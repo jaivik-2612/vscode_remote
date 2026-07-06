@@ -20,6 +20,7 @@
     <button class="tab active" data-tab="log" role="tab" aria-selected="true">Log</button>
     <button class="tab" data-tab="dashboard" role="tab" aria-selected="false">Dashboard</button>
     <button class="tab" data-tab="tips" role="tab" aria-selected="false">Tips</button>
+    <button class="tab" data-tab="data" role="tab" aria-selected="false">Data</button>
     <button class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
   </nav>
 
@@ -56,6 +57,7 @@
           <h2 id="day-title">Today</h2>
           <span id="day-total" class="day-total"></span>
         </div>
+        <p class="card-note">Tap an entry to see the detailed footprint — operation vs. manufacturing, gas breakdown, and the factor used.</p>
         <ul id="day-entries" class="entry-list"></ul>
         <p id="day-empty" class="empty-note">Nothing logged for this day yet. Everything counts — commute, meals, fan, AC, even your phone charger.</p>
       </div>
@@ -100,6 +102,12 @@
       </div>
 
       <div class="card">
+        <h2>Operation vs. manufacturing</h2>
+        <p class="card-note">How much comes from running things vs. making them.</p>
+        <div id="chart-phase" class="chart-box"></div>
+      </div>
+
+      <div class="card">
         <h2>Last 14 days</h2>
         <div id="chart-trend" class="chart-box chart-wide"></div>
       </div>
@@ -132,6 +140,21 @@
       </div>
     </section>
 
+    <!-- ============ DATA TAB ============ -->
+    <section id="tab-data" class="tab-panel">
+      <div class="card">
+        <h2>The numbers behind the app</h2>
+        <p class="card-note">
+          Every calculation in this app uses the factors below — nothing else. Each activity has an
+          <strong>operation</strong> factor (the fuel or electricity used while doing it) and an
+          <strong>embodied</strong> factor (making the equipment, amortised over its lifetime — or for food,
+          the full farm-to-shop production footprint). Values marked <strong>≈</strong> are derived estimates;
+          the rest come from the cited published datasets.
+        </p>
+      </div>
+      <div id="data-tables"></div>
+    </section>
+
     <!-- ============ SETTINGS TAB ============ -->
     <section id="tab-settings" class="tab-panel">
       <div class="card">
@@ -158,10 +181,11 @@
       <div class="card">
         <h2>About the numbers</h2>
         <p class="card-note">
-          Factors are approximate averages assembled from public sources (UK DEFRA/BEIS
-          conversion factors, Poore &amp; Nemecek 2018 food study via Our World in Data,
-          national grid-intensity data). They are meant for habit tracking and comparison,
-          not carbon accounting. CH₄ and N₂O are shown as CO₂-equivalent (GWP-100).
+          Every factor, its source, and whether it is a published value or a derived estimate
+          is listed in the <strong>Data</strong> tab. Headline sources: UK DEFRA conversion factors
+          (via Our World in Data), Poore &amp; Nemecek 2018 (food), Ember (grid intensity),
+          ICCT/IVL (vehicle manufacturing), IEA (streaming). Good for habit tracking and
+          comparison, not formal carbon accounting. CH₄ and N₂O are shown as CO₂-equivalent (GWP-100).
         </p>
       </div>
     </section>

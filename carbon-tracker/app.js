@@ -36,7 +36,8 @@ function esc(s) {
 }
 
 function catColor(catId) {
-  const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const forced = document.documentElement.dataset.theme;
+  const dark = forced ? forced === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
   const c = CATEGORY_BY_ID[catId];
   return dark ? c.colorDark : c.colorLight;
 }
@@ -47,9 +48,10 @@ const LS_SETTINGS = 'cft:settings';
 
 const state = {
   logs: [],
-  settings: { gridPreset: 'india', gridIntensity: 0.71 },
+  settings: { gridPreset: 'india', gridIntensity: 0.67 },
   logDate: todayStr(),
   range: 1,
+  openEntry: null,
 };
 
 function loadState() {
@@ -63,19 +65,39 @@ function loadState() {
   } catch (_) { /* keep defaults */ }
 }
 
-function saveLogs() { localStorage.setItem(LS_LOGS, JSON.stringify(state.logs)); }
-function saveSettings() { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); }
+function saveLogs() { try { localStorage.setItem(LS_LOGS, JSON.stringify(state.logs)); } catch (_) { /* storage unavailable */ } }
+function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); } catch (_) { /* storage unavailable */ } }
 
 /* ================= emissions engine ================= */
-/* Returns { total, co2, ch4, n2o } in kg CO2e for a quantity of an activity. */
+/* Operation-phase kg CO2e per unit (grid-dependent for electric activities). */
+function useFactor(a) {
+  if (a.useKwh !== undefined) return a.useKwh * state.settings.gridIntensity;
+  return a.usePer || 0;
+}
+
+/* Embodied (manufacturing / production) kg CO2e per unit. */
+function embFactor(a) { return a.embPer || 0; }
+
+function embSplitOf(a) {
+  if (a.embSplit) return GAS_SPLITS[a.embSplit];
+  if (a.cat === 'food') return GAS_SPLITS[a.split];
+  return GAS_SPLITS.industry;
+}
+
+/* Returns { total, use, emb, co2, ch4, n2o } in kg CO2e. */
 function emissionsFor(activityId, qty) {
   const a = ACTIVITY_BY_ID[activityId];
-  if (!a || !(qty > 0)) return { total: 0, co2: 0, ch4: 0, n2o: 0 };
-  const total = a.kwhPerUnit !== undefined
-    ? qty * a.kwhPerUnit * state.settings.gridIntensity
-    : qty * a.per;
-  const split = GAS_SPLITS[a.split] || GAS_SPLITS.fuel;
-  return { total, co2: total * split.co2, ch4: total * split.ch4, n2o: total * split.n2o };
+  if (!a || !(qty > 0)) return { total: 0, use: 0, emb: 0, co2: 0, ch4: 0, n2o: 0 };
+  const use = qty * useFactor(a);
+  const emb = qty * embFactor(a);
+  const sU = GAS_SPLITS[a.split] || GAS_SPLITS.fuel;
+  const sE = embSplitOf(a);
+  return {
+    total: use + emb, use, emb,
+    co2: use * sU.co2 + emb * sE.co2,
+    ch4: use * sU.ch4 + emb * sE.ch4,
+    n2o: use * sU.n2o + emb * sE.n2o,
+  };
 }
 
 function entryEmissions(entry) { return emissionsFor(entry.activityId, entry.qty); }
@@ -89,10 +111,10 @@ function entriesInRange(days) {
 }
 
 function sumEmissions(entries) {
-  const acc = { total: 0, co2: 0, ch4: 0, n2o: 0 };
+  const acc = { total: 0, use: 0, emb: 0, co2: 0, ch4: 0, n2o: 0 };
   for (const e of entries) {
     const em = entryEmissions(e);
-    acc.total += em.total; acc.co2 += em.co2; acc.ch4 += em.ch4; acc.n2o += em.n2o;
+    for (const k of Object.keys(acc)) acc[k] += em[k];
   }
   return acc;
 }
@@ -107,6 +129,7 @@ function switchTab(name) {
   $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === `tab-${name}`));
   if (name === 'dashboard') renderDashboard();
   if (name === 'tips') renderTips();
+  if (name === 'data') renderData();
 }
 
 /* ================= log tab ================= */
@@ -158,6 +181,49 @@ function removeEntry(id) {
   renderDay();
 }
 
+/* One line of factor math for the entry detail view. */
+function factorMath(a, qty, phase) {
+  if (phase === 'use') {
+    if (a.useKwh !== undefined) {
+      return `${fmtQty(qty)} ${esc(a.unit)} × ${a.useKwh} kWh × ${state.settings.gridIntensity} kg/kWh (your grid)`;
+    }
+    return `${fmtQty(qty)} ${esc(a.unit)} × ${a.usePer} kg CO₂e/${esc(a.unit.replace(/s$/, ''))}`;
+  }
+  return `${fmtQty(qty)} ${esc(a.unit)} × ${a.embPer} kg CO₂e/${esc(a.unit.replace(/s$/, ''))}`;
+}
+
+function entryDetailHTML(e) {
+  const a = ACTIVITY_BY_ID[e.activityId];
+  const em = entryEmissions(e);
+  const rows = [];
+  if (em.use > 0 || (!a.embPer && !em.emb)) {
+    const src = SOURCES[a.srcUse];
+    rows.push(`<div class="detail-row">
+      <span class="detail-phase">⚡ Operation${a.estUse ? ' <span class="badge-est">estimate</span>' : ''}</span>
+      <span class="detail-math">${factorMath(a, e.qty, 'use')}</span>
+      <span class="detail-val">${fmtKg(em.use)}</span>
+    </div>${src ? `<p class="detail-src">Source: ${esc(src.short)}</p>` : ''}`);
+  }
+  if (em.emb > 0) {
+    const src = SOURCES[a.srcEmb];
+    rows.push(`<div class="detail-row">
+      <span class="detail-phase">🏭 ${a.cat === 'food' ? 'Production & supply chain' : 'Manufacturing (amortised)'}${a.estEmb ? ' <span class="badge-est">estimate</span>' : ''}</span>
+      <span class="detail-math">${factorMath(a, e.qty, 'emb')}</span>
+      <span class="detail-val">${fmtKg(em.emb)}</span>
+    </div>${a.embNote ? `<p class="detail-src">${esc(a.embNote)}</p>` : ''}${src ? `<p class="detail-src">Source: ${esc(src.short)}</p>` : ''}`);
+  }
+  return `<div class="entry-detail">
+    ${rows.join('')}
+    <div class="detail-gases">
+      <span>Gases (as CO₂e):</span>
+      <span>CO₂ <strong>${fmtKg(em.co2)}</strong></span>
+      <span>CH₄ <strong>${fmtKg(em.ch4)}</strong></span>
+      <span>N₂O <strong>${fmtKg(em.n2o)}</strong></span>
+    </div>
+    <p class="detail-src">Full factor table and citations are in the Data tab.</p>
+  </div>`;
+}
+
 function renderDay() {
   const entries = entriesForDate(state.logDate);
   $('#day-title').textContent = niceDate(state.logDate);
@@ -168,12 +234,17 @@ function renderDay() {
   $('#day-entries').innerHTML = entries.map((e) => {
     const a = ACTIVITY_BY_ID[e.activityId];
     const em = entryEmissions(e);
-    return `<li>
-      <span class="entry-dot" style="background:${catColor(a.cat)}"></span>
-      <span class="entry-label">${esc(a.label)}</span>
-      <span class="entry-qty">${fmtQty(e.qty)} ${esc(a.unit)}</span>
-      <span class="entry-co2">${fmtKg(em.total)}</span>
-      <button class="entry-del" data-id="${e.id}" aria-label="Delete ${esc(a.label)} entry" title="Delete">✕</button>
+    const open = state.openEntry === e.id;
+    return `<li class="${open ? 'open' : ''}" data-entry="${e.id}">
+      <div class="entry-row" role="button" tabindex="0" aria-expanded="${open}">
+        <span class="entry-dot" style="background:${catColor(a.cat)}"></span>
+        <span class="entry-label">${esc(a.label)}</span>
+        <span class="entry-qty">${fmtQty(e.qty)} ${esc(a.unit)}</span>
+        <span class="entry-co2">${fmtKg(em.total)}</span>
+        <span class="entry-chevron" aria-hidden="true">${open ? '▾' : '▸'}</span>
+        <button class="entry-del" data-id="${e.id}" aria-label="Delete ${esc(a.label)} entry" title="Delete">✕</button>
+      </div>
+      ${open ? entryDetailHTML(e) : ''}
     </li>`;
   }).join('');
 }
@@ -200,6 +271,7 @@ function renderDashboard() {
 
   renderDonut(entries, em.total);
   renderGasBar(em);
+  renderPhaseBar(em);
   renderTrend();
   renderTopTable(entries, em.total);
 }
@@ -249,30 +321,45 @@ function renderDonut(entries, total) {
     <div class="legend">${data.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${catColor(d.cat.id)}"></span>${esc(d.cat.label)} <span class="legend-value">${fmtKg(d.value)}</span></span>`).join('')}</div>`;
 }
 
+/* Shared horizontal stacked bar (gas mix & phase split). */
+function stackedBarSVG(parts, total, ariaLabel) {
+  const W = 420, H = 64, barY = 8, barH = 28, gapPx = 2;
+  let x = 0, segs = '', labels = '';
+  parts.forEach((p) => {
+    const wSeg = (p.value / total) * (W - gapPx * (parts.length - 1));
+    const pct = Math.round((p.value / total) * 100);
+    segs += `<rect x="${x}" y="${barY}" width="${Math.max(wSeg, 1)}" height="${barH}" rx="4" fill="${p.color}"
+      data-tip="<strong>${esc(p.name)}</strong>${fmtKg(p.value)} CO₂e · ${pct}%"/>`;
+    if (wSeg > 60) labels += `<text x="${x + wSeg / 2}" y="${barY + barH + 18}" text-anchor="middle" class="value-label">${esc(p.label)} ${pct}%</text>`;
+    x += wSeg + gapPx;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaLabel)}">${segs}${labels}</svg>
+    <div class="legend">${parts.map((p) => `<span class="legend-item"><span class="legend-swatch" style="background:${p.color}"></span>${esc(p.name)} <span class="legend-value">${fmtKg(p.value)}</span></span>`).join('')}</div>`;
+}
+
 function renderGasBar(em) {
   const box = $('#chart-gases');
   if (em.total <= 0) { box.innerHTML = '<p class="empty-note">No data in this range yet.</p>'; return; }
-
   const css = getComputedStyle(document.documentElement);
   const gases = [
-    { key: 'co2', label: 'CO₂', name: 'Carbon dioxide', value: em.co2, color: css.getPropertyValue('--gas-co2').trim() },
-    { key: 'ch4', label: 'CH₄', name: 'Methane', value: em.ch4, color: css.getPropertyValue('--gas-ch4').trim() },
-    { key: 'n2o', label: 'N₂O', name: 'Nitrous oxide', value: em.n2o, color: css.getPropertyValue('--gas-n2o').trim() },
+    { label: 'CO₂', name: 'Carbon dioxide (CO₂)', value: em.co2, color: css.getPropertyValue('--gas-co2').trim() },
+    { label: 'CH₄', name: 'Methane (CH₄)', value: em.ch4, color: css.getPropertyValue('--gas-ch4').trim() },
+    { label: 'N₂O', name: 'Nitrous oxide (N₂O)', value: em.n2o, color: css.getPropertyValue('--gas-n2o').trim() },
   ].filter((g) => g.value > 0.0005);
+  box.innerHTML = stackedBarSVG(gases, em.total, 'Greenhouse gas mix')
+    + '<p class="card-note" style="margin-top:8px">Methane and nitrous oxide are far stronger warmers per kg than CO₂ — shown here as CO₂-equivalent. Big CH₄ share usually means red meat, rice or landfill waste.</p>';
+}
 
-  const W = 420, H = 64, barY = 8, barH = 28, gapPx = 2;
-  let x = 0, segs = '', labels = '';
-  gases.forEach((g, i) => {
-    const wSeg = (g.value / em.total) * (W - gapPx * (gases.length - 1));
-    const pct = Math.round((g.value / em.total) * 100);
-    segs += `<rect x="${x}" y="${barY}" width="${Math.max(wSeg, 1)}" height="${barH}" rx="4" fill="${g.color}"
-      data-tip="<strong>${g.name} (${g.label})</strong>${fmtKg(g.value)} CO₂e · ${pct}%"/>`;
-    if (wSeg > 44) labels += `<text x="${x + wSeg / 2}" y="${barY + barH + 18}" text-anchor="middle" class="value-label">${g.label} ${pct}%</text>`;
-    x += wSeg + gapPx;
-  });
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Greenhouse gas mix">${segs}${labels}</svg>
-    <div class="legend">${gases.map((g) => `<span class="legend-item"><span class="legend-swatch" style="background:${g.color}"></span>${g.name} (${g.label}) <span class="legend-value">${fmtKg(g.value)}</span></span>`).join('')}</div>
-    <p class="card-note" style="margin-top:8px">Methane and nitrous oxide are far stronger warmers per kg than CO₂ — shown here as CO₂-equivalent. Big CH₄ share usually means red meat, rice or landfill waste.</p>`;
+function renderPhaseBar(em) {
+  const box = $('#chart-phase');
+  if (em.total <= 0) { box.innerHTML = '<p class="empty-note">No data in this range yet.</p>'; return; }
+  const css = getComputedStyle(document.documentElement);
+  const parts = [
+    { label: 'Operation', name: 'Operation (fuel & electricity)', value: em.use, color: css.getPropertyValue('--cat-transport').trim() },
+    { label: 'Embodied', name: 'Manufacturing & supply chain', value: em.emb, color: css.getPropertyValue('--cat-home').trim() },
+  ].filter((p) => p.value > 0.0005);
+  box.innerHTML = stackedBarSVG(parts, em.total, 'Operation vs embodied emissions')
+    + '<p class="card-note" style="margin-top:8px">“Manufacturing & supply chain” is the footprint of making the things you use — a share of your car, AC or phone per use, and the full farm-to-shop footprint of food.</p>';
 }
 
 function renderTrend() {
@@ -352,14 +439,92 @@ function renderTopTable(entries, total) {
     </tr>`).join('');
 }
 
+/* ================= data tab ================= */
+function factorCellHTML(a, phase) {
+  const unit1 = a.unit.replace(/s$/, '');
+  if (phase === 'use') {
+    if (a.useKwh !== undefined) {
+      const val = a.useKwh * state.settings.gridIntensity;
+      return `${a.estUse ? '≈' : ''}${val.toFixed(3)} kg/${esc(unit1)}<br><span class="cell-note">${a.useKwh} kWh × your grid (${state.settings.gridIntensity})</span>`;
+    }
+    if (!a.usePer) return '<span class="cell-note">—</span>';
+    return `${a.estUse ? '≈' : ''}${a.usePer} kg/${esc(unit1)}`;
+  }
+  if (!a.embPer) return '<span class="cell-note">—</span>';
+  return `${a.estEmb ? '≈' : ''}${a.embPer} kg/${esc(unit1)}${a.embNote ? `<br><span class="cell-note">${esc(a.embNote)}</span>` : ''}`;
+}
+
+function sourceLinkHTML(srcId) {
+  const s = SOURCES[srcId];
+  if (!s) return '';
+  const href = s.url === 'SOURCES.md'
+    ? 'https://github.com/jaivik-2612/vscode_remote/blob/main/carbon-tracker/SOURCES.md'
+    : s.url;
+  return `<a href="${href}" target="_blank" rel="noopener" title="${esc(s.label)}">${esc(s.short)}</a>`;
+}
+
+function renderData() {
+  const box = $('#data-tables');
+  let html = '';
+  for (const c of CATEGORIES) {
+    const acts = ACTIVITIES.filter((a) => a.cat === c.id);
+    html += `<div class="card">
+      <h2>${c.icon} ${esc(c.label)}</h2>
+      <div class="chart-box"><table class="data-table">
+        <thead><tr><th>Activity</th><th>Operation</th><th>${c.id === 'food' ? 'Production & supply chain' : 'Manufacturing (amortised)'}</th><th>Source</th></tr></thead>
+        <tbody>${acts.map((a) => `<tr>
+          <td>${esc(a.label)}<br><span class="cell-note">per ${esc(a.unit.replace(/s$/, ''))}</span></td>
+          <td>${factorCellHTML(a, 'use')}</td>
+          <td>${factorCellHTML(a, 'emb')}</td>
+          <td class="src-cell">${[a.srcUse, a.srcEmb].filter(Boolean).filter((v, i, arr) => arr.indexOf(v) === i).map(sourceLinkHTML).join('<br>')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>`;
+  }
+
+  html += `<div class="card">
+    <h2>⚡ Electricity grid intensity (kg CO₂/kWh)</h2>
+    <p class="card-note">Applied to every electric activity. Currently using <strong>${state.settings.gridIntensity}</strong> (change in Settings). Values: Ember 2025 data via ${sourceLinkHTML('ember')}; world average from Ember's Global Electricity Review (~0.47 in 2024).</p>
+    <div class="chart-box"><table class="data-table">
+      <thead><tr><th>Region</th><th class="num">kg CO₂/kWh</th></tr></thead>
+      <tbody>${GRID_PRESETS.filter((p) => p.value !== null).map((p) => `<tr><td>${esc(p.label.replace(/ \(.*\)/, ''))}</td><td class="num">${p.value}</td></tr>`).join('')}</tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>🎯 Benchmarks</h2>
+    <div class="chart-box"><table class="data-table">
+      <thead><tr><th>Benchmark</th><th class="num">kg CO₂e/day</th><th>Basis</th></tr></thead>
+      <tbody>
+        <tr><td>Sustainable personal target</td><td class="num">${BENCHMARKS.sustainable}</td><td>≈2 t CO₂e/person/year, a widely used Paris-aligned target</td></tr>
+        <tr><td>World average</td><td class="num">${BENCHMARKS.worldAvg}</td><td>≈4.7 t fossil CO₂/person/year (Global Carbon Budget) ÷ 365</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+  <div class="card">
+    <h2>📚 Sources & method</h2>
+    <ul class="source-list">${Object.entries(SOURCES).map(([id, s]) => `<li><strong>${esc(s.short)}</strong> — ${esc(s.label)}${s.url !== 'SOURCES.md' ? ` · <a href="${s.url}" target="_blank" rel="noopener">link</a>` : ''}</li>`).join('')}</ul>
+    <p class="card-note" style="margin-top:12px">
+      Values marked <strong>≈</strong> or <span class="badge-est">estimate</span> are derived (e.g. a manufacturing
+      footprint divided by typical lifetime, or a per-kg factor scaled to a stated serving size) rather than read
+      directly from a published table — the derivation is shown in the row and detailed in
+      <a href="https://github.com/jaivik-2612/vscode_remote/blob/main/carbon-tracker/SOURCES.md" target="_blank" rel="noopener">SOURCES.md</a>.
+      Gas splits (CO₂/CH₄/N₂O) are approximate allocations based on how each activity's emissions arise.
+      All CH₄ and N₂O are expressed as CO₂-equivalent (GWP-100). Good for habit tracking; not for formal accounting.
+    </p>
+  </div>`;
+  box.innerHTML = html;
+}
+
 /* ================= tips / suggestions engine ================= */
 function weeklyStats() {
   const entries = entriesInRange(7);
   const per = {};
   for (const e of entries) {
-    const rec = per[e.activityId] || (per[e.activityId] = { qty: 0, co2e: 0 });
+    const rec = per[e.activityId] || (per[e.activityId] = { qty: 0, co2e: 0, use: 0 });
+    const em = entryEmissions(e);
     rec.qty += e.qty;
-    rec.co2e += entryEmissions(e).total;
+    rec.co2e += em.total;
+    rec.use += em.use;
   }
   return { entries, per, total: sumEmissions(entries).total };
 }
@@ -367,7 +532,7 @@ function weeklyStats() {
 function buildTips() {
   const { entries, per, total } = weeklyStats();
   const tips = [];
-  const get = (id) => per[id] || { qty: 0, co2e: 0 };
+  const get = (id) => per[id] || { qty: 0, co2e: 0, use: 0 };
   const gi = state.settings.gridIntensity;
 
   if (!entries.length) {
@@ -399,14 +564,19 @@ function buildTips() {
     tips.push({ icon: '🚿', title: 'Shorter geyser runs', body: `The water heater ran ${(geyser.qty / 7 * 60).toFixed(0)} min/day on average. ~15 minutes heats a bucket-bath's worth; switch it off before you step in.`, saving: (geyser.qty - MINIMAL_BASELINES.geyser.qty * 7) * 2.0 * gi });
   }
 
-  const redMeat = get('meal_redmeat');
-  if (redMeat.qty >= 3) {
-    tips.push({ icon: '🥗', title: 'Swap some red-meat meals', body: `${fmtQty(redMeat.qty)} beef/mutton meals this week. Each swap to chicken saves ~3.7 kg CO₂e and to a vegetarian meal ~4.3 kg — the single biggest food lever.`, saving: (redMeat.qty - 2) * 4.3 });
+  const beef = get('meal_beef'), lamb = get('meal_lamb');
+  const redMeatQty = beef.qty + lamb.qty;
+  if (redMeatQty >= 2) {
+    const vegPer = ACTIVITY_BY_ID.meal_veg.embPer;
+    const avgRed = (beef.co2e + lamb.co2e) / redMeatQty;
+    tips.push({ icon: '🥗', title: 'Swap some red-meat meals', body: `${fmtQty(redMeatQty)} beef/lamb meals this week at ~${fmtKg(avgRed)} each. Swapping one for chicken saves ~${fmtKg(avgRed - ACTIVITY_BY_ID.meal_chicken.embPer)}, for a vegetarian meal ~${fmtKg(avgRed - vegPer)} — the single biggest food lever.`, saving: (redMeatQty - 1) * (avgRed - vegPer) });
   }
 
   const carKm = get('car_petrol').qty + get('car_diesel').qty;
   if (carKm / 7 > 10) {
-    tips.push({ icon: '🚌', title: 'Shift short car trips', body: `You drove ~${Math.round(carKm / 7)} km/day. Moving half of that to bus or metro cuts those kilometres' emissions by 45–80%; cycling or walking trips under 2 km cuts them to zero.`, saving: (carKm / 2) * (0.192 - 0.07) });
+    const carF = ACTIVITY_BY_ID.car_petrol.usePer + ACTIVITY_BY_ID.car_petrol.embPer;
+    const busF = ACTIVITY_BY_ID.bus.usePer + ACTIVITY_BY_ID.bus.embPer;
+    tips.push({ icon: '🚌', title: 'Shift short car trips', body: `You drove ~${Math.round(carKm / 7)} km/day. Moving half of that to bus or metro cuts those kilometres' emissions by half or more; cycling or walking trips under 2 km cuts them to almost zero.`, saving: (carKm / 2) * (carF - busF) });
   }
 
   const flights = get('flight_dom').co2e + get('flight_int').co2e;
@@ -416,7 +586,7 @@ function buildTips() {
 
   const stream = get('stream');
   if (stream.qty / 7 > MINIMAL_BASELINES.stream.qty) {
-    tips.push({ icon: '📺', title: 'Lighter streaming habits', body: `~${(stream.qty / 7).toFixed(1)} h/day of streaming. Dropping from 4K to HD on small screens cuts the footprint of each hour by more than half.`, saving: (stream.qty - MINIMAL_BASELINES.stream.qty * 7) * 0.03 });
+    tips.push({ icon: '📺', title: 'Lighter streaming habits', body: `~${(stream.qty / 7).toFixed(1)} h/day of streaming. Dropping from 4K to HD on small screens cuts the network footprint of each hour by more than half.`, saving: (stream.qty - MINIMAL_BASELINES.stream.qty * 7) * 0.02 });
   }
 
   const waste = get('waste');
@@ -424,12 +594,18 @@ function buildTips() {
     tips.push({ icon: '♻️', title: 'Divert waste from landfill', body: 'Landfilled organic waste rots into methane, a far stronger greenhouse gas. Composting kitchen scraps and segregating recyclables removes most of it.', saving: waste.co2e * 0.6 });
   }
 
+  /* Embodied-specific advice: if manufacturing share is large, longevity beats replacement. */
+  const em7 = sumEmissions(entries);
+  if (em7.total > 0 && em7.emb / em7.total > 0.4) {
+    tips.push({ icon: '🔧', title: 'Make your things last', body: `${Math.round((em7.emb / em7.total) * 100)}% of this week's footprint is manufacturing & supply chain, not energy use. The biggest lever there: keep devices and appliances longer, repair instead of replace, and buy second-hand — a phone kept 5 years instead of 3 nearly halves its manufacturing footprint per year.` });
+  }
+
   if (state.settings.gridIntensity >= 0.6) {
     tips.push({ icon: '☀️', title: 'Your grid is carbon-heavy', body: `At ${state.settings.gridIntensity} kg CO₂/kWh, every appliance-hour counts. If available, rooftop solar or a green-power tariff would cut your electricity emissions by ~90%.` });
   }
 
   if (tips.length <= 2) {
-    tips.push({ icon: '💡', title: 'General wins', body: 'Biggest levers in order: fly less, drive less, eat less red meat, cool/heat efficiently. Log more activity types to get sharper, personalised suggestions.' });
+    tips.push({ icon: '💡', title: 'General wins', body: 'Biggest levers in order: fly less, drive less, eat less red meat, cool/heat efficiently, keep your things longer. Log more activity types to get sharper, personalised suggestions.' });
   }
 
   return tips;
@@ -455,7 +631,9 @@ function renderBaselines() {
     const a = ACTIVITY_BY_ID[id];
     const avg = rec.qty / 7;
     const over = Math.max(0, avg - base.qty);
-    const savingPerDay = emissionsFor(id, over).total;
+    /* Savings use the operation phase only: using a thing less doesn't undo
+     * its manufacturing, it just spreads it over a longer life. */
+    const savingPerDay = over * useFactor(a);
     rows.push({ a, base, avg, savingPerDay });
   }
   rows.sort((x, y) => y.savingPerDay - x.savingPerDay);
@@ -526,7 +704,15 @@ function importData(file) {
 }
 
 function clearData() {
-  if (!confirm('Delete all logged data from this browser? This cannot be undone.')) return;
+  const btn = $('#btn-clear');
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Tap again to delete everything';
+    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Delete all data'; }, 4000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = 'Delete all data';
   state.logs = [];
   saveLogs();
   renderDay();
@@ -577,11 +763,28 @@ function init() {
   $('#log-form').addEventListener('submit', addEntry);
   $('#log-date').addEventListener('change', () => {
     state.logDate = $('#log-date').value || todayStr();
+    state.openEntry = null;
     renderDay();
   });
   $('#day-entries').addEventListener('click', (ev) => {
     const btn = ev.target.closest('.entry-del');
-    if (btn) removeEntry(btn.dataset.id);
+    if (btn) { removeEntry(btn.dataset.id); return; }
+    const row = ev.target.closest('.entry-row');
+    if (row) {
+      const id = row.parentElement.dataset.entry;
+      state.openEntry = state.openEntry === id ? null : id;
+      renderDay();
+    }
+  });
+  $('#day-entries').addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const row = ev.target.closest('.entry-row');
+    if (row) {
+      ev.preventDefault();
+      const id = row.parentElement.dataset.entry;
+      state.openEntry = state.openEntry === id ? null : id;
+      renderDay();
+    }
   });
 
   $('#grid-preset').addEventListener('change', onGridPreset);

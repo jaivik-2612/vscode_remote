@@ -11,15 +11,26 @@ fan running while you sleep.
 
 - **Log daily activities** — transport, meals & drinks, home appliances
   (AC, fan, heater, geyser, fridge, TV, …), cooking, showers, waste and more,
-  for today or any past date.
+  for today or any past date. Tap any logged entry to expand the detailed
+  footprint: the factor math, operation vs. manufacturing split, per-gas
+  breakdown and the data source.
 - **Emissions engine** — every activity is converted to kg CO₂-equivalent,
-  with a breakdown into CO₂, CH₄ (methane) and N₂O (nitrous oxide).
-  Electric appliances use a configurable grid carbon intensity
-  (presets for India, world average, US, EU, UK, renewables).
+  with a breakdown into CO₂, CH₄ (methane) and N₂O (nitrous oxide), and
+  split into two phases: **operation** (the fuel/electricity used) and
+  **embodied** (manufacturing of the equipment amortised over its lifetime,
+  or the farm-to-shop production footprint of food). Electric appliances use
+  a configurable grid carbon intensity (presets for India, world average,
+  US, UK, EU, renewables — Ember 2025 data).
+- **Citable data** — factors come from published datasets (UK DEFRA
+  conversion factors via Our World in Data, Poore & Nemecek 2018 for food,
+  Ember for grids, ICCT/IVL for vehicle manufacturing, IEA for streaming);
+  derived estimates are explicitly marked. See
+  [`carbon-tracker/SOURCES.md`](carbon-tracker/SOURCES.md) for every
+  assumption, and the in-app **Data** tab for the live factor matrix.
 - **Dashboard** — daily/weekly/monthly totals compared against the
   sustainable target (~5.5 kg CO₂e/day) and the world average (~12.9 kg/day),
-  a category donut, greenhouse-gas mix, a 14-day trend chart and your
-  biggest contributors.
+  a category donut, greenhouse-gas mix, an operation-vs-manufacturing split,
+  a 14-day trend chart and your biggest contributors.
 - **Personal suggestions** — rule-based tips computed from your own last
   7 days of logs, each with an estimated weekly saving, plus a
   **minimal-usage guide** showing a comfortable-but-frugal baseline for every
