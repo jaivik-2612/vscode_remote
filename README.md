@@ -35,8 +35,15 @@ fan running while you sleep.
   7 days of logs, each with an estimated weekly saving, plus a
   **minimal-usage guide** showing a comfortable-but-frugal baseline for every
   appliance you actually use and what trimming to it would save per day.
+- **Accounts** — create per-person accounts (name + PIN) so several people
+  can share a device, each with their own logs and settings; sign in/out,
+  switch accounts, or keep using the guest space. Anything logged as guest
+  is copied into the first account created. The storage layer is namespaced
+  per account, ready for an optional cloud-sync backend (Supabase/Firebase)
+  later.
 - **Private by design** — all data stays in your browser (localStorage),
-  with JSON export/import for backups. Works offline, light & dark mode,
+  with JSON export/import for backups per account. The PIN gates the app on
+  the device (data is not encrypted). Works offline, light & dark mode,
   touch-friendly (iPad-ready).
 
 ### Run it

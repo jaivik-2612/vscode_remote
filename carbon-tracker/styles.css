@@ -60,8 +60,28 @@ body {
 }
 
 .app-header { padding: 8px 4px 16px; }
+.app-header-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .app-header h1 { font-size: 1.5rem; font-weight: 700; }
 .subtitle { color: var(--ink-2); font-size: 0.95rem; }
+.account-chip {
+  font: inherit; font-size: 0.88rem; font-weight: 600;
+  background: var(--surface); color: var(--ink);
+  border: 1px solid var(--grid-line); border-radius: 999px;
+  padding: 7px 14px; cursor: pointer;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.account-chip:hover { border-color: var(--accent); }
+
+/* ---------- account forms ---------- */
+.account-block { margin-top: 12px; }
+.account-block h3 { font-size: 0.92rem; font-weight: 600; margin-bottom: 8px; }
+.account-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px; align-items: end;
+}
+.account-msg { min-height: 1.3em; margin-top: 8px; font-size: 0.88rem; color: var(--ink-2); }
+.account-msg.error { color: var(--bad); font-weight: 600; }
 
 /* ---------- tabs ---------- */
 .tabs {
@@ -106,7 +126,8 @@ body {
 @media (max-width: 720px) { .log-form { grid-template-columns: 1fr 1fr; } }
 .field { display: flex; flex-direction: column; gap: 4px; }
 .field label { font-size: 0.8rem; color: var(--ink-2); }
-select, input[type="number"], input[type="date"] {
+select, input[type="number"], input[type="date"],
+input[type="text"], input[type="email"], input[type="password"] {
   font: inherit; color: var(--ink);
   background: var(--page);
   border: 1px solid var(--grid-line);

@@ -43,30 +43,50 @@ function catColor(catId) {
 }
 
 /* ================= storage & state ================= */
-const LS_LOGS = 'cft:logs';
-const LS_SETTINGS = 'cft:settings';
+const DEFAULT_SETTINGS = { gridPreset: 'india', gridIntensity: 0.67 };
 
 const state = {
+  user: null,           // active account (null = guest space)
   logs: [],
-  settings: { gridPreset: 'india', gridIntensity: 0.67 },
+  settings: { ...DEFAULT_SETTINGS },
   logDate: todayStr(),
   range: 1,
   openEntry: null,
 };
 
+/* Storage keys are namespaced per account; guest uses the legacy keys. */
+function dataKey(suffix) {
+  return state.user ? `cft:u:${state.user.id}:${suffix}` : `cft:${suffix}`;
+}
+
 function loadState() {
+  state.user = Accounts.current();
+  state.logs = [];
+  state.settings = { ...DEFAULT_SETTINGS };
   try {
-    const logs = JSON.parse(localStorage.getItem(LS_LOGS));
+    const logs = JSON.parse(localStorage.getItem(dataKey('logs')));
     if (Array.isArray(logs)) state.logs = logs.filter((e) => e && ACTIVITY_BY_ID[e.activityId] && e.date && e.qty > 0);
   } catch (_) { /* corrupted storage — start fresh */ }
   try {
-    const s = JSON.parse(localStorage.getItem(LS_SETTINGS));
+    const s = JSON.parse(localStorage.getItem(dataKey('settings')));
     if (s && typeof s.gridIntensity === 'number' && s.gridIntensity >= 0) Object.assign(state.settings, s);
   } catch (_) { /* keep defaults */ }
 }
 
-function saveLogs() { try { localStorage.setItem(LS_LOGS, JSON.stringify(state.logs)); } catch (_) { /* storage unavailable */ } }
-function saveSettings() { try { localStorage.setItem(LS_SETTINGS, JSON.stringify(state.settings)); } catch (_) { /* storage unavailable */ } }
+function saveLogs() { try { localStorage.setItem(dataKey('logs'), JSON.stringify(state.logs)); } catch (_) { /* storage unavailable */ } }
+function saveSettings() { try { localStorage.setItem(dataKey('settings'), JSON.stringify(state.settings)); } catch (_) { /* storage unavailable */ } }
+
+/* Re-read everything for the (possibly different) active account. */
+function reloadForUser() {
+  state.openEntry = null;
+  loadState();
+  renderChip();
+  renderAccountUI();
+  renderSettings();
+  renderDay();
+  if ($('#tab-dashboard').classList.contains('active')) renderDashboard();
+  if ($('#tab-tips').classList.contains('active')) renderTips();
+}
 
 /* ================= emissions engine ================= */
 /* Operation-phase kg CO2e per unit (grid-dependent for electric activities). */
@@ -648,6 +668,98 @@ function renderBaselines() {
     </tr>`).join('');
 }
 
+/* ================= accounts ================= */
+function renderChip() {
+  const chip = $('#account-chip');
+  chip.textContent = state.user ? `👤 ${state.user.name}` : '👤 Guest';
+  chip.title = state.user ? `Signed in as ${state.user.name} — manage in Settings` : 'Using this device as guest — create an account in Settings';
+}
+
+function accountMsg(text, isError) {
+  const el = $('#account-msg');
+  el.textContent = text || '';
+  el.className = 'account-msg' + (isError ? ' error' : '');
+}
+
+function renderAccountUI() {
+  const box = $('#account-ui');
+  const users = Accounts.list();
+
+  if (state.user) {
+    box.innerHTML = `
+      <p class="card-note">Signed in as <strong>${esc(state.user.name)}</strong>${state.user.email ? ` (${esc(state.user.email)})` : ''} — your logs and settings are saved under this account on this device.</p>
+      <div class="btn-row">
+        <button id="acc-logout" class="btn-secondary">Sign out</button>
+        <button id="acc-delete" class="btn-danger">Delete this account</button>
+      </div>
+      <p id="account-msg" class="account-msg"></p>`;
+    $('#acc-logout').addEventListener('click', () => { Accounts.logout(); reloadForUser(); });
+    $('#acc-delete').addEventListener('click', () => {
+      const btn = $('#acc-delete');
+      if (btn.dataset.armed !== '1') {
+        btn.dataset.armed = '1';
+        btn.textContent = 'Tap again to delete account & its data';
+        setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = 'Delete this account'; } }, 4000);
+        return;
+      }
+      Accounts.remove(state.user.id);
+      reloadForUser();
+    });
+    return;
+  }
+
+  const signIn = users.length ? `
+    <div class="account-block">
+      <h3>Sign in</h3>
+      <div class="account-form">
+        <div class="field"><label for="acc-user">Account</label>
+          <select id="acc-user">${users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
+        <div class="field"><label for="acc-login-pin">PIN</label>
+          <input type="password" id="acc-login-pin" inputmode="numeric" autocomplete="current-password" placeholder="••••"></div>
+        <div class="field field-submit"><button id="acc-login" class="btn-primary">Sign in</button></div>
+      </div>
+    </div>` : '';
+
+  box.innerHTML = `
+    <p class="card-note">You're using this device as <strong>Guest</strong> — entries still save, but anyone using this browser sees them. Create an account to keep your own space${users.length ? ' or sign in below' : ''}.</p>
+    ${signIn}
+    <div class="account-block">
+      <h3>Create account</h3>
+      <div class="account-form">
+        <div class="field"><label for="acc-name">Name</label>
+          <input type="text" id="acc-name" autocomplete="name" placeholder="Your name"></div>
+        <div class="field"><label for="acc-email">Email (optional)</label>
+          <input type="email" id="acc-email" autocomplete="email" placeholder="you@example.com"></div>
+        <div class="field"><label for="acc-pin">PIN (4+ characters)</label>
+          <input type="password" id="acc-pin" inputmode="numeric" autocomplete="new-password" placeholder="••••"></div>
+        <div class="field"><label for="acc-pin2">Confirm PIN</label>
+          <input type="password" id="acc-pin2" inputmode="numeric" autocomplete="new-password" placeholder="••••"></div>
+        <div class="field field-submit"><button id="acc-create" class="btn-primary">Create</button></div>
+      </div>
+      <p class="card-note" style="margin-top:8px">${users.length ? '' : 'Anything you logged as guest is copied into your first account. '}The PIN protects access on this device only — data stays in this browser and is not encrypted.</p>
+    </div>
+    <p id="account-msg" class="account-msg"></p>`;
+
+  if (users.length) {
+    $('#acc-login').addEventListener('click', async () => {
+      const ok = await Accounts.login($('#acc-user').value, $('#acc-login-pin').value);
+      if (!ok) { accountMsg('Wrong PIN — try again.', true); return; }
+      reloadForUser();
+    });
+    $('#acc-login-pin').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#acc-login').click(); });
+  }
+  $('#acc-create').addEventListener('click', async () => {
+    const pin = $('#acc-pin').value, pin2 = $('#acc-pin2').value;
+    if (pin !== pin2) { accountMsg('The two PINs don’t match.', true); return; }
+    try {
+      await Accounts.create($('#acc-name').value, pin, $('#acc-email').value);
+      reloadForUser();
+    } catch (err) {
+      accountMsg(err.message, true);
+    }
+  });
+}
+
 /* ================= settings ================= */
 function renderSettings() {
   $('#grid-preset').innerHTML = GRID_PRESETS
@@ -746,9 +858,13 @@ function init() {
   $('#log-date').value = state.logDate;
   $('#log-date').max = todayStr();
   populateLogSelects();
+  renderChip();
+  renderAccountUI();
   renderDay();
   renderSettings();
   setupTooltip();
+
+  $('#account-chip').addEventListener('click', () => switchTab('settings'));
 
   $$('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   $$('.range-btn').forEach((b) => b.addEventListener('click', () => {

@@ -12,7 +12,10 @@
 </head>
 <body>
   <header class="app-header">
-    <h1>🌱 Carbon Footprint Tracker</h1>
+    <div class="app-header-row">
+      <h1>🌱 Carbon Footprint Tracker</h1>
+      <button id="account-chip" class="account-chip" type="button">👤 Guest</button>
+    </div>
     <p class="subtitle">Log your day, see your emissions, shrink your footprint.</p>
   </header>
 
@@ -157,6 +160,10 @@
 
     <!-- ============ SETTINGS TAB ============ -->
     <section id="tab-settings" class="tab-panel">
+      <div class="card" id="account-card">
+        <h2>Account</h2>
+        <div id="account-ui"></div>
+      </div>
       <div class="card">
         <h2>Electricity grid</h2>
         <p class="card-note">Electric appliances are converted to emissions using your grid's carbon intensity (kg CO₂ per kWh).</p>
@@ -171,7 +178,7 @@
       </div>
       <div class="card">
         <h2>Your data</h2>
-        <p class="card-note">Everything is stored only in this browser (localStorage). Export to keep a backup or move devices.</p>
+        <p class="card-note">Everything is stored only in this browser (localStorage), separately per account. Export/import applies to the account you're signed into — use it to keep a backup or move devices.</p>
         <div class="btn-row">
           <button id="btn-export" class="btn-secondary">Export JSON</button>
           <label class="btn-secondary btn-file">Import JSON<input type="file" id="btn-import" accept=".json,application/json" hidden></label>
@@ -194,6 +201,7 @@
   <div id="tooltip" class="tooltip" role="status" hidden></div>
 
   <script src="factors.js"></script>
+  <script src="accounts.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
