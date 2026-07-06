@@ -47,14 +47,16 @@ const Accounts = {
 
   async create(name, pin, email) {
     name = (name || '').trim();
+    email = (email || '').trim();
     if (!name) throw new Error('Please enter a name.');
-    if (!pin || pin.length < 4) throw new Error('The PIN needs at least 4 characters.');
+    if (!/.+@.+\..+/.test(email)) throw new Error('Please enter a valid email address.');
+    if (!pin || pin.length < 6) throw new Error('The password needs at least 6 characters.');
     const users = this.list();
     const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
     const user = {
       id: 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       name,
-      email: (email || '').trim(),
+      email,
       salt,
       created: new Date().toISOString().slice(0, 10),
     };

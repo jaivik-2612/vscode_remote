@@ -1,0 +1,14 @@
+{
+  "name": "Carbon Footprint Tracker",
+  "short_name": "Carbon",
+  "description": "Log your day, see your emissions, shrink your footprint.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f9f9f7",
+  "theme_color": "#fcfcfb",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

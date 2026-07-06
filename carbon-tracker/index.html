@@ -4,9 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Carbon">
   <meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
   <title>Carbon Footprint Tracker</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🌱&lt;/text&gt;&lt;/svg&gt;">
 </head>
@@ -14,10 +18,21 @@
   <header class="app-header">
     <div class="app-header-row">
       <h1>🌱 Carbon Footprint Tracker</h1>
-      <button id="account-chip" class="account-chip" type="button">👤 Guest</button>
+      <button id="account-chip" class="account-chip" type="button">👤</button>
     </div>
     <p class="subtitle">Log your day, see your emissions, shrink your footprint.</p>
   </header>
+
+  <!-- Sign-in / sign-up gate (shown until authenticated) -->
+  <div id="auth-gate" class="auth-gate" hidden>
+    <div class="card auth-card">
+      <h2 id="gate-title">Welcome 🌱</h2>
+      <p class="card-note" id="gate-note"></p>
+      <div id="gate-form"></div>
+      <p id="gate-msg" class="account-msg"></p>
+      <p class="card-note" id="gate-switch"></p>
+    </div>
+  </div>
 
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="log" role="tab" aria-selected="true">Log</button>
@@ -30,6 +45,36 @@
   <main>
     <!-- ============ LOG TAB ============ -->
     <section id="tab-log" class="tab-panel active">
+      <div class="card welcome-card" id="welcome-card" hidden>
+        <h2>Welcome! Here's how it works 👋</h2>
+        <ul class="welcome-list">
+          <li>🚗 <strong>Log your day</strong> — commute, meals, AC &amp; fan hours, showers, even phone charging.</li>
+          <li>📊 <strong>See the impact</strong> — the Dashboard converts it all to CO₂e with citable factors (see the Data tab).</li>
+          <li>🌱 <strong>Shrink it</strong> — the Tips tab suggests changes based on your own habits, with savings quantified.</li>
+        </ul>
+        <div class="btn-row">
+          <button id="btn-sample" class="btn-primary">Load a sample day to explore</button>
+          <button id="btn-welcome-dismiss" class="btn-secondary">Got it, I'll log my own</button>
+        </div>
+      </div>
+
+      <div class="card" id="quick-card" hidden>
+        <div class="card-head">
+          <h2>Quick log</h2>
+          <button id="btn-repeat" class="btn-secondary btn-small" hidden>⟳ Copy yesterday</button>
+        </div>
+        <div id="quick-chips" class="chip-row"></div>
+        <div class="tmpl-row" id="tmpl-row">
+          <select id="tmpl-select" aria-label="Day template"></select>
+          <button id="tmpl-apply" class="btn-secondary btn-small">Apply template</button>
+          <button id="tmpl-delete" class="btn-secondary btn-small" title="Delete selected template">✕</button>
+        </div>
+        <div class="tmpl-row" id="tmpl-save-row" hidden>
+          <input type="text" id="tmpl-name" placeholder="Name this day (e.g. Weekday)" maxlength="30">
+          <button id="tmpl-save" class="btn-secondary btn-small">Save day as template</button>
+        </div>
+      </div>
+
       <div class="card">
         <div class="card-head">
           <h2>Log an activity</h2>
@@ -202,6 +247,8 @@
 
   <script src="factors.js"></script>
   <script src="accounts.js"></script>
+  <script src="config.js"></script>
+  <script src="cloud.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

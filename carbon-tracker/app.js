@@ -1,4 +1,6 @@
-/* Carbon Footprint Tracker — app logic. No dependencies, data in localStorage. */
+/* Carbon Footprint Tracker — app logic. No dependencies.
+ * Data lives in localStorage per account; with a cloud backend configured
+ * (config.js) it is additionally backed up to the user's cloud account. */
 'use strict';
 
 /* ================= helpers ================= */
@@ -13,6 +15,13 @@ function todayStr(offsetDays = 0) {
   d.setDate(d.getDate() + offsetDays);
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+function addDays(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`;
 }
 
 function fmtKg(kg, digits) {
@@ -45,24 +54,46 @@ function catColor(catId) {
 /* ================= storage & state ================= */
 const DEFAULT_SETTINGS = { gridPreset: 'india', gridIntensity: 0.67 };
 
+const SAMPLE_DAY = [
+  { a: 'bus', q: 8 }, { a: 'car_petrol', q: 5 }, { a: 'meal_veg', q: 2 },
+  { a: 'rice', q: 1 }, { a: 'milk', q: 1 }, { a: 'coffee', q: 1 },
+  { a: 'ac', q: 3 }, { a: 'fan', q: 8 }, { a: 'tv', q: 2 },
+  { a: 'lights', q: 5 }, { a: 'geyser', q: 0.5 }, { a: 'lpg', q: 0.75 },
+  { a: 'shower_hot', q: 1 }, { a: 'phone', q: 1 }, { a: 'stream', q: 1.5 },
+];
+
 const state = {
-  user: null,           // active account (null = guest space)
+  user: null,            // active account: device account, or cloud session user
   logs: [],
   settings: { ...DEFAULT_SETTINGS },
+  templates: [],
   logDate: todayStr(),
   range: 1,
   openEntry: null,
+  backupStatus: 'ok',
+  wired: false,
 };
 
-/* Storage keys are namespaced per account; guest uses the legacy keys. */
+/* The signed-in identity: cloud session when a backend is configured,
+ * otherwise a device account. null → the auth gate is shown. */
+function activeUser() {
+  if (Cloud.enabled()) {
+    const s = Cloud.session();
+    return s ? { id: 'c' + s.user.id, name: s.user.name, email: s.user.email, cloud: true } : null;
+  }
+  return Accounts.current();
+}
+
+/* Storage keys are namespaced per account. */
 function dataKey(suffix) {
   return state.user ? `cft:u:${state.user.id}:${suffix}` : `cft:${suffix}`;
 }
 
 function loadState() {
-  state.user = Accounts.current();
+  state.user = activeUser();
   state.logs = [];
   state.settings = { ...DEFAULT_SETTINGS };
+  state.templates = [];
   try {
     const logs = JSON.parse(localStorage.getItem(dataKey('logs')));
     if (Array.isArray(logs)) state.logs = logs.filter((e) => e && ACTIVITY_BY_ID[e.activityId] && e.date && e.qty > 0);
@@ -71,31 +102,186 @@ function loadState() {
     const s = JSON.parse(localStorage.getItem(dataKey('settings')));
     if (s && typeof s.gridIntensity === 'number' && s.gridIntensity >= 0) Object.assign(state.settings, s);
   } catch (_) { /* keep defaults */ }
+  state.templates = lsGet(dataKey('templates'), []).filter((t) => t && t.name && Array.isArray(t.items));
 }
 
-function saveLogs() { try { localStorage.setItem(dataKey('logs'), JSON.stringify(state.logs)); } catch (_) { /* storage unavailable */ } }
-function saveSettings() { try { localStorage.setItem(dataKey('settings'), JSON.stringify(state.settings)); } catch (_) { /* storage unavailable */ } }
+function saveLogsLocal() { lsSet(dataKey('logs'), state.logs); }
+function saveSettingsLocal() { lsSet(dataKey('settings'), state.settings); }
+function saveTemplatesLocal() { lsSet(dataKey('templates'), state.templates); }
+function saveLogs() { saveLogsLocal(); scheduleBackup(); }
+function saveSettings() { saveSettingsLocal(); scheduleBackup(); }
+function saveTemplates() { saveTemplatesLocal(); scheduleBackup(); }
 
-/* Re-read everything for the (possibly different) active account. */
-function reloadForUser() {
-  state.openEntry = null;
-  loadState();
-  renderChip();
-  renderAccountUI();
+/* ================= cloud backup ================= */
+let backupTimer = null;
+
+function backupPayload() {
+  return { logs: state.logs, settings: state.settings, templates: state.templates, savedAt: new Date().toISOString() };
+}
+
+function scheduleBackup() {
+  if (!state.user || !state.user.cloud) return;
+  setBackupStatus('pending');
+  clearTimeout(backupTimer);
+  backupTimer = setTimeout(pushBackup, 2500);
+}
+
+async function pushBackup() {
+  if (!state.user || !state.user.cloud) return;
+  try {
+    await Cloud.backup(backupPayload());
+    lsSet(dataKey('lastBackup'), new Date().toISOString());
+    setBackupStatus('ok');
+  } catch (_) {
+    setBackupStatus('fail');
+  }
+}
+
+function setBackupStatus(s) {
+  state.backupStatus = s;
+  renderBackupStatus();
+}
+
+function renderBackupStatus() {
+  const el = $('#backup-status');
+  if (!el) return;
+  const last = lsGet(dataKey('lastBackup'), null);
+  const lastTxt = last
+    ? new Date(last).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    : 'never';
+  el.textContent = state.backupStatus === 'pending' ? '☁️ Backing up…'
+    : state.backupStatus === 'fail' ? `⚠️ Couldn't reach the cloud — last backup: ${lastTxt}. Retries automatically.`
+    : `☁️ Backed up to your cloud account · ${lastTxt}`;
+}
+
+function applyBackup(p) {
+  state.logs = (p.logs || []).filter((e) => e && ACTIVITY_BY_ID[e.activityId] && e.date && e.qty > 0);
+  if (p.settings && typeof p.settings.gridIntensity === 'number') state.settings = { ...DEFAULT_SETTINGS, ...p.settings };
+  state.templates = Array.isArray(p.templates) ? p.templates.filter((t) => t && t.name && Array.isArray(t.items)) : [];
+  saveLogsLocal(); saveSettingsLocal(); saveTemplatesLocal();
   renderSettings();
   renderDay();
-  if ($('#tab-dashboard').classList.contains('active')) renderDashboard();
-  if ($('#tab-tips').classList.contains('active')) renderTips();
+}
+
+/* On sign-in: restore from cloud when this device has nothing yet;
+ * otherwise make sure a first backup exists. */
+async function cloudAfterLogin() {
+  try {
+    const remote = await Cloud.fetchBackup();
+    if (remote && remote.payload && Array.isArray(remote.payload.logs)
+        && remote.payload.logs.length && state.logs.length === 0) {
+      applyBackup(remote.payload);
+    } else if (!remote) {
+      await pushBackup();
+    }
+    setBackupStatus('ok');
+  } catch (_) {
+    setBackupStatus('fail');
+  }
+}
+
+/* ================= auth gate ================= */
+function renderGate(view) {
+  document.body.classList.add('gated');
+  $('#auth-gate').hidden = false;
+  const cloud = Cloud.enabled();
+  const users = cloud ? [] : Accounts.list();
+  if (!view) view = (cloud || users.length) ? 'signin' : 'signup';
+
+  $('#gate-title').textContent = view === 'signup' ? 'Create your free account 🌱' : 'Welcome back 🌱';
+  $('#gate-note').textContent = cloud
+    ? (view === 'signup'
+      ? 'Sign up with your email — your data is saved on this device and backed up to the cloud, so you never lose it.'
+      : 'Sign in with your email. If this is a new device, your data is restored from your cloud backup.')
+    : (view === 'signup'
+      ? 'Your account keeps your logs in their own space on this device.'
+      : 'Sign in to your account on this device.');
+
+  const form = $('#gate-form');
+  if (view === 'signup') {
+    form.innerHTML = `<div class="gate-form">
+      <div class="field"><label for="gate-name">Name</label>
+        <input id="gate-name" type="text" autocomplete="name" placeholder="Your name"></div>
+      <div class="field"><label for="gate-email">Email</label>
+        <input id="gate-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label for="gate-pass">Password (6+ characters)</label>
+        <input id="gate-pass" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="gate-pass2">Confirm password</label>
+        <input id="gate-pass2" type="password" autocomplete="new-password"></div>
+      <button id="gate-submit" class="btn-primary">Create free account</button>
+    </div>`;
+  } else if (cloud) {
+    form.innerHTML = `<div class="gate-form">
+      <div class="field"><label for="gate-email">Email</label>
+        <input id="gate-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label for="gate-pass">Password</label>
+        <input id="gate-pass" type="password" autocomplete="current-password"></div>
+      <button id="gate-submit" class="btn-primary">Sign in</button>
+    </div>`;
+  } else {
+    form.innerHTML = `<div class="gate-form">
+      <div class="field"><label for="gate-user">Account</label>
+        <select id="gate-user">${users.map((u) => `<option value="${u.id}">${esc(u.name)}${u.email ? ` — ${esc(u.email)}` : ''}</option>`).join('')}</select></div>
+      <div class="field"><label for="gate-pass">Password</label>
+        <input id="gate-pass" type="password" autocomplete="current-password"></div>
+      <button id="gate-submit" class="btn-primary">Sign in</button>
+    </div>`;
+  }
+
+  $('#gate-msg').textContent = '';
+  $('#gate-msg').className = 'account-msg';
+  $('#gate-switch').innerHTML = view === 'signup'
+    ? ((cloud || users.length) ? 'Already have an account? <button class="gate-link" id="gate-toggle" type="button">Sign in</button>' : '')
+    : 'New here? <button class="gate-link" id="gate-toggle" type="button">Create a free account</button>';
+
+  const toggle = $('#gate-toggle');
+  if (toggle) toggle.addEventListener('click', () => renderGate(view === 'signup' ? 'signin' : 'signup'));
+  $('#gate-submit').addEventListener('click', () => submitGate(view, cloud));
+  form.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#gate-submit').click(); });
+}
+
+async function submitGate(view, cloud) {
+  const msg = (t, err) => { const el = $('#gate-msg'); el.textContent = t || ''; el.className = 'account-msg' + (err ? ' error' : ''); };
+  const btn = $('#gate-submit');
+  btn.disabled = true;
+  try {
+    if (view === 'signup') {
+      const name = $('#gate-name').value.trim();
+      const email = $('#gate-email').value.trim();
+      const pass = $('#gate-pass').value;
+      if (!name) throw new Error('Please enter a name.');
+      if (!/.+@.+\..+/.test(email)) throw new Error('Please enter a valid email address.');
+      if (pass.length < 6) throw new Error('The password needs at least 6 characters.');
+      if (pass !== $('#gate-pass2').value) throw new Error('The two passwords don’t match.');
+      if (cloud) {
+        const res = await Cloud.signUp(name, email, pass);
+        if (!res.confirmed) {
+          msg('Almost there — open the confirmation link we emailed you, then sign in here.');
+          btn.disabled = false;
+          return;
+        }
+      } else {
+        await Accounts.create(name, pass, email);
+      }
+    } else if (cloud) {
+      await Cloud.signIn($('#gate-email').value.trim(), $('#gate-pass').value);
+    } else {
+      const ok = await Accounts.login($('#gate-user').value, $('#gate-pass').value);
+      if (!ok) throw new Error('Wrong password — try again.');
+    }
+    init();
+  } catch (err) {
+    msg(err.message, true);
+    btn.disabled = false;
+  }
 }
 
 /* ================= emissions engine ================= */
-/* Operation-phase kg CO2e per unit (grid-dependent for electric activities). */
 function useFactor(a) {
   if (a.useKwh !== undefined) return a.useKwh * state.settings.gridIntensity;
   return a.usePer || 0;
 }
 
-/* Embodied (manufacturing / production) kg CO2e per unit. */
 function embFactor(a) { return a.embPer || 0; }
 
 function embSplitOf(a) {
@@ -104,7 +290,6 @@ function embSplitOf(a) {
   return GAS_SPLITS.industry;
 }
 
-/* Returns { total, use, emb, co2, ch4, n2o } in kg CO2e. */
 function emissionsFor(activityId, qty) {
   const a = ACTIVITY_BY_ID[activityId];
   if (!a || !(qty > 0)) return { total: 0, use: 0, emb: 0, co2: 0, ch4: 0, n2o: 0 };
@@ -183,16 +368,18 @@ function updatePreview() {
   el.innerHTML = `${fmtQty(qty)} ${esc(a.unit)} of “${esc(a.label)}” ≈ <strong>${fmtKg(em.total)} CO₂e</strong>`;
 }
 
-function addEntry(ev) {
-  ev.preventDefault();
-  const activityId = $('#log-activity').value;
-  const qty = parseFloat($('#log-qty').value);
+function addEntryDirect(activityId, qty) {
   if (!ACTIVITY_BY_ID[activityId] || !(qty > 0)) return;
   state.logs.push({ id: Date.now() + Math.random().toString(16).slice(2), date: state.logDate, activityId, qty });
   saveLogs();
+  renderDay();
+}
+
+function addEntry(ev) {
+  ev.preventDefault();
+  addEntryDirect($('#log-activity').value, parseFloat($('#log-qty').value));
   $('#log-qty').value = '';
   updatePreview();
-  renderDay();
 }
 
 function removeEntry(id) {
@@ -201,7 +388,103 @@ function removeEntry(id) {
   renderDay();
 }
 
-/* One line of factor math for the entry detail view. */
+/* ---- welcome (first run) ---- */
+function renderWelcome() {
+  const card = $('#welcome-card');
+  card.hidden = !(state.logs.length === 0 && !lsGet('cft:welcomed', false));
+}
+
+function dismissWelcome(loadSample) {
+  lsSet('cft:welcomed', true);
+  if (loadSample) {
+    for (const s of SAMPLE_DAY) {
+      state.logs.push({ id: Date.now() + Math.random().toString(16).slice(2), date: todayStr(), activityId: s.a, qty: s.q });
+    }
+    saveLogs();
+  }
+  renderDay();
+}
+
+/* ---- quick log: favorites, copy yesterday, templates ---- */
+function quickFavorites() {
+  const cutoff = todayStr(-30);
+  const freq = {};
+  const lastQty = {};
+  for (const e of state.logs) {
+    if (e.date >= cutoff) freq[e.activityId] = (freq[e.activityId] || 0) + 1;
+    lastQty[e.activityId] = e.qty;
+  }
+  return Object.keys(freq)
+    .sort((a, b) => freq[b] - freq[a])
+    .slice(0, 6)
+    .map((id) => ({ a: ACTIVITY_BY_ID[id], qty: lastQty[id] }));
+}
+
+function renderQuickLog() {
+  const favs = quickFavorites();
+  const prevDate = addDays(state.logDate, -1);
+  const prevCount = entriesForDate(prevDate).length;
+  const dayCount = entriesForDate(state.logDate).length;
+  const hasTemplates = state.templates.length > 0;
+
+  $('#quick-card').hidden = !(favs.length || hasTemplates || prevCount || dayCount);
+
+  const repeat = $('#btn-repeat');
+  repeat.hidden = !prevCount;
+  repeat.textContent = `⟳ Copy ${prevDate === todayStr(-1) ? 'yesterday' : niceDate(prevDate)} (${prevCount})`;
+
+  $('#quick-chips').innerHTML = favs.map((f) => {
+    const short = f.a.label.replace(/\s*\(.*\)$/, '');
+    return `<button class="chip" type="button" data-act="${f.a.id}" data-qty="${f.qty}"
+      title="Add ${fmtQty(f.qty)} ${esc(f.a.unit)} of ${esc(f.a.label)}">
+      ${CATEGORY_BY_ID[f.a.cat].icon} ${esc(short)} <span class="chip-qty">+${fmtQty(f.qty)} ${esc(f.a.unit)}</span></button>`;
+  }).join('');
+
+  $('#tmpl-row').style.display = hasTemplates ? '' : 'none';
+  if (hasTemplates) {
+    $('#tmpl-select').innerHTML = state.templates
+      .map((t) => `<option value="${t.id}">${esc(t.name)} (${t.items.length} items)</option>`).join('');
+  }
+  $('#tmpl-save-row').hidden = !dayCount;
+}
+
+function copyPreviousDay() {
+  const prev = entriesForDate(addDays(state.logDate, -1));
+  for (const e of prev) {
+    state.logs.push({ id: Date.now() + Math.random().toString(16).slice(2), date: state.logDate, activityId: e.activityId, qty: e.qty });
+  }
+  if (prev.length) { saveLogs(); renderDay(); }
+}
+
+function saveDayTemplate() {
+  const items = entriesForDate(state.logDate).map((e) => ({ activityId: e.activityId, qty: e.qty }));
+  if (!items.length) return;
+  const name = ($('#tmpl-name').value || '').trim() || `Day of ${niceDate(state.logDate)}`;
+  state.templates.push({ id: 't' + Date.now().toString(36), name, items });
+  saveTemplates();
+  $('#tmpl-name').value = '';
+  renderQuickLog();
+}
+
+function applyTemplate() {
+  const t = state.templates.find((x) => x.id === $('#tmpl-select').value);
+  if (!t) return;
+  for (const it of t.items) {
+    if (ACTIVITY_BY_ID[it.activityId] && it.qty > 0) {
+      state.logs.push({ id: Date.now() + Math.random().toString(16).slice(2), date: state.logDate, activityId: it.activityId, qty: it.qty });
+    }
+  }
+  saveLogs();
+  renderDay();
+}
+
+function deleteTemplate() {
+  state.templates = state.templates.filter((x) => x.id !== $('#tmpl-select').value);
+  saveTemplates();
+  renderQuickLog();
+}
+
+/* ---- entry list with expandable detail & inline edit ---- */
 function factorMath(a, qty, phase) {
   if (phase === 'use') {
     if (a.useKwh !== undefined) {
@@ -240,6 +523,11 @@ function entryDetailHTML(e) {
       <span>CH₄ <strong>${fmtKg(em.ch4)}</strong></span>
       <span>N₂O <strong>${fmtKg(em.n2o)}</strong></span>
     </div>
+    <div class="detail-edit">
+      <label for="edit-${e.id}">Change amount (${esc(a.unit)}):</label>
+      <input type="number" id="edit-${e.id}" value="${e.qty}" min="0" step="any">
+      <button class="btn-secondary btn-small entry-update" type="button" data-id="${e.id}">Save</button>
+    </div>
     <p class="detail-src">Full factor table and citations are in the Data tab.</p>
   </div>`;
 }
@@ -267,6 +555,9 @@ function renderDay() {
       ${open ? entryDetailHTML(e) : ''}
     </li>`;
   }).join('');
+
+  renderWelcome();
+  renderQuickLog();
 }
 
 /* ================= dashboard ================= */
@@ -318,7 +609,7 @@ function renderDonut(entries, total) {
   if (!data.length) { box.innerHTML = '<p class="empty-note">No data in this range yet.</p>'; return; }
 
   const size = 240, cx = size / 2, cy = size / 2, r = 88, w = 26;
-  const gap = data.length > 1 ? 0.035 : 0; // ~2px angular gap between segments
+  const gap = data.length > 1 ? 0.035 : 0;
   let angle = -Math.PI / 2;
   let paths = '';
   for (const d of data) {
@@ -341,7 +632,6 @@ function renderDonut(entries, total) {
     <div class="legend">${data.map((d) => `<span class="legend-item"><span class="legend-swatch" style="background:${catColor(d.cat.id)}"></span>${esc(d.cat.label)} <span class="legend-value">${fmtKg(d.value)}</span></span>`).join('')}</div>`;
 }
 
-/* Shared horizontal stacked bar (gas mix & phase split). */
 function stackedBarSVG(parts, total, ariaLabel) {
   const W = 420, H = 64, barY = 8, barH = 28, gapPx = 2;
   let x = 0, segs = '', labels = '';
@@ -614,7 +904,6 @@ function buildTips() {
     tips.push({ icon: '♻️', title: 'Divert waste from landfill', body: 'Landfilled organic waste rots into methane, a far stronger greenhouse gas. Composting kitchen scraps and segregating recyclables removes most of it.', saving: waste.co2e * 0.6 });
   }
 
-  /* Embodied-specific advice: if manufacturing share is large, longevity beats replacement. */
   const em7 = sumEmissions(entries);
   if (em7.total > 0 && em7.emb / em7.total > 0.4) {
     tips.push({ icon: '🔧', title: 'Make your things last', body: `${Math.round((em7.emb / em7.total) * 100)}% of this week's footprint is manufacturing & supply chain, not energy use. The biggest lever there: keep devices and appliances longer, repair instead of replace, and buy second-hand — a phone kept 5 years instead of 3 nearly halves its manufacturing footprint per year.` });
@@ -651,8 +940,7 @@ function renderBaselines() {
     const a = ACTIVITY_BY_ID[id];
     const avg = rec.qty / 7;
     const over = Math.max(0, avg - base.qty);
-    /* Savings use the operation phase only: using a thing less doesn't undo
-     * its manufacturing, it just spreads it over a longer life. */
+    /* Operation phase only: using a thing less doesn't undo its manufacturing. */
     const savingPerDay = over * useFactor(a);
     rows.push({ a, base, avg, savingPerDay });
   }
@@ -668,95 +956,83 @@ function renderBaselines() {
     </tr>`).join('');
 }
 
-/* ================= accounts ================= */
+/* ================= accounts (settings card) ================= */
 function renderChip() {
   const chip = $('#account-chip');
-  chip.textContent = state.user ? `👤 ${state.user.name}` : '👤 Guest';
-  chip.title = state.user ? `Signed in as ${state.user.name} — manage in Settings` : 'Using this device as guest — create an account in Settings';
+  chip.textContent = state.user ? `👤 ${state.user.name}` : '👤 —';
+  chip.title = state.user
+    ? `Signed in as ${state.user.name}${state.user.cloud ? ' (cloud backup on)' : ''} — manage in Settings`
+    : 'Sign in';
 }
 
 function accountMsg(text, isError) {
   const el = $('#account-msg');
+  if (!el) return;
   el.textContent = text || '';
   el.className = 'account-msg' + (isError ? ' error' : '');
 }
 
+function armTwoTap(btn, armedLabel, restLabel, fn) {
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = armedLabel;
+    setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = restLabel; } }, 4000);
+    return;
+  }
+  btn.dataset.armed = '';
+  btn.textContent = restLabel;
+  fn();
+}
+
 function renderAccountUI() {
   const box = $('#account-ui');
-  const users = Accounts.list();
+  if (!state.user) { box.innerHTML = ''; return; }
 
-  if (state.user) {
+  if (state.user.cloud) {
     box.innerHTML = `
-      <p class="card-note">Signed in as <strong>${esc(state.user.name)}</strong>${state.user.email ? ` (${esc(state.user.email)})` : ''} — your logs and settings are saved under this account on this device.</p>
+      <p class="card-note">Signed in as <strong>${esc(state.user.name)}</strong> (${esc(state.user.email)}). Your data is saved on this device and backed up to your cloud account automatically a moment after every change.</p>
+      <p id="backup-status" class="account-msg"></p>
       <div class="btn-row">
+        <button id="acc-backup" class="btn-secondary">Back up now</button>
+        <button id="acc-restore" class="btn-secondary">Restore from cloud</button>
         <button id="acc-logout" class="btn-secondary">Sign out</button>
-        <button id="acc-delete" class="btn-danger">Delete this account</button>
       </div>
       <p id="account-msg" class="account-msg"></p>`;
-    $('#acc-logout').addEventListener('click', () => { Accounts.logout(); reloadForUser(); });
-    $('#acc-delete').addEventListener('click', () => {
-      const btn = $('#acc-delete');
-      if (btn.dataset.armed !== '1') {
-        btn.dataset.armed = '1';
-        btn.textContent = 'Tap again to delete account & its data';
-        setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = 'Delete this account'; } }, 4000);
-        return;
-      }
-      Accounts.remove(state.user.id);
-      reloadForUser();
+    renderBackupStatus();
+    $('#acc-backup').addEventListener('click', async () => {
+      accountMsg('Backing up…');
+      await pushBackup();
+      accountMsg(state.backupStatus === 'ok' ? 'Backup complete.' : 'Could not reach the cloud — check your connection.', state.backupStatus !== 'ok');
     });
+    $('#acc-restore').addEventListener('click', () => {
+      armTwoTap($('#acc-restore'), 'Tap again to overwrite this device', 'Restore from cloud', async () => {
+        try {
+          const remote = await Cloud.fetchBackup();
+          if (!remote || !remote.payload) { accountMsg('No cloud backup found yet.', true); return; }
+          applyBackup(remote.payload);
+          accountMsg(`Restored ${state.logs.length} entries from your cloud backup.`);
+        } catch (_) {
+          accountMsg('Could not reach the cloud — check your connection.', true);
+        }
+      });
+    });
+    $('#acc-logout').addEventListener('click', () => { Cloud.signOut(); location.reload(); });
     return;
   }
 
-  const signIn = users.length ? `
-    <div class="account-block">
-      <h3>Sign in</h3>
-      <div class="account-form">
-        <div class="field"><label for="acc-user">Account</label>
-          <select id="acc-user">${users.map((u) => `<option value="${u.id}">${esc(u.name)}</option>`).join('')}</select></div>
-        <div class="field"><label for="acc-login-pin">PIN</label>
-          <input type="password" id="acc-login-pin" inputmode="numeric" autocomplete="current-password" placeholder="••••"></div>
-        <div class="field field-submit"><button id="acc-login" class="btn-primary">Sign in</button></div>
-      </div>
-    </div>` : '';
-
   box.innerHTML = `
-    <p class="card-note">You're using this device as <strong>Guest</strong> — entries still save, but anyone using this browser sees them. Create an account to keep your own space${users.length ? ' or sign in below' : ''}.</p>
-    ${signIn}
-    <div class="account-block">
-      <h3>Create account</h3>
-      <div class="account-form">
-        <div class="field"><label for="acc-name">Name</label>
-          <input type="text" id="acc-name" autocomplete="name" placeholder="Your name"></div>
-        <div class="field"><label for="acc-email">Email (optional)</label>
-          <input type="email" id="acc-email" autocomplete="email" placeholder="you@example.com"></div>
-        <div class="field"><label for="acc-pin">PIN (4+ characters)</label>
-          <input type="password" id="acc-pin" inputmode="numeric" autocomplete="new-password" placeholder="••••"></div>
-        <div class="field"><label for="acc-pin2">Confirm PIN</label>
-          <input type="password" id="acc-pin2" inputmode="numeric" autocomplete="new-password" placeholder="••••"></div>
-        <div class="field field-submit"><button id="acc-create" class="btn-primary">Create</button></div>
-      </div>
-      <p class="card-note" style="margin-top:8px">${users.length ? '' : 'Anything you logged as guest is copied into your first account. '}The PIN protects access on this device only — data stays in this browser and is not encrypted.</p>
+    <p class="card-note">Signed in as <strong>${esc(state.user.name)}</strong>${state.user.email ? ` (${esc(state.user.email)})` : ''} — your logs and settings are saved under this account on this device. Cloud backup is off (no backend configured — see SETUP-CLOUD.md).</p>
+    <div class="btn-row">
+      <button id="acc-logout" class="btn-secondary">Sign out / switch account</button>
+      <button id="acc-delete" class="btn-danger">Delete this account</button>
     </div>
     <p id="account-msg" class="account-msg"></p>`;
-
-  if (users.length) {
-    $('#acc-login').addEventListener('click', async () => {
-      const ok = await Accounts.login($('#acc-user').value, $('#acc-login-pin').value);
-      if (!ok) { accountMsg('Wrong PIN — try again.', true); return; }
-      reloadForUser();
+  $('#acc-logout').addEventListener('click', () => { Accounts.logout(); location.reload(); });
+  $('#acc-delete').addEventListener('click', () => {
+    armTwoTap($('#acc-delete'), 'Tap again to delete account & its data', 'Delete this account', () => {
+      Accounts.remove(state.user.id);
+      location.reload();
     });
-    $('#acc-login-pin').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#acc-login').click(); });
-  }
-  $('#acc-create').addEventListener('click', async () => {
-    const pin = $('#acc-pin').value, pin2 = $('#acc-pin2').value;
-    if (pin !== pin2) { accountMsg('The two PINs don’t match.', true); return; }
-    try {
-      await Accounts.create($('#acc-name').value, pin, $('#acc-email').value);
-      reloadForUser();
-    } catch (err) {
-      accountMsg(err.message, true);
-    }
   });
 }
 
@@ -789,7 +1065,7 @@ function onGridCustom() {
 }
 
 function exportData() {
-  const blob = new Blob([JSON.stringify({ logs: state.logs, settings: state.settings }, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(backupPayload(), null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `carbon-footprint-${todayStr()}.json`;
@@ -803,13 +1079,11 @@ function importData(file) {
     try {
       const data = JSON.parse(reader.result);
       if (!Array.isArray(data.logs)) throw new Error('bad file');
-      state.logs = data.logs.filter((e) => e && ACTIVITY_BY_ID[e.activityId] && e.date && e.qty > 0);
-      if (data.settings && typeof data.settings.gridIntensity === 'number') Object.assign(state.settings, data.settings);
-      saveLogs(); saveSettings();
-      renderSettings(); renderDay();
-      alert(`Imported ${state.logs.length} entries.`);
+      applyBackup(data);
+      scheduleBackup();
+      accountMsg(`Imported ${state.logs.length} entries.`);
     } catch (_) {
-      alert('Could not read that file — expected a JSON export from this app.');
+      accountMsg('Could not read that file — expected a JSON export from this app.', true);
     }
   };
   reader.readAsText(file);
@@ -817,17 +1091,11 @@ function importData(file) {
 
 function clearData() {
   const btn = $('#btn-clear');
-  if (btn.dataset.armed !== '1') {
-    btn.dataset.armed = '1';
-    btn.textContent = 'Tap again to delete everything';
-    setTimeout(() => { btn.dataset.armed = ''; btn.textContent = 'Delete all data'; }, 4000);
-    return;
-  }
-  btn.dataset.armed = '';
-  btn.textContent = 'Delete all data';
-  state.logs = [];
-  saveLogs();
-  renderDay();
+  armTwoTap(btn, 'Tap again to delete everything', 'Delete all data', () => {
+    state.logs = [];
+    saveLogs();
+    renderDay();
+  });
 }
 
 /* ================= tooltip ================= */
@@ -852,19 +1120,11 @@ function setupTooltip() {
 }
 
 /* ================= wiring ================= */
-function init() {
-  loadState();
+function wireOnce() {
+  if (state.wired) return;
+  state.wired = true;
 
-  $('#log-date').value = state.logDate;
-  $('#log-date').max = todayStr();
-  populateLogSelects();
-  renderChip();
-  renderAccountUI();
-  renderDay();
-  renderSettings();
   setupTooltip();
-
-  $('#account-chip').addEventListener('click', () => switchTab('settings'));
 
   $$('.tab').forEach((b) => b.addEventListener('click', () => switchTab(b.dataset.tab)));
   $$('.range-btn').forEach((b) => b.addEventListener('click', () => {
@@ -872,6 +1132,8 @@ function init() {
     $$('.range-btn').forEach((x) => x.classList.toggle('active', x === b));
     renderDashboard();
   }));
+
+  $('#account-chip').addEventListener('click', () => switchTab('settings'));
 
   $('#log-category').addEventListener('change', populateActivitySelect);
   $('#log-activity').addEventListener('change', updateQtyLabel);
@@ -882,9 +1144,19 @@ function init() {
     state.openEntry = null;
     renderDay();
   });
+
   $('#day-entries').addEventListener('click', (ev) => {
-    const btn = ev.target.closest('.entry-del');
-    if (btn) { removeEntry(btn.dataset.id); return; }
+    const del = ev.target.closest('.entry-del');
+    if (del) { removeEntry(del.dataset.id); return; }
+    const upd = ev.target.closest('.entry-update');
+    if (upd) {
+      const input = $(`#edit-${CSS.escape(upd.dataset.id)}`);
+      const qty = parseFloat(input && input.value);
+      const entry = state.logs.find((e) => e.id === upd.dataset.id);
+      if (entry && qty > 0) { entry.qty = qty; saveLogs(); renderDay(); }
+      return;
+    }
+    if (ev.target.closest('.entry-detail')) return;
     const row = ev.target.closest('.entry-row');
     if (row) {
       const id = row.parentElement.dataset.entry;
@@ -895,7 +1167,7 @@ function init() {
   $('#day-entries').addEventListener('keydown', (ev) => {
     if (ev.key !== 'Enter' && ev.key !== ' ') return;
     const row = ev.target.closest('.entry-row');
-    if (row) {
+    if (row && ev.target === row) {
       ev.preventDefault();
       const id = row.parentElement.dataset.entry;
       state.openEntry = state.openEntry === id ? null : id;
@@ -903,16 +1175,54 @@ function init() {
     }
   });
 
+  $('#btn-sample').addEventListener('click', () => dismissWelcome(true));
+  $('#btn-welcome-dismiss').addEventListener('click', () => dismissWelcome(false));
+  $('#btn-repeat').addEventListener('click', copyPreviousDay);
+  $('#quick-chips').addEventListener('click', (ev) => {
+    const chip = ev.target.closest('.chip');
+    if (chip) addEntryDirect(chip.dataset.act, parseFloat(chip.dataset.qty));
+  });
+  $('#tmpl-save').addEventListener('click', saveDayTemplate);
+  $('#tmpl-apply').addEventListener('click', applyTemplate);
+  $('#tmpl-delete').addEventListener('click', deleteTemplate);
+
   $('#grid-preset').addEventListener('change', onGridPreset);
   $('#grid-custom').addEventListener('change', onGridCustom);
   $('#btn-export').addEventListener('click', exportData);
   $('#btn-import').addEventListener('change', (ev) => { if (ev.target.files[0]) importData(ev.target.files[0]); ev.target.value = ''; });
   $('#btn-clear').addEventListener('click', clearData);
 
+  window.addEventListener('online', () => { if (state.backupStatus === 'fail') scheduleBackup(); });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
     renderDay();
     if ($('#tab-dashboard').classList.contains('active')) renderDashboard();
   });
+
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* not available (e.g. preview) */ });
+  }
+}
+
+function init() {
+  const user = activeUser();
+  if (!user) { renderGate(); return; }
+
+  document.body.classList.remove('gated');
+  $('#auth-gate').hidden = true;
+
+  loadState();
+  wireOnce();
+
+  $('#log-date').value = state.logDate;
+  $('#log-date').max = todayStr();
+  populateLogSelects();
+  renderChip();
+  renderAccountUI();
+  renderSettings();
+  renderDay();
+  if ($('#tab-dashboard').classList.contains('active')) renderDashboard();
+
+  if (state.user.cloud) cloudAfterLogin();
 }
 
 document.addEventListener('DOMContentLoaded', init);

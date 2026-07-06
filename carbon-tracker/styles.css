@@ -72,6 +72,43 @@ body {
 }
 .account-chip:hover { border-color: var(--accent); }
 
+/* ---------- auth gate ---------- */
+body.gated .tabs, body.gated main { display: none; }
+.auth-gate { max-width: 440px; margin: 24px auto 0; }
+.auth-card h2 { font-size: 1.2rem; margin-bottom: 4px; }
+.gate-form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.gate-form .btn-primary { width: 100%; margin-top: 4px; }
+.gate-link {
+  appearance: none; background: none; border: none; padding: 0;
+  font: inherit; font-weight: 600; color: var(--accent); cursor: pointer;
+}
+
+/* ---------- quick log ---------- */
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.chip {
+  font: inherit; font-size: 0.88rem;
+  background: var(--page); color: var(--ink);
+  border: 1px solid var(--grid-line); border-radius: 999px;
+  padding: 8px 14px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.chip:hover { border-color: var(--accent); }
+.chip .chip-qty { color: var(--ink-2); font-size: 0.8rem; }
+.chip:active { background: var(--accent); color: var(--accent-ink); }
+.btn-small { padding: 7px 14px; min-height: 36px; font-size: 0.86rem; }
+.tmpl-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
+.tmpl-row select, .tmpl-row input { flex: 1; min-width: 160px; width: auto; min-height: 36px; padding: 6px 10px; }
+#tmpl-save-row { margin-top: 10px; }
+
+/* ---------- welcome card ---------- */
+.welcome-card { border-color: var(--accent); }
+.welcome-list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 8px 0 16px; font-size: 0.94rem; }
+
+/* ---------- entry edit ---------- */
+.detail-edit { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-top: 6px; border-top: 1px dashed var(--grid-line); }
+.detail-edit label { font-size: 0.82rem; color: var(--ink-2); }
+.detail-edit input { width: 110px; min-height: 36px; padding: 6px 10px; }
+
 /* ---------- account forms ---------- */
 .account-block { margin-top: 12px; }
 .account-block h3 { font-size: 0.92rem; font-weight: 600; margin-bottom: 8px; }

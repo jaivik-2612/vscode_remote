@@ -35,16 +35,24 @@ fan running while you sleep.
   7 days of logs, each with an estimated weekly saving, plus a
   **minimal-usage guide** showing a comfortable-but-frugal baseline for every
   appliance you actually use and what trimming to it would save per day.
-- **Accounts** — create per-person accounts (name + PIN) so several people
-  can share a device, each with their own logs and settings; sign in/out,
-  switch accounts, or keep using the guest space. Anything logged as guest
-  is copied into the first account created. The storage layer is namespaced
-  per account, ready for an optional cloud-sync backend (Supabase/Firebase)
-  later.
-- **Private by design** — all data stays in your browser (localStorage),
-  with JSON export/import for backups per account. The PIN gates the app on
-  the device (data is not encrypted). Works offline, light & dark mode,
-  touch-friendly (iPad-ready).
+- **Quick logging** — one-tap favorite chips learned from your habits,
+  "copy yesterday", reusable day templates, and in-place editing of any
+  entry. A first-run welcome card can load a sample day to explore.
+- **Mandatory accounts** — sign-up with name, email and password before
+  using the app. Without a cloud backend configured, accounts live on the
+  device (several people can share it, fully isolated). With Supabase
+  configured (see [`carbon-tracker/SETUP-CLOUD.md`](carbon-tracker/SETUP-CLOUD.md),
+  ~5 minutes, free), accounts become real email+password cloud accounts:
+  every change is backed up automatically, and signing in on a new device
+  restores everything. Settings shows backup status plus manual
+  "Back up now" / "Restore from cloud".
+- **Installable PWA** — web-app manifest, icons and a service worker:
+  "Add to Home Screen" gives a real app icon, full-screen launch and
+  offline use.
+- **Private by design** — data lives in your browser per account (plus your
+  own Supabase project when cloud mode is on), with JSON export/import for
+  manual backups. Works offline, light & dark mode, touch-friendly
+  (iPad-ready).
 
 ### Run it
 
