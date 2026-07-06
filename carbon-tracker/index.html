@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+  <title>Carbon Footprint Tracker</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;🌱&lt;/text&gt;&lt;/svg&gt;">
+</head>
+<body>
+  <header class="app-header">
+    <h1>🌱 Carbon Footprint Tracker</h1>
+    <p class="subtitle">Log your day, see your emissions, shrink your footprint.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="log" role="tab" aria-selected="true">Log</button>
+    <button class="tab" data-tab="dashboard" role="tab" aria-selected="false">Dashboard</button>
+    <button class="tab" data-tab="tips" role="tab" aria-selected="false">Tips</button>
+    <button class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+  </nav>
+
+  <main>
+    <!-- ============ LOG TAB ============ -->
+    <section id="tab-log" class="tab-panel active">
+      <div class="card">
+        <div class="card-head">
+          <h2>Log an activity</h2>
+          <input type="date" id="log-date" aria-label="Date for this log entry">
+        </div>
+        <form id="log-form" class="log-form">
+          <div class="field">
+            <label for="log-category">Category</label>
+            <select id="log-category" required></select>
+          </div>
+          <div class="field">
+            <label for="log-activity">Activity</label>
+            <select id="log-activity" required></select>
+          </div>
+          <div class="field">
+            <label for="log-qty" id="log-qty-label">Amount</label>
+            <input type="number" id="log-qty" min="0" step="any" required placeholder="0">
+          </div>
+          <div class="field field-submit">
+            <button type="submit" class="btn-primary">Add</button>
+          </div>
+        </form>
+        <p id="log-preview" class="log-preview" aria-live="polite"></p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 id="day-title">Today</h2>
+          <span id="day-total" class="day-total"></span>
+        </div>
+        <ul id="day-entries" class="entry-list"></ul>
+        <p id="day-empty" class="empty-note">Nothing logged for this day yet. Everything counts — commute, meals, fan, AC, even your phone charger.</p>
+      </div>
+    </section>
+
+    <!-- ============ DASHBOARD TAB ============ -->
+    <section id="tab-dashboard" class="tab-panel">
+      <div class="range-row" role="group" aria-label="Date range">
+        <button class="range-btn active" data-range="1">Today</button>
+        <button class="range-btn" data-range="7">Last 7 days</button>
+        <button class="range-btn" data-range="30">Last 30 days</button>
+      </div>
+
+      <div class="stat-row">
+        <div class="card stat-tile">
+          <span class="stat-label" id="stat-total-label">Total emissions</span>
+          <span class="stat-value" id="stat-total">–</span>
+          <span class="stat-sub" id="stat-total-sub"></span>
+        </div>
+        <div class="card stat-tile">
+          <span class="stat-label">vs. sustainable target</span>
+          <span class="stat-value" id="stat-target">–</span>
+          <span class="stat-sub">target ≈ 5.5 kg CO₂e/day (2 t/yr)</span>
+        </div>
+        <div class="card stat-tile">
+          <span class="stat-label">vs. global average</span>
+          <span class="stat-value" id="stat-global">–</span>
+          <span class="stat-sub">world avg ≈ 12.9 kg CO₂e/day</span>
+        </div>
+      </div>
+
+      <div class="chart-grid">
+        <div class="card">
+          <h2>By category</h2>
+          <div id="chart-donut" class="chart-box"></div>
+        </div>
+        <div class="card">
+          <h2>Greenhouse gas mix</h2>
+          <p class="card-note">Share of your CO₂-equivalent from each gas.</p>
+          <div id="chart-gases" class="chart-box"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Last 14 days</h2>
+        <div id="chart-trend" class="chart-box chart-wide"></div>
+      </div>
+
+      <div class="card">
+        <h2>Biggest contributors</h2>
+        <table class="data-table" id="top-table">
+          <thead><tr><th>Activity</th><th>Amount</th><th>kg CO₂e</th><th>Share</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="dash-empty" class="empty-note">No data in this range yet — log some activities first.</p>
+      </div>
+    </section>
+
+    <!-- ============ TIPS TAB ============ -->
+    <section id="tab-tips" class="tab-panel">
+      <div class="card">
+        <h2>Personal suggestions</h2>
+        <p class="card-note">Based on your last 7 days of logs.</p>
+        <ul id="tips-list" class="tips-list"></ul>
+      </div>
+      <div class="card">
+        <h2>Minimal-usage guide</h2>
+        <p class="card-note">A comfortable-but-frugal daily baseline for appliances you actually use, and what trimming to it would save.</p>
+        <table class="data-table" id="baseline-table">
+          <thead><tr><th>Appliance</th><th>Your avg/day</th><th>Suggested</th><th>Saving/day</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <p id="baseline-empty" class="empty-note">Log some appliance hours (fan, AC, heater, geyser…) and a personalised guide appears here.</p>
+      </div>
+    </section>
+
+    <!-- ============ SETTINGS TAB ============ -->
+    <section id="tab-settings" class="tab-panel">
+      <div class="card">
+        <h2>Electricity grid</h2>
+        <p class="card-note">Electric appliances are converted to emissions using your grid's carbon intensity (kg CO₂ per kWh).</p>
+        <div class="field">
+          <label for="grid-preset">Where is your electricity from?</label>
+          <select id="grid-preset"></select>
+        </div>
+        <div class="field">
+          <label for="grid-custom">Custom intensity (kg CO₂/kWh)</label>
+          <input type="number" id="grid-custom" min="0" max="2" step="0.01">
+        </div>
+      </div>
+      <div class="card">
+        <h2>Your data</h2>
+        <p class="card-note">Everything is stored only in this browser (localStorage). Export to keep a backup or move devices.</p>
+        <div class="btn-row">
+          <button id="btn-export" class="btn-secondary">Export JSON</button>
+          <label class="btn-secondary btn-file">Import JSON<input type="file" id="btn-import" accept=".json,application/json" hidden></label>
+          <button id="btn-clear" class="btn-danger">Delete all data</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>About the numbers</h2>
+        <p class="card-note">
+          Factors are approximate averages assembled from public sources (UK DEFRA/BEIS
+          conversion factors, Poore &amp; Nemecek 2018 food study via Our World in Data,
+          national grid-intensity data). They are meant for habit tracking and comparison,
+          not carbon accounting. CH₄ and N₂O are shown as CO₂-equivalent (GWP-100).
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
+
+  <script src="factors.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
