@@ -14,7 +14,8 @@ than this app needs — each user stores one small JSON row).
    email).
 2. **New project** → pick any name (e.g. `carbon-tracker`), a database
    password (store it somewhere safe; the app never uses it), and the region
-   closest to your users (e.g. Mumbai) → **Create**.
+   closest to your users — **Canada (Central)** for Canada/US, which also
+   keeps the stored data resident in Canada → **Create**.
 
 ## 2. Create the backups table
 
