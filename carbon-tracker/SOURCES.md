@@ -32,9 +32,7 @@ factors. <https://ourworldindata.org/travel-carbon-footprint>
 | Long-haul flight | 147.87 | 0.148 |
 
 Estimates: **electric car** 0.17 kWh/km × user grid (typical mid-size EV
-consumption); **auto-rickshaw** 0.065 kg/km (small-engine three-wheeler,
-no DEFRA factor exists). Walking and cycling operation = 0 (food energy not
-counted).
+consumption). Walking and cycling operation = 0 (food energy not counted).
 
 ## 2. Transport — embodied (manufacturing, amortised per km)
 
@@ -50,7 +48,6 @@ All rows are **derived estimates**:
 | Petrol/diesel car | ≈6 t to manufacture a mid-size car ÷ 200,000 km lifetime | 0.030 |
 | Electric car | ≈6 t car + ≈4 t battery (50 kWh × ~85 kg/kWh) ÷ 200,000 km | 0.050 |
 | Motorbike | ≈1.2 t ÷ 100,000 km | 0.012 |
-| Auto-rickshaw | small vehicle, high lifetime km, shared | 0.008 |
 | Bus | vehicle mfg over ~1 M km ÷ passengers | 0.006 |
 | Metro / intercity train | rolling stock only, per passenger-km | 0.004 / 0.005 |
 | Aircraft | ~25-year service life, per passenger-km | 0.002 |
@@ -97,12 +94,17 @@ average from Ember's Global Electricity Review (~473 g/kWh in 2024).
 
 | Region | g CO₂/kWh (source, 2025) | Used |
 |---|---|---|
-| India | 670 | 0.67 |
-| World average | ~473 (2024) | 0.47 |
+| **Canada (app default)** | 190.7 | 0.19 |
 | United States | 384 | 0.38 |
+| World average | ~473 (2024) | 0.47 |
 | United Kingdom | 217 | 0.22 |
 | European Union (27) | 210 | 0.21 |
+| India | 670 | 0.67 |
 | Mostly renewables | — | 0.05 (assumption) |
+
+The app is regionally centred on Canada/US: the default grid preset is
+Canada, and the activity list includes North-American staples such as
+gas-furnace home heating.
 
 ## 5. Home appliances
 
@@ -140,8 +142,13 @@ a known simplification.
 
 ## 6. Other factors
 
-- **LPG cooking** ≈0.50 kg/h: DEFRA LPG combustion factor (~1.56 kg CO₂e per
-  litre) × typical domestic burner consumption (~0.32 l/h). Derived estimate.
+- **Gas stove cooking** ≈0.50 kg/h: DEFRA LPG/propane combustion factor
+  (~1.56 kg CO₂e per litre) × typical domestic burner consumption
+  (~0.32 l/h). Natural-gas stoves are similar. Derived estimate.
+- **Gas furnace heating** ≈3.2 kg/h of burner runtime: 60,000 BTU-input
+  furnace ≈ 17.6 kWh(th) × DEFRA natural-gas factor ~0.18 kg CO₂e/kWh.
+  Furnaces cycle on and off — log actual burner runtime, not thermostat-on
+  hours. Derived estimate.
 - **Video streaming** 0.036 kg/h: IEA (Kamiya, 2020), *The carbon footprint of
   streaming video* — data centres + network only, world-average grid; the
   viewing device is logged separately.
@@ -158,6 +165,8 @@ a known simplification.
   Paris-aligned personal budget for ~2030–2040.
 - **World average** 12.9 kg/day ≈ 4.7 t fossil CO₂/person/year, Global Carbon
   Budget per-capita CO₂ (all-GHG per-capita is higher, ~6.5 t).
+- **Canada / US average** 38 kg/day ≈ 14 t fossil CO₂/person/year — both
+  countries sit near this figure in Global Carbon Budget per-capita data.
 
 ## 8. Gas splits (CO₂ / CH₄ / N₂O)
 

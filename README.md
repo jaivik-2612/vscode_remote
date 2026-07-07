@@ -19,8 +19,9 @@ fan running while you sleep.
   split into two phases: **operation** (the fuel/electricity used) and
   **embodied** (manufacturing of the equipment amortised over its lifetime,
   or the farm-to-shop production footprint of food). Electric appliances use
-  a configurable grid carbon intensity (presets for India, world average,
-  US, UK, EU, renewables — Ember 2025 data).
+  a configurable grid carbon intensity (default: Canada; presets for the US,
+  world average, UK, EU, India, renewables — Ember 2025 data). The activity
+  list is centred on Canada/US life, including gas-furnace home heating.
 - **Citable data** — factors come from published datasets (UK DEFRA
   conversion factors via Our World in Data, Poore & Nemecek 2018 for food,
   Ember for grids, ICCT/IVL for vehicle manufacturing, IEA for streaming);

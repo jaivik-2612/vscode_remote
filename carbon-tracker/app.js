@@ -52,7 +52,7 @@ function catColor(catId) {
 }
 
 /* ================= storage & state ================= */
-const DEFAULT_SETTINGS = { gridPreset: 'india', gridIntensity: 0.67 };
+const DEFAULT_SETTINGS = { gridPreset: 'canada', gridIntensity: 0.19 };
 
 const SAMPLE_DAY = [
   { a: 'bus', q: 8 }, { a: 'car_petrol', q: 5 }, { a: 'meal_veg', q: 2 },
@@ -817,6 +817,7 @@ function renderData() {
       <tbody>
         <tr><td>Sustainable personal target</td><td class="num">${BENCHMARKS.sustainable}</td><td>≈2 t CO₂e/person/year, a widely used Paris-aligned target</td></tr>
         <tr><td>World average</td><td class="num">${BENCHMARKS.worldAvg}</td><td>≈4.7 t fossil CO₂/person/year (Global Carbon Budget) ÷ 365</td></tr>
+        <tr><td>Canada / US average</td><td class="num">${BENCHMARKS.naAvg}</td><td>≈14 t fossil CO₂/person/year in North America ÷ 365</td></tr>
       </tbody>
     </table></div>
   </div>
@@ -881,7 +882,12 @@ function buildTips() {
 
   const geyser = get('geyser');
   if (geyser.qty / 7 > MINIMAL_BASELINES.geyser.qty) {
-    tips.push({ icon: '🚿', title: 'Shorter geyser runs', body: `The water heater ran ${(geyser.qty / 7 * 60).toFixed(0)} min/day on average. ~15 minutes heats a bucket-bath's worth; switch it off before you step in.`, saving: (geyser.qty - MINIMAL_BASELINES.geyser.qty * 7) * 2.0 * gi });
+    tips.push({ icon: '🚿', title: 'Shorter water-heater runs', body: `The water heater ran ${(geyser.qty / 7 * 60).toFixed(0)} min/day on average. ~15 minutes of heating covers a shower; a timer or smart plug pays for itself fast.`, saving: (geyser.qty - MINIMAL_BASELINES.geyser.qty * 7) * 2.0 * gi });
+  }
+
+  const furnace = get('gas_furnace');
+  if (furnace.qty / 7 > MINIMAL_BASELINES.gas_furnace.qty) {
+    tips.push({ icon: '🌡️', title: 'Tame the furnace', body: `The gas furnace ran ~${(furnace.qty / 7).toFixed(1)} h/day. Each 1 °C lower on the thermostat cuts heating fuel ~7%; 20 °C when home, 17 °C at night, and sealed drafts usually get runtime to ~${MINIMAL_BASELINES.gas_furnace.qty} h/day.`, saving: (furnace.qty - MINIMAL_BASELINES.gas_furnace.qty * 7) * 3.2 });
   }
 
   const beef = get('meal_beef'), lamb = get('meal_lamb');

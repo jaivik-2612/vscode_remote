@@ -79,7 +79,7 @@ const CATEGORIES = [
   { id: 'transport', label: 'Transport',        icon: '🚗', colorLight: '#2a78d6', colorDark: '#3987e5' },
   { id: 'food',      label: 'Food & drink',     icon: '🍛', colorLight: '#1baf7a', colorDark: '#199e70' },
   { id: 'home',      label: 'Home appliances',  icon: '🔌', colorLight: '#eda100', colorDark: '#c98500' },
-  { id: 'water',     label: 'Cooking & water',  icon: '🚿', colorLight: '#008300', colorDark: '#008300' },
+  { id: 'water',     label: 'Cooking, water & heating', icon: '🚿', colorLight: '#008300', colorDark: '#008300' },
   { id: 'other',     label: 'Other',            icon: '📦', colorLight: '#4a3aa7', colorDark: '#9085e9' },
 ];
 
@@ -104,11 +104,6 @@ const ACTIVITIES = [
     usePer: 0.114, srcUse: 'owid_travel',
     embPer: 0.012, srcEmb: 'lca_est', estEmb: true,
     embNote: '≈1.2 t CO₂e to build ÷ 100,000 km lifetime',
-    split: 'fuel' },
-  { id: 'auto', cat: 'transport', label: 'Auto-rickshaw / tuk-tuk', unit: 'km',
-    usePer: 0.065, srcUse: 'lca_est', estUse: true,
-    embPer: 0.008, srcEmb: 'lca_est', estEmb: true,
-    embNote: 'small vehicle amortised over high lifetime km, shared by passengers',
     split: 'fuel' },
   { id: 'bus', cat: 'transport', label: 'City bus', unit: 'km',
     usePer: 0.097, srcUse: 'owid_travel',
@@ -184,7 +179,7 @@ const ACTIVITIES = [
     embPer: 0.79, srcEmb: 'poore2018',
     embNote: '250 ml dairy milk (3.15 kg CO₂e/kg)',
     split: 'dairy' },
-  { id: 'cheese', cat: 'food', label: 'Cheese / paneer (30 g)', unit: 'servings',
+  { id: 'cheese', cat: 'food', label: 'Cheese (30 g)', unit: 'servings',
     embPer: 0.72, srcEmb: 'poore2018',
     embNote: '30 g cheese (23.9 kg CO₂e/kg)',
     split: 'dairy' },
@@ -206,7 +201,7 @@ const ACTIVITIES = [
     split: 'plant' },
 
   /* ---------- Home appliances (operation = kWh × grid; embodied = mfg amortised) ---------- */
-  { id: 'ac', cat: 'home', label: 'Air conditioner (1.5 T split)', unit: 'hours',
+  { id: 'ac', cat: 'home', label: 'Air conditioner (1.5 kW)', unit: 'hours',
     useKwh: 1.50, srcUse: 'lca_est', estUse: true,
     embPer: 0.033, srcEmb: 'lca_est', estEmb: true,
     embNote: '≈500 kg CO₂e to make ÷ 15,000 lifetime hours (excl. refrigerant leaks)',
@@ -272,13 +267,18 @@ const ACTIVITIES = [
     embNote: '≈55 kg CO₂e to make a phone (manufacturer PCF) ÷ ~1,100 charges (3 yr)',
     split: 'electricity' },
 
-  /* ---------- Cooking & water ---------- */
-  { id: 'lpg', cat: 'water', label: 'LPG stove cooking', unit: 'hours',
+  /* ---------- Cooking, water & heating ---------- */
+  { id: 'lpg', cat: 'water', label: 'Gas stove cooking (propane/natural gas)', unit: 'hours',
     usePer: 0.50, srcUse: 'defra_fuel', estUse: true,
     embPer: 0.010, srcEmb: 'lca_est', estEmb: true,
-    embNote: 'stove + cylinder manufacturing amortised',
+    embNote: 'stove manufacturing amortised',
     split: 'lpg' },
-  { id: 'geyser', cat: 'water', label: 'Electric water heater (geyser)', unit: 'hours',
+  { id: 'gas_furnace', cat: 'water', label: 'Home heating — gas furnace', unit: 'hours',
+    usePer: 3.2, srcUse: 'defra_fuel', estUse: true,
+    embPer: 0.020, srcEmb: 'lca_est', estEmb: true,
+    embNote: '60,000 BTU-input furnace ≈ 17.6 kWh × 0.18 kg CO₂e/kWh natural gas (DEFRA); log burner runtime, not thermostat-on time',
+    split: 'lpg' },
+  { id: 'geyser', cat: 'water', label: 'Electric water heater', unit: 'hours',
     useKwh: 2.0, srcUse: 'lca_est', estUse: true,
     embPer: 0.010, srcEmb: 'lca_est', estEmb: true,
     embNote: '≈100 kg CO₂e to make ÷ ~10,000 lifetime hours',
@@ -311,11 +311,12 @@ const ACTIVITIES = [
 
 /* Grid carbon intensity, kg CO2 per kWh (Ember via OWID, 2025; world: Ember GER 2025 for 2024). */
 const GRID_PRESETS = [
-  { id: 'india',  label: 'India (0.67)',           value: 0.67 },
-  { id: 'world',  label: 'World average (0.47)',   value: 0.47 },
+  { id: 'canada', label: 'Canada (0.19)',          value: 0.19 },
   { id: 'us',     label: 'United States (0.38)',   value: 0.38 },
+  { id: 'world',  label: 'World average (0.47)',   value: 0.47 },
   { id: 'uk',     label: 'United Kingdom (0.22)',  value: 0.22 },
   { id: 'eu',     label: 'European Union (0.21)',  value: 0.21 },
+  { id: 'india',  label: 'India (0.67)',           value: 0.67 },
   { id: 'renew',  label: 'Mostly renewables (0.05)', value: 0.05 },
   { id: 'custom', label: 'Custom…',                value: null },
 ];
@@ -324,6 +325,7 @@ const GRID_PRESETS = [
 const BENCHMARKS = {
   sustainable: 5.5,   // ~2 t CO2e/yr — widely used Paris-aligned personal target
   worldAvg:    12.9,  // ~4.7 t fossil CO2 per capita (Global Carbon Budget) / 365
+  naAvg:       38,    // ~14 t fossil CO2 per capita in Canada/US / 365
 };
 
 /* Comfortable-but-frugal daily baselines for the minimal-usage guide.
@@ -332,7 +334,8 @@ const MINIMAL_BASELINES = {
   ac:        { qty: 4,    note: 'Run it at 26 °C for the hottest hours only; a fan covers the rest.' },
   heater:    { qty: 2,    note: 'Heat the room you are in, layer up, and switch off overnight.' },
   fan:       { qty: 10,   note: 'Fans are cheap to run — prefer them over AC whenever bearable.' },
-  geyser:    { qty: 0.25, note: '15 minutes heats enough water for one person’s bath.' },
+  geyser:    { qty: 0.25, note: '15 minutes of heating covers one person’s shower.' },
+  gas_furnace:{ qty: 6,   note: 'Set the thermostat to 20 °C when home, 17 °C at night; seal drafts.' },
   tv:        { qty: 2,    note: 'Switch off at the wall — standby still draws power.' },
   desktop:   { qty: 8,    note: 'Enable sleep mode; a laptop uses about a third of the power.' },
   lights:    { qty: 5,    note: 'Daylight first; switch rooms off as you leave them.' },
