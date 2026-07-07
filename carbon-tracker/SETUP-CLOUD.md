@@ -47,15 +47,29 @@ create policy "update own backup"
 The row-level-security policies are what make the published key safe: every
 user can only ever read and write **their own** row.
 
-## 3. (Recommended) simplify email sign-up
+## 3. Email confirmation (this project: ON)
 
-By default Supabase sends a confirmation email before the first sign-in.
-That's good for a public launch; for personal/family use it's friction:
+By default Supabase sends a confirmation email before the first sign-in,
+and this project **keeps that on** — users must verify they own their email
+address before they can sign in. The app handles the flow: after sign-up it
+shows "check your email", and sign-in attempts before confirming show
+"Email not confirmed".
 
-- **Authentication → Sign In / Up → Email** → turn **off** "Confirm email".
+Because of this, one more setting matters — **where the confirmation link
+sends people**. Once the app is hosted:
 
-If you leave it on, the app handles it: after sign-up it shows "check your
-email", and the user signs in after clicking the link.
+- **Authentication → URL Configuration → Site URL** → set it to the app's
+  public URL (e.g. `https://<your-site>/carbon-tracker/`).
+
+Until that's set, confirmation links redirect to Supabase's default
+(`localhost:3000`), which shows users a broken page after confirming —
+their account still gets confirmed and sign-in works, but it looks wrong.
+Optionally also customise the email template under
+**Authentication → Emails**.
+
+(For a personal/family deployment you could instead turn "Confirm email"
+off under **Authentication → Sign In / Up → Email** to remove the step
+entirely.)
 
 ## 4. Paste the keys into the app
 
