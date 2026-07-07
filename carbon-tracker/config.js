@@ -10,6 +10,6 @@
  * row-level-security policies permit (each user can touch only their own row).
  */
 const CLOUD_CONFIG = {
-  supabaseUrl: '',      // e.g. 'https://abcdefgh.supabase.co'
-  supabaseAnonKey: '',  // the long 'anon public' key from the API settings
+  supabaseUrl: 'https://cljkprrtnmydroalzycw.supabase.co',
+  supabaseAnonKey: 'sb_publishable_MnE-xOMeBF5iiQHD3zX9_Q_jDO0V4nn',
 };
