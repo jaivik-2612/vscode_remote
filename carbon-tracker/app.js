@@ -218,7 +218,9 @@ function renderGate(view) {
         <input id="gate-pass" type="password" autocomplete="current-password"></div>
       <button id="gate-submit" class="btn-primary">Sign in</button>
     </div>`;
-  } else {
+    const last = lsGet('cft:lastEmail', '');
+    if (last) $('#gate-email').value = last;
+  } else if (users.length) {
     form.innerHTML = `<div class="gate-form">
       <div class="field"><label for="gate-user">Account</label>
         <select id="gate-user">${users.map((u) => `<option value="${u.id}">${esc(u.name)}${u.email ? ` — ${esc(u.email)}` : ''}</option>`).join('')}</select></div>
@@ -226,18 +228,23 @@ function renderGate(view) {
         <input id="gate-pass" type="password" autocomplete="current-password"></div>
       <button id="gate-submit" class="btn-primary">Sign in</button>
     </div>`;
+  } else {
+    /* Device mode with no accounts in this browser's storage: nothing to
+     * sign in to — explain instead of hiding the option. */
+    form.innerHTML = `<p class="card-note">No account exists in this browser yet — accounts live in the browser's storage in device mode. If you had one here before, the browser's site data was cleared (the claude.ai preview does this between visits). Create an account below; on a real host you stay signed in between visits.</p>`;
   }
 
   $('#gate-msg').textContent = '';
   $('#gate-msg').className = 'account-msg';
   $('#gate-switch').innerHTML = view === 'signup'
-    ? ((cloud || users.length) ? 'Already have an account? <button class="gate-link" id="gate-toggle" type="button">Sign in</button>' : '')
+    ? 'Already have an account? <button class="gate-link" id="gate-toggle" type="button">Sign in</button>'
     : 'New here? <button class="gate-link" id="gate-toggle" type="button">Create a free account</button>';
 
   const toggle = $('#gate-toggle');
   if (toggle) toggle.addEventListener('click', () => renderGate(view === 'signup' ? 'signin' : 'signup'));
-  $('#gate-submit').addEventListener('click', () => submitGate(view, cloud));
-  form.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#gate-submit').click(); });
+  const submit = $('#gate-submit');
+  if (submit) submit.addEventListener('click', () => submitGate(view, cloud));
+  form.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' && $('#gate-submit')) $('#gate-submit').click(); });
 }
 
 async function submitGate(view, cloud) {
@@ -255,6 +262,7 @@ async function submitGate(view, cloud) {
       if (pass !== $('#gate-pass2').value) throw new Error('The two passwords don’t match.');
       if (cloud) {
         const res = await Cloud.signUp(name, email, pass);
+        lsSet('cft:lastEmail', email);
         if (!res.confirmed) {
           msg('Almost there — open the confirmation link we emailed you, then sign in here.');
           btn.disabled = false;
@@ -264,7 +272,9 @@ async function submitGate(view, cloud) {
         await Accounts.create(name, pass, email);
       }
     } else if (cloud) {
-      await Cloud.signIn($('#gate-email').value.trim(), $('#gate-pass').value);
+      const email = $('#gate-email').value.trim();
+      await Cloud.signIn(email, $('#gate-pass').value);
+      lsSet('cft:lastEmail', email);
     } else {
       const ok = await Accounts.login($('#gate-user').value, $('#gate-pass').value);
       if (!ok) throw new Error('Wrong password — try again.');
