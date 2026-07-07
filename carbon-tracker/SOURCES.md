@@ -88,23 +88,31 @@ extra pulses/tofu); **tea** ≈0.03 (2 g dry leaves, brewed black).
 
 ## 4. Electricity grid intensity (kg CO₂/kWh)
 
-**Source:** Ember yearly electricity data (2025) via Our World in Data,
-<https://ourworldindata.org/grapher/carbon-intensity-electricity>; world
-average from Ember's Global Electricity Review (~473 g/kWh in 2024).
+Three levels, all listed in the app's Data tab and in `factors.js`:
 
-| Region | g CO₂/kWh (source, 2025) | Used |
-|---|---|---|
-| **Canada (app default)** | 190.7 | 0.19 |
-| United States | 384 | 0.38 |
-| World average | ~473 (2024) | 0.47 |
-| United Kingdom | 217 | 0.22 |
-| European Union (27) | 210 | 0.21 |
-| India | 670 | 0.67 |
-| Mostly renewables | — | 0.05 (assumption) |
+- **Countries (~180)**: Ember yearly electricity data (latest year, mostly
+  2024/2025) via Our World in Data,
+  <https://ourworldindata.org/grapher/carbon-intensity-electricity>.
+  Values are the published national figures rounded to 3 decimals
+  (e.g. Canada 190.7 g → 0.191; US 384.4 g → 0.384). "Other / not listed"
+  falls back to ~0.47, the world average from Ember's Global Electricity
+  Review 2025 (2024 data).
+- **Canadian provinces & territories**: approximate values from Environment
+  and Climate Change Canada's National Inventory Report (~2022 data), from
+  Quebec/Manitoba ≈ 0.002 to Alberta 0.54, Saskatchewan 0.69 and
+  diesel-powered Nunavut 0.9.
+- **US states**: approximate values from EPA eGRID 2022, from Vermont 0.01
+  and Washington 0.09 to West Virginia 0.85 and Wyoming 0.9.
 
-The app is regionally centred on Canada/US: the default grid preset is
-Canada, and the activity list includes North-American staples such as
-gas-furnace home heating.
+The provincial/state figures are marked *approximate*: they are assembled
+from the cited government datasets but rounded and not fetched from a live
+table — verify against the current NIR/eGRID release before any formal use.
+
+At sign-up the user picks a country of residence (and a province/state for
+Canada/US); this sets their grid intensity. It can be changed any time in
+Settings, including a custom value. The app is regionally centred on
+Canada/US: the default is Canada, and the activity list includes
+North-American staples such as gas-furnace home heating.
 
 ## 5. Home appliances
 

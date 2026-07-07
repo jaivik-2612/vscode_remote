@@ -292,6 +292,9 @@ input[type="text"], input[type="email"], input[type="password"] {
 .source-list { list-style: none; display: flex; flex-direction: column; gap: 8px; font-size: 0.88rem; color: var(--ink-2); }
 .source-list strong { color: var(--ink); }
 #data-tables .data-table { min-width: 560px; }
+.grid-table { max-height: 340px; overflow-y: auto; }
+.grid-table .data-table { min-width: 0; }
+.data-subhead { font-size: 0.92rem; font-weight: 600; margin: 14px 0 6px; }
 
 /* ---------- tips ---------- */
 .tips-list { list-style: none; display: flex; flex-direction: column; gap: 12px; }

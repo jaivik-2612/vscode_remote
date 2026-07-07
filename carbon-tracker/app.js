@@ -52,7 +52,21 @@ function catColor(catId) {
 }
 
 /* ================= storage & state ================= */
-const DEFAULT_SETTINGS = { gridPreset: 'canada', gridIntensity: 0.19 };
+const DEFAULT_SETTINGS = { country: 'CA', subdivision: '', gridIntensity: 0.191 };
+
+/* Grid intensity for a country + optional province/state. */
+function regionIntensity(country, subdivision) {
+  const subs = GRID_SUBDIVISIONS[country];
+  if (subdivision && subs) {
+    const s = subs.find((x) => x.id === subdivision);
+    if (s) return s.value;
+  }
+  const c = GRID_COUNTRIES.find((x) => x.id === country);
+  return c ? c.value : 0.47;
+}
+
+/* Region chosen on the sign-up form, applied right after the account exists. */
+let pendingRegion = null;
 
 const SAMPLE_DAY = [
   { a: 'bus', q: 8 }, { a: 'car_petrol', q: 5 }, { a: 'meal_veg', q: 2 },
@@ -102,6 +116,13 @@ function loadState() {
     const s = JSON.parse(localStorage.getItem(dataKey('settings')));
     if (s && typeof s.gridIntensity === 'number' && s.gridIntensity >= 0) Object.assign(state.settings, s);
   } catch (_) { /* keep defaults */ }
+  /* Migrate settings saved before the country/subdivision picker existed. */
+  if (!state.settings.country) {
+    const OLD_PRESET_MAP = { canada: 'CA', us: 'US', uk: 'UNITED_KINGDOM', eu: 'OTHER', india: 'INDIA', world: 'OTHER', renew: 'OTHER', custom: 'OTHER' };
+    state.settings.country = OLD_PRESET_MAP[state.settings.gridPreset] || 'CA';
+    state.settings.subdivision = '';
+    delete state.settings.gridPreset;
+  }
   state.templates = lsGet(dataKey('templates'), []).filter((t) => t && t.name && Array.isArray(t.items));
 }
 
@@ -204,12 +225,28 @@ function renderGate(view) {
         <input id="gate-name" type="text" autocomplete="name" placeholder="Your name"></div>
       <div class="field"><label for="gate-email">Email</label>
         <input id="gate-email" type="email" autocomplete="email" placeholder="you@example.com"></div>
+      <div class="field"><label for="gate-country">Country of residence</label>
+        <select id="gate-country">${GRID_COUNTRIES.filter((c) => c.id !== 'OTHER').map((c) => `<option value="${c.id}" ${c.id === 'CA' ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}<option value="OTHER">Other / not listed</option></select></div>
+      <div class="field" id="gate-subdiv-field"><label for="gate-subdiv" id="gate-subdiv-label">Province</label>
+        <select id="gate-subdiv"></select></div>
       <div class="field"><label for="gate-pass">Password (6+ characters)</label>
         <input id="gate-pass" type="password" autocomplete="new-password"></div>
       <div class="field"><label for="gate-pass2">Confirm password</label>
         <input id="gate-pass2" type="password" autocomplete="new-password"></div>
       <button id="gate-submit" class="btn-primary">Create free account</button>
     </div>`;
+    const syncSubdiv = () => {
+      const country = $('#gate-country').value;
+      const subs = GRID_SUBDIVISIONS[country];
+      $('#gate-subdiv-field').style.display = subs ? '' : 'none';
+      if (subs) {
+        $('#gate-subdiv-label').textContent = country === 'CA' ? 'Province / territory' : 'State';
+        $('#gate-subdiv').innerHTML = '<option value="">Not sure — national average</option>'
+          + subs.map((s) => `<option value="${s.id}">${esc(s.label)}</option>`).join('');
+      }
+    };
+    $('#gate-country').addEventListener('change', syncSubdiv);
+    syncSubdiv();
   } else if (cloud) {
     form.innerHTML = `<div class="gate-form">
       <div class="field"><label for="gate-email">Email</label>
@@ -260,6 +297,7 @@ async function submitGate(view, cloud) {
       if (!/.+@.+\..+/.test(email)) throw new Error('Please enter a valid email address.');
       if (pass.length < 6) throw new Error('The password needs at least 6 characters.');
       if (pass !== $('#gate-pass2').value) throw new Error('The two passwords don’t match.');
+      pendingRegion = { country: $('#gate-country').value, subdivision: $('#gate-subdiv') ? $('#gate-subdiv').value : '' };
       if (cloud) {
         const res = await Cloud.signUp(name, email, pass);
         lsSet('cft:lastEmail', email);
@@ -802,13 +840,19 @@ function renderData() {
     </div>`;
   }
 
+  const gridTable = (rows) => `<div class="chart-box grid-table"><table class="data-table">
+      <thead><tr><th>Region</th><th class="num">kg CO₂/kWh</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr><td>${esc(r.label)}</td><td class="num">${r.value}</td></tr>`).join('')}</tbody>
+    </table></div>`;
   html += `<div class="card">
     <h2>⚡ Electricity grid intensity (kg CO₂/kWh)</h2>
-    <p class="card-note">Applied to every electric activity. Currently using <strong>${state.settings.gridIntensity}</strong> (change in Settings). Values: Ember 2025 data via ${sourceLinkHTML('ember')}; world average from Ember's Global Electricity Review (~0.47 in 2024).</p>
-    <div class="chart-box"><table class="data-table">
-      <thead><tr><th>Region</th><th class="num">kg CO₂/kWh</th></tr></thead>
-      <tbody>${GRID_PRESETS.filter((p) => p.value !== null).map((p) => `<tr><td>${esc(p.label.replace(/ \(.*\)/, ''))}</td><td class="num">${p.value}</td></tr>`).join('')}</tbody>
-    </table></div>
+    <p class="card-note">Applied to every electric activity. You are currently using <strong>${state.settings.gridIntensity}</strong> — change your country/province in Settings.</p>
+    <h3 class="data-subhead">Canadian provinces &amp; territories <span class="cell-note">(${sourceLinkHTML('eccc_nir')})</span></h3>
+    ${gridTable(GRID_SUBDIVISIONS.CA)}
+    <h3 class="data-subhead">US states <span class="cell-note">(${sourceLinkHTML('epa_egrid')})</span></h3>
+    ${gridTable(GRID_SUBDIVISIONS.US)}
+    <h3 class="data-subhead">Countries <span class="cell-note">(${sourceLinkHTML('ember')}, latest year)</span></h3>
+    ${gridTable(GRID_COUNTRIES)}
   </div>
   <div class="card">
     <h2>🎯 Benchmarks</h2>
@@ -1054,19 +1098,26 @@ function renderAccountUI() {
 
 /* ================= settings ================= */
 function renderSettings() {
-  $('#grid-preset').innerHTML = GRID_PRESETS
-    .map((p) => `<option value="${p.id}" ${p.id === state.settings.gridPreset ? 'selected' : ''}>${esc(p.label)}</option>`).join('');
+  $('#grid-country').innerHTML = GRID_COUNTRIES
+    .map((c) => `<option value="${c.id}" ${c.id === state.settings.country ? 'selected' : ''}>${esc(c.label)} (${c.value})</option>`).join('');
+  const subs = GRID_SUBDIVISIONS[state.settings.country];
+  $('#grid-subdiv-field').style.display = subs ? '' : 'none';
+  if (subs) {
+    $('#grid-subdiv-label').textContent = state.settings.country === 'CA' ? 'Province / territory' : 'State';
+    const nat = GRID_COUNTRIES.find((c) => c.id === state.settings.country).value;
+    $('#grid-subdiv').innerHTML = `<option value="">National average (${nat})</option>`
+      + subs.map((s) => `<option value="${s.id}" ${s.id === state.settings.subdivision ? 'selected' : ''}>${esc(s.label)} (${s.value})</option>`).join('');
+  }
   $('#grid-custom').value = state.settings.gridIntensity;
 }
 
-function onGridPreset() {
-  const preset = GRID_PRESETS.find((p) => p.id === $('#grid-preset').value);
-  state.settings.gridPreset = preset.id;
-  if (preset.value !== null) {
-    state.settings.gridIntensity = preset.value;
-    $('#grid-custom').value = preset.value;
-  }
+function onRegionChange(countryChanged) {
+  state.settings.country = $('#grid-country').value;
+  if (countryChanged) state.settings.subdivision = '';
+  else state.settings.subdivision = $('#grid-subdiv').value;
+  state.settings.gridIntensity = regionIntensity(state.settings.country, state.settings.subdivision);
   saveSettings();
+  renderSettings();
   renderDay();
 }
 
@@ -1074,8 +1125,6 @@ function onGridCustom() {
   const v = parseFloat($('#grid-custom').value);
   if (!(v >= 0) || v > 5) return;
   state.settings.gridIntensity = v;
-  state.settings.gridPreset = 'custom';
-  $('#grid-preset').value = 'custom';
   saveSettings();
   renderDay();
 }
@@ -1202,7 +1251,8 @@ function wireOnce() {
   $('#tmpl-apply').addEventListener('click', applyTemplate);
   $('#tmpl-delete').addEventListener('click', deleteTemplate);
 
-  $('#grid-preset').addEventListener('change', onGridPreset);
+  $('#grid-country').addEventListener('change', () => onRegionChange(true));
+  $('#grid-subdiv').addEventListener('change', () => onRegionChange(false));
   $('#grid-custom').addEventListener('change', onGridCustom);
   $('#btn-export').addEventListener('click', exportData);
   $('#btn-import').addEventListener('change', (ev) => { if (ev.target.files[0]) importData(ev.target.files[0]); ev.target.value = ''; });
@@ -1227,6 +1277,13 @@ function init() {
   $('#auth-gate').hidden = true;
 
   loadState();
+  if (pendingRegion) {
+    state.settings.country = pendingRegion.country;
+    state.settings.subdivision = pendingRegion.subdivision || '';
+    state.settings.gridIntensity = regionIntensity(state.settings.country, state.settings.subdivision);
+    pendingRegion = null;
+    saveSettings();
+  }
   wireOnce();
 
   $('#log-date').value = state.logDate;
