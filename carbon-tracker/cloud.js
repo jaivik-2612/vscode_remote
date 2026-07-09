@@ -67,6 +67,31 @@ const Cloud = {
     this._storeSession(data);
   },
 
+  /* Sends the password-reset email. Returns 200 whether or not the email
+   * exists (Supabase avoids account enumeration), so callers show a neutral
+   * "check your inbox" message. */
+  async requestPasswordReset(email) {
+    await this._auth('recover', { email });
+  },
+
+  /* Sets a new password using the short-lived token from the reset link,
+   * then adopts that token as the active session. Returns the user. */
+  async completePasswordReset(recovery, newPassword) {
+    const res = await fetch(`${CLOUD_CONFIG.supabaseUrl}/auth/v1/user`, {
+      method: 'PUT', headers: this._headers(recovery.access_token),
+      body: JSON.stringify({ password: newPassword }),
+    });
+    const user = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(user.msg || user.error_description || user.message || `Reset failed (${res.status})`);
+    this._storeSession({
+      access_token: recovery.access_token,
+      refresh_token: recovery.refresh_token,
+      expires_in: recovery.expires_in,
+      user,
+    });
+    return user;
+  },
+
   async _token() {
     let s = this.session();
     if (!s) throw new Error('Not signed in.');

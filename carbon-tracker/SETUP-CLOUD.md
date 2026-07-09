@@ -71,6 +71,19 @@ Optionally also customise the email template under
 off under **Authentication → Sign In / Up → Email** to remove the step
 entirely.)
 
+**Passwords & resets.** The app enforces strong passwords at sign-up
+(8+ characters with letters, numbers and a special character) and has a
+full "Forgot password?" flow: the sign-in page requests a reset email, the
+emailed link opens the app's set-new-password screen, and the user is
+signed in on success. Two related dashboard settings:
+
+- **Enforce the same rule server-side** (client checks can be bypassed):
+  **Authentication → Sign In / Up → Passwords** (on some versions under
+  Project Settings → Auth) → set minimum length **8** and required
+  characters to **letters, digits and symbols**.
+- Reset links use the same **Site URL** as confirmation links, so the URL
+  Configuration step above covers both.
+
 ## 4. Paste the keys into the app
 
 1. **Project Settings → API**. Copy:

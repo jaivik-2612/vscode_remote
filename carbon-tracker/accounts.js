@@ -23,6 +23,16 @@ function lsRemove(key) {
   try { localStorage.removeItem(key); } catch (_) { /* storage unavailable */ }
 }
 
+/* Shared password policy: 8+ characters with a letter, a number and a
+ * special character. Returns a human explanation, or null when acceptable. */
+function passwordProblem(pass) {
+  if (!pass || pass.length < 8) return 'Password needs at least 8 characters.';
+  if (!/[a-zA-Z]/.test(pass)) return 'Password needs at least one letter.';
+  if (!/[0-9]/.test(pass)) return 'Password needs at least one number.';
+  if (!/[^a-zA-Z0-9]/.test(pass)) return 'Password needs at least one special character (e.g. ! @ # $ %).';
+  return null;
+}
+
 async function hashPin(pin, salt) {
   const text = `${salt}:${pin}`;
   if (typeof crypto !== 'undefined' && crypto.subtle) {
@@ -50,7 +60,8 @@ const Accounts = {
     email = (email || '').trim();
     if (!name) throw new Error('Please enter a name.');
     if (!/.+@.+\..+/.test(email)) throw new Error('Please enter a valid email address.');
-    if (!pin || pin.length < 6) throw new Error('The password needs at least 6 characters.');
+    const problem = passwordProblem(pin);
+    if (problem) throw new Error(problem);
     const users = this.list();
     const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
     const user = {

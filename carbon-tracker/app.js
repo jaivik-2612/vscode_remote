@@ -68,6 +68,29 @@ function regionIntensity(country, subdivision) {
 /* Region chosen on the sign-up form, applied right after the account exists. */
 let pendingRegion = null;
 
+/* Password-reset token arriving via the emailed link's URL hash. */
+function parseRecoveryHash() {
+  if (!location.hash || !location.hash.includes('type=recovery')) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get('type') !== 'recovery' || !p.get('access_token')) return null;
+  return {
+    access_token: p.get('access_token'),
+    refresh_token: p.get('refresh_token') || '',
+    expires_in: Number(p.get('expires_in') || 3600),
+  };
+}
+
+/* Error arriving via the hash (e.g. an expired reset link). */
+function parseHashError() {
+  if (!location.hash || !location.hash.includes('error')) return null;
+  const p = new URLSearchParams(location.hash.slice(1));
+  return p.get('error_description') || p.get('error') || null;
+}
+
+function clearHash() {
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
 const SAMPLE_DAY = [
   { a: 'bus', q: 8 }, { a: 'car_petrol', q: 5 }, { a: 'meal_veg', q: 2 },
   { a: 'rice', q: 1 }, { a: 'milk', q: 1 }, { a: 'coffee', q: 1 },
@@ -202,6 +225,8 @@ async function cloudAfterLogin() {
 }
 
 /* ================= auth gate ================= */
+let recoveryToken = null; // set when the app is opened from a reset link
+
 function renderGate(view) {
   document.body.classList.add('gated');
   $('#auth-gate').hidden = false;
@@ -209,14 +234,33 @@ function renderGate(view) {
   const users = cloud ? [] : Accounts.list();
   if (!view) view = (cloud || users.length) ? 'signin' : 'signup';
 
-  $('#gate-title').textContent = view === 'signup' ? 'Create your free account 🌱' : 'Welcome back 🌱';
-  $('#gate-note').textContent = cloud
-    ? (view === 'signup'
-      ? 'Sign up with your email — your data is saved on this device and backed up to the cloud, so you never lose it.'
-      : 'Sign in with your email. If this is a new device, your data is restored from your cloud backup.')
-    : (view === 'signup'
-      ? 'Your account keeps your logs in their own space on this device.'
-      : 'Sign in to your account on this device.');
+  $('#gate-title').textContent = view === 'reset' ? 'Choose a new password 🔑'
+    : view === 'signup' ? 'Create your free account 🌱' : 'Welcome back 🌱';
+  $('#gate-note').textContent = view === 'reset'
+    ? 'You followed a password-reset link. Set a new password below — you’ll be signed in right after.'
+    : cloud
+      ? (view === 'signup'
+        ? 'Sign up with your email — your data is saved on this device and backed up to the cloud, so you never lose it.'
+        : 'Sign in with your email. If this is a new device, your data is restored from your cloud backup.')
+      : (view === 'signup'
+        ? 'Your account keeps your logs in their own space on this device.'
+        : 'Sign in to your account on this device.');
+
+  if (view === 'reset') {
+    $('#gate-form').innerHTML = `<div class="gate-form">
+      <div class="field"><label for="gate-pass">New password (8+ chars, letters, numbers &amp; a symbol)</label>
+        <input id="gate-pass" type="password" autocomplete="new-password"></div>
+      <div class="field"><label for="gate-pass2">Confirm new password</label>
+        <input id="gate-pass2" type="password" autocomplete="new-password"></div>
+      <button id="gate-submit" class="btn-primary">Set new password &amp; sign in</button>
+    </div>`;
+    $('#gate-msg').textContent = '';
+    $('#gate-msg').className = 'account-msg';
+    $('#gate-switch').innerHTML = '';
+    $('#gate-submit').addEventListener('click', () => submitGate('reset', true));
+    $('#gate-form').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#gate-submit').click(); });
+    return;
+  }
 
   const form = $('#gate-form');
   if (view === 'signup') {
@@ -229,7 +273,7 @@ function renderGate(view) {
         <select id="gate-country">${GRID_COUNTRIES.filter((c) => c.id !== 'OTHER').map((c) => `<option value="${c.id}" ${c.id === 'CA' ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}<option value="OTHER">Other / not listed</option></select></div>
       <div class="field" id="gate-subdiv-field"><label for="gate-subdiv" id="gate-subdiv-label">Province</label>
         <select id="gate-subdiv"></select></div>
-      <div class="field"><label for="gate-pass">Password (6+ characters)</label>
+      <div class="field"><label for="gate-pass">Password (8+ chars, letters, numbers &amp; a symbol)</label>
         <input id="gate-pass" type="password" autocomplete="new-password"></div>
       <div class="field"><label for="gate-pass2">Confirm password</label>
         <input id="gate-pass2" type="password" autocomplete="new-password"></div>
@@ -254,9 +298,21 @@ function renderGate(view) {
       <div class="field"><label for="gate-pass">Password</label>
         <input id="gate-pass" type="password" autocomplete="current-password"></div>
       <button id="gate-submit" class="btn-primary">Sign in</button>
+      <p class="card-note" style="margin:0"><button class="gate-link" id="gate-forgot" type="button">Forgot password?</button></p>
     </div>`;
     const last = lsGet('cft:lastEmail', '');
     if (last) $('#gate-email').value = last;
+    $('#gate-forgot').addEventListener('click', async () => {
+      const msg = (t, err) => { const el = $('#gate-msg'); el.textContent = t || ''; el.className = 'account-msg' + (err ? ' error' : ''); };
+      const email = $('#gate-email').value.trim();
+      if (!/.+@.+\..+/.test(email)) { msg('Type your email in the box above first, then tap "Forgot password?" again.', true); return; }
+      try {
+        await Cloud.requestPasswordReset(email);
+        msg(`If an account exists for ${email}, a password-reset email is on its way — open the link on this device.`);
+      } catch (_) {
+        msg('Could not reach the server — check your connection and try again.', true);
+      }
+    });
   } else if (users.length) {
     form.innerHTML = `<div class="gate-form">
       <div class="field"><label for="gate-user">Account</label>
@@ -289,13 +345,26 @@ async function submitGate(view, cloud) {
   const btn = $('#gate-submit');
   btn.disabled = true;
   try {
+    if (view === 'reset') {
+      const pass = $('#gate-pass').value;
+      const problem = passwordProblem(pass);
+      if (problem) throw new Error(problem);
+      if (pass !== $('#gate-pass2').value) throw new Error('The two passwords don’t match.');
+      if (!recoveryToken) throw new Error('This reset link has expired — request a new one from the sign-in page.');
+      await Cloud.completePasswordReset(recoveryToken, pass);
+      recoveryToken = null;
+      clearHash();
+      init();
+      return;
+    }
     if (view === 'signup') {
       const name = $('#gate-name').value.trim();
       const email = $('#gate-email').value.trim();
       const pass = $('#gate-pass').value;
       if (!name) throw new Error('Please enter a name.');
       if (!/.+@.+\..+/.test(email)) throw new Error('Please enter a valid email address.');
-      if (pass.length < 6) throw new Error('The password needs at least 6 characters.');
+      const problem = passwordProblem(pass);
+      if (problem) throw new Error(problem);
       if (pass !== $('#gate-pass2').value) throw new Error('The two passwords don’t match.');
       pendingRegion = { country: $('#gate-country').value, subdivision: $('#gate-subdiv') ? $('#gate-subdiv').value : '' };
       if (cloud) {
@@ -1270,6 +1339,25 @@ function wireOnce() {
 }
 
 function init() {
+  /* Arriving from a password-reset email link? Show the reset view first. */
+  if (Cloud.enabled()) {
+    const rec = parseRecoveryHash();
+    if (rec) {
+      recoveryToken = rec;
+      renderGate('reset');
+      return;
+    }
+    const hashErr = parseHashError();
+    if (hashErr) {
+      clearHash();
+      renderGate('signin');
+      const el = $('#gate-msg');
+      el.textContent = hashErr.replace(/\+/g, ' ') + ' — request a new reset link below if needed.';
+      el.className = 'account-msg error';
+      return;
+    }
+  }
+
   const user = activeUser();
   if (!user) { renderGate(); return; }
 
