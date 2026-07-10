@@ -83,6 +83,19 @@ body.gated .tabs, body.gated main { display: none; }
   font: inherit; font-weight: 600; color: var(--accent); cursor: pointer;
 }
 
+/* ---------- password feedback ---------- */
+.pass-meter { display: flex; gap: 4px; margin-top: 6px; }
+.pass-meter span { height: 4px; flex: 1; border-radius: 2px; background: var(--grid-line); transition: background 0.15s; }
+.pass-meter span.on-weak { background: var(--bad); }
+.pass-meter span.on-fair { background: #eb6834; }
+.pass-meter span.on-good { background: #8db600; }
+.pass-meter span.on-strong { background: var(--good); }
+.pass-note { font-size: 0.78rem; margin-top: 4px; color: var(--ink-muted); min-height: 1.1em; }
+.pass-note.ok { color: var(--good); font-weight: 600; }
+.match-note { font-size: 0.8rem; margin-top: 4px; min-height: 1.1em; }
+.match-note.ok { color: var(--good); font-weight: 600; }
+.match-note.no { color: var(--bad); font-weight: 600; }
+
 /* ---------- quick log ---------- */
 .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .chip {

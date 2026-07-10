@@ -1,11 +1,12 @@
-/* Service worker: offline app shell.
- * - Navigations: network first, cached shell as offline fallback.
- * - Static assets: cache first (bump CACHE on every release to update).
- * - Everything else (e.g. Supabase API calls) is untouched.
+/* Service worker: offline support with always-fresh updates.
+ * Strategy: network first for everything same-origin, falling back to the
+ * cache when offline. Every successful response refreshes the cache, so
+ * deployments reach users on their next load — no version juggling.
+ * Supabase API calls (different origin) are never intercepted.
  */
 'use strict';
 
-const CACHE = 'cft-v1';
+const CACHE = 'cft-v2';
 const ASSETS = [
   './',
   'index.html',
@@ -38,13 +39,15 @@ self.addEventListener('fetch', (ev) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
 
-  if (req.mode === 'navigate') {
-    ev.respondWith(fetch(req).catch(() => caches.match('index.html')));
-    return;
-  }
-
-  const name = url.pathname.split('/').pop();
-  if (ASSETS.includes(name)) {
-    ev.respondWith(caches.match(req).then((hit) => hit || fetch(req)));
-  }
+  ev.respondWith(
+    fetch(req)
+      .then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(req).then((hit) => hit || (req.mode === 'navigate' ? caches.match('index.html') : undefined))),
+  );
 });

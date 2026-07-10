@@ -227,6 +227,46 @@ async function cloudAfterLogin() {
 /* ================= auth gate ================= */
 let recoveryToken = null; // set when the app is opened from a reset link
 
+/* 0–5: one point per satisfied rule, plus one for 12+ chars once all pass. */
+function passwordScore(pass) {
+  let score = 0;
+  if (pass.length >= 8) score++;
+  if (/[a-zA-Z]/.test(pass)) score++;
+  if (/[0-9]/.test(pass)) score++;
+  if (/[^a-zA-Z0-9]/.test(pass)) score++;
+  if (score === 4 && pass.length >= 12) score++;
+  return score;
+}
+
+/* Live strength meter under the password box + match note under confirm. */
+function wirePasswordFeedback() {
+  const pass = $('#gate-pass'), pass2 = $('#gate-pass2');
+  if (!pass || !pass2) return;
+  pass.insertAdjacentHTML('afterend',
+    `<div class="pass-meter" id="pass-meter" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+     <p class="pass-note" id="pass-note" aria-live="polite"></p>`);
+  pass2.insertAdjacentHTML('afterend', '<p class="match-note" id="pass-match" aria-live="polite"></p>');
+
+  const update = () => {
+    const v = pass.value;
+    const problem = passwordProblem(v);
+    const score = passwordScore(v);
+    const cls = score <= 2 ? 'on-weak' : score === 3 ? 'on-fair' : score === 4 ? 'on-good' : 'on-strong';
+    const filled = v ? Math.min(4, Math.max(1, score)) : 0;
+    $$('#pass-meter span').forEach((seg, i) => { seg.className = i < filled ? cls : ''; });
+    const note = $('#pass-note');
+    if (!v) { note.textContent = ''; note.className = 'pass-note'; }
+    else if (problem) { note.textContent = problem.replace('Password needs', 'Needs'); note.className = 'pass-note'; }
+    else { note.textContent = score === 5 ? 'Strong password ✓' : 'Good password ✓'; note.className = 'pass-note ok'; }
+    const match = $('#pass-match');
+    if (!pass2.value) { match.textContent = ''; match.className = 'match-note'; }
+    else if (v === pass2.value) { match.textContent = 'Passwords match ✓'; match.className = 'match-note ok'; }
+    else { match.textContent = 'Passwords do not match'; match.className = 'match-note no'; }
+  };
+  pass.addEventListener('input', update);
+  pass2.addEventListener('input', update);
+}
+
 function renderGate(view) {
   document.body.classList.add('gated');
   $('#auth-gate').hidden = false;
@@ -257,6 +297,7 @@ function renderGate(view) {
     $('#gate-msg').textContent = '';
     $('#gate-msg').className = 'account-msg';
     $('#gate-switch').innerHTML = '';
+    wirePasswordFeedback();
     $('#gate-submit').addEventListener('click', () => submitGate('reset', true));
     $('#gate-form').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') $('#gate-submit').click(); });
     return;
@@ -291,6 +332,7 @@ function renderGate(view) {
     };
     $('#gate-country').addEventListener('change', syncSubdiv);
     syncSubdiv();
+    wirePasswordFeedback();
   } else if (cloud) {
     form.innerHTML = `<div class="gate-form">
       <div class="field"><label for="gate-email">Email</label>
