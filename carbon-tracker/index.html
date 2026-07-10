@@ -31,6 +31,18 @@
       <div id="gate-form"></div>
       <p id="gate-msg" class="account-msg"></p>
       <p class="card-note" id="gate-switch"></p>
+      <p class="card-note"><button class="gate-link" id="gate-privacy" type="button">Privacy policy</button></p>
+    </div>
+  </div>
+
+  <!-- Privacy policy (overlay, reachable before and after sign-in) -->
+  <div id="privacy-overlay" class="privacy-overlay" hidden>
+    <div class="card privacy-card">
+      <div class="card-head">
+        <h2>Privacy policy</h2>
+        <button id="privacy-close" class="btn-secondary btn-small" type="button">Close</button>
+      </div>
+      <div id="privacy-body" class="privacy-body"></div>
     </div>
   </div>
 
@@ -227,12 +239,18 @@
       </div>
       <div class="card">
         <h2>Your data</h2>
-        <p class="card-note">Everything is stored only in this browser (localStorage), separately per account. Export/import applies to the account you're signed into — use it to keep a backup or move devices.</p>
+        <p class="card-note">Everything is stored in this browser (localStorage), separately per account — plus your cloud backup when signed in with a cloud account. Export/import applies to the account you're signed into.</p>
         <div class="btn-row">
           <button id="btn-export" class="btn-secondary">Export JSON</button>
           <label class="btn-secondary btn-file">Import JSON<input type="file" id="btn-import" accept=".json,application/json" hidden></label>
           <button id="btn-clear" class="btn-danger">Delete all data</button>
         </div>
+        <p class="card-note" style="margin-top:12px;margin-bottom:0"><button class="gate-link" id="privacy-link" type="button">Privacy policy</button></p>
+      </div>
+      <div class="card" id="support-card" hidden>
+        <h2>Support this project 🌱</h2>
+        <p class="card-note">The app is free, has no ads and never sells your data. If it's helping you shrink your footprint, you can support its development.</p>
+        <a id="donate-link" class="btn-primary btn-link" target="_blank" rel="noopener">☕ Support the developer</a>
       </div>
       <div class="card">
         <h2>About the numbers</h2>

@@ -13,3 +13,26 @@ const CLOUD_CONFIG = {
   supabaseUrl: 'https://cljkprrtnmydroalzycw.supabase.co',
   supabaseAnonKey: 'sb_publishable_MnE-xOMeBF5iiQHD3zX9_Q_jDO0V4nn',
 };
+
+/*
+ * Monetization & contact (all optional — leave a value empty to hide that
+ * feature in the app).
+ *
+ * donateUrl:    your Ko-fi / Buy Me a Coffee / GitHub Sponsors page.
+ * contactEmail: shown in the privacy policy for data/account requests.
+ * affiliates:   product links shown under matching tips, clearly labelled
+ *               as affiliate links. Paste your tagged URLs from Amazon
+ *               Associates / retailer programs as you join them.
+ */
+const MONETIZE = {
+  donateUrl: '',
+  contactEmail: '',
+  affiliates: {
+    thermostat: '',    // smart thermostat (AC / heater / furnace tips)
+    smart_plug: '',    // smart plug with timer (AC tip)
+    weatherstrip: '',  // draft-sealing kit (heater / furnace tips)
+    timer_plug: '',    // water-heater timer (water-heater tip)
+    led_bulbs: '',     // LED bulbs
+    ebike: '',         // e-bike (car tip)
+  },
+};

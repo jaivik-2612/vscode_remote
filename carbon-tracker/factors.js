@@ -567,6 +567,16 @@ const BENCHMARKS = {
   naAvg:       38,    // ~14 t fossil CO2 per capita in Canada/US / 365
 };
 
+/* Display names for the affiliate product slots configured in config.js. */
+const AFFILIATE_PRODUCTS = {
+  thermostat: 'Smart thermostat',
+  smart_plug: 'Smart plug with timer',
+  weatherstrip: 'Draft-sealing kit',
+  timer_plug: 'Water-heater timer',
+  led_bulbs: 'LED bulbs',
+  ebike: 'E-bike',
+};
+
 /* Comfortable-but-frugal daily baselines for the minimal-usage guide.
  * qty = suggested units/day; note = the habit that gets you there. */
 const MINIMAL_BASELINES = {

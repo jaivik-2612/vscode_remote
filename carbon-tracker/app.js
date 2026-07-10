@@ -68,6 +68,62 @@ function regionIntensity(country, subdivision) {
 /* Region chosen on the sign-up form, applied right after the account exists. */
 let pendingRegion = null;
 
+/* Monetization/contact config (all features hidden while values are empty). */
+const MZ = (typeof MONETIZE !== 'undefined' && MONETIZE)
+  ? MONETIZE
+  : { donateUrl: '', contactEmail: '', affiliates: {} };
+
+/* ================= privacy policy ================= */
+function privacyHTML() {
+  const cloud = Cloud.enabled();
+  const contact = MZ.contactEmail
+    ? `<a href="mailto:${esc(MZ.contactEmail)}">${esc(MZ.contactEmail)}</a>`
+    : 'the contact listed on the project page';
+  return `
+    <p class="card-note">Effective July 2026. Plain language on purpose.</p>
+    <h3>What this app collects</h3>
+    <p>Only what you type in: your name, email address, country/province, a password, and the
+    activities you log (with their amounts and dates), plus your settings and day templates.</p>
+    <h3>Where your data lives</h3>
+    <p>Your logs are stored in your browser on your device. ${cloud
+      ? 'When you sign in with your account, a backup of your logs, settings and templates is also stored in the app’s cloud database (hosted in Canada). Database rules ensure each account can only ever read or write its own backup. Your password is stored only as a secure hash — never in plain text.'
+      : 'In device mode nothing leaves your browser. Your password is stored only as a salted hash.'}</p>
+    <h3>What this app does <em>not</em> do</h3>
+    <p>No analytics, no advertising trackers, no cookies (only the browser storage that holds your
+    own data), no marketing emails, and your personal data is never sold or shared. The only emails
+    you can receive are account confirmation and password-reset messages.</p>
+    <h3>Affiliate links & donations</h3>
+    <p>Some tips may include clearly-labelled affiliate links to relevant products. If you buy
+    through one, the app may earn a commission at no extra cost to you. No personal data is shared
+    with merchants. Donation links go to external platforms with their own privacy policies.</p>
+    <h3>Deleting your data</h3>
+    <p>"Delete all data" in Settings erases your logs on this device${cloud ? ' and, moments later, replaces your cloud backup with an empty one' : ''}.
+    ${cloud ? `To delete your account itself, contact ${contact}.` : 'Deleting a device account in Settings removes it and its data completely.'}</p>
+    <h3>Security, children & changes</h3>
+    <p>All traffic is encrypted (HTTPS). This app is not directed at children under 13. If this
+    policy changes, the update appears here with a new date. Questions: ${contact}.</p>`;
+}
+
+function openPrivacy() {
+  $('#privacy-body').innerHTML = privacyHTML();
+  $('#privacy-overlay').hidden = false;
+}
+function closePrivacy() {
+  $('#privacy-overlay').hidden = true;
+  if (location.hash === '#privacy') clearHash();
+}
+
+let privacyWired = false;
+function wirePrivacy() {
+  if (privacyWired) return;
+  privacyWired = true;
+  $('#gate-privacy').addEventListener('click', openPrivacy);
+  $('#privacy-link').addEventListener('click', openPrivacy);
+  $('#privacy-close').addEventListener('click', closePrivacy);
+  $('#privacy-overlay').addEventListener('click', (ev) => { if (ev.target.id === 'privacy-overlay') closePrivacy(); });
+  if (location.hash === '#privacy') openPrivacy();
+}
+
 /* Password-reset token arriving via the emailed link's URL hash. */
 function parseRecoveryHash() {
   if (!location.hash || !location.hash.includes('type=recovery')) return null;
@@ -1024,7 +1080,7 @@ function buildTips() {
   const ac = get('ac');
   if (ac.qty / 7 > MINIMAL_BASELINES.ac.qty) {
     const overHrs = ac.qty - MINIMAL_BASELINES.ac.qty * 7;
-    tips.push({ icon: '❄️', title: 'Trim air-conditioner hours', body: `You averaged ${(ac.qty / 7).toFixed(1)} h/day of AC. Setting 26 °C, closing doors, and switching to a fan after the room cools typically keeps comfort at ~${MINIMAL_BASELINES.ac.qty} h/day.`, saving: overHrs * 1.5 * gi });
+    tips.push({ icon: '❄️', title: 'Trim air-conditioner hours', body: `You averaged ${(ac.qty / 7).toFixed(1)} h/day of AC. Setting 26 °C, closing doors, and switching to a fan after the room cools typically keeps comfort at ~${MINIMAL_BASELINES.ac.qty} h/day.`, saving: overHrs * 1.5 * gi, links: ['thermostat', 'smart_plug'] });
   }
   if (ac.qty > 0 && get('fan').qty < ac.qty) {
     tips.push({ icon: '🌀', title: 'Fan first, AC second', body: 'A ceiling fan uses about 5% of the electricity of an AC. Using the fan for the milder hours and AC only for peak heat is the single biggest cooling saving.', saving: Math.min(ac.qty, 2 * 7) * (1.5 - 0.075) * gi * 0.3 });
@@ -1032,17 +1088,17 @@ function buildTips() {
 
   const heater = get('heater');
   if (heater.qty / 7 > MINIMAL_BASELINES.heater.qty) {
-    tips.push({ icon: '🔥', title: 'Heat the person, not the house', body: `Space heating averaged ${(heater.qty / 7).toFixed(1)} h/day. A blanket, warm layers and heating only the occupied room usually gets this to ~${MINIMAL_BASELINES.heater.qty} h/day.`, saving: (heater.qty - MINIMAL_BASELINES.heater.qty * 7) * 1.8 * gi });
+    tips.push({ icon: '🔥', title: 'Heat the person, not the house', body: `Space heating averaged ${(heater.qty / 7).toFixed(1)} h/day. A blanket, warm layers and heating only the occupied room usually gets this to ~${MINIMAL_BASELINES.heater.qty} h/day.`, saving: (heater.qty - MINIMAL_BASELINES.heater.qty * 7) * 1.8 * gi, links: ['thermostat', 'weatherstrip'] });
   }
 
   const geyser = get('geyser');
   if (geyser.qty / 7 > MINIMAL_BASELINES.geyser.qty) {
-    tips.push({ icon: '🚿', title: 'Shorter water-heater runs', body: `The water heater ran ${(geyser.qty / 7 * 60).toFixed(0)} min/day on average. ~15 minutes of heating covers a shower; a timer or smart plug pays for itself fast.`, saving: (geyser.qty - MINIMAL_BASELINES.geyser.qty * 7) * 2.0 * gi });
+    tips.push({ icon: '🚿', title: 'Shorter water-heater runs', body: `The water heater ran ${(geyser.qty / 7 * 60).toFixed(0)} min/day on average. ~15 minutes of heating covers a shower; a timer or smart plug pays for itself fast.`, saving: (geyser.qty - MINIMAL_BASELINES.geyser.qty * 7) * 2.0 * gi, links: ['timer_plug'] });
   }
 
   const furnace = get('gas_furnace');
   if (furnace.qty / 7 > MINIMAL_BASELINES.gas_furnace.qty) {
-    tips.push({ icon: '🌡️', title: 'Tame the furnace', body: `The gas furnace ran ~${(furnace.qty / 7).toFixed(1)} h/day. Each 1 °C lower on the thermostat cuts heating fuel ~7%; 20 °C when home, 17 °C at night, and sealed drafts usually get runtime to ~${MINIMAL_BASELINES.gas_furnace.qty} h/day.`, saving: (furnace.qty - MINIMAL_BASELINES.gas_furnace.qty * 7) * 3.2 });
+    tips.push({ icon: '🌡️', title: 'Tame the furnace', body: `The gas furnace ran ~${(furnace.qty / 7).toFixed(1)} h/day. Each 1 °C lower on the thermostat cuts heating fuel ~7%; 20 °C when home, 17 °C at night, and sealed drafts usually get runtime to ~${MINIMAL_BASELINES.gas_furnace.qty} h/day.`, saving: (furnace.qty - MINIMAL_BASELINES.gas_furnace.qty * 7) * 3.2, links: ['thermostat', 'weatherstrip'] });
   }
 
   const beef = get('meal_beef'), lamb = get('meal_lamb');
@@ -1057,7 +1113,7 @@ function buildTips() {
   if (carKm / 7 > 10) {
     const carF = ACTIVITY_BY_ID.car_petrol.usePer + ACTIVITY_BY_ID.car_petrol.embPer;
     const busF = ACTIVITY_BY_ID.bus.usePer + ACTIVITY_BY_ID.bus.embPer;
-    tips.push({ icon: '🚌', title: 'Shift short car trips', body: `You drove ~${Math.round(carKm / 7)} km/day. Moving half of that to bus or metro cuts those kilometres' emissions by half or more; cycling or walking trips under 2 km cuts them to almost zero.`, saving: (carKm / 2) * (carF - busF) });
+    tips.push({ icon: '🚌', title: 'Shift short car trips', body: `You drove ~${Math.round(carKm / 7)} km/day. Moving half of that to bus or metro cuts those kilometres' emissions by half or more; cycling or walking trips under 2 km cuts them to almost zero.`, saving: (carKm / 2) * (carF - busF), links: ['ebike'] });
   }
 
   const flights = get('flight_dom').co2e + get('flight_int').co2e;
@@ -1093,12 +1149,28 @@ function buildTips() {
 
 function renderTips() {
   const tips = buildTips();
+  let anyAffiliate = false;
+  const tipLinks = (t) => {
+    const html = (t.links || [])
+      .filter((k) => MZ.affiliates && MZ.affiliates[k])
+      .map((k) => `<a class="aff-link" href="${MZ.affiliates[k]}" target="_blank" rel="noopener sponsored">${esc(AFFILIATE_PRODUCTS[k] || k)} ↗</a>`)
+      .join('');
+    if (html) anyAffiliate = true;
+    return html ? `<span class="tip-links">${html}</span>` : '';
+  };
   $('#tips-list').innerHTML = tips.map((t) => `<li>
       <span class="tip-icon">${t.icon}</span>
       <span class="tip-body"><strong>${esc(t.title)}</strong>${esc(t.body)}
         ${t.saving && t.saving > 0.05 ? `<br><span class="tip-saving">Potential saving ≈ ${fmtKg(t.saving)} CO₂e/week</span>` : ''}
+        ${tipLinks(t)}
       </span>
     </li>`).join('');
+  const extras = [];
+  if (anyAffiliate) extras.push('<p class="card-note tips-disclosure">Product links marked ↗ are affiliate links — the app may earn a commission at no extra cost to you.</p>');
+  if (MZ.donateUrl) extras.push(`<p class="card-note">Enjoying the app? <a href="${esc(MZ.donateUrl)}" target="_blank" rel="noopener">Support its development</a> 🌱</p>`);
+  const prev = $('#tips-extras');
+  if (prev) prev.remove();
+  $('#tips-list').insertAdjacentHTML('afterend', `<div id="tips-extras">${extras.join('')}</div>`);
   renderBaselines();
 }
 
@@ -1381,6 +1453,8 @@ function wireOnce() {
 }
 
 function init() {
+  wirePrivacy();
+
   /* Arriving from a password-reset email link? Show the reset view first. */
   if (Cloud.enabled()) {
     const rec = parseRecoveryHash();
@@ -1419,6 +1493,10 @@ function init() {
   $('#log-date').value = state.logDate;
   $('#log-date').max = todayStr();
   populateLogSelects();
+  if (MZ.donateUrl) {
+    $('#support-card').hidden = false;
+    $('#donate-link').href = MZ.donateUrl;
+  }
   renderChip();
   renderAccountUI();
   renderSettings();
