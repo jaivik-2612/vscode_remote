@@ -334,16 +334,32 @@ input[type="text"], input[type="email"], input[type="password"] {
 .privacy-body p { font-size: 0.9rem; color: var(--ink-2); margin-bottom: 4px; }
 .privacy-body a { color: var(--accent); }
 
-/* ---------- affiliate & support ---------- */
-.tip-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.aff-link {
-  display: inline-block;
-  font-size: 0.82rem; font-weight: 600;
-  color: var(--accent); text-decoration: none;
-  border: 1px solid var(--grid-line); border-radius: 999px;
-  padding: 5px 12px;
+/* ---------- affiliate product cards & support ---------- */
+.tip-links { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.product-card {
+  display: flex; gap: 12px; align-items: flex-start;
+  text-decoration: none; color: var(--ink);
+  border: 1px solid var(--grid-line); border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--page);
 }
-.aff-link:hover { border-color: var(--accent); }
+.product-card:hover { border-color: var(--accent); }
+.product-thumb {
+  flex: none; width: 44px; height: 44px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.5rem;
+  background: var(--surface);
+  border: 1px solid var(--grid-line); border-radius: 10px;
+}
+.product-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.product-name { font-weight: 700; font-size: 0.92rem; }
+.product-arrow { color: var(--accent); font-weight: 600; }
+.product-price { font-size: 0.78rem; color: var(--ink-muted); }
+.product-roi { font-size: 0.84rem; color: var(--ink-2); }
+.tip-body .product-roi strong { display: inline; margin: 0; color: var(--good); }
+.product-payback { font-size: 0.8rem; font-weight: 600; }
+.product-payback.ok { color: var(--good); }
+.product-payback.no { color: var(--ink-muted); font-weight: 500; font-style: italic; }
 .tips-disclosure { margin-top: 12px; font-size: 0.8rem; }
 #tips-extras .card-note { margin-top: 10px; }
 #tips-extras a { color: var(--accent); }

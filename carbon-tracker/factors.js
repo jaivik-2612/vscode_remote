@@ -567,14 +567,50 @@ const BENCHMARKS = {
   naAvg:       38,    // ~14 t fossil CO2 per capita in Canada/US / 365
 };
 
-/* Display names for the affiliate product slots configured in config.js. */
+/* Typical Canadian energy prices (CAD, estimates) used for the product
+ * savings math. Documented in SOURCES.md. */
+const PRICES = {
+  electricityKwh: 0.15,  // $/kWh, residential average
+  fuelPerKm: 0.13,       // petrol ~8 L/100 km × ~$1.60/L
+  gasFurnaceHour: 0.30,  // ~0.63 m³ gas per burner-hour × ~$0.45/m³ delivered
+  gasStoveHour: 0.10,
+};
+
+/* Affiliate product slots (URLs live in config.js). Each product's savings
+ * model: `applies` lists the activities it affects, `reduction` is the share
+ * of that operation energy it typically saves — evidence noted per product.
+ * Prices are typical CAD, lifespans typical service life. */
 const AFFILIATE_PRODUCTS = {
-  thermostat: 'Smart thermostat',
-  smart_plug: 'Smart plug with timer',
-  weatherstrip: 'Draft-sealing kit',
-  timer_plug: 'Water-heater timer',
-  led_bulbs: 'LED bulbs',
-  ebike: 'E-bike',
+  thermostat: {
+    label: 'Smart thermostat', icon: '🌡️', price: 170, lifespanYears: 10,
+    applies: ['ac', 'heater', 'gas_furnace'], reduction: 0.12,
+    note: 'ENERGY STAR: typically trims heating & cooling energy ~8–15%',
+  },
+  smart_plug: {
+    label: 'Smart plug with timer', icon: '🔌', price: 25, lifespanYears: 5,
+    applies: ['ac', 'tv', 'iron'], reduction: 0.10,
+    note: 'auto-off schedules cut forgotten-on hours',
+  },
+  weatherstrip: {
+    label: 'Draft-sealing kit', icon: '🚪', price: 30, lifespanYears: 5,
+    applies: ['heater', 'gas_furnace'], reduction: 0.10,
+    note: 'sealing drafts typically saves ~10% of heating energy',
+  },
+  timer_plug: {
+    label: 'Water-heater timer', icon: '⏲️', price: 45, lifespanYears: 10,
+    applies: ['geyser'], reduction: 0.25,
+    note: 'heats only when you need it instead of around the clock',
+  },
+  led_bulbs: {
+    label: 'LED bulbs (4-pack)', icon: '💡', price: 20, lifespanYears: 10,
+    applies: ['lights'], reduction: 0.15,
+    note: 'vs older or mixed bulbs',
+  },
+  ebike: {
+    label: 'E-bike', icon: '🚲', price: 1800, lifespanYears: 8,
+    applies: ['car_petrol', 'car_diesel'], reduction: 0.4,
+    note: 'replacing short car trips (fuel cost, not electricity)',
+  },
 };
 
 /* Comfortable-but-frugal daily baselines for the minimal-usage guide.

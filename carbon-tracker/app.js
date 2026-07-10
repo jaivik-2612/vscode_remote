@@ -1147,13 +1147,72 @@ function buildTips() {
   return tips;
 }
 
+function fmtMoney(v) {
+  return '$' + (v >= 100 ? Math.round(v).toLocaleString() : v >= 10 ? v.toFixed(1) : v.toFixed(2));
+}
+
+/* Operating cost per unit of an activity, CAD (estimates — see SOURCES.md). */
+function useCostPerUnit(a) {
+  if (a.useKwh !== undefined) return a.useKwh * PRICES.electricityKwh;
+  if (a.id === 'gas_furnace') return PRICES.gasFurnaceHour;
+  if (a.id === 'lpg') return PRICES.gasStoveHour;
+  if (a.id === 'car_petrol' || a.id === 'car_diesel') return PRICES.fuelPerKm;
+  return 0;
+}
+
+/* Personalised savings for a product, from the user's last 7 days of logs. */
+function productROI(key) {
+  const p = AFFILIATE_PRODUCTS[key];
+  const { per } = weeklyStats();
+  let weeklyCost = 0, weeklyCO2 = 0;
+  for (const id of p.applies) {
+    const rec = per[id];
+    if (!rec) continue;
+    weeklyCost += rec.qty * useCostPerUnit(ACTIVITY_BY_ID[id]) * p.reduction;
+    weeklyCO2 += rec.use * p.reduction;
+  }
+  const yearly = weeklyCost * 52;
+  return {
+    weeklyCost, weeklyCO2, yearly,
+    lifetime: yearly * p.lifespanYears,
+    paybackYears: yearly > 0 ? p.price / yearly : Infinity,
+  };
+}
+
+function productCardHTML(key) {
+  const p = AFFILIATE_PRODUCTS[key];
+  const url = MZ.affiliates && MZ.affiliates[key];
+  if (!p || !url) return '';
+  const roi = productROI(key);
+  const energyWord = p.applies.includes('car_petrol') ? 'fuel'
+    : p.applies.includes('gas_furnace') ? 'energy' : 'electricity';
+  let roiHTML = '';
+  if (roi.weeklyCost > 0.005) {
+    const payback = roi.paybackYears <= p.lifespanYears
+      ? `<span class="product-payback ok">Pays for itself in ~${roi.paybackYears < 1.5 ? Math.max(1, Math.round(roi.paybackYears * 12)) + ' months' : Math.round(roi.paybackYears) + ' years'}</span>`
+      : '<span class="product-payback no">May not pay for itself at your current usage</span>';
+    roiHTML = `<span class="product-roi">At your usage, saves ${energyWord} worth <strong>${fmtMoney(roi.weeklyCost)}/week</strong> · <strong>${fmtMoney(roi.yearly)}/year</strong> · <strong>${fmtMoney(roi.lifetime)}</strong> over its ~${p.lifespanYears}-year life — and cuts ≈ ${fmtKg(roi.weeklyCO2)} CO₂e/week.</span>${payback}`;
+  } else {
+    roiHTML = '<span class="product-roi">Log the related activities and your personal savings estimate appears here.</span>';
+  }
+  return `<a class="product-card" href="${url}" target="_blank" rel="noopener sponsored" aria-label="${esc(p.label)} (affiliate link)">
+    <span class="product-thumb">${p.icon}</span>
+    <span class="product-info">
+      <span class="product-name">${esc(p.label)} <span class="product-arrow">↗</span></span>
+      <span class="product-price">≈ ${fmtMoney(p.price)} · lasts ~${p.lifespanYears} yr · ${esc(p.note)}</span>
+      ${roiHTML}
+    </span>
+  </a>`;
+}
+
 function renderTips() {
   const tips = buildTips();
   let anyAffiliate = false;
+  const shown = new Set(); // each product appears once, under its first tip
   const tipLinks = (t) => {
     const html = (t.links || [])
-      .filter((k) => MZ.affiliates && MZ.affiliates[k])
-      .map((k) => `<a class="aff-link" href="${MZ.affiliates[k]}" target="_blank" rel="noopener sponsored">${esc(AFFILIATE_PRODUCTS[k] || k)} ↗</a>`)
+      .filter((k) => MZ.affiliates && MZ.affiliates[k] && !shown.has(k) && (shown.add(k) || true))
+      .map(productCardHTML)
       .join('');
     if (html) anyAffiliate = true;
     return html ? `<span class="tip-links">${html}</span>` : '';
@@ -1166,7 +1225,8 @@ function renderTips() {
       </span>
     </li>`).join('');
   const extras = [];
-  if (anyAffiliate) extras.push('<p class="card-note tips-disclosure">Product links marked ↗ are affiliate links — the app may earn a commission at no extra cost to you.</p>');
+  if (anyAffiliate) extras.push(`<p class="card-note tips-disclosure">Product links marked ↗ are affiliate links — the app may earn a commission at no extra cost to you.
+    Prices are typical, and savings estimates assume ≈$${PRICES.electricityKwh.toFixed(2)}/kWh electricity and typical Canadian fuel/gas rates — your bills will vary.</p>`);
   if (MZ.donateUrl) extras.push(`<p class="card-note">Enjoying the app? <a href="${esc(MZ.donateUrl)}" target="_blank" rel="noopener">Support its development</a> 🌱</p>`);
   const prev = $('#tips-extras');
   if (prev) prev.remove();

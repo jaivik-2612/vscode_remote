@@ -185,6 +185,27 @@ dairy are dominated by enteric-fermentation methane; rice by paddy methane;
 landfill waste by decomposition methane; fertilised crops carry N₂O. Treat the
 gas-mix chart as indicative.
 
+## 9. Product savings estimates (Tips tab)
+
+The affiliate product cards show personalised money/CO₂ savings computed
+from the user's own last-7-days logs:
+
+    weekly $ saved = (units of affected activities logged that week)
+                   × (operating cost per unit) × (product's reduction share)
+
+- **Energy prices** (CAD estimates in `PRICES`): electricity $0.15/kWh,
+  petrol ≈ $0.13/km (8 L/100 km × ~$1.60/L), gas furnace ≈ $0.30 per
+  burner-hour, gas stove ≈ $0.10/h. These are typical Canadian rates, not
+  the user's bill; the in-app disclosure says so.
+- **Reduction shares** (per product, derived from public guidance):
+  smart thermostat 12% of heating/cooling (ENERGY STAR cites ~8–15%);
+  draft sealing 10% of heating; water-heater timer 25% of heater runtime;
+  smart plug 10% of scheduled appliances; LED refresh 15% of lighting;
+  e-bike 40% of logged car km. Marked as estimates.
+- **Prices & lifespans**: typical retail CAD prices and service lives,
+  hard-coded per product. Payback = price ÷ yearly savings; if payback
+  exceeds the product's lifespan the card says it may not pay for itself.
+
 ## Known limitations
 
 - Global/UK averages stand in for local values everywhere.

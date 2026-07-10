@@ -27,12 +27,14 @@ const CLOUD_CONFIG = {
 const MONETIZE = {
   donateUrl: '',
   contactEmail: '',
+  /* Standard Amazon.ca search links for now — swap each for your tagged
+   * affiliate URL when your Amazon Associates account is approved. */
   affiliates: {
-    thermostat: '',    // smart thermostat (AC / heater / furnace tips)
-    smart_plug: '',    // smart plug with timer (AC tip)
-    weatherstrip: '',  // draft-sealing kit (heater / furnace tips)
-    timer_plug: '',    // water-heater timer (water-heater tip)
-    led_bulbs: '',     // LED bulbs
-    ebike: '',         // e-bike (car tip)
+    thermostat: 'https://www.amazon.ca/s?k=smart+thermostat',
+    smart_plug: 'https://www.amazon.ca/s?k=smart+plug+with+timer',
+    weatherstrip: 'https://www.amazon.ca/s?k=door+window+draft+seal+kit',
+    timer_plug: 'https://www.amazon.ca/s?k=water+heater+timer',
+    led_bulbs: 'https://www.amazon.ca/s?k=led+light+bulbs+pack',
+    ebike: 'https://www.amazon.ca/s?k=electric+bike+adult',
   },
 };
