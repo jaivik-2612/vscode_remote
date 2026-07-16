@@ -356,7 +356,7 @@ input[type="text"], input[type="email"], input[type="password"] {
 .product-arrow { color: var(--accent); font-weight: 600; }
 .product-price { font-size: 0.78rem; color: var(--ink-muted); }
 .product-roi { font-size: 0.84rem; color: var(--ink-2); }
-.tip-body .product-roi strong { display: inline; margin: 0; color: var(--good); }
+.product-roi strong, .tip-body .product-roi strong { display: inline; margin: 0; color: var(--good); }
 .product-payback { font-size: 0.8rem; font-weight: 600; }
 .product-payback.ok { color: var(--good); }
 .product-payback.no { color: var(--ink-muted); font-weight: 500; font-style: italic; }

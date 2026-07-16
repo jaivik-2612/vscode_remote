@@ -1205,32 +1205,36 @@ function productCardHTML(key) {
   </a>`;
 }
 
+/* Always-visible product section: every configured product with the user's
+ * personalised ROI, biggest lifetime savings first. Products the user has no
+ * relevant logs for show a hint instead of numbers. */
+function renderProducts() {
+  const card = $('#products-card');
+  const keys = Object.keys(AFFILIATE_PRODUCTS).filter((k) => MZ.affiliates && MZ.affiliates[k]);
+  if (!keys.length) { card.hidden = true; return; }
+  card.hidden = false;
+  const ordered = keys
+    .map((k) => ({ k, lifetime: productROI(k).lifetime }))
+    .sort((a, b) => b.lifetime - a.lifetime);
+  $('#product-grid').innerHTML = ordered.map(({ k }) => productCardHTML(k)).join('');
+  $('#products-disclosure').innerHTML = `Product links marked ↗ are affiliate links — the app may earn a commission at no extra cost to you.
+    Prices are typical, and savings estimates assume ≈$${PRICES.electricityKwh.toFixed(2)}/kWh electricity and typical Canadian fuel/gas rates — your bills will vary.`;
+}
+
 function renderTips() {
   const tips = buildTips();
-  let anyAffiliate = false;
-  const shown = new Set(); // each product appears once, under its first tip
-  const tipLinks = (t) => {
-    const html = (t.links || [])
-      .filter((k) => MZ.affiliates && MZ.affiliates[k] && !shown.has(k) && (shown.add(k) || true))
-      .map(productCardHTML)
-      .join('');
-    if (html) anyAffiliate = true;
-    return html ? `<span class="tip-links">${html}</span>` : '';
-  };
   $('#tips-list').innerHTML = tips.map((t) => `<li>
       <span class="tip-icon">${t.icon}</span>
       <span class="tip-body"><strong>${esc(t.title)}</strong>${esc(t.body)}
         ${t.saving && t.saving > 0.05 ? `<br><span class="tip-saving">Potential saving ≈ ${fmtKg(t.saving)} CO₂e/week</span>` : ''}
-        ${tipLinks(t)}
       </span>
     </li>`).join('');
   const extras = [];
-  if (anyAffiliate) extras.push(`<p class="card-note tips-disclosure">Product links marked ↗ are affiliate links — the app may earn a commission at no extra cost to you.
-    Prices are typical, and savings estimates assume ≈$${PRICES.electricityKwh.toFixed(2)}/kWh electricity and typical Canadian fuel/gas rates — your bills will vary.</p>`);
   if (MZ.donateUrl) extras.push(`<p class="card-note">Enjoying the app? <a href="${esc(MZ.donateUrl)}" target="_blank" rel="noopener">Support its development</a> 🌱</p>`);
   const prev = $('#tips-extras');
   if (prev) prev.remove();
   $('#tips-list').insertAdjacentHTML('afterend', `<div id="tips-extras">${extras.join('')}</div>`);
+  renderProducts();
   renderBaselines();
 }
 
