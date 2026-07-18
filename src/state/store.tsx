@@ -28,12 +28,26 @@ type Action =
   | { type: 'addPlan'; plan: Plan }
   | { type: 'removePlan'; planId: string }
   | { type: 'setTaskStatus'; planId: string; taskId: string; status: TaskStatus }
-  | { type: 'toggleDocument'; planId: string; taskId: string; documentName: string };
+  | { type: 'toggleDocument'; planId: string; taskId: string; documentName: string }
+  | { type: 'toggleStep'; planId: string; taskId: string; stepName: string };
+
+/** Backfill fields added since a stored plan was created. */
+export function migratePlan(plan: Plan): Plan {
+  return {
+    ...plan,
+    milestone: plan.milestone ?? false,
+    tasks: plan.tasks.map((t) => ({
+      ...t,
+      documents: t.documents ?? [],
+      steps: t.steps ?? [],
+    })),
+  };
+}
 
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'hydrate':
-      return { plans: action.plans, hydrated: true };
+      return { plans: action.plans.map(migratePlan), hydrated: true };
     case 'addPlan':
       return { ...state, plans: [action.plan, ...state.plans] };
     case 'removePlan':
@@ -65,6 +79,26 @@ export function reducer(state: State, action: Action): State {
                     ...t,
                     documents: t.documents.map((d) =>
                       d.name === action.documentName ? { ...d, collected: !d.collected } : d
+                    ),
+                  }
+                : t
+            ),
+          };
+        }),
+      };
+    case 'toggleStep':
+      return {
+        ...state,
+        plans: state.plans.map((p) => {
+          if (p.id !== action.planId) return p;
+          return {
+            ...p,
+            tasks: p.tasks.map((t) =>
+              t.id === action.taskId
+                ? {
+                    ...t,
+                    steps: t.steps.map((s) =>
+                      s.name === action.stepName ? { ...s, done: !s.done } : s
                     ),
                   }
                 : t

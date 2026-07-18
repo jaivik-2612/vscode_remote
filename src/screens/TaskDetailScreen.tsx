@@ -90,6 +90,31 @@ export default function TaskDetailScreen() {
         )}
       </Card>
 
+      {task.steps.length > 0 && (
+        <Card>
+          <Text style={styles.sectionTitle}>
+            Steps ({task.steps.filter((s) => s.done).length}/{task.steps.length})
+          </Text>
+          {task.steps.map((step) => (
+            <TouchableOpacity
+              key={step.name}
+              style={styles.docRow}
+              onPress={() =>
+                dispatch({
+                  type: 'toggleStep',
+                  planId: plan.id,
+                  taskId: task.id,
+                  stepName: step.name,
+                })
+              }
+            >
+              <Text style={styles.docCheck}>{step.done ? '☑' : '☐'}</Text>
+              <Text style={[styles.docName, step.done && styles.docNameDone]}>{step.name}</Text>
+            </TouchableOpacity>
+          ))}
+        </Card>
+      )}
+
       {task.documents.length > 0 && (
         <Card>
           <Text style={styles.sectionTitle}>Documents needed</Text>

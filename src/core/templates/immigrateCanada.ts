@@ -61,6 +61,12 @@ export const immigrateCanada: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['imm.eca'],
     },
+    {
+      id: 'has_job_offer',
+      prompt: 'Do you have a Canadian job offer?',
+      kind: 'boolean',
+      gatesTasks: ['imm.job_offer_docs'],
+    },
   ],
   tasks: [
     {
@@ -168,6 +174,18 @@ export const immigrateCanada: LifeEventTemplate = {
       startOffsetDays: -180,
       dueOffsetDays: -60,
       documents: ['Marriage / relationship proof', 'Spouse passport'],
+    },
+    {
+      id: 'imm.job_offer_docs',
+      title: 'Document the Canadian job offer',
+      description:
+        'A valid job offer can add significant points, but only with the right paperwork — usually an LMIA or an exemption the employer must arrange.',
+      domain: 'employment',
+      priority: 'high',
+      authority: 'Employer + ESDC',
+      startOffsetDays: -180,
+      dueOffsetDays: -90,
+      documents: ['Offer letter', 'LMIA or exemption proof'],
     },
     {
       id: 'imm.profile',

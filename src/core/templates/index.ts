@@ -10,6 +10,7 @@ import { tripAbroad, newPet, homeRenovation } from './leisure';
 import { extraMilestones } from './extraMilestones';
 import { extraImportant } from './extraImportant';
 import { extraLeisure } from './extraLeisure';
+import { TASK_STEPS } from './steps';
 
 /**
  * The catalog of life events the platform can administer. Featured events
@@ -42,6 +43,14 @@ export const EVENT_CATALOG: LifeEventTemplate[] = [
   ...extraImportant,
   ...extraLeisure,
 ];
+
+// Featured events author their sub-steps in steps.ts (archetype events carry
+// them inline); attach them here so every task in the catalog has a checklist.
+for (const event of EVENT_CATALOG) {
+  for (const task of event.tasks) {
+    if (!task.steps) task.steps = TASK_STEPS[task.id];
+  }
+}
 
 export function getEventTemplate(id: string): LifeEventTemplate | undefined {
   return EVENT_CATALOG.find((e) => e.id === id);

@@ -68,6 +68,10 @@ export function TaskRow({
   subtitle?: string;
 }) {
   const resolved = task.status === 'done' || task.status === 'skipped';
+  const stepsNote =
+    task.steps.length > 0 && !resolved
+      ? ` · ${task.steps.filter((s) => s.done).length}/${task.steps.length} steps`
+      : '';
   return (
     <TouchableOpacity onPress={onPress} style={styles.taskRow}>
       <View style={[styles.domainDot, { backgroundColor: domainColors[task.domain] }]} />
@@ -76,7 +80,8 @@ export function TaskRow({
           {statusGlyph(task.status)} {task.title}
         </Text>
         <Text style={styles.taskSubtitle} numberOfLines={1}>
-          {subtitle ?? `Due ${task.dueDate}${task.authority ? ` · ${task.authority}` : ''}`}
+          {(subtitle ?? `Due ${task.dueDate}${task.authority ? ` · ${task.authority}` : ''}`) +
+            stepsNote}
         </Text>
       </View>
       <PriorityBadge priority={task.priority} />

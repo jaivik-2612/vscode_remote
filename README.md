@@ -57,6 +57,11 @@ Key engine behaviors:
   (negative = before), so "update licence within 14 days of the move" becomes
   an actual date, and the Timeline tab merges every plan into one
   soonest-first deadline feed with overdue highlighting.
+- **Step checklists** — every task in the catalog breaks down into checkable
+  sub-steps ("Flight tickets booked", "Hotel stay confirmed"), instantiated
+  per plan and persisted; task rows show step progress.
+- **Focused intake** — every event asks at most 5 questions, and answers gate
+  tasks in or out rather than just collecting data.
 - **Document checklists** — each task instantiates its required documents as
   a per-task checklist.
 

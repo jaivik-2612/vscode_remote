@@ -18,6 +18,18 @@ export const gotMarried: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['mar.name_id', 'mar.name_everywhere'],
     },
+    {
+      id: 'merge_finances',
+      prompt: 'Are you merging finances (joint accounts)?',
+      kind: 'boolean',
+      gatesTasks: ['mar.joint_accounts'],
+    },
+    {
+      id: 'spouse_foreign',
+      prompt: 'Is your spouse a citizen of a different country?',
+      kind: 'boolean',
+      gatesTasks: ['mar.spouse_status'],
+    },
   ],
   tasks: [
     {
@@ -72,6 +84,31 @@ export const gotMarried: LifeEventTemplate = {
       startOffsetDays: 21,
       dueOffsetDays: 90,
       documents: ['Marriage certificate'],
+      dependsOn: ['mar.certificate'],
+    },
+    {
+      id: 'mar.joint_accounts',
+      title: 'Set up the joint finances',
+      description:
+        'Decide joint vs. separate vs. hybrid, open or merge the accounts, and repoint household bills — the structure matters more than the bank.',
+      domain: 'finance',
+      priority: 'high',
+      authority: 'Banks',
+      startOffsetDays: 14,
+      dueOffsetDays: 90,
+      dependsOn: ['mar.certificate'],
+    },
+    {
+      id: 'mar.spouse_status',
+      title: "Sort your spouse's immigration status",
+      description:
+        'Marriage changes what is possible — spousal sponsorship, residence or work rights — but nothing is automatic; applications have their own timelines.',
+      domain: 'immigration',
+      priority: 'critical',
+      authority: 'Immigration authority',
+      startOffsetDays: 0,
+      dueOffsetDays: 90,
+      documents: ['Marriage certificate', 'Spouse passport'],
       dependsOn: ['mar.certificate'],
     },
     {

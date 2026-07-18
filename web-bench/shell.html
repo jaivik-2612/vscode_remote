@@ -294,7 +294,8 @@
       browser. Things worth testing:</p>
       <ul class="checklist">
         <li>Type anything — 200+ events match as you type, with scores below</li>
-        <li>Answer intake questions — Yes/No answers add/remove tasks</li>
+        <li>Answer intake questions (max 5) — Yes/No answers add/remove tasks</li>
+        <li>Open any task — every task has a checkable step list</li>
         <li>Try the anniversary with year 10 — the plan gets a ⭐ milestone badge</li>
         <li>Complete "Check the business name" — watch registration unblock</li>
         <li>Move the simulated date forward — Timeline turns overdue red</li>
@@ -378,8 +379,16 @@ const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'�
 /* ===== state ===== */
 const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1';
 function realToday() { return new Date().toISOString().slice(0, 10); }
+/* Backfill fields added since a stored plan was created. */
+function migratePlan(p) {
+  return {
+    ...p,
+    milestone: p.milestone === undefined ? false : p.milestone,
+    tasks: p.tasks.map((t) => ({ ...t, documents: t.documents || [], steps: t.steps || [] })),
+  };
+}
 let plans = [];
-try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]'); } catch (e) { plans = []; }
+try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]').map(migratePlan); } catch (e) { plans = []; }
 let simToday = localStorage.getItem(K_TODAY) || realToday();
 let route = { name: 'home' };
 let backStack = [];
@@ -439,6 +448,16 @@ function toggleDocument(planId, taskId, name) {
   save();
   log('<b>toggleDocument</b> ' + esc(name));
 }
+function toggleStep(planId, taskId, name) {
+  plans = plans.map((p) => p.id !== planId ? p : ({
+    ...p,
+    tasks: p.tasks.map((t) => t.id !== taskId ? t : ({
+      ...t, steps: t.steps.map((s) => s.name === name ? { ...s, done: !s.done } : s),
+    })),
+  }));
+  save();
+  log('<b>toggleStep</b> ' + esc(name));
+}
 
 /* ===== phone rendering ===== */
 const headerEl = document.getElementById('p-header');
@@ -447,10 +466,13 @@ const tabbarEl = document.getElementById('p-tabbar');
 
 function taskRowHtml(task, planId, subtitle) {
   const resolved = task.status === 'done' || task.status === 'skipped';
+  const stepsNote = task.steps.length && !resolved
+    ? ' · ' + task.steps.filter((s) => s.done).length + '/' + task.steps.length + ' steps'
+    : '';
   return '<button class="p-task' + (resolved ? ' done' : '') + '" data-nav-task="' + esc(planId) + '|' + esc(task.id) + '">' +
     '<span class="dot" style="background:' + DOMAIN_COLORS[task.domain] + '"></span>' +
     '<span style="flex:1;min-width:0"><span class="tt">' + STATUS_GLYPH[task.status] + ' ' + esc(task.title) + '</span>' +
-    '<div class="ts">' + esc(subtitle || ('Due ' + task.dueDate + (task.authority ? ' · ' + task.authority : ''))) + '</div></span>' +
+    '<div class="ts">' + esc((subtitle || ('Due ' + task.dueDate + (task.authority ? ' · ' + task.authority : ''))) + stepsNote) + '</div></span>' +
     '<span class="pr" style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</span></button>';
 }
 
@@ -592,6 +614,14 @@ function renderTask() {
   html += '<div class="p-card"><div class="p-section" style="margin-top:0">Status</div><div class="p-chiprow">' +
     opts.map(([s, l]) => '<button class="p-chip' + (task.status === s ? ' sel' : '') + '" data-status="' + s + '">' + l + '</button>').join('') +
     '</div></div>';
+  if (task.steps.length) {
+    const doneCount = task.steps.filter((s) => s.done).length;
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Steps (' + doneCount + '/' + task.steps.length + ')</div>' +
+      task.steps.map((s) =>
+        '<button class="p-doc' + (s.done ? ' on' : '') + '" data-step="' + esc(s.name) + '">' +
+        '<span class="cb">' + (s.done ? '☑' : '☐') + '</span><span class="dn">' + esc(s.name) + '</span></button>').join('') +
+      '</div>';
+  }
   if (task.documents.length) {
     html += '<div class="p-card"><div class="p-section" style="margin-top:0">Documents needed</div>' +
       task.documents.map((d) =>
@@ -669,6 +699,8 @@ function renderPlanPanel() {
   const domains = new Set(plan.tasks.map((t) => t.domain)).size;
   const docs = plan.tasks.reduce((n, t) => n + t.documents.length, 0);
   const docsDone = plan.tasks.reduce((n, t) => n + t.documents.filter((d) => d.collected).length, 0);
+  const steps = plan.tasks.reduce((n, t) => n + t.steps.length, 0);
+  const stepsDone = plan.tasks.reduce((n, t) => n + t.steps.filter((s) => s.done).length, 0);
   const gated = Catalog.getEventTemplate(plan.eventId).tasks.length - plan.tasks.length;
   document.getElementById('plan-stats').innerHTML =
     '<dt>plan id</dt><dd>' + esc(plan.id.slice(0, 22)) + '…</dd>' +
@@ -677,6 +709,7 @@ function renderPlanPanel() {
     '<dt>resolved</dt><dd class="good">' + pr.done + '</dd>' +
     '<dt>blocked by deps</dt><dd>' + blocked + '</dd>' +
     '<dt>overdue @ sim date</dt><dd class="' + (pr.overdue ? 'bad' : '') + '">' + pr.overdue + '</dd>' +
+    '<dt>steps checked</dt><dd>' + stepsDone + '/' + steps + '</dd>' +
     '<dt>documents collected</dt><dd>' + docsDone + '/' + docs + '</dd>';
   document.getElementById('json-btn').onclick = () => {
     document.getElementById('jsonpre').textContent = JSON.stringify(plan, null, 2);
@@ -732,6 +765,9 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   }
   if (el.dataset.status) {
     setTaskStatus(route.planId, route.taskId, el.dataset.status); renderAll(); return;
+  }
+  if (el.dataset.step !== undefined && el.dataset.step !== '') {
+    toggleStep(route.planId, route.taskId, el.dataset.step); renderAll(); return;
   }
   if (el.dataset.doc !== undefined && el.dataset.doc !== '') {
     toggleDocument(route.planId, route.taskId, el.dataset.doc); renderAll(); return;

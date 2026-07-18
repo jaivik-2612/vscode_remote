@@ -83,6 +83,11 @@ export interface TaskTemplate {
   dueOffsetDays: number;
   /** Documents needed to complete this task. */
   documents?: string[];
+  /**
+   * Concrete checkable sub-steps of this task ("Flights booked",
+   * "Hotel confirmed"). Every task in the catalog must define at least two.
+   */
+  steps?: string[];
   /** Ids of tasks (same template) that must be completed first. */
   dependsOn?: string[];
 }
@@ -125,11 +130,18 @@ export interface PlanTask {
   status: TaskStatus;
   dependsOn: string[];
   documents: DocumentItem[];
+  steps: StepItem[];
 }
 
 export interface DocumentItem {
   name: string;
   collected: boolean;
+}
+
+/** One checkable sub-step of a plan task. */
+export interface StepItem {
+  name: string;
+  done: boolean;
 }
 
 /** A generated, live plan for one life event. */

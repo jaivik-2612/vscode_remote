@@ -79,6 +79,37 @@ describe('event catalog integrity', () => {
     }
   });
 
+  test('every event asks at most 5 intake questions', () => {
+    for (const event of EVENT_CATALOG) {
+      if (event.questions.length > 5) {
+        throw new Error(`${event.id} asks ${event.questions.length} questions`);
+      }
+    }
+  });
+
+  test('every task in the catalog has at least 2 checkable steps', () => {
+    const missing: string[] = [];
+    for (const event of EVENT_CATALOG) {
+      for (const task of event.tasks) {
+        if (!task.steps || task.steps.length < 2) missing.push(task.id);
+      }
+    }
+    if (missing.length > 0) {
+      throw new Error(`tasks without steps: ${missing.join(', ')}`);
+    }
+  });
+
+  test('step labels within a task are unique (they are toggled by name)', () => {
+    for (const event of EVENT_CATALOG) {
+      for (const task of event.tasks) {
+        const names = task.steps ?? [];
+        if (new Set(names).size !== names.length) {
+          throw new Error(`${task.id} has duplicate step labels`);
+        }
+      }
+    }
+  });
+
   test('the catalog spans all three categories', () => {
     const cats = new Set(EVENT_CATALOG.map((e) => e.category));
     expect(cats).toEqual(new Set(['milestone', 'important', 'leisure']));

@@ -37,6 +37,18 @@ export const tripAbroad: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['trip.house_sitting'],
     },
+    {
+      id: 'renting_car',
+      prompt: 'Will you rent a car there?',
+      kind: 'boolean',
+      gatesTasks: ['trip.car_rental'],
+    },
+    {
+      id: 'work_handover',
+      prompt: 'Do you need to hand over work before leaving?',
+      kind: 'boolean',
+      gatesTasks: ['trip.work_prep'],
+    },
   ],
   tasks: [
     {
@@ -114,6 +126,30 @@ export const tripAbroad: LifeEventTemplate = {
       dueOffsetDays: -3,
     },
     {
+      id: 'trip.car_rental',
+      title: 'Arrange the rental car',
+      description:
+        'Book ahead for better rates, get an International Driving Permit where required, and know what the rental insurance actually covers before declining or accepting it.',
+      domain: 'travel',
+      priority: 'medium',
+      authority: 'Rental company / automobile club',
+      startOffsetDays: -30,
+      dueOffsetDays: -7,
+      documents: ["Driver's licence", 'International Driving Permit'],
+      dependsOn: ['trip.passports'],
+    },
+    {
+      id: 'trip.work_prep',
+      title: 'Hand over work and set your out-of-office',
+      description:
+        'Brief whoever covers for you, close what can be closed, and set expectations for what waits until you return.',
+      domain: 'employment',
+      priority: 'medium',
+      authority: 'Employer',
+      startOffsetDays: -7,
+      dueOffsetDays: -1,
+    },
+    {
       id: 'trip.house_sitting',
       title: 'Arrange pet / house care and hold the mail',
       description: 'Book the sitter or boarding, share keys and vet contacts, pause deliveries and hold the mail for the dates away.',
@@ -155,6 +191,18 @@ export const newPet: LifeEventTemplate = {
       prompt: 'Does your municipality require pet licensing (common for dogs)?',
       kind: 'boolean',
       gatesTasks: ['pet.licence'],
+    },
+    {
+      id: 'first_pet',
+      prompt: 'Is this your first pet?',
+      kind: 'boolean',
+      gatesTasks: ['pet.training'],
+    },
+    {
+      id: 'travel_often',
+      prompt: 'Do you travel away from home regularly?',
+      kind: 'boolean',
+      gatesTasks: ['pet.care_plan'],
     },
   ],
   tasks: [
@@ -203,6 +251,29 @@ export const newPet: LifeEventTemplate = {
       dueOffsetDays: 45,
     },
     {
+      id: 'pet.training',
+      title: 'Set up training and the daily routine',
+      description:
+        'First-time owners underestimate the first months: basic training or classes, a consistent daily routine, and one set of house rules everyone follows.',
+      domain: 'education',
+      priority: 'high',
+      authority: 'Trainer / classes',
+      startOffsetDays: 0,
+      dueOffsetDays: 45,
+      dependsOn: ['pet.vet_registration'],
+    },
+    {
+      id: 'pet.care_plan',
+      title: 'Line up the away-from-home care plan',
+      description:
+        'Vet the sitters and boarding options before you need them, agree a backup carer, and write the care instructions once.',
+      domain: 'housing',
+      priority: 'medium',
+      authority: 'Sitters / boarding',
+      startOffsetDays: 14,
+      dueOffsetDays: 90,
+    },
+    {
       id: 'pet.household',
       title: 'Check lease / building rules and pet-proof the home',
       description: 'Confirm the lease or condo bylaws allow the pet (and any deposits), and secure hazards before the pet finds them.',
@@ -247,6 +318,12 @@ export const homeRenovation: LifeEventTemplate = {
       prompt: 'Are you hiring a contractor?',
       kind: 'boolean',
       gatesTasks: ['reno.contractor'],
+    },
+    {
+      id: 'moving_out_during',
+      prompt: 'Will you move out during the work?',
+      kind: 'boolean',
+      gatesTasks: ['reno.temp_housing'],
     },
   ],
   tasks: [
@@ -303,6 +380,18 @@ export const homeRenovation: LifeEventTemplate = {
       authority: 'Bank',
       startOffsetDays: -45,
       dueOffsetDays: -14,
+      dependsOn: ['reno.scope_budget'],
+    },
+    {
+      id: 'reno.temp_housing',
+      title: 'Arrange temporary housing during the work',
+      description:
+        'Book housing matched to the (realistic, padded) schedule, and put the cost into the project budget where it belongs.',
+      domain: 'housing',
+      priority: 'high',
+      authority: 'Short-term rentals',
+      startOffsetDays: -21,
+      dueOffsetDays: 0,
       dependsOn: ['reno.scope_budget'],
     },
     {

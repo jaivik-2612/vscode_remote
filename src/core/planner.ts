@@ -4,6 +4,7 @@ import {
   LifeEventTemplate,
   Plan,
   PlanTask,
+  StepItem,
   TaskTemplate,
 } from './types';
 
@@ -42,6 +43,10 @@ function toDocuments(template: TaskTemplate): DocumentItem[] {
   return (template.documents ?? []).map((name) => ({ name, collected: false }));
 }
 
+function toSteps(template: TaskTemplate): StepItem[] {
+  return (template.steps ?? []).map((name) => ({ name, done: false }));
+}
+
 export interface GeneratePlanInput {
   template: LifeEventTemplate;
   /** ISO date (YYYY-MM-DD) the event takes effect. */
@@ -76,6 +81,7 @@ export function generatePlan(input: GeneratePlanInput): Plan {
       status: dependsOn.length > 0 ? 'blocked' : 'pending',
       dependsOn,
       documents: toDocuments(t),
+      steps: toSteps(t),
     };
   });
 

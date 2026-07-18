@@ -92,6 +92,24 @@ describe('generatePlan', () => {
     expect(licence.documents.length).toBeGreaterThan(0);
     expect(licence.documents.every((d) => d.collected === false)).toBe(true);
   });
+
+  test('every generated task carries its step checklist, all unchecked', () => {
+    const plan = generatePlan({ template: moved, eventDate: '2026-08-01' });
+    for (const task of plan.tasks) {
+      expect(task.steps.length).toBeGreaterThanOrEqual(2);
+      expect(task.steps.every((s) => s.done === false)).toBe(true);
+    }
+  });
+
+  test('the trip bookings task has the concrete booking steps', () => {
+    const trip = getEventTemplate('trip-abroad')!;
+    const plan = generatePlan({ template: trip, eventDate: '2026-12-01' });
+    const bookings = plan.tasks.find((t) => t.id === 'trip.bookings')!;
+    const names = bookings.steps.map((s) => s.name);
+    expect(names).toContain('Flight tickets booked');
+    expect(names).toContain('Hotel stay confirmed');
+    expect(names).toContain('Tour guide confirmed');
+  });
 });
 
 describe('reconcileBlocked', () => {

@@ -18,6 +18,18 @@ export const newChild: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['baby.leave'],
     },
+    {
+      id: 'unmarried_parents',
+      prompt: 'Are the parents unmarried?',
+      kind: 'boolean',
+      gatesTasks: ['baby.parentage'],
+    },
+    {
+      id: 'education_fund',
+      prompt: 'Do you want to start an education savings fund?',
+      kind: 'boolean',
+      gatesTasks: ['baby.education_savings'],
+    },
   ],
   tasks: [
     {
@@ -73,6 +85,30 @@ export const newChild: LifeEventTemplate = {
       startOffsetDays: 7,
       dueOffsetDays: 60,
       dependsOn: ['baby.birth_registration'],
+    },
+    {
+      id: 'baby.parentage',
+      title: 'Establish legal parentage',
+      description:
+        'For unmarried parents, the second parent is often not legally recognized without an acknowledgment of parentage — it affects custody, support and inheritance.',
+      domain: 'legal',
+      priority: 'critical',
+      authority: 'Vital records / court',
+      startOffsetDays: 0,
+      dueOffsetDays: 60,
+      dependsOn: ['baby.birth_registration'],
+    },
+    {
+      id: 'baby.education_savings',
+      title: 'Open the education savings account',
+      description:
+        'Education accounts (529 / RESP / junior ISA) compound for 18 years — opening early is the whole advantage, and some earn government matches.',
+      domain: 'finance',
+      priority: 'medium',
+      authority: 'Bank / broker',
+      startOffsetDays: 30,
+      dueOffsetDays: 180,
+      dependsOn: ['baby.ssn'],
     },
     {
       id: 'baby.beneficiaries',

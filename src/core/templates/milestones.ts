@@ -20,6 +20,18 @@ export const turned18: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['a18.selective_service'],
     },
+    {
+      id: 'wants_licence',
+      prompt: 'Do you drive, or plan to learn soon?',
+      kind: 'boolean',
+      gatesTasks: ['a18.drivers_licence'],
+    },
+    {
+      id: 'heading_to_college',
+      prompt: 'Are you heading to college / university?',
+      kind: 'boolean',
+      gatesTasks: ['a18.student_aid'],
+    },
   ],
   tasks: [
     {
@@ -78,6 +90,29 @@ export const turned18: LifeEventTemplate = {
       dependsOn: ['a18.own_bank'],
     },
     {
+      id: 'a18.drivers_licence',
+      title: "Progress your driver's licence",
+      description:
+        'At 18 most graduated-licensing restrictions lift — check what changes, pass the theory test if you haven\'t, and book lessons.',
+      domain: 'government',
+      priority: 'medium',
+      authority: 'Licensing authority',
+      startOffsetDays: 0,
+      dueOffsetDays: 180,
+      dependsOn: ['a18.adult_id'],
+    },
+    {
+      id: 'a18.student_aid',
+      title: 'Prepare student aid applications',
+      description:
+        'Financial aid forms (FAFSA-style) are filed in your own name from 18, with deadlines that arrive earlier than admission decisions.',
+      domain: 'education',
+      priority: 'high',
+      authority: 'Aid office',
+      startOffsetDays: 0,
+      dueOffsetDays: 120,
+    },
+    {
       id: 'a18.health_admin',
       title: 'Take over your health administration',
       description: 'At 18 parents lose automatic access to your records. Register with a doctor as an adult, know your insurance status, and consider a healthcare proxy.',
@@ -122,6 +157,18 @@ export const graduatedCollege: LifeEventTemplate = {
       prompt: 'Is your health coverage through the university or a parent?',
       kind: 'boolean',
       gatesTasks: ['grad.health_transition'],
+    },
+    {
+      id: 'job_hunting',
+      prompt: 'Are you job hunting now?',
+      kind: 'boolean',
+      gatesTasks: ['grad.career_setup'],
+    },
+    {
+      id: 'moving_out',
+      prompt: 'Are you moving out of student housing?',
+      kind: 'boolean',
+      gatesTasks: ['grad.move_out'],
     },
   ],
   tasks: [
@@ -187,6 +234,17 @@ export const graduatedCollege: LifeEventTemplate = {
       dueOffsetDays: 60,
     },
     {
+      id: 'grad.move_out',
+      title: 'Move out of student housing',
+      description:
+        'End-of-lease dates around graduation are hard deadlines — plan the move, arrange the next address, and recover deposits.',
+      domain: 'housing',
+      priority: 'high',
+      authority: 'Housing office / landlord',
+      startOffsetDays: -14,
+      dueOffsetDays: 30,
+    },
+    {
       id: 'grad.tax_status',
       title: 'Check your tax situation changes',
       description: 'Dependency status, education credits for the final year, and student loan interest deductions all shift at graduation.',
@@ -232,6 +290,18 @@ export const boughtHouse: LifeEventTemplate = {
       prompt: 'Is there a mortgage?',
       kind: 'boolean',
       gatesTasks: ['house.mortgage_autopay', 'house.escrow_check'],
+    },
+    {
+      id: 'leaving_previous_home',
+      prompt: 'Are you leaving a rental or selling a previous home?',
+      kind: 'boolean',
+      gatesTasks: ['house.old_home'],
+    },
+    {
+      id: 'renovating_first',
+      prompt: 'Are you renovating before moving in?',
+      kind: 'boolean',
+      gatesTasks: ['house.reno_before'],
     },
   ],
   tasks: [
@@ -309,6 +379,29 @@ export const boughtHouse: LifeEventTemplate = {
       dueOffsetDays: 120,
     },
     {
+      id: 'house.old_home',
+      title: 'Wind down the previous home',
+      description:
+        'Give proper notice or coordinate the sale, plan the overlap period, and get deposits back or proceeds settled.',
+      domain: 'housing',
+      priority: 'high',
+      authority: 'Landlord / agent',
+      startOffsetDays: -30,
+      dueOffsetDays: 30,
+    },
+    {
+      id: 'house.reno_before',
+      title: 'Renovate before moving in',
+      description:
+        'Work is far easier in an empty house — scope, quote and schedule it into the window between closing and move-in.',
+      domain: 'housing',
+      priority: 'medium',
+      authority: 'Contractors',
+      startOffsetDays: -14,
+      dueOffsetDays: 60,
+      dependsOn: ['house.insurance'],
+    },
+    {
       id: 'house.estate_update',
       title: 'Update your will and beneficiaries',
       description: 'A house is usually your largest asset the moment you own it — your estate documents should say what happens to it.',
@@ -352,6 +445,12 @@ export const gotDivorced: LifeEventTemplate = {
       prompt: 'Are children involved?',
       kind: 'boolean',
       gatesTasks: ['div.custody_support'],
+    },
+    {
+      id: 'shared_home',
+      prompt: 'Do you own a home together?',
+      kind: 'boolean',
+      gatesTasks: ['div.home_division'],
     },
   ],
   tasks: [
@@ -430,6 +529,19 @@ export const gotDivorced: LifeEventTemplate = {
       dependsOn: ['div.decree_copies'],
     },
     {
+      id: 'div.home_division',
+      title: 'Divide the shared home',
+      description:
+        'Valuation, then buyout or sale per the decree — and the title and mortgage must actually be retitled, or both of you stay liable.',
+      domain: 'housing',
+      priority: 'critical',
+      authority: 'Lender / land registry',
+      startOffsetDays: 0,
+      dueOffsetDays: 120,
+      documents: ['Decree', 'Property valuation', 'Mortgage statement'],
+      dependsOn: ['div.decree_copies'],
+    },
+    {
       id: 'div.estate_docs',
       title: 'Rewrite will and powers of attorney',
       description: 'Old documents likely name your ex as heir, executor and medical proxy — replace them.',
@@ -472,6 +584,12 @@ export const retired: LifeEventTemplate = {
       prompt: 'Are you at the age for government health coverage (e.g. Medicare at 65)?',
       kind: 'boolean',
       gatesTasks: ['ret.gov_health'],
+    },
+    {
+      id: 'working_parttime',
+      prompt: 'Will you work part-time in retirement?',
+      kind: 'boolean',
+      gatesTasks: ['ret.parttime_tax'],
     },
   ],
   tasks: [
@@ -537,6 +655,18 @@ export const retired: LifeEventTemplate = {
       startOffsetDays: 0,
       dueOffsetDays: 90,
       dependsOn: ['ret.income_plan'],
+    },
+    {
+      id: 'ret.parttime_tax',
+      title: 'Check how part-time work affects benefits',
+      description:
+        'Earnings can claw back pension or benefit payments below certain ages and thresholds — know the limits before accepting work.',
+      domain: 'tax',
+      priority: 'high',
+      authority: 'Pension agency / tax authority',
+      startOffsetDays: 0,
+      dueOffsetDays: 90,
+      dependsOn: ['ret.gov_pension'],
     },
     {
       id: 'ret.estate_refresh',

@@ -29,6 +29,18 @@ export const newJob: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['job.old_retirement', 'job.coverage_bridge'],
     },
+    {
+      id: 'relocating',
+      prompt: 'Does the job require relocating?',
+      kind: 'boolean',
+      gatesTasks: ['job.relocation'],
+    },
+    {
+      id: 'employment_type',
+      prompt: 'What kind of employment?',
+      kind: 'choice',
+      choices: ['Full-time', 'Part-time', 'Contract'],
+    },
   ],
   tasks: [
     {
@@ -93,6 +105,18 @@ export const newJob: LifeEventTemplate = {
       dueOffsetDays: 14,
     },
     {
+      id: 'job.relocation',
+      title: 'Plan the relocation',
+      description:
+        'Get the employer relocation package in writing, sort housing at the destination, and schedule the move around the start date — then run the "I moved" plan.',
+      domain: 'housing',
+      priority: 'high',
+      authority: 'Employer + movers',
+      startOffsetDays: -30,
+      dueOffsetDays: 14,
+      dependsOn: ['job.contract'],
+    },
+    {
       id: 'job.payroll_check',
       title: 'Verify the first paycheck',
       description: 'Check gross pay, withholding, and that retirement and benefit deductions actually started.',
@@ -133,6 +157,18 @@ export const lostJob: LifeEventTemplate = {
       prompt: 'Were you offered a severance agreement?',
       kind: 'boolean',
       gatesTasks: ['loss.severance_review'],
+    },
+    {
+      id: 'money_tight',
+      prompt: 'Is your financial runway under 3 months?',
+      kind: 'boolean',
+      gatesTasks: ['loss.hardship_relief'],
+    },
+    {
+      id: 'had_employer_policies',
+      prompt: 'Did you have life / disability insurance through the employer?',
+      kind: 'boolean',
+      gatesTasks: ['loss.convert_policies'],
     },
   ],
   tasks: [
@@ -188,6 +224,29 @@ export const lostJob: LifeEventTemplate = {
       dueOffsetDays: 90,
     },
     {
+      id: 'loss.hardship_relief',
+      title: 'Activate hardship protections',
+      description:
+        'Mortgage/rent deferrals, utility hardship programs and minimum-payment arrangements exist — but only if you ask before you miss payments.',
+      domain: 'finance',
+      priority: 'critical',
+      authority: 'Lenders / providers',
+      startOffsetDays: 0,
+      dueOffsetDays: 21,
+      dependsOn: ['loss.budget_triage'],
+    },
+    {
+      id: 'loss.convert_policies',
+      title: 'Convert employer life / disability policies',
+      description:
+        'Group policies often convert to individual ones without medical underwriting — within a short window (usually 31 days) of leaving.',
+      domain: 'insurance',
+      priority: 'high',
+      authority: 'Group insurer',
+      startOffsetDays: 0,
+      dueOffsetDays: 30,
+    },
+    {
       id: 'loss.employer_records',
       title: 'Collect records and references from the employer',
       description: 'Termination letter, service record, pay history and named references — much easier to get now than months later.',
@@ -230,6 +289,12 @@ export const boughtCar: LifeEventTemplate = {
       prompt: 'Is it financed with a loan or lease?',
       kind: 'boolean',
       gatesTasks: ['car.loan_setup'],
+    },
+    {
+      id: 'replacing_old_car',
+      prompt: 'Are you replacing / getting rid of an old car?',
+      kind: 'boolean',
+      gatesTasks: ['car.old_car'],
     },
   ],
   tasks: [
@@ -277,6 +342,17 @@ export const boughtCar: LifeEventTemplate = {
       dueOffsetDays: 30,
     },
     {
+      id: 'car.old_car',
+      title: 'Hand off the old car properly',
+      description:
+        'Sell, trade or scrap it — then cancel its registration and end its insurance the same day, so you stop paying for (and being liable for) a car you no longer have.',
+      domain: 'government',
+      priority: 'high',
+      authority: 'Registry + insurer',
+      startOffsetDays: 0,
+      dueOffsetDays: 30,
+    },
+    {
       id: 'car.sales_tax',
       title: 'Pay vehicle sales tax / transfer duty',
       description: 'Usually collected at registration for private sales — bring payment; the registry will not register without it.',
@@ -316,6 +392,18 @@ export const lovedOnePassed: LifeEventTemplate = {
       kind: 'boolean',
       gatesTasks: ['est.will_probate', 'est.estate_account', 'est.final_taxes'],
     },
+    {
+      id: 'arranging_funeral',
+      prompt: 'Are you arranging the funeral?',
+      kind: 'boolean',
+      gatesTasks: ['est.funeral'],
+    },
+    {
+      id: 'owned_property',
+      prompt: 'Did they own a home or other property?',
+      kind: 'boolean',
+      gatesTasks: ['est.property'],
+    },
   ],
   tasks: [
     {
@@ -327,6 +415,29 @@ export const lovedOnePassed: LifeEventTemplate = {
       authority: 'Vital records office',
       startOffsetDays: 0,
       dueOffsetDays: 14,
+    },
+    {
+      id: 'est.funeral',
+      title: 'Arrange the funeral or memorial',
+      description:
+        'Check for wishes or a prepaid plan first, then choose the funeral home and service — costs vary enormously and decisions made in grief are rarely price-compared.',
+      domain: 'social',
+      priority: 'critical',
+      authority: 'Funeral home',
+      startOffsetDays: 0,
+      dueOffsetDays: 14,
+    },
+    {
+      id: 'est.property',
+      title: 'Secure and manage their property',
+      description:
+        'Secure the home, notify the insurer (vacant-property rules can void coverage), and tell the mortgage servicer — the estate keeps paying until transfer or sale.',
+      domain: 'housing',
+      priority: 'critical',
+      authority: 'Insurer / mortgage servicer',
+      startOffsetDays: 0,
+      dueOffsetDays: 30,
+      dependsOn: ['est.death_certificates'],
     },
     {
       id: 'est.notify_agencies',
