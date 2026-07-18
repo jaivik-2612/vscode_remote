@@ -1,7 +1,7 @@
 import { RouteProp, useRoute } from '@react-navigation/native';
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { AFFILIATE_DISCLOSURE, amazonUrl, productsForTask } from '../core/products';
+import { AFFILIATE_DISCLOSURE, productUrl, productsForTask } from '../core/products';
 import { countryName, resolveResources } from '../core/resources';
 import { DOMAIN_LABELS, TaskStatus } from '../core/types';
 import { RootStackParamList } from '../navigation';
@@ -92,7 +92,7 @@ export default function TaskDetailScreen() {
             <TouchableOpacity
               key={p.label}
               style={styles.resourceRow}
-              onPress={() => Linking.openURL(amazonUrl(p.query, state.profile)).catch(() => {})}
+              onPress={() => Linking.openURL(productUrl(p, state.profile)).catch(() => {})}
             >
               <Text style={styles.resourceIcon}>🛍️</Text>
               <Text style={[styles.resourceLabel, { color: colors.accent }]}>{p.label}</Text>

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { groupByDomain, planProgress } from '../core/progress';
-import { AFFILIATE_DISCLOSURE, amazonUrl, productsForPlan } from '../core/products';
+import { AFFILIATE_DISCLOSURE, productUrl, productsForPlan } from '../core/products';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
 import { useTheme } from '../state/theme';
@@ -101,7 +101,7 @@ export default function PlanScreen() {
               <TouchableOpacity
                 key={p.label}
                 style={[styles.productCard, cardShadow, { backgroundColor: colors.card }]}
-                onPress={() => Linking.openURL(amazonUrl(p.query, state.profile)).catch(() => {})}
+                onPress={() => Linking.openURL(productUrl(p, state.profile)).catch(() => {})}
               >
                 <Text style={{ fontSize: 19 }}>🛍️</Text>
                 <Text style={[styles.productLabel, { color: colors.ink }]} numberOfLines={2}>

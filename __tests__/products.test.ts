@@ -2,7 +2,9 @@ import {
   AFFILIATE_DISCLOSURE,
   AFFILIATE_TAG,
   EVENT_PRODUCTS,
+  ProductSuggestion,
   amazonUrl,
+  productUrl,
   productsForPlan,
   productsForTask,
 } from '../src/core/products';
@@ -82,5 +84,34 @@ describe('product suggestions', () => {
 
   test('disclosure text exists for the UI', () => {
     expect(AFFILIATE_DISCLOSURE).toContain('Amazon Associate');
+  });
+
+  describe('productUrl — the three-tier link ladder', () => {
+    const withAsin: ProductSuggestion = {
+      label: 'Baby monitor',
+      query: 'baby monitor',
+      asin: { US: 'B0EXAMPLE1', CA: 'B0EXAMPLE2' },
+    };
+    const withoutAsin: ProductSuggestion = { label: 'Diapers', query: 'newborn diapers' };
+
+    test('curated ASIN gives a direct product-page link for that marketplace', () => {
+      expect(productUrl(withAsin, us)).toBe('https://www.amazon.com/dp/B0EXAMPLE1');
+      expect(productUrl(withAsin, { ...us, country: 'CA' })).toBe('https://www.amazon.ca/dp/B0EXAMPLE2');
+    });
+
+    test('marketplaces without a curated ASIN fall back to search — never a dead end', () => {
+      expect(productUrl(withAsin, inr)).toContain('amazon.in/s?k=');
+      expect(productUrl(withoutAsin, us)).toContain('amazon.com/s?k=');
+      expect(productUrl(withoutAsin, null)).toContain('amazon.com/s?k=');
+    });
+
+    test('every product currently links without a tag (tag not yet configured)', () => {
+      expect(AFFILIATE_TAG).toBe('');
+      for (const products of Object.values(EVENT_PRODUCTS)) {
+        for (const p of products) {
+          expect(productUrl(p, us)).not.toContain('tag=');
+        }
+      }
+    });
   });
 });

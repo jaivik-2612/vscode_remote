@@ -1010,7 +1010,7 @@ function renderPlan() {
   if (planProducts.length) {
     html += '<div class="p-section">🛍️ Things you might need</div>' +
       '<div class="p-prods">' + planProducts.map((p) =>
-        '<a class="p-prod" href="' + esc(Products.amazonUrl(p.query, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<a class="p-prod" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
         '<span class="pe">🛍️</span><span class="pl">' + esc(p.label) + '</span><span class="pa">Amazon ↗</span></a>').join('') +
       '</div><p class="p-disclosure">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p>';
   }
@@ -1046,7 +1046,7 @@ function renderTask() {
   if (taskProducts.length) {
     html += '<div class="p-card"><div class="p-section" style="margin-top:0">🛍️ Helpful products</div>' +
       taskProducts.map((p) =>
-        '<a class="p-resource" href="' + esc(Products.amazonUrl(p.query, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<a class="p-resource" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
         '<span>🛍️</span><span>' + esc(p.label) + '</span></a>').join('') +
       '<p class="p-disclosure" style="margin:6px 0 0">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p></div>';
   }

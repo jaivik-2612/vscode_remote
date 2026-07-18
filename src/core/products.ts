@@ -28,17 +28,40 @@ const AMAZON_DOMAINS: Record<string, string> = {
 export interface ProductSuggestion {
   /** What the user sees, e.g. "Newborn clothes". */
   label: string;
-  /** Amazon search query the link runs. */
+  /** Amazon search query — the fallback link when no ASIN is curated. */
   query: string;
   /** Optional task-template id this product belongs inside. */
   taskId?: string;
+  /**
+   * Optional curated product ASINs per marketplace ('US', 'CA', …), for
+   * direct product-page links (much higher conversion than search results).
+   * ASINs are marketplace-specific — only countries listed here get the
+   * direct link; everyone else falls back to the search link, so a missing
+   * or stale ASIN can never produce a dead end.
+   */
+  asin?: Record<string, string>;
+}
+
+function tagged(url: string, sep: '?' | '&'): string {
+  return AFFILIATE_TAG ? `${url}${sep}tag=${encodeURIComponent(AFFILIATE_TAG)}` : url;
 }
 
 export function amazonUrl(query: string, profile: UserProfile | null): string {
   const domain = (profile && AMAZON_DOMAINS[profile.country]) || 'amazon.com';
-  let url = `https://www.${domain}/s?k=${encodeURIComponent(query)}`;
-  if (AFFILIATE_TAG) url += `&tag=${encodeURIComponent(AFFILIATE_TAG)}`;
-  return url;
+  return tagged(`https://www.${domain}/s?k=${encodeURIComponent(query)}`, '&');
+}
+
+/**
+ * The link a product suggestion opens: direct product page when a curated
+ * ASIN exists for the user's marketplace, search results otherwise.
+ */
+export function productUrl(product: ProductSuggestion, profile: UserProfile | null): string {
+  const country = profile?.country && AMAZON_DOMAINS[profile.country] ? profile.country : 'US';
+  const asin = product.asin?.[country];
+  if (asin) {
+    return tagged(`https://www.${AMAZON_DOMAINS[country]}/dp/${encodeURIComponent(asin)}`, '?');
+  }
+  return amazonUrl(product.query, profile);
 }
 
 /** Required Amazon Associates disclosure, shown wherever products appear. */

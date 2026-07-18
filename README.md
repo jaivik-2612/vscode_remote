@@ -78,11 +78,22 @@ No charges, no ads. Life events come with shopping lists as well as paperwork,
 so plans show a "Things you might need" section (baby → newborn clothes,
 diapers, monitor; new job → work clothes, laptop) and some tasks carry
 anchored products (language test → IELTS prep book). The product database
-lives in `src/core/products.ts` — per-event packs rendered as Amazon search
-links that follow the user's profile country storefront. Links are plain for
-now; setting `AFFILIATE_TAG` in that file turns every link into an Amazon
-Associates affiliate link in one change. The required disclosure is shown
-wherever products appear.
+lives in `src/core/products.ts` — per-event packs following the user's
+profile country storefront. The required disclosure is shown wherever
+products appear.
+
+The link ladder (each tier converts better than the last):
+
+1. **Tagged search links** — set `AFFILIATE_TAG` once your Associates
+   account is approved and every link earns. Amazon pays commission on
+   anything bought within 24h of a tagged click, so search links do earn.
+2. **Curated ASINs** — add `asin: { US: '…', CA: '…' }` to any product for
+   direct product-page links (much higher conversion). ASINs are
+   marketplace-specific; countries without one automatically fall back to
+   the search link, so stale ASINs never dead-end.
+3. **PA-API product cards** (future) — after 3 qualifying sales unlock
+   Amazon's Product Advertising API, real cards with image/price/rating
+   become possible via a small backend proxy.
 
 ## Web test bench
 

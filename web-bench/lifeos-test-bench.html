@@ -809,7 +809,7 @@ exports.reconcileBlocked = reconcileBlocked;
 __define("products", function (exports, require, module) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.productsForTask = exports.productsForPlan = exports.EVENT_PRODUCTS = exports.AFFILIATE_DISCLOSURE = exports.amazonUrl = exports.AFFILIATE_TAG = void 0;
+exports.productsForTask = exports.productsForPlan = exports.EVENT_PRODUCTS = exports.AFFILIATE_DISCLOSURE = exports.productUrl = exports.amazonUrl = exports.AFFILIATE_TAG = void 0;
 /**
  * Product suggestions — the monetization layer.
  *
@@ -832,14 +832,27 @@ const AMAZON_DOMAINS = {
     AU: 'amazon.com.au',
     IN: 'amazon.in',
 };
+function tagged(url, sep) {
+    return exports.AFFILIATE_TAG ? `${url}${sep}tag=${encodeURIComponent(exports.AFFILIATE_TAG)}` : url;
+}
 function amazonUrl(query, profile) {
     const domain = (profile && AMAZON_DOMAINS[profile.country]) || 'amazon.com';
-    let url = `https://www.${domain}/s?k=${encodeURIComponent(query)}`;
-    if (exports.AFFILIATE_TAG)
-        url += `&tag=${encodeURIComponent(exports.AFFILIATE_TAG)}`;
-    return url;
+    return tagged(`https://www.${domain}/s?k=${encodeURIComponent(query)}`, '&');
 }
 exports.amazonUrl = amazonUrl;
+/**
+ * The link a product suggestion opens: direct product page when a curated
+ * ASIN exists for the user's marketplace, search results otherwise.
+ */
+function productUrl(product, profile) {
+    const country = profile?.country && AMAZON_DOMAINS[profile.country] ? profile.country : 'US';
+    const asin = product.asin?.[country];
+    if (asin) {
+        return tagged(`https://www.${AMAZON_DOMAINS[country]}/dp/${encodeURIComponent(asin)}`, '?');
+    }
+    return amazonUrl(product.query, profile);
+}
+exports.productUrl = productUrl;
 /** Required Amazon Associates disclosure, shown wherever products appear. */
 exports.AFFILIATE_DISCLOSURE = 'As an Amazon Associate, LifeOS may earn from qualifying purchases.';
 /** Event id → suggestion pack. The product database. */
@@ -5642,7 +5655,7 @@ function renderPlan() {
   if (planProducts.length) {
     html += '<div class="p-section">🛍️ Things you might need</div>' +
       '<div class="p-prods">' + planProducts.map((p) =>
-        '<a class="p-prod" href="' + esc(Products.amazonUrl(p.query, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<a class="p-prod" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
         '<span class="pe">🛍️</span><span class="pl">' + esc(p.label) + '</span><span class="pa">Amazon ↗</span></a>').join('') +
       '</div><p class="p-disclosure">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p>';
   }
@@ -5678,7 +5691,7 @@ function renderTask() {
   if (taskProducts.length) {
     html += '<div class="p-card"><div class="p-section" style="margin-top:0">🛍️ Helpful products</div>' +
       taskProducts.map((p) =>
-        '<a class="p-resource" href="' + esc(Products.amazonUrl(p.query, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<a class="p-resource" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
         '<span>🛍️</span><span>' + esc(p.label) + '</span></a>').join('') +
       '<p class="p-disclosure" style="margin:6px 0 0">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p></div>';
   }
