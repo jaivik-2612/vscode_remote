@@ -34,6 +34,17 @@ describe('product suggestions', () => {
     expect(productsForTask('immigrate-canada', 'imm.medical')).toHaveLength(0);
   });
 
+  test('lost job → budget triage task suggests a monthly budget planner', () => {
+    const products = productsForTask('lost-job', 'loss.budget_triage');
+    expect(products.some((p) => p.label === 'Monthly budget planner')).toBe(true);
+  });
+
+  test('marriage planning tasks carry anchored products', () => {
+    expect(productsForTask('planning-wedding', 'wed.budget').some((p) => p.label.includes('planner'))).toBe(true);
+    expect(productsForTask('planning-wedding', 'wed.attire').some((p) => p.label === 'Wedding rings')).toBe(true);
+    expect(productsForTask('planning-wedding', 'wed.invitations').length).toBeGreaterThan(0);
+  });
+
   test('amazon storefront follows the profile country', () => {
     expect(amazonUrl('diapers', us)).toContain('https://www.amazon.com/s?k=diapers');
     expect(amazonUrl('diapers', inr)).toContain('https://www.amazon.in/s?k=');

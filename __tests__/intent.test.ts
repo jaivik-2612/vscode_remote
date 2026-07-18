@@ -38,6 +38,14 @@ describe('intent matching', () => {
     expect(matches[0].event.id).toBe('moved');
   });
 
+  test('"I am planning my marriage" matches the wedding-planning event', () => {
+    expect(bestMatch('i am planning my marriage')?.event.id).toBe('planning-wedding');
+    expect(bestMatch('planning our wedding')?.event.id).toBe('planning-wedding');
+    expect(bestMatch('we are getting married next summer')?.event.id).toBe('planning-wedding');
+    // Post-wedding admin still routes to the marriage event.
+    expect(bestMatch('we got married')?.event.id).toBe('got-married');
+  });
+
   test('milestone events match', () => {
     expect(bestMatch('i graduated college')?.event.id).toBe('graduated-college');
     expect(bestMatch('I just turned 18')?.event.id).toBe('turned-18');

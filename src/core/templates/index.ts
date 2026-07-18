@@ -4,7 +4,14 @@ import { startedBusiness } from './startedBusiness';
 import { immigrateCanada } from './immigrateCanada';
 import { gotMarried } from './gotMarried';
 import { newChild } from './newChild';
-import { turned18, graduatedCollege, boughtHouse, gotDivorced, retired } from './milestones';
+import {
+  turned18,
+  graduatedCollege,
+  planningMarriage,
+  boughtHouse,
+  gotDivorced,
+  retired,
+} from './milestones';
 import { newJob, lostJob, boughtCar, lovedOnePassed } from './important';
 import { tripAbroad, newPet, homeRenovation } from './leisure';
 import { extraMilestones } from './extraMilestones';
@@ -21,6 +28,7 @@ export const EVENT_CATALOG: LifeEventTemplate[] = [
   // Featured milestones — roughly in life order
   turned18,
   graduatedCollege,
+  planningMarriage,
   gotMarried,
   newChild,
   boughtHouse,
