@@ -405,6 +405,141 @@
   .screen[data-design] .p-tag { font-size: 14px; color: var(--p-muted); margin-top: 6px; }
   .screen[data-design] .p-seg { display: flex; gap: 8px; flex-wrap: wrap; }
   .screen[data-design] .p-about { font-size: 12px; color: var(--p-muted); line-height: 1.7; }
+
+  /* ================= structural identities ================= */
+
+  /* ---- PAPER: editorial, no cards, hairlines, serif ---- */
+  .screen[data-design="paper"] .p-dateline {
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--p-muted); margin-bottom: 8px;
+  }
+  .pr-paper { align-items: baseline; gap: 12px !important; }
+  .screen[data-design] .pr-paper .p-input {
+    background: transparent; border: none; border-bottom: 1px solid var(--p-ink); border-radius: 0;
+    box-shadow: none; padding: 8px 2px; min-height: 40px; font-family: var(--p-head); font-size: 17px;
+  }
+  .screen[data-design] .pr-paper .p-go {
+    background: none; color: var(--p-accent); border-radius: 0; padding: 0 2px;
+    font-family: var(--p-head); font-size: 16px;
+  }
+  .p-planline { display: block; width: 100%; background: none; border: none; text-align: left;
+    padding: 12px 0 14px; border-bottom: 1px solid var(--p-line); }
+  .p-planline:first-of-type { border-top: 1px solid var(--p-line); }
+  .pl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .pl-name { font-family: var(--p-head); font-size: 17px; color: var(--p-ink); }
+  .pl-count { font-size: 12px; color: var(--p-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pl-count b { color: #C62828; font-weight: 700; }
+  .pl-bar { display: block; height: 2px; background: var(--p-line); margin-top: 10px; }
+  .pl-bar i { display: block; height: 2px; background: var(--p-accent); }
+  .p-idx { margin-bottom: 16px; line-height: 2; }
+  .p-evlink { background: none; border: none; padding: 0; color: var(--p-ink);
+    font-family: var(--p-head); font-size: 15px; }
+  .p-evlink:hover { color: var(--p-accent); text-decoration: underline; }
+  .p-dot { color: var(--p-muted); margin: 0 8px; }
+  .screen[data-design="paper"] .p-card {
+    background: transparent; border: none; border-top: 1px solid var(--p-line);
+    border-radius: 0; box-shadow: none; padding: 14px 2px;
+  }
+  .screen[data-design="paper"] .p-cta {
+    background: none; color: var(--p-accent); border: 1px solid var(--p-accent); border-radius: 0;
+    font-family: var(--p-head);
+  }
+  .screen[data-design="paper"] .p-chip { border-radius: 4px; background: transparent; }
+  .screen[data-design="paper"] .p-suggest { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 4px; }
+  .tabbar.tb-paper { padding: 12px 0 16px; }
+  .tb-paper button .lbl { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; padding-bottom: 3px; }
+  .tb-paper button.active .lbl { border-bottom: 1px solid var(--p-ink); color: var(--p-ink); }
+  .screen[data-design="paper"] .tabbar button.active { color: var(--p-ink); }
+
+  /* ---- SKY: floaty cards, rings, tiles, floating tab pill ---- */
+  .screen[data-design] .pr-sky .p-input { border-radius: 999px; padding: 16px 20px; }
+  .screen[data-design] .pr-sky .p-go { border-radius: 999px; width: 54px; flex: none; font-size: 22px; padding: 0; }
+  .p-planscroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; }
+  .p-plancard { flex: none; width: 150px; display: flex; flex-direction: column; align-items: flex-start;
+    gap: 8px; background: var(--p-card); border: none; border-radius: 20px; padding: 14px;
+    box-shadow: var(--p-shadow); text-align: left; }
+  .p-ring { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .p-ring span { width: 40px; height: 40px; border-radius: 50%; background: var(--p-card);
+    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: var(--p-ink); }
+  .p-plancard-name { font-size: 13px; font-weight: 700; color: var(--p-ink); line-height: 1.3; }
+  .p-plancard-ov { font-size: 11px; font-weight: 700; color: #C62828; }
+  .p-plancard-ov.ok { color: var(--p-muted); font-weight: 500; }
+  .p-tilegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+  .p-tile { display: flex; align-items: center; gap: 10px; background: var(--p-card); border: none;
+    border-radius: 16px; padding: 10px 12px; box-shadow: var(--p-shadow); text-align: left; }
+  .p-tileemoji { flex: none; width: 38px; height: 38px; border-radius: 12px; background: var(--p-soft);
+    display: flex; align-items: center; justify-content: center; font-size: 19px; }
+  .p-tilename { font-size: 12px; font-weight: 600; color: var(--p-ink); line-height: 1.25; }
+  .screen[data-design="sky"] .p-body { padding-bottom: 86px; }
+  .tabbar.tb-sky { position: absolute; left: 14px; right: 14px; bottom: 12px; border-radius: 999px;
+    border: 1px solid var(--p-line); box-shadow: 0 12px 30px rgba(0,0,0,.18); padding: 8px 6px 10px; }
+  .tb-sky button .lbl { font-size: 10px; }
+
+  /* ---- NOIR: dashboard, command bar, dense rows, icon dock ---- */
+  .p-stats { display: flex; gap: 10px; margin: 2px 0 14px; }
+  .p-stat { flex: 1; background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 10px 12px; }
+  .p-stat b { display: block; font-size: 24px; line-height: 1.1; color: var(--p-accent);
+    font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .p-stat.bad b { color: #E57373; }
+  .p-stat span { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--p-muted); }
+  .pr-noir { align-items: center; background: var(--p-card); border: 1px solid var(--p-line);
+    border-radius: 12px; padding: 4px 6px 4px 14px; gap: 6px !important; }
+  .pr-noir .p-prompt { color: var(--p-accent); font-weight: 800; font-size: 18px; font-family: var(--mono); }
+  .screen[data-design] .pr-noir .p-input { background: none; border: none; box-shadow: none; border-radius: 0;
+    padding: 12px 4px; min-height: 40px; font-family: var(--mono); font-size: 14px; }
+  .screen[data-design] .pr-noir .p-go { background: none; border: 1px solid var(--p-accent); color: var(--p-accent);
+    border-radius: 9px; padding: 9px 14px; font-size: 11px; letter-spacing: .12em; font-family: var(--mono); }
+  .screen[data-design] .pr-noir .p-go:disabled { border-color: var(--p-line); color: var(--p-muted); }
+  .p-plansbox { padding: 4px 14px; }
+  .p-planrow2 { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none;
+    border-bottom: 1px solid var(--p-line); padding: 12px 0; text-align: left; }
+  .p-planrow2:last-child { border-bottom: none; }
+  .pr2-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--p-ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pr2-bar { flex: none; width: 64px; height: 4px; border-radius: 2px; background: var(--p-line); overflow: hidden; }
+  .pr2-bar i { display: block; height: 4px; background: var(--p-accent); }
+  .pr2-count { flex: none; font-family: var(--mono); font-size: 11px; color: var(--p-muted); font-variant-numeric: tabular-nums; }
+  .p-hscroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; }
+  .p-hscroll .p-chip { flex: none; margin: 0; white-space: nowrap; }
+  .tabbar.tb-noir { padding: 10px 0 16px; }
+  .tb-noir button { flex-direction: column; }
+  .tb-noir button .ticon { font-size: 21px; filter: grayscale(1) opacity(.55); }
+  .tb-noir button.active .ticon { filter: none; }
+  .tb-noir button.active::after { content: ''; width: 4px; height: 4px; border-radius: 2px;
+    background: var(--p-accent); margin-top: 4px; }
+
+  /* ---- STUDIO: brutalist grid, hard borders, segments ---- */
+  .screen[data-design="studio"] .p-hello { text-transform: uppercase; font-size: 27px; font-weight: 900; letter-spacing: -.01em; }
+  .p-reddot { color: var(--p-accent); }
+  .p-num { color: var(--p-accent); margin-right: 8px; font-weight: 800; }
+  .pr-studio { gap: 0 !important; }
+  .screen[data-design] .pr-studio .p-input { border: 2px solid var(--p-ink); border-radius: 0; box-shadow: none; background: var(--p-card); }
+  .screen[data-design] .pr-studio .p-go { border: 2px solid var(--p-ink); border-left: none; border-radius: 0;
+    padding: 0 18px; letter-spacing: .1em; }
+  .screen[data-design] .pr-studio .p-go:disabled { background: var(--p-card); color: var(--p-muted); opacity: 1; }
+  .p-planblock { display: block; width: 100%; background: var(--p-card); border: 2px solid var(--p-line);
+    border-radius: 0; padding: 12px 14px; margin-bottom: 10px; text-align: left; }
+  .p-planblock:hover { border-color: var(--p-ink); }
+  .p-planblock .top { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; color: var(--p-ink); font-size: 14px; }
+  .p-planblock .mono { font-family: var(--mono); color: var(--p-muted); font-variant-numeric: tabular-nums; }
+  .p-segs { display: flex; gap: 3px; margin-top: 12px; }
+  .p-segs i { flex: 1; height: 8px; background: var(--p-line); }
+  .p-segs i.on { background: var(--p-accent); }
+  .p-cellgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .p-cell { display: flex; align-items: center; gap: 8px; background: var(--p-card);
+    border: 2px solid var(--p-line); border-radius: 0; padding: 11px 10px; text-align: left; }
+  .p-cell:hover { border-color: var(--p-ink); }
+  .p-cell .ce { font-size: 17px; }
+  .p-cell .cn { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--p-ink); line-height: 1.35; }
+  .screen[data-design="studio"] .p-card { border-width: 2px; border-radius: 0; }
+  .screen[data-design="studio"] .p-chip { border-width: 2px; border-radius: 0; }
+  .screen[data-design="studio"] .p-cta { border-radius: 0; letter-spacing: .08em; text-transform: uppercase; }
+  .screen[data-design="studio"] .p-suggest { border-width: 2px; border-radius: 0; }
+  .tabbar.tb-studio { padding: 0; border-top: 2px solid var(--p-ink); }
+  .tb-studio button { padding: 13px 0 15px; border-right: 2px solid var(--p-ink); border-radius: 0; }
+  .tb-studio button:last-child { border-right: none; }
+  .tb-studio button .lbl { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .screen[data-design="studio"] .tabbar button.active { background: var(--p-ink); color: var(--p-bg); }
 </style>
 
 <header class="topbar">
@@ -655,45 +790,148 @@ function matchesHtml() {
     ).join('') + '</div>';
 }
 
-function renderHome() {
-  headerEl.innerHTML = '';
+/* ===== home building blocks — structurally different per design ===== */
+
+function greetingHtml() {
   const hour = new Date().getHours();
   const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
   const firstName = profile && profile.name ? profile.name.trim().split(' ')[0] : '';
-  let html =
-    '<div class="p-greet"><div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div>' +
-    '<div class="p-tag">What’s happening in your life? LifeOS handles the paperwork.</div></div>' +
+  const tag = '<div class="p-tag">What’s happening in your life? LifeOS handles the paperwork.</div>';
+  if (designId === 'paper') {
+    const dateLine = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    return '<div class="p-greet"><div class="p-dateline">' + esc(dateLine) + '</div>' +
+      '<div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div></div>';
+  }
+  if (designId === 'studio') {
+    return '<div class="p-greet"><div class="p-hello">' + daypart.toUpperCase() +
+      (firstName ? ',<br>' + esc(firstName.toUpperCase()) : '') + '<span class="p-reddot">.</span></div>' + tag + '</div>';
+  }
+  return '<div class="p-greet"><div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div>' + tag + '</div>';
+}
+
+function inputHtml() {
+  const dis = Intent.matchIntent(homeInput).length ? '' : ' disabled';
+  const ph = (designId === 'paper' || designId === 'noir')
+    ? 'Tell me what happened…'
+    : 'Try "I moved" or "I started a business"…';
+  const area = (rows) => '<textarea class="p-input" id="p-freetext" rows="' + rows + '" enterkeyhint="go" placeholder=\'' + ph + '\'>' + esc(homeInput) + '</textarea>';
+  if (designId === 'paper') {
+    return '<div class="p-inputrow pr-paper">' + area(1) + '<button class="p-go" id="p-go" data-go' + dis + '>Go →</button></div>';
+  }
+  if (designId === 'noir') {
+    return '<div class="p-inputrow pr-noir"><span class="p-prompt">›</span>' + area(1) + '<button class="p-go" id="p-go" data-go' + dis + '>GO</button></div>';
+  }
+  if (designId === 'studio') {
+    return '<div class="p-inputrow pr-studio">' + area(2) + '<button class="p-go" id="p-go" data-go' + dis + '>GO</button></div>';
+  }
+  return '<div class="p-inputrow pr-sky">' + area(2) + '<button class="p-go" id="p-go" data-go' + dis + ' aria-label="Go">→</button></div>';
+}
+
+function statsHtml() {
+  const tl = Progress.buildTimeline(plans, simToday);
+  const due7 = tl.filter((e) => e.daysUntilDue >= 0 && e.daysUntilDue <= 7).length;
+  const overdue = tl.filter((e) => e.daysUntilDue < 0).length;
+  return '<div class="p-stats">' +
+    '<div class="p-stat"><b>' + plans.length + '</b><span>plans</span></div>' +
+    '<div class="p-stat"><b>' + due7 + '</b><span>due 7d</span></div>' +
+    '<div class="p-stat' + (overdue ? ' bad' : '') + '"><b>' + overdue + '</b><span>overdue</span></div></div>';
+}
+
+function sectionHead(label, n) {
+  return '<div class="p-section">' + (designId === 'studio' ? '<span class="p-num">' + String(n).padStart(2, '0') + '</span>' : '') + esc(label) + '</div>';
+}
+
+function plansHtml(sectionNo) {
+  if (!plans.length) return '';
+  let out = sectionHead('Active plans', sectionNo);
+  if (designId === 'sky') {
+    out += '<div class="p-planscroll">' + plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      const pct = Math.round(pr.fraction * 100);
+      return '<button class="p-plancard" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="p-ring" style="background:conic-gradient(var(--p-accent) ' + pct + '%, var(--p-line) 0)"><span>' + pct + '%</span></span>' +
+        '<span class="p-plancard-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        (pr.overdue
+          ? '<span class="p-plancard-ov">' + pr.overdue + ' overdue</span>'
+          : '<span class="p-plancard-ov ok">' + pr.done + '/' + pr.total + ' done</span>') +
+        '</button>';
+    }).join('') + '</div>';
+  } else if (designId === 'paper') {
+    out += plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      return '<button class="p-planline" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="pl-top"><span class="pl-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
+        '<span class="pl-count">' + pr.done + ' / ' + pr.total + (pr.overdue ? ' · <b>' + pr.overdue + ' late</b>' : '') + '</span></span>' +
+        '<span class="pl-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span></button>';
+    }).join('');
+  } else if (designId === 'noir') {
+    out += '<div class="p-card p-plansbox">' + plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      return '<button class="p-planrow2" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="pr2-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="pr2-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+        '<span class="pr2-count">' + pr.done + '/' + pr.total + '</span></button>';
+    }).join('') + '</div>';
+  } else {
+    out += plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      const segs = Array.from({ length: 10 }, (_, i) =>
+        '<i class="' + (i < Math.round(pr.fraction * 10) ? 'on' : '') + '"></i>').join('');
+      return '<button class="p-planblock" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="top"><span>' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="mono">' + pr.done + '/' + pr.total + '</span></span>' +
+        '<span class="p-segs">' + segs + '</span>' +
+        (pr.overdue ? '<span class="p-overdue">' + pr.overdue + ' overdue</span>' : '') +
+        '</button>';
+    }).join('');
+  }
+  return out;
+}
+
+function eventsHtml(startNo) {
+  const groups = Catalog.featuredByCategory();
+  let n = startNo;
+  let out = '';
+  for (const g of groups) {
+    out += sectionHead(Types.CATEGORY_LABELS[g.category], n++);
+    if (designId === 'paper') {
+      out += '<div class="p-idx">' + g.events.map((e) =>
+        '<button class="p-evlink" data-nav-intake="' + esc(e.id) + '">' + esc(e.name) + '</button>'
+      ).join('<span class="p-dot">·</span>') + '</div>';
+    } else if (designId === 'sky') {
+      out += '<div class="p-tilegrid">' + g.events.map((e) =>
+        '<button class="p-tile" data-nav-intake="' + esc(e.id) + '">' +
+        '<span class="p-tileemoji">' + e.emoji + '</span><span class="p-tilename">' + esc(e.name) + '</span></button>'
+      ).join('') + '</div>';
+    } else if (designId === 'noir') {
+      out += '<div class="p-hscroll">' + g.events.map((e) =>
+        '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>'
+      ).join('') + '</div>';
+    } else {
+      out += '<div class="p-cellgrid">' + g.events.map((e) =>
+        '<button class="p-cell" data-nav-intake="' + esc(e.id) + '">' +
+        '<span class="ce">' + e.emoji + '</span><span class="cn">' + esc(e.name) + '</span></button>'
+      ).join('') + '</div>';
+    }
+  }
+  return out;
+}
+
+function renderHome() {
+  headerEl.innerHTML = '';
+  const longTail = Catalog.EVENT_CATALOG.length -
+    Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0);
+  let sectionNo = 1;
+  let html = greetingHtml() +
     (!(profile && profile.country)
       ? '<button class="p-nudge" data-tab="profile">👤 Set up your profile — country-specific links and guidance on every task →</button>'
       : '') +
-    '<div class="p-inputrow">' +
-    '<textarea class="p-input" id="p-freetext" rows="2" enterkeyhint="go" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
-    '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
-    '</div>' +
-    '<div id="p-matches">' + matchesHtml() + '</div>';
-  // Returning users see their plans first; the catalog browser follows.
-  if (plans.length) {
-    html += '<div class="p-section">Active plans</div>';
-    for (const plan of plans) {
-      const pr = Progress.planProgress(plan, simToday);
-      html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
-        '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) +
-        (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
-        '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
-        '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
-        (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
-        '</button>';
-    }
-  }
-  html +=
-    Catalog.featuredByCategory().map((g) =>
-      '<div class="p-section">' + esc(Types.CATEGORY_LABELS[g.category]) + '</div><div class="p-chiprow">' +
-      g.events.map((e) =>
-        '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
-      '</div>').join('') +
-    '<div class="p-cataloghint">…and ' +
-    (Catalog.EVENT_CATALOG.length - Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0)) +
-    ' more events in the catalog — just describe what happened above.</div>';
+    inputHtml() +
+    '<div id="p-matches">' + matchesHtml() + '</div>' +
+    (designId === 'noir' && plans.length ? statsHtml() : '') +
+    plansHtml(sectionNo++) +
+    eventsHtml(plans.length ? sectionNo : 1) +
+    '<div class="p-cataloghint">…and ' + longTail + ' more events in the catalog — just describe what happened above.</div>';
   bodyEl.innerHTML = html;
   const ta = document.getElementById('p-freetext');
   ta.addEventListener('input', () => {
@@ -840,11 +1078,20 @@ function renderTimeline() {
 function renderTabbar() {
   const tabs = [['home', '🏠', 'Home'], ['timeline', '📅', 'Timeline'], ['profile', '👤', 'Profile'], ['settings', '⚙️', 'Settings']];
   const onTabs = tabs.some(([id]) => id === route.name);
+  tabbarEl.className = 'tabbar tb-' + designId;
   tabbarEl.style.display = onTabs ? 'flex' : 'none';
   if (!onTabs) return;
-  tabbarEl.innerHTML = tabs.map(([id, icon, label]) =>
-    '<button class="' + (route.name === id ? 'active' : '') + '" data-tab="' + id + '">' +
-    '<span class="ticon-pill"><span class="ticon">' + icon + '</span></span>' + label + '</button>').join('');
+  tabbarEl.innerHTML = tabs.map(([id, icon, label]) => {
+    const active = route.name === id ? ' active' : '';
+    if (designId === 'paper' || designId === 'studio') {
+      return '<button class="' + active + '" data-tab="' + id + '"><span class="lbl">' + label + '</span></button>';
+    }
+    if (designId === 'noir') {
+      return '<button class="' + active + '" data-tab="' + id + '" aria-label="' + label + '"><span class="ticon">' + icon + '</span></button>';
+    }
+    return '<button class="' + active + '" data-tab="' + id + '">' +
+      '<span class="ticon-pill"><span class="ticon">' + icon + '</span></span><span class="lbl">' + label + '</span></button>';
+  }).join('');
 }
 
 function renderPhone() {
