@@ -83,4 +83,11 @@ describe('event catalog integrity', () => {
     const cats = new Set(EVENT_CATALOG.map((e) => e.category));
     expect(cats).toEqual(new Set(['milestone', 'important', 'leisure']));
   });
+
+  test('the catalog has more than 200 events, few of them featured', () => {
+    expect(EVENT_CATALOG.length).toBeGreaterThan(200);
+    const featured = EVENT_CATALOG.filter((e) => e.featured === true);
+    expect(featured.length).toBeGreaterThan(0);
+    expect(featured.length).toBeLessThanOrEqual(20);
+  });
 });

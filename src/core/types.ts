@@ -21,7 +21,8 @@ export type Domain =
   | 'immigration'
   | 'business'
   | 'education'
-  | 'travel';
+  | 'travel'
+  | 'social';
 
 export const DOMAIN_LABELS: Record<Domain, string> = {
   government: 'Government records',
@@ -37,6 +38,7 @@ export const DOMAIN_LABELS: Record<Domain, string> = {
   business: 'Business',
   education: 'Education',
   travel: 'Travel & bookings',
+  social: 'Events & celebrations',
 };
 
 /**
@@ -92,6 +94,13 @@ export interface LifeEventTemplate {
   emoji: string;
   summary: string;
   category: EventCategory;
+  /** Featured events appear in the home-screen picker; the rest are reachable by typing. */
+  featured?: boolean;
+  /**
+   * Optional rule that upgrades a generated plan to milestone status based on
+   * intake answers (e.g. a 5th/10th/25th wedding anniversary).
+   */
+  isMilestone?: (answers: Record<string, string | boolean>) => boolean;
   /** Phrases and keywords used by the intent matcher. */
   triggerPhrases: string[];
   keywords: string[];
@@ -132,6 +141,8 @@ export interface Plan {
   createdAt: string;
   /** ISO date the event takes / took effect. */
   eventDate: string;
+  /** True for milestone-category events or when the template's isMilestone rule fires. */
+  milestone: boolean;
   answers: Record<string, string | boolean>;
   tasks: PlanTask[];
 }

@@ -140,13 +140,26 @@
     padding: 7px 13px; margin: 0 8px 8px 0; font-size: 13px; color: #1A1A1A;
   }
   .p-chip.sel { background: #E8F0FE; border-color: #2F6FED; color: #2F6FED; font-weight: 600; }
+  #p-matches { position: relative; height: 0; z-index: 30; }
+  .p-suggest {
+    position: absolute; top: 2px; left: 0; right: 0;
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.16); overflow: hidden;
+  }
   .p-match { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
-    background: none; border: none; padding: 8px 0; border-bottom: 1px solid #F0EFEC; }
+    background: none; border: none; padding: 10px 14px; border-bottom: 1px solid #F0EFEC; }
   .p-match:last-child { border-bottom: none; }
-  .p-match .me { font-size: 22px; }
-  .p-match .mn { font-size: 15px; font-weight: 600; color: #1A1A1A; }
-  .p-match .md { font-size: 12px; color: #6B6B6B; display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical; overflow: hidden; }
+  .p-match:hover { background: #F7F7F5; }
+  .p-match .me { font-size: 18px; }
+  .p-match .mn { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: #1A1A1A;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-match .mc { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; }
+  .mc-milestone { color: #B8860B; }
+  .mc-important { color: #2F6FED; }
+  .mc-leisure { color: #2E7D32; }
+  .p-star { color: #B8860B; font-size: 12px; font-weight: 700; }
+  .p-cataloghint { font-size: 11px; color: #6B6B6B; margin: 2px 0 10px; }
   .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
     border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -280,8 +293,9 @@
       planner, dependency graph — transpiled from the repo's TypeScript. Plans persist in this
       browser. Things worth testing:</p>
       <ul class="checklist">
-        <li>Type "I moved" (or a paraphrase) — watch match scores below</li>
+        <li>Type anything — 200+ events match as you type, with scores below</li>
         <li>Answer intake questions — Yes/No answers add/remove tasks</li>
+        <li>Try the anniversary with year 10 — the plan gets a ⭐ milestone badge</li>
         <li>Complete "Check the business name" — watch registration unblock</li>
         <li>Move the simulated date forward — Timeline turns overdue red</li>
       </ul>
@@ -355,7 +369,7 @@ const DOMAIN_COLORS = {
   government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
   employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
   legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
-  travel:'#00ACC1',
+  travel:'#00ACC1', social:'#EC407A',
 };
 const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
 const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
@@ -441,14 +455,15 @@ function taskRowHtml(task, planId, subtitle) {
 }
 
 function matchesHtml() {
-  const matches = Intent.matchIntent(homeInput).slice(0, 3);
+  const matches = Intent.matchIntent(homeInput).slice(0, 6);
   if (!matches.length) return '';
-  return '<div class="p-card"><div class="p-section" style="margin-top:0">Sounds like…</div>' +
+  return '<div class="p-suggest">' +
     matches.map((m) =>
       '<button class="p-match" data-nav-intake="' + esc(m.event.id) + '">' +
       '<span class="me">' + m.event.emoji + '</span>' +
-      '<span style="flex:1;min-width:0"><div class="mn">' + esc(m.event.name) + '</div>' +
-      '<div class="md">' + esc(m.event.summary) + '</div></span></button>'
+      '<span class="mn">' + esc(m.event.name) + '</span>' +
+      '<span class="mc mc-' + m.event.category + '">' + esc(Types.CATEGORY_LABELS[m.event.category].split(' ')[0]) + '</span>' +
+      '</button>'
     ).join('') + '</div>';
 }
 
@@ -461,17 +476,21 @@ function renderHome() {
     '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
     '</div>' +
     '<div id="p-matches">' + matchesHtml() + '</div>' +
-    Catalog.eventsByCategory().map((g) =>
+    Catalog.featuredByCategory().map((g) =>
       '<div class="p-section">' + esc(Types.CATEGORY_LABELS[g.category]) + '</div><div class="p-chiprow">' +
       g.events.map((e) =>
         '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
       '</div>').join('') +
+    '<div class="p-cataloghint">…and ' +
+    (Catalog.EVENT_CATALOG.length - Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0)) +
+    ' more events in the catalog — just describe what happened above.</div>' +
     '<div class="p-section">Active plans</div>';
   if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
   for (const plan of plans) {
     const pr = Progress.planProgress(plan, simToday);
     html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
-      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) + '</span>' +
+      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) +
+      (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
       '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
       '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
       (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
@@ -536,6 +555,7 @@ function renderPlan() {
   const pr = Progress.planProgress(plan, simToday);
   const groups = Progress.groupByDomain(plan);
   let html = '<h1 class="p-h1" style="font-size:22px">' + plan.emoji + ' ' + esc(plan.eventName) + '</h1>' +
+    (plan.milestone ? '<div class="p-star" style="margin-top:2px">⭐ Milestone</div>' : '') +
     '<p class="p-sub" style="font-size:12px">Event date ' + plan.eventDate + ' · ' + pr.done + '/' + pr.total + ' done' +
     (pr.overdue ? ' · <b style="color:#C62828">' + pr.overdue + ' overdue</b>' : '') + '</p>' +
     '<div class="p-progress" style="margin-bottom:16px"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></div>';
@@ -724,14 +744,16 @@ const SCENARIOS = [
   'I started a business',
   'I want to immigrate to Canada',
   'i graduated college',
-  'I turned 18',
+  "i planned my son's 5th birthday party",
+  'planned my marriage anniversary',
   'I got a new job',
   'I was laid off',
   'I bought a house',
   'I retired',
   'I planned a family trip to Europe',
   'we adopted a puppy',
-  'renovating the kitchen',
+  'my identity was stolen',
+  'training for a triathlon',
 ];
 const scEl = document.getElementById('scenarios');
 for (const s of SCENARIOS) {

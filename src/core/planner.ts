@@ -88,6 +88,9 @@ export function generatePlan(input: GeneratePlanInput): Plan {
     emoji: template.emoji,
     createdAt: input.createdAt ?? new Date().toISOString(),
     eventDate,
+    milestone:
+      template.category === 'milestone' ||
+      (template.isMilestone ? template.isMilestone(answers) === true : false),
     answers,
     tasks,
   };

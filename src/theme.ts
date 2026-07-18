@@ -30,6 +30,7 @@ export const domainColors: Record<Domain, string> = {
   business: '#FB8C00',
   education: '#3949AB',
   travel: '#00ACC1',
+  social: '#EC407A',
 };
 
 export const priorityLabels: Record<Priority, string> = {

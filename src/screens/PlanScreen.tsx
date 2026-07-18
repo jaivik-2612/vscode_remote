@@ -48,6 +48,7 @@ export default function PlanScreen() {
       <Text style={styles.planTitle}>
         {plan.emoji} {plan.eventName}
       </Text>
+      {plan.milestone && <Text style={styles.milestoneBadge}>⭐ Milestone</Text>}
       <Text style={styles.planMeta}>
         Event date {plan.eventDate} · {progress.done}/{progress.total} done
         {progress.overdue > 0 ? ` · ${progress.overdue} overdue` : ''}
@@ -90,6 +91,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
   planTitle: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: spacing.sm },
   planMeta: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs },
+  milestoneBadge: { fontSize: 12, fontWeight: '700', color: '#B8860B', marginTop: spacing.xs },
   groupHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.xs },
   groupDot: { width: 12, height: 12, borderRadius: 6, marginRight: spacing.sm },
   groupLabel: { flex: 1, fontSize: 16, fontWeight: '700', color: colors.text },

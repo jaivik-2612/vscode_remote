@@ -7,6 +7,7 @@ export const newJob: LifeEventTemplate = {
   name: 'I got a new job',
   emoji: '💼',
   category: 'important',
+  featured: true,
   summary:
     'The first month at a new employer is full of one-shot windows: benefits enrollment, retirement matching, and moving money and coverage over from the old job.',
   triggerPhrases: [
@@ -110,6 +111,7 @@ export const lostJob: LifeEventTemplate = {
   name: 'I lost my job',
   emoji: '📉',
   category: 'important',
+  featured: true,
   summary:
     'The week after a job ends is deadline-dense: unemployment claims, health coverage continuation and severance review all have short windows.',
   triggerPhrases: [
@@ -203,6 +205,7 @@ export const boughtCar: LifeEventTemplate = {
   name: 'I bought a car',
   emoji: '🚗',
   category: 'important',
+  featured: true,
   summary:
     'A car is only legally yours to drive once insurance, title and registration line up — each with its own office and deadline.',
   triggerPhrases: [
@@ -291,6 +294,7 @@ export const lovedOnePassed: LifeEventTemplate = {
   name: 'A loved one passed away',
   emoji: '🕊️',
   category: 'important',
+  featured: true,
   summary:
     'Grief comes with a case file no one warns you about. This plan sequences the administration — certificates, agencies, accounts, estate — so nothing urgent is missed.',
   triggerPhrases: [

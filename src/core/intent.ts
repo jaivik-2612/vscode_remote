@@ -21,7 +21,8 @@ function tokenize(text: string): string[] {
   return normalize(text).split(' ').filter(Boolean);
 }
 
-const PHRASE_SCORE = 10;
+/** Per-word so longer, more specific phrases outrank short generic ones. */
+const PHRASE_WORD_SCORE = 10;
 const KEYWORD_SCORE = 2;
 
 function scoreEvent(input: string, event: LifeEventTemplate): IntentMatch {
@@ -31,8 +32,9 @@ function scoreEvent(input: string, event: LifeEventTemplate): IntentMatch {
   const matchedOn: string[] = [];
 
   for (const phrase of event.triggerPhrases) {
-    if (norm.includes(normalize(phrase))) {
-      score += PHRASE_SCORE;
+    const normPhrase = normalize(phrase);
+    if (norm.includes(normPhrase)) {
+      score += PHRASE_WORD_SCORE * normPhrase.split(' ').length;
       matchedOn.push(phrase);
     }
   }

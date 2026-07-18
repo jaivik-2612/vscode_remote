@@ -7,6 +7,7 @@ export const tripAbroad: LifeEventTemplate = {
   name: 'I planned a trip abroad',
   emoji: '✈️',
   category: 'leisure',
+  featured: true,
   summary:
     'International travel has an admin critical path — passports, visas, insurance, money and the house you leave behind — and most of it has lead times.',
   triggerPhrases: [
@@ -130,6 +131,7 @@ export const newPet: LifeEventTemplate = {
   name: 'We got a pet',
   emoji: '🐶',
   category: 'leisure',
+  featured: true,
   summary:
     'A new pet comes with a small legal identity of its own: registration, vaccinations, insurance and a vet relationship.',
   triggerPhrases: [
@@ -218,6 +220,7 @@ export const homeRenovation: LifeEventTemplate = {
   name: "I'm renovating my home",
   emoji: '🔨',
   category: 'leisure',
+  featured: true,
   summary:
     'Renovation is a construction project with your name on the permits: scope, contractors, municipal approval and insurance all before the first wall opens.',
   triggerPhrases: [

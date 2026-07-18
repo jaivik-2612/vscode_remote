@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { matchIntent } from '../core/intent';
-import { eventsByCategory } from '../core/templates';
+import { EVENT_CATALOG, featuredByCategory } from '../core/templates';
 import { CATEGORY_LABELS } from '../core/types';
 import { planProgress } from '../core/progress';
 import { RootStackParamList } from '../navigation';
@@ -32,7 +32,7 @@ export default function HomeScreen() {
   const [input, setInput] = useState('');
   const today = todayIso();
 
-  const matches = useMemo(() => matchIntent(input).slice(0, 3), [input]);
+  const matches = useMemo(() => matchIntent(input).slice(0, 6), [input]);
 
   const goToBest = () => {
     const top = matches[0];
@@ -74,8 +74,7 @@ export default function HomeScreen() {
         </View>
 
         {matches.length > 0 && (
-          <Card>
-            <Text style={styles.sectionTitle}>Sounds like…</Text>
+          <Card style={{ paddingVertical: 4 }}>
             {matches.map((m) => (
               <TouchableOpacity
                 key={m.event.id}
@@ -83,18 +82,18 @@ export default function HomeScreen() {
                 onPress={() => navigation.navigate('Intake', { eventId: m.event.id })}
               >
                 <Text style={styles.matchEmoji}>{m.event.emoji}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.matchName}>{m.event.name}</Text>
-                  <Text style={styles.matchDetail} numberOfLines={2}>
-                    {m.event.summary}
-                  </Text>
-                </View>
+                <Text style={styles.matchName} numberOfLines={1}>
+                  {m.event.name}
+                </Text>
+                <Text style={[styles.matchCategory, categoryStyle[m.event.category]]}>
+                  {CATEGORY_LABELS[m.event.category].split(' ')[0]}
+                </Text>
               </TouchableOpacity>
             ))}
           </Card>
         )}
 
-        {eventsByCategory().map((group) => (
+        {featuredByCategory().map((group) => (
           <View key={group.category}>
             <Text style={styles.sectionTitle}>{CATEGORY_LABELS[group.category]}</Text>
             <View style={styles.chipWrap}>
@@ -108,6 +107,10 @@ export default function HomeScreen() {
             </View>
           </View>
         ))}
+        <Text style={styles.catalogHint}>
+          …and {EVENT_CATALOG.length - featuredByCategory().reduce((n, g) => n + g.events.length, 0)}{' '}
+          more events in the catalog — just describe what happened above.
+        </Text>
 
         <Text style={styles.sectionTitle}>Active plans</Text>
         {state.plans.length === 0 && (
@@ -124,6 +127,7 @@ export default function HomeScreen() {
                 <View style={styles.planHeader}>
                   <Text style={styles.planName}>
                     {plan.emoji} {plan.eventName}
+                    {plan.milestone ? '  ⭐' : ''}
                   </Text>
                   <Text style={styles.planMeta}>
                     {progress.done}/{progress.total}
@@ -144,6 +148,12 @@ export default function HomeScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const categoryStyle = StyleSheet.create({
+  milestone: { color: '#B8860B' },
+  important: { color: colors.accent },
+  leisure: { color: colors.success },
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
@@ -190,9 +200,15 @@ const styles = StyleSheet.create({
   },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
   matchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
-  matchEmoji: { fontSize: 24, marginRight: spacing.sm },
-  matchName: { fontSize: 16, fontWeight: '600', color: colors.text },
-  matchDetail: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  matchEmoji: { fontSize: 20, marginRight: spacing.sm },
+  matchName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
+  matchCategory: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  catalogHint: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
   empty: { color: colors.textSecondary, fontSize: 14, marginBottom: spacing.md },
   planHeader: {
     flexDirection: 'row',

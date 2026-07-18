@@ -16,11 +16,16 @@ describe('intent matching', () => {
   });
 
   test('paraphrases still match via keywords', () => {
-    expect(bestMatch('just signed a lease on a new apartment across town')?.event.id).toBe('moved');
+    // Ambiguous between moving and a first apartment — both should surface.
+    const leaseIds = matchIntent('just signed a lease on a new apartment across town')
+      .slice(0, 3)
+      .map((m) => m.event.id);
+    expect(leaseIds).toContain('moved');
     expect(bestMatch('thinking about getting canadian permanent residence')?.event.id).toBe(
       'immigrate-canada'
     );
-    expect(bestMatch('going freelance and forming an LLC')?.event.id).toBe('started-business');
+    expect(bestMatch('incorporating an LLC for my new company')?.event.id).toBe('started-business');
+    expect(bestMatch('going freelance full time')?.event.id).toBe('started-freelancing');
   });
 
   test('phrase matches outrank keyword-only matches', () => {
@@ -52,6 +57,17 @@ describe('intent matching', () => {
     expect(bestMatch('I planned a family trip to Europe')?.event.id).toBe('trip-abroad');
     expect(bestMatch('we adopted a puppy')?.event.id).toBe('new-pet');
     expect(bestMatch('renovating the kitchen this fall')?.event.id).toBe('home-renovation');
+  });
+
+  test("the long tail matches: birthday party, anniversary, and friends", () => {
+    expect(bestMatch("i planned my son's 5th birthday party")?.event.id).toBe('kids-birthday-party');
+    expect(bestMatch('planned my marriage anniversary')?.event.id).toBe('wedding-anniversary');
+    expect(bestMatch('I lost my wallet yesterday')?.event.id).toBe('lost-wallet');
+    expect(bestMatch('we are hosting thanksgiving this year')?.event.id).toBe('holiday-hosting');
+    expect(bestMatch('getting scuba certified')?.event.id).toBe('scuba');
+    expect(bestMatch('my passport needs renewing')?.event.id).toBe('passport-renewal');
+    expect(bestMatch('planning our honeymoon')?.event.id).toBe('honeymoon');
+    expect(bestMatch('i turned 30 last week')?.event.id).toBe('turned-30');
   });
 
   test('unrelated input matches nothing', () => {

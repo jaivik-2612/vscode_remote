@@ -140,13 +140,26 @@
     padding: 7px 13px; margin: 0 8px 8px 0; font-size: 13px; color: #1A1A1A;
   }
   .p-chip.sel { background: #E8F0FE; border-color: #2F6FED; color: #2F6FED; font-weight: 600; }
+  #p-matches { position: relative; height: 0; z-index: 30; }
+  .p-suggest {
+    position: absolute; top: 2px; left: 0; right: 0;
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.16); overflow: hidden;
+  }
   .p-match { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
-    background: none; border: none; padding: 8px 0; border-bottom: 1px solid #F0EFEC; }
+    background: none; border: none; padding: 10px 14px; border-bottom: 1px solid #F0EFEC; }
   .p-match:last-child { border-bottom: none; }
-  .p-match .me { font-size: 22px; }
-  .p-match .mn { font-size: 15px; font-weight: 600; color: #1A1A1A; }
-  .p-match .md { font-size: 12px; color: #6B6B6B; display: -webkit-box; -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical; overflow: hidden; }
+  .p-match:hover { background: #F7F7F5; }
+  .p-match .me { font-size: 18px; }
+  .p-match .mn { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: #1A1A1A;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-match .mc { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; }
+  .mc-milestone { color: #B8860B; }
+  .mc-important { color: #2F6FED; }
+  .mc-leisure { color: #2E7D32; }
+  .p-star { color: #B8860B; font-size: 12px; font-weight: 700; }
+  .p-cataloghint { font-size: 11px; color: #6B6B6B; margin: 2px 0 10px; }
   .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
     border-radius: 14px; padding: 14px; margin-bottom: 12px; }
   .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -280,8 +293,9 @@
       planner, dependency graph — transpiled from the repo's TypeScript. Plans persist in this
       browser. Things worth testing:</p>
       <ul class="checklist">
-        <li>Type "I moved" (or a paraphrase) — watch match scores below</li>
+        <li>Type anything — 200+ events match as you type, with scores below</li>
         <li>Answer intake questions — Yes/No answers add/remove tasks</li>
+        <li>Try the anniversary with year 10 — the plan gets a ⭐ milestone badge</li>
         <li>Complete "Check the business name" — watch registration unblock</li>
         <li>Move the simulated date forward — Timeline turns overdue red</li>
       </ul>
@@ -364,7 +378,8 @@ function normalize(text) {
 function tokenize(text) {
     return normalize(text).split(' ').filter(Boolean);
 }
-const PHRASE_SCORE = 10;
+/** Per-word so longer, more specific phrases outrank short generic ones. */
+const PHRASE_WORD_SCORE = 10;
 const KEYWORD_SCORE = 2;
 function scoreEvent(input, event) {
     const norm = normalize(input);
@@ -372,8 +387,9 @@ function scoreEvent(input, event) {
     let score = 0;
     const matchedOn = [];
     for (const phrase of event.triggerPhrases) {
-        if (norm.includes(normalize(phrase))) {
-            score += PHRASE_SCORE;
+        const normPhrase = normalize(phrase);
+        if (norm.includes(normPhrase)) {
+            score += PHRASE_WORD_SCORE * normPhrase.split(' ').length;
             matchedOn.push(phrase);
         }
     }
@@ -470,6 +486,8 @@ function generatePlan(input) {
         emoji: template.emoji,
         createdAt: input.createdAt ?? new Date().toISOString(),
         eventDate,
+        milestone: template.category === 'milestone' ||
+            (template.isMilestone ? template.isMilestone(answers) === true : false),
         answers,
         tasks,
     };
@@ -557,6 +575,793 @@ function buildTimeline(plans, todayIso) {
 exports.buildTimeline = buildTimeline;
 
 });
+__define("templates/builder", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.birthday = exports.renting = exports.sport = exports.emergency = exports.lossRecovery = exports.digital = exports.licence = exports.hobby = exports.care = exports.finance = exports.homeProject = exports.career = exports.legal = exports.enrollment = exports.medical = exports.application = exports.purchase = exports.trip = exports.kidParty = exports.celebration = exports.E = void 0;
+function expand(eventId, specs) {
+    return specs.map(([id, title, description, domain, priority, start, due, deps, docs]) => ({
+        id: `${eventId}.${id}`,
+        title,
+        description,
+        domain,
+        priority,
+        startOffsetDays: start,
+        dueOffsetDays: due,
+        dependsOn: deps?.map((d) => `${eventId}.${d}`),
+        documents: docs,
+    }));
+}
+function E(spec) {
+    const questions = spec.questions ? [...spec.questions] : [];
+    if (!questions.some((q) => q.kind === 'date')) {
+        questions.unshift({ id: 'event_date', prompt: 'When is (was) it?', kind: 'date' });
+    }
+    return {
+        id: spec.id,
+        name: spec.name,
+        emoji: spec.emoji,
+        category: spec.category,
+        featured: spec.featured ?? false,
+        isMilestone: spec.isMilestone,
+        summary: spec.summary ??
+            `A coordinated checklist for this: budget, bookings, paperwork and deadlines, in the order they depend on each other.`,
+        triggerPhrases: spec.phrases,
+        keywords: spec.keywords,
+        questions,
+        tasks: expand(spec.id, spec.tasks),
+    };
+}
+exports.E = E;
+/* ============ archetype task packs ============ */
+/** Parties and ceremonies. */
+function celebration(s) {
+    return [
+        ['plan', `Set the date, budget and guest list for ${s}`, `Everything else hangs off these three decisions — lock them first.`, 'finance', 'critical', -60, -45],
+        ['venue', `Book the venue or prepare the space`, `Popular venues and weekends book out far ahead; confirm capacity, deposit and cancellation terms in writing.`, 'social', 'high', -45, -30, ['plan']],
+        ['invites', `Send invitations and track RSVPs`, `Send early enough for people to plan; keep one list of RSVPs, dietary needs and plus-ones.`, 'social', 'high', -30, -14, ['venue']],
+        ['catering', `Arrange food, drinks and the cake`, `Confirm final headcount with caterers about a week out; ask guests about allergies before fixing the menu.`, 'social', 'high', -21, -7, ['plan']],
+        ['program', `Plan the program, music and photos`, `Decide the running order, who speaks, and who is capturing photos so the day runs itself.`, 'social', 'medium', -21, -7],
+        ['runsheet', `Confirm all vendors and write the day-of run sheet`, `One page: times, contacts, deliveries, and who is responsible for what.`, 'social', 'medium', -7, -1, ['invites']],
+    ];
+}
+exports.celebration = celebration;
+/** Children's parties — celebration plus kid-specific safety. */
+function kidParty(s) {
+    return [
+        ['plan', `Pick the date, theme and budget for ${s}`, `Check the school and sports calendar for clashes, agree the guest list with your kid, and set the budget.`, 'finance', 'critical', -45, -30],
+        ['venue', `Book the venue or plan the home setup`, `Party venues for popular weekend slots go fast; for home parties plan the space, weather backup and seating.`, 'social', 'high', -30, -21, ['plan']],
+        ['invites', `Send invitations and track RSVPs`, `Via the class group or parents directly; collect RSVPs and each child's pickup arrangements.`, 'social', 'high', -21, -10, ['venue']],
+        ['allergies', `Collect allergies and dietary needs from parents`, `Nut allergies and intolerances are common — ask every parent explicitly, and plan the menu around the answers.`, 'health', 'critical', -14, -7, ['invites']],
+        ['food_cake', `Order the cake and plan food and favors`, `Order the cake a week ahead; keep food simple and label anything allergen-relevant.`, 'social', 'high', -10, -3, ['allergies']],
+        ['activities', `Plan activities, entertainment and supervision`, `Age-appropriate games or an entertainer, plus enough adults for supervision and a first-aid kit on hand.`, 'social', 'medium', -14, -2],
+    ];
+}
+exports.kidParty = kidParty;
+/** Trips; abroad adds documents & insurance. */
+function trip(s, abroad) {
+    const base = [
+        ['plan', `Set dates, budget and destination details for ${s}`, `Fix the dates with everyone traveling, set the budget, and check seasonal factors (weather, peak pricing, closures).`, 'travel', 'critical', -60, -45],
+        ['book', `Book transport and accommodation`, `Book with names matching ID documents exactly, and keep confirmations in one place.`, 'travel', 'critical', -45, -21, ['plan']],
+        ['activities', `Reserve key activities and local transport`, `The things that sell out — tours, restaurants, rental cars, park passes — get booked now, the rest stays flexible.`, 'travel', 'medium', -21, -7, ['book']],
+        ['home_prep', `Prepare the home front`, `Mail hold, plants, pets, deliveries paused, and someone with a key who knows you're away.`, 'housing', 'medium', -14, -1],
+    ];
+    if (abroad) {
+        base.splice(1, 0, ['docs', `Check passports, visas and entry rules`, `Six months passport validity, visas or e-authorizations for every traveler, and entry requirements for each country on the route.`, 'government', 'critical', -75, -30, ['plan']], ['insurance', `Get travel and medical insurance`, `Domestic health coverage usually stops at the border — cover medical, cancellation and baggage.`, 'insurance', 'high', -30, -14, ['plan']]);
+    }
+    return base;
+}
+exports.trip = trip;
+/** Significant purchases. */
+function purchase(s, opts) {
+    const t = [
+        ['research', `Research and compare options for ${s}`, `Set requirements, compare models/providers and total cost of ownership, and read the fine print before deciding.`, 'finance', 'high', -30, -14],
+        ['budget', `Confirm the budget and how you'll pay`, `Cash, financing or lease — settle it before negotiating, and leave room for the costs that follow the purchase.`, 'finance', 'high', -21, -7, ['research']],
+        ['buy', `Complete the purchase and keep the paperwork`, `Invoice, warranty registration and receipts filed where you can find them — warranty claims die on missing paperwork.`, 'finance', 'critical', 0, 7, ['budget']],
+        ['setup', `Set up, install and learn the essentials`, `Do the setup properly once: installation, safety basics, and any manufacturer registration for recalls.`, 'housing', 'medium', 0, 21, ['buy']],
+    ];
+    if (opts?.insure)
+        t.push(['insure', `Insure it or add it to an existing policy`, `Check whether home/contents coverage already applies or a rider is needed.`, 'insurance', 'high', 0, 14, ['buy']]);
+    if (opts?.register)
+        t.push(['register', `Register it with the relevant authority`, `Registration deadlines are typically 10–30 days with late fees after.`, 'government', 'high', 0, 30, ['buy']]);
+    return t;
+}
+exports.purchase = purchase;
+/** Government / institutional applications. */
+function application(s, authority) {
+    return [
+        ['eligibility', `Confirm eligibility and requirements for ${s}`, `Read the current official requirements — rules and fees change, and secondhand advice ages badly.`, 'government', 'critical', -30, -21],
+        ['documents', `Gather the required documents`, `Work from the official checklist; order anything with lead time (certificates, translations, photos) first.`, 'government', 'critical', -21, -7, ['eligibility']],
+        ['submit', `Complete and submit the application`, `Answer exactly and consistently with your documents; keep a full copy of what you submitted.`, 'government', 'critical', 0, 7, ['documents'], ['Application forms', 'Supporting documents', 'Fee payment']],
+        ['track', `Track status and respond to requests fast`, `Requests for more information have short response windows — check the portal or mail regularly.`, 'government', 'high', 7, 60, ['submit']],
+        ['store', `Store the result with your key documents`, `The approval/licence/certificate joins your permanent records; note any renewal date.`, 'legal', 'low', 30, 90, ['track']],
+    ];
+}
+exports.application = application;
+/** Medical procedures and treatments. */
+function medical(s) {
+    return [
+        ['consult', `Get the consultation and referral for ${s}`, `Understand options, risks and recovery time; get the referral chain your insurer requires.`, 'health', 'critical', -30, -14],
+        ['approval', `Confirm insurance coverage / pre-approval`, `Pre-authorization requirements are strict — confirm in writing what is covered and what you'll owe.`, 'insurance', 'critical', -21, -7, ['consult']],
+        ['schedule', `Schedule it and follow the prep instructions`, `Book the date, arrange transport home if needed, and follow pre-procedure instructions exactly.`, 'health', 'critical', -14, -1, ['approval']],
+        ['work', `Arrange time off and support`, `Sick leave or accommodations with your employer, and help at home for the recovery window.`, 'employment', 'high', -14, -1],
+        ['recovery', `Manage recovery, follow-ups and claims`, `Follow-up appointments, prescriptions, and submitting/tracking the insurance claims.`, 'health', 'high', 0, 30, ['schedule']],
+    ];
+}
+exports.medical = medical;
+/** Courses, programs, school enrollment. */
+function enrollment(s) {
+    return [
+        ['research', `Research programs and requirements for ${s}`, `Compare programs, deadlines, costs and prerequisites; talk to people who've done it.`, 'education', 'high', -90, -60],
+        ['apply', `Apply with all required documents`, `Applications, transcripts, references and test scores — submitted before the deadline with copies kept.`, 'education', 'critical', -60, -30, ['research']],
+        ['funding', `Sort funding, aid or payment plans`, `Scholarships, aid applications and payment schedules have their own deadlines, usually earlier than you think.`, 'finance', 'high', -45, -14, ['research']],
+        ['confirm', `Accept, register and confirm the start`, `Accept the offer, register for the schedule, and complete any orientation requirements.`, 'education', 'critical', -14, 0, ['apply']],
+        ['logistics', `Sort day-one logistics`, `Transport or parking, materials and equipment, and the calendar for the term.`, 'education', 'medium', -14, 7, ['confirm']],
+    ];
+}
+exports.enrollment = enrollment;
+/** Legal processes. */
+function legal(s) {
+    return [
+        ['collect', `Collect every document related to ${s}`, `Contracts, correspondence, records and evidence — organized chronologically before anyone bills you by the hour.`, 'legal', 'critical', 0, 14],
+        ['advice', `Get qualified legal advice`, `A focused consultation with the documents prepared; understand your options, costs and deadlines.`, 'legal', 'high', 7, 30, ['collect']],
+        ['file', `File / execute the required paperwork`, `Court filings, notarizations or registrations done correctly the first time — rejected filings cost weeks.`, 'legal', 'critical', 14, 45, ['advice']],
+        ['deadlines', `Calendar every legal deadline`, `Response windows, hearing dates and limitation periods, with reminders well ahead of each.`, 'legal', 'high', 14, 60, ['file']],
+        ['records', `Keep the complete record`, `Everything filed and received, stored where you can produce it years later.`, 'legal', 'medium', 30, 90],
+    ];
+}
+exports.legal = legal;
+/** Job and career transitions. */
+function career(s) {
+    return [
+        ['documents', `Update your professional documents for ${s}`, `Résumé, portfolio and profiles current and consistent; references warned and willing.`, 'employment', 'high', -30, -14],
+        ['process', `Work the process: applications, interviews, negotiation`, `Track every application and conversation; negotiate before accepting — leverage disappears after.`, 'employment', 'critical', -30, 0, ['documents']],
+        ['transition', `Handle the transition professionally`, `Proper notice, clean handover, and exit paperwork (final pay, unused leave, references) in writing.`, 'employment', 'critical', -14, 7],
+        ['money', `Update pay, benefits and retirement contributions`, `New direct deposit, benefit elections within their windows, and retirement contributions restarted.`, 'finance', 'high', 0, 30, ['transition']],
+        ['tax', `Check the tax withholding consequences`, `Mid-year changes routinely under- or over-withhold — check and adjust.`, 'tax', 'medium', 0, 60, ['money']],
+    ];
+}
+exports.career = career;
+/** Home improvement projects. */
+function homeProject(s, permits) {
+    const t = [
+        ['scope', `Fix the scope and budget for ${s}`, `Written scope, itemized budget, and 15–20% contingency — every later decision points back here.`, 'finance', 'critical', -45, -30],
+        ['quotes', `Get quotes / plan the work`, `Three comparable quotes from licensed, insured people — or a realistic DIY plan with materials list.`, 'legal', 'high', -30, -14, ['scope']],
+        ['insurer', `Check your home insurance implications`, `Significant work can need disclosure or a rider; the finished value may change the policy.`, 'insurance', 'medium', -21, -7],
+        ['execute', `Schedule and oversee the work`, `Milestone-based payments, progress checks, and snag list before final payment.`, 'housing', 'high', 0, 60, ['quotes']],
+    ];
+    if (permits)
+        t.splice(2, 0, ['permits', `Get the required permits`, `Structural, electrical and plumbing work usually needs municipal permits; unpermitted work resurfaces at sale time.`, 'legal', 'critical', -30, -7, ['scope']]);
+    return t;
+}
+exports.homeProject = homeProject;
+/** Financial setups and changes. */
+function finance(s) {
+    return [
+        ['assess', `Assess your current position for ${s}`, `Numbers on paper: balances, rates, terms, obligations. Decisions improve when the facts are in one place.`, 'finance', 'high', 0, 14],
+        ['compare', `Compare options and decide`, `Providers, rates, fees and exit terms compared like-for-like before committing.`, 'finance', 'high', 7, 30, ['assess']],
+        ['paperwork', `Complete the paperwork and switch`, `Applications, transfers and account changes executed and confirmed in writing.`, 'finance', 'critical', 21, 45, ['compare']],
+        ['update', `Update autopays, beneficiaries and records`, `Everything pointing at the old arrangement — payments, deposits, beneficiaries — repointed at the new one.`, 'finance', 'high', 30, 60, ['paperwork']],
+        ['verify', `Verify the first full cycle`, `Check the first statement/payment cycle end-to-end; this is where setup errors surface.`, 'finance', 'medium', 45, 90, ['update']],
+    ];
+}
+exports.finance = finance;
+/** Care arrangements (family members, health situations, habits). */
+function care(s) {
+    return [
+        ['assess', `Assess the needs and situation for ${s}`, `An honest inventory of needs, capabilities, and what support already exists.`, 'health', 'critical', 0, 14],
+        ['providers', `Find and vet providers or programs`, `Compare options, check references and credentials, and visit before committing.`, 'health', 'high', 7, 30, ['assess']],
+        ['legal_docs', `Put the legal documents in place`, `Consents, powers of attorney, or care agreements — the paperwork that lets you act when needed.`, 'legal', 'high', 14, 60, ['assess']],
+        ['funding', `Sort funding, benefits and insurance`, `What insurance covers, what benefits exist, and what you'll pay — applications in early.`, 'government', 'high', 14, 60, ['assess']],
+        ['schedule', `Set the schedule and review rhythm`, `Who does what, when — and a regular check that the arrangement still fits the need.`, 'health', 'medium', 30, 90, ['providers']],
+    ];
+}
+exports.care = care;
+/** Hobbies, classes, memberships. */
+function hobby(s) {
+    return [
+        ['research', `Choose where and how to start ${s}`, `Classes, clubs or self-taught — compare cost, schedule and level; ask to trial before committing.`, 'education', 'high', -14, 0],
+        ['gear', `Get the starter gear or supplies`, `Buy the beginner tier, borrow or rent where possible — upgrade only once you know you'll stick with it.`, 'finance', 'medium', -14, 7],
+        ['signup', `Sign up and handle the paperwork`, `Membership, waivers and payment schedule; note the cancellation terms.`, 'education', 'high', -7, 7, ['research']],
+        ['schedule', `Protect the time in your calendar`, `A recurring slot you defend — the habit is the actual project.`, 'education', 'medium', 0, 21, ['signup']],
+    ];
+}
+exports.hobby = hobby;
+/** Licences and certifications (drone, scuba, pilot, hunting…). */
+function licence(s, authority) {
+    return [
+        ['requirements', `Learn the legal requirements for ${s}`, `Age, training hours, exams, and where it's valid — from the authority's current official source.`, 'government', 'high', -30, -14],
+        ['training', `Complete the required training or study`, `Book the course or study program and put the hours in before the exam.`, 'education', 'high', -30, 0, ['requirements']],
+        ['exam', `Pass the exam / assessment and apply`, `Sit the test, submit the application with documents and fees.`, 'government', 'critical', 0, 14, ['training'], ['ID', 'Training certificate', 'Fee payment']],
+        ['maintain', `Note renewal dates and usage rules`, `Renewal cycles, logbooks and where/how you may legally use it — calendar the renewal now.`, 'government', 'low', 14, 60, ['exam']],
+    ];
+}
+exports.licence = licence;
+/** Digital projects (content, accounts, tech setups). */
+function digital(s) {
+    return [
+        ['plan', `Plan the setup for ${s}`, `What you're making, which platform/tools, and the naming that you'll live with.`, 'utilities', 'high', -14, 0],
+        ['setup', `Set up accounts, tools and equipment`, `Accounts registered, tools configured, and the workspace or equipment ready.`, 'utilities', 'critical', 0, 14, ['plan']],
+        ['security', `Lock down security and ownership`, `Unique passwords, 2FA, recovery emails you control, and clarity on who owns what.`, 'utilities', 'high', 0, 14, ['setup']],
+        ['launch', `Publish / go live and set the rhythm`, `Ship the first thing and set a sustainable schedule; backups and analytics from day one.`, 'utilities', 'medium', 14, 45, ['setup']],
+    ];
+}
+exports.digital = digital;
+/** Lost/stolen documents, cards, devices, identity. */
+function lossRecovery(s) {
+    return [
+        ['report', `Report ${s} to the police / issuing authority`, `The report number unlocks replacements and disputes — file it first, even for small losses.`, 'government', 'critical', 0, 2],
+        ['block', `Block, freeze and lock everything exposed`, `Cards cancelled, accounts frozen, devices remotely locked, passwords rotated — within hours, not days.`, 'finance', 'critical', 0, 2],
+        ['replace', `Order replacements`, `Replacement documents/cards/devices, with the police report attached where it speeds things up.`, 'government', 'critical', 2, 21, ['report']],
+        ['monitor', `Monitor for fraud for the next 60 days`, `Statements, credit report and unfamiliar account activity — dispute anything unrecognized immediately.`, 'finance', 'high', 2, 60, ['block']],
+    ];
+}
+exports.lossRecovery = lossRecovery;
+/** Home emergencies: fire, flood, burglary, disaster. */
+function emergency(s) {
+    return [
+        ['secure', `Make the property safe and prevent further damage`, `Safety first, then mitigation (board up, shut off water/power, dry out) — insurers expect reasonable mitigation.`, 'housing', 'critical', 0, 2],
+        ['document', `Document everything before touching anything`, `Photos, video and an inventory of damage/losses — the claim is built on this evidence.`, 'legal', 'critical', 0, 3],
+        ['claim', `Open the insurance claim`, `Notify the insurer immediately, get the claim number, and log every conversation.`, 'insurance', 'critical', 0, 14, ['document']],
+        ['restore', `Arrange repairs and restoration`, `Approved contractors, itemized quotes, and insurer sign-off before major work.`, 'housing', 'high', 7, 60, ['claim']],
+        ['prevent', `Reduce the odds of a repeat`, `Alarms, detectors, locks, drainage — whatever addresses this event's root cause.`, 'housing', 'medium', 30, 90],
+    ];
+}
+exports.emergency = emergency;
+/** Athletic events and training goals. */
+function sport(s) {
+    return [
+        ['register', `Register for ${s}`, `Spots and early-bird pricing go first; registration usually requires a waiver and sometimes a medical certificate.`, 'social', 'critical', -120, -90],
+        ['medical', `Get the medical green light`, `A check-up appropriate to the effort, especially if you're new to this volume of training.`, 'health', 'high', -120, -90],
+        ['train', `Follow a structured training plan`, `A progressive plan with rest weeks; the plan is what gets you to the start line uninjured.`, 'health', 'critical', -90, -7, ['medical']],
+        ['gear', `Sort gear, nutrition and logistics`, `Nothing new on event day — gear and nutrition tested in training; travel and bib pickup planned.`, 'travel', 'medium', -30, -7, ['register']],
+    ];
+}
+exports.sport = sport;
+/** Renting a home. */
+function renting(s) {
+    return [
+        ['search', `Search and view places for ${s}`, `Set the budget ceiling (rent plus utilities plus insurance), shortlist, and view with a checklist.`, 'housing', 'critical', -60, -30],
+        ['apply', `Apply with your documents ready`, `Income proof, references and ID ready to go — good places go to the first complete application.`, 'housing', 'critical', -30, -14, ['search'], ['Income proof', 'References', 'ID']],
+        ['lease', `Read and sign the lease carefully`, `Term, notice period, deposit terms and what you're liable for — photographed condition report before moving in.`, 'legal', 'critical', -14, 0, ['apply']],
+        ['insurance', `Get renter's/contents insurance`, `Often required by the lease; cheap relative to what it covers.`, 'insurance', 'high', -14, 0, ['lease']],
+        ['setup', `Set up utilities and services`, `Electricity, internet and anything not included in rent, active from day one.`, 'utilities', 'high', -14, 7, ['lease']],
+    ];
+}
+exports.renting = renting;
+/** Decade birthdays and age milestones. */
+function birthday(age, financeNote, healthNote) {
+    return [
+        ['celebrate', `Plan the ${age}th birthday celebration`, `However you mark it — party, trip or dinner — decide and book it early enough to do it well.`, 'social', 'medium', -45, -7],
+        ['documents', `Check documents and renewals around this birthday`, `IDs, passports, licences and any age-linked registrations that expire or change around this age.`, 'government', 'medium', -30, 30],
+        ['money', `Do the ${age}-year financial checkpoint`, financeNote, 'finance', 'high', -14, 60],
+        ['health', `Do the age-appropriate health checks`, healthNote, 'health', 'high', 0, 90],
+    ];
+}
+exports.birthday = birthday;
+
+});
+__define("templates/extraImportant", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extraImportant = exports.weddingAnniversary = void 0;
+const builder_1 = require("./builder");
+/** Extended important-events catalog — compact, archetype-based events. */
+/** 5th, 10th, 15th… anniversaries count as milestones. */
+function milestoneAnniversaryYear(answers) {
+    const year = parseInt(String(answers['anniversary_year'] ?? '').replace(/\D/g, ''), 10);
+    return year > 0 && year % 5 === 0;
+}
+exports.weddingAnniversary = (0, builder_1.E)({
+    id: 'wedding-anniversary',
+    name: 'Our wedding anniversary',
+    emoji: '💞',
+    category: 'important',
+    summary: 'Plan the anniversary properly — and if it\'s a 5th, 10th, 25th… year, this becomes a milestone plan worth the extra effort.',
+    tasks: (0, builder_1.celebration)('the anniversary'),
+    phrases: ['wedding anniversary', 'marriage anniversary', 'our anniversary', 'anniversary coming up', 'planned my marriage anniversary', 'planning our anniversary'],
+    keywords: ['anniversary', 'anniversaries'],
+    questions: [
+        { id: 'event_date', prompt: 'When is the anniversary?', kind: 'date' },
+        { id: 'anniversary_year', prompt: 'Which anniversary is it? (year number, e.g. 5)', kind: 'text' },
+    ],
+    isMilestone: milestoneAnniversaryYear,
+});
+exports.extraImportant = [
+    exports.weddingAnniversary,
+    (0, builder_1.E)({ id: 'promotion', name: 'I got promoted', emoji: '📊', category: 'important', tasks: (0, builder_1.career)('the promotion'),
+        phrases: ['i got promoted', 'got a promotion', 'i was promoted', 'getting promoted'], keywords: ['promoted', 'promotion', 'raise'] }),
+    (0, builder_1.E)({ id: 'career-change', name: "I'm changing careers", emoji: '🔄', category: 'important', tasks: (0, builder_1.career)('the career change'),
+        phrases: ['changing careers', 'career change', 'switching fields', 'new career'], keywords: ['career', 'retraining', 'pivot'] }),
+    (0, builder_1.E)({ id: 'remote-work', name: "I'm switching to remote work", emoji: '💻', category: 'important', tasks: (0, builder_1.career)('the switch to remote work'),
+        phrases: ['working remotely', 'switching to remote', 'going remote', 'work from home now'], keywords: ['remote', 'wfh', 'telecommute'] }),
+    (0, builder_1.E)({ id: 'return-to-office', name: "I'm returning to the office", emoji: '🏢', category: 'important', tasks: (0, builder_1.career)('the return to office'),
+        phrases: ['returning to the office', 'back to the office', 'return to office'], keywords: ['office', 'commute', 'rto'] }),
+    (0, builder_1.E)({ id: 'workplace-injury', name: 'I was injured at work', emoji: '🤕', category: 'important', tasks: (0, builder_1.legal)('the workplace injury'),
+        phrases: ['injured at work', 'workplace injury', 'hurt on the job', 'work accident'], keywords: ['injury', 'injured', 'compensation'] }),
+    (0, builder_1.E)({ id: 'parental-leave', name: "I'm going on parental leave", emoji: '🍼', category: 'important', tasks: (0, builder_1.application)('parental leave and benefits', 'Employer + benefits agency'),
+        phrases: ['going on parental leave', 'maternity leave', 'paternity leave', 'taking parental leave'], keywords: ['leave', 'maternity', 'paternity'] }),
+    (0, builder_1.E)({ id: 'return-from-leave', name: "I'm returning from parental leave", emoji: '👔', category: 'important', tasks: (0, builder_1.career)('the return from leave'),
+        phrases: ['returning from parental leave', 'back from maternity leave', 'returning to work after baby'], keywords: ['returning', 'childcare'] }),
+    (0, builder_1.E)({ id: 'started-freelancing', name: 'I started freelancing', emoji: '🧑‍💻', category: 'important', tasks: (0, builder_1.career)('the move to freelancing'),
+        phrases: ['started freelancing', 'going freelance', 'becoming a freelancer', 'freelancing full time'], keywords: ['freelance', 'freelancer', 'contractor', 'gig'] }),
+    (0, builder_1.E)({ id: 'side-gig-taxes', name: 'I started a side gig', emoji: '💡', category: 'important', tasks: (0, builder_1.finance)('the side gig money and taxes'),
+        phrases: ['started a side gig', 'side hustle', 'earning on the side'], keywords: ['side', 'hustle', 'gig', 'etsy', 'uber'] }),
+    (0, builder_1.E)({ id: 'tax-season', name: "It's tax season", emoji: '🧾', category: 'important', tasks: (0, builder_1.finance)('this year\'s tax filing'),
+        phrases: ['tax season', 'filing my taxes', 'doing my taxes', 'tax return due'], keywords: ['tax', 'taxes', 'filing', 'deduction', 'refund'] }),
+    (0, builder_1.E)({ id: 'tax-audit', name: "I'm being audited", emoji: '🔍', category: 'important', tasks: (0, builder_1.legal)('the tax audit'),
+        phrases: ['being audited', 'tax audit', 'audit letter from the irs', 'cra audit'], keywords: ['audit', 'audited', 'auditor'] }),
+    (0, builder_1.E)({ id: 'first-tax-return', name: "I'm filing taxes for the first time", emoji: '🧾', category: 'important', tasks: (0, builder_1.finance)('your first tax return'),
+        phrases: ['filing taxes for the first time', 'first tax return', 'never filed taxes before'], keywords: ['w2', 't4', 'deadline'] }),
+    (0, builder_1.E)({ id: 'mortgage-application', name: "I'm applying for a mortgage", emoji: '🏦', category: 'important', tasks: (0, builder_1.application)('the mortgage', 'Lender'),
+        phrases: ['applying for a mortgage', 'mortgage application', 'getting pre-approved', 'mortgage preapproval'], keywords: ['mortgage', 'preapproval', 'lender', 'downpayment'] }),
+    (0, builder_1.E)({ id: 'mortgage-refinance', name: "I'm refinancing the mortgage", emoji: '📉', category: 'important', tasks: (0, builder_1.finance)('the refinance'),
+        phrases: ['refinancing the mortgage', 'refinance my mortgage', 'remortgaging'], keywords: ['refinance', 'refinancing', 'remortgage', 'rate'] }),
+    (0, builder_1.E)({ id: 'lease-renewal', name: 'My lease is up for renewal', emoji: '📋', category: 'important', tasks: (0, builder_1.legal)('the lease renewal'),
+        phrases: ['lease is up for renewal', 'renewing my lease', 'lease renewal', 'lease expiring'], keywords: ['lease', 'renewal', 'landlord', 'tenancy'] }),
+    (0, builder_1.E)({ id: 'rent-increase', name: 'My rent is being increased', emoji: '📈', category: 'important', tasks: (0, builder_1.legal)('the rent increase'),
+        phrases: ['rent increase', 'rent is going up', 'landlord raising the rent'], keywords: ['rent', 'increase', 'tenant'] }),
+    (0, builder_1.E)({ id: 'eviction-notice', name: 'I received an eviction notice', emoji: '⚠️', category: 'important', tasks: (0, builder_1.legal)('the eviction notice'),
+        phrases: ['eviction notice', 'being evicted', 'notice to vacate'], keywords: ['eviction', 'evicted', 'vacate'] }),
+    (0, builder_1.E)({ id: 'sold-house', name: "I'm selling my house", emoji: '🏷️', category: 'important', tasks: (0, builder_1.legal)('the house sale'),
+        phrases: ['selling my house', 'selling our home', 'putting the house on the market', 'i sold my house'], keywords: ['selling', 'sale', 'realtor', 'listing'] }),
+    (0, builder_1.E)({ id: 'sold-car', name: "I'm selling my car", emoji: '🚙', category: 'important', tasks: (0, builder_1.finance)('the car sale'),
+        phrases: ['selling my car', 'i sold my car', 'selling the car'], keywords: ['selling', 'sale'] }),
+    (0, builder_1.E)({ id: 'car-accident', name: 'I was in a car accident', emoji: '💥', category: 'important', tasks: (0, builder_1.emergency)('the accident'),
+        phrases: ['car accident', 'car crash', 'i was in an accident', 'fender bender'], keywords: ['accident', 'crash', 'collision', 'whiplash'] }),
+    (0, builder_1.E)({ id: 'car-stolen', name: 'My car was stolen', emoji: '🚨', category: 'important', tasks: (0, builder_1.lossRecovery)('the stolen car'),
+        phrases: ['my car was stolen', 'car got stolen', 'vehicle theft'], keywords: ['stolen', 'theft'] }),
+    (0, builder_1.E)({ id: 'house-fire', name: 'We had a house fire', emoji: '🔥', category: 'important', tasks: (0, builder_1.emergency)('the fire'),
+        phrases: ['house fire', 'fire at home', 'fire damage'], keywords: ['fire', 'smoke', 'damage'] }),
+    (0, builder_1.E)({ id: 'flood-damage', name: 'We have flood/water damage', emoji: '🌊', category: 'important', tasks: (0, builder_1.emergency)('the water damage'),
+        phrases: ['flood damage', 'water damage', 'basement flooded', 'burst pipe'], keywords: ['flood', 'flooded', 'leak', 'water'] }),
+    (0, builder_1.E)({ id: 'burglary', name: 'We were burgled', emoji: '🚪', category: 'important', tasks: (0, builder_1.emergency)('the break-in'),
+        phrases: ['we were burgled', 'house was broken into', 'we got robbed', 'break in at home'], keywords: ['burglary', 'burgled', 'robbed', 'break-in'] }),
+    (0, builder_1.E)({ id: 'identity-theft', name: 'My identity was stolen', emoji: '🪪', category: 'important', tasks: (0, builder_1.lossRecovery)('the identity theft'),
+        phrases: ['identity theft', 'identity was stolen', 'someone opened accounts in my name', 'my identity got stolen'], keywords: ['identity', 'fraud', 'phishing', 'scammed'] }),
+    (0, builder_1.E)({ id: 'lost-wallet', name: 'I lost my wallet', emoji: '👛', category: 'important', tasks: (0, builder_1.lossRecovery)('the lost wallet'),
+        phrases: ['lost my wallet', 'wallet was stolen', 'lost my purse'], keywords: ['wallet', 'purse', 'cards'] }),
+    (0, builder_1.E)({ id: 'lost-passport', name: 'I lost my passport', emoji: '🛂', category: 'important', tasks: (0, builder_1.lossRecovery)('the lost passport'),
+        phrases: ['lost my passport', 'passport was stolen', 'missing passport'], keywords: ['passport'] }),
+    (0, builder_1.E)({ id: 'lost-phone', name: 'I lost my phone', emoji: '📱', category: 'important', tasks: (0, builder_1.lossRecovery)('the lost phone'),
+        phrases: ['lost my phone', 'phone was stolen', 'my phone got stolen'], keywords: ['phone', 'iphone', 'android', 'sim'] }),
+    (0, builder_1.E)({ id: 'switching-banks', name: "I'm switching banks", emoji: '🏦', category: 'important', tasks: (0, builder_1.finance)('the bank switch'),
+        phrases: ['switching banks', 'changing banks', 'moving my accounts to a new bank'], keywords: ['bank', 'banking', 'account'] }),
+    (0, builder_1.E)({ id: 'debt-consolidation', name: "I'm consolidating my debt", emoji: '📊', category: 'important', tasks: (0, builder_1.finance)('the debt consolidation'),
+        phrases: ['consolidating my debt', 'debt consolidation', 'consolidate my loans'], keywords: ['consolidation', 'consolidate', 'refinance'] }),
+    (0, builder_1.E)({ id: 'bankruptcy', name: "I'm considering bankruptcy", emoji: '⚖️', category: 'important', tasks: (0, builder_1.legal)('the insolvency process'),
+        phrases: ['considering bankruptcy', 'filing for bankruptcy', 'declaring bankruptcy', 'insolvency'], keywords: ['bankruptcy', 'bankrupt', 'insolvency', 'creditors'] }),
+    (0, builder_1.E)({ id: 'starting-investing', name: "I'm starting to invest", emoji: '📈', category: 'important', tasks: (0, builder_1.finance)('your first investments'),
+        phrases: ['starting to invest', 'start investing', 'opening a brokerage account', 'buying stocks for the first time'], keywords: ['invest', 'investing', 'stocks', 'etf', 'brokerage'] }),
+    (0, builder_1.E)({ id: 'retirement-account', name: "I'm opening a retirement account", emoji: '🏦', category: 'important', tasks: (0, builder_1.finance)('the retirement account'),
+        phrases: ['opening a retirement account', 'opening an ira', 'starting a 401k', 'setting up my pension'], keywords: ['ira', '401k', 'rrsp', 'pension'] }),
+    (0, builder_1.E)({ id: 'college-fund', name: "I'm starting a college fund", emoji: '🎓', category: 'important', tasks: (0, builder_1.finance)('the education fund'),
+        phrases: ['starting a college fund', 'education savings', '529 plan', 'resp'], keywords: ['529', 'fund', 'savings'] }),
+    (0, builder_1.E)({ id: 'cosigning-loan', name: "I'm co-signing a loan", emoji: '🖊️', category: 'important', tasks: (0, builder_1.legal)('the co-signing decision'),
+        phrases: ['cosigning a loan', 'co-signing', 'asked to cosign'], keywords: ['cosign', 'cosigner', 'guarantor'] }),
+    (0, builder_1.E)({ id: 'open-enrollment', name: "It's insurance open enrollment", emoji: '🗓️', category: 'important', tasks: (0, builder_1.finance)('this year\'s benefits elections'),
+        phrases: ['open enrollment', 'benefits enrollment period', 'choosing my benefits'], keywords: ['enrollment', 'benefits', 'premiums'] }),
+    (0, builder_1.E)({ id: 'switching-health-insurance', name: "I'm switching health insurance", emoji: '🏥', category: 'important', tasks: (0, builder_1.finance)('the insurance switch'),
+        phrases: ['switching health insurance', 'changing health plans', 'new health insurance'], keywords: ['insurance', 'coverage', 'deductible'] }),
+    (0, builder_1.E)({ id: 'medicare-enrollment', name: "I'm enrolling in Medicare", emoji: '🏥', category: 'important', tasks: (0, builder_1.application)('Medicare enrollment', 'Medicare'),
+        phrases: ['enrolling in medicare', 'medicare enrollment', 'signing up for medicare'], keywords: ['medicare', 'medigap'] }),
+    (0, builder_1.E)({ id: 'disability-application', name: "I'm applying for disability benefits", emoji: '♿', category: 'important', tasks: (0, builder_1.application)('disability benefits', 'Benefits agency'),
+        phrases: ['applying for disability', 'disability benefits', 'disability claim'], keywords: ['disability', 'ssdi', 'benefits'] }),
+    (0, builder_1.E)({ id: 'veteran-benefits', name: "I'm claiming veteran benefits", emoji: '🎖️', category: 'important', tasks: (0, builder_1.application)('veteran benefits', 'Veterans affairs'),
+        phrases: ['claiming veteran benefits', 'va benefits', 'veterans benefits'], keywords: ['va', 'gi'] }),
+    (0, builder_1.E)({ id: 'financial-aid', name: "I'm applying for financial aid", emoji: '🎓', category: 'important', tasks: (0, builder_1.application)('financial aid', 'Aid office'),
+        phrases: ['applying for financial aid', 'fafsa', 'student aid application'], keywords: ['aid', 'grant', 'bursary'] }),
+    (0, builder_1.E)({ id: 'scholarship-hunt', name: "I'm applying for scholarships", emoji: '🏅', category: 'important', tasks: (0, builder_1.application)('scholarships', 'Scholarship programs'),
+        phrases: ['applying for scholarships', 'scholarship applications', 'scholarship hunt'], keywords: ['scholarship', 'scholarships'] }),
+    (0, builder_1.E)({ id: 'visa-renewal', name: 'My visa needs renewing', emoji: '🛂', category: 'important', tasks: (0, builder_1.application)('the visa renewal', 'Immigration authority'),
+        phrases: ['visa needs renewing', 'renewing my visa', 'visa renewal', 'visa expiring'], keywords: ['visa', 'renewal', 'status'] }),
+    (0, builder_1.E)({ id: 'work-permit', name: "I'm applying for a work permit", emoji: '🪪', category: 'important', tasks: (0, builder_1.application)('the work permit', 'Immigration authority'),
+        phrases: ['applying for a work permit', 'work permit application', 'work authorization'], keywords: ['permit', 'authorization', 'sponsor'] }),
+    (0, builder_1.E)({ id: 'green-card', name: "I'm applying for a green card", emoji: '🟩', category: 'important', tasks: (0, builder_1.application)('the green card', 'USCIS'),
+        phrases: ['applying for a green card', 'green card application', 'adjustment of status'], keywords: ['uscis', 'i-485'] }),
+    (0, builder_1.E)({ id: 'sponsoring-spouse', name: "I'm sponsoring my spouse's visa", emoji: '💑', category: 'important', tasks: (0, builder_1.application)('the spousal sponsorship', 'Immigration authority'),
+        phrases: ['sponsoring my spouse', 'spousal sponsorship', 'sponsor my wife', 'sponsor my husband', 'partner visa'],
+        keywords: ['sponsorship', 'sponsoring', 'spousal'] }),
+    (0, builder_1.E)({ id: 'passport-renewal', name: 'My passport needs renewing', emoji: '📕', category: 'important', tasks: (0, builder_1.application)('the passport renewal', 'Passport office'),
+        phrases: ['passport needs renewing', 'renewing my passport', 'passport renewal', 'passport expired', 'passport expiring'], keywords: ['renewal', 'expiring'] }),
+    (0, builder_1.E)({ id: 'jury-duty', name: 'I was called for jury duty', emoji: '⚖️', category: 'important', tasks: (0, builder_1.legal)('jury duty'),
+        phrases: ['jury duty', 'jury summons', 'called for jury service'], keywords: ['jury', 'juror', 'summons'] }),
+    (0, builder_1.E)({ id: 'court-summons', name: 'I received a court summons', emoji: '📨', category: 'important', tasks: (0, builder_1.legal)('the summons'),
+        phrases: ['court summons', 'summoned to court', 'being sued', 'court date'], keywords: ['court', 'sued', 'lawsuit', 'hearing'] }),
+    (0, builder_1.E)({ id: 'small-claims', name: "I'm filing a small claims case", emoji: '🧑‍⚖️', category: 'important', tasks: (0, builder_1.legal)('the small claims case'),
+        phrases: ['small claims', 'taking someone to small claims court', 'filing a claim against'], keywords: ['claims', 'dispute'] }),
+    (0, builder_1.E)({ id: 'traffic-ticket', name: 'I got a traffic ticket', emoji: '🎫', category: 'important', tasks: (0, builder_1.legal)('the ticket'),
+        phrases: ['got a traffic ticket', 'speeding ticket', 'parking ticket', 'contesting a ticket'], keywords: ['ticket', 'fine', 'violation', 'speeding'] }),
+    (0, builder_1.E)({ id: 'will-creation', name: "I'm making a will", emoji: '📜', category: 'important', tasks: (0, builder_1.legal)('your will'),
+        phrases: ['making a will', 'writing my will', 'need a will', 'estate planning'], keywords: ['will', 'testament', 'estate', 'heirs'] }),
+    (0, builder_1.E)({ id: 'power-of-attorney', name: "I'm setting up power of attorney", emoji: '🖋️', category: 'important', tasks: (0, builder_1.legal)('the power of attorney'),
+        phrases: ['power of attorney', 'setting up poa', 'healthcare proxy'], keywords: ['attorney', 'poa', 'proxy'] }),
+    (0, builder_1.E)({ id: 'trust-setup', name: "I'm setting up a trust", emoji: '🏛️', category: 'important', tasks: (0, builder_1.legal)('the trust'),
+        phrases: ['setting up a trust', 'creating a trust', 'living trust'], keywords: ['trust', 'trustee'] }),
+    (0, builder_1.E)({ id: 'estate-executor', name: "I've been named an executor", emoji: '🗂️', category: 'important', tasks: (0, builder_1.legal)('the executor role'),
+        phrases: ['named an executor', 'i am the executor', 'executor of the estate'], keywords: ['executor', 'probate'] }),
+    (0, builder_1.E)({ id: 'guardianship', name: "I'm becoming a legal guardian", emoji: '🛡️', category: 'important', tasks: (0, builder_1.legal)('the guardianship'),
+        phrases: ['becoming a legal guardian', 'guardianship', 'custody of my nephew', 'custody of my grandchild'], keywords: ['guardian', 'custody', 'ward'] }),
+    (0, builder_1.E)({ id: 'pregnancy', name: "We're expecting a baby", emoji: '🤰', category: 'important', tasks: (0, builder_1.care)('the pregnancy'),
+        phrases: ['we are expecting', 'i am pregnant', 'we are pregnant', 'expecting a baby', 'due in'], keywords: ['pregnant', 'pregnancy', 'expecting', 'due', 'prenatal'] }),
+    (0, builder_1.E)({ id: 'fertility-treatment', name: "We're starting fertility treatment", emoji: '🧬', category: 'important', tasks: (0, builder_1.medical)('the fertility treatment'),
+        phrases: ['fertility treatment', 'starting ivf', 'ivf journey'], keywords: ['fertility', 'ivf', 'iui'] }),
+    (0, builder_1.E)({ id: 'surgery', name: 'I have surgery scheduled', emoji: '🏥', category: 'important', tasks: (0, builder_1.medical)('the surgery'),
+        phrases: ['surgery scheduled', 'having surgery', 'getting an operation', 'my operation'], keywords: ['surgery', 'operation', 'procedure', 'hospital'] }),
+    (0, builder_1.E)({ id: 'chronic-diagnosis', name: 'I received a chronic diagnosis', emoji: '🩺', category: 'important', tasks: (0, builder_1.care)('managing the diagnosis'),
+        phrases: ['chronic diagnosis', 'diagnosed with diabetes', 'new diagnosis', 'chronic condition'], keywords: ['diagnosis', 'diagnosed', 'chronic', 'condition'] }),
+    (0, builder_1.E)({ id: 'starting-therapy', name: "I'm starting therapy", emoji: '🛋️', category: 'important', tasks: (0, builder_1.care)('starting therapy'),
+        phrases: ['starting therapy', 'finding a therapist', 'looking for a therapist', 'mental health support'], keywords: ['therapy', 'therapist', 'counseling', 'psychologist'] }),
+    (0, builder_1.E)({ id: 'elder-care', name: 'My parent needs care', emoji: '🧓', category: 'important', tasks: (0, builder_1.care)('your parent\'s care'),
+        phrases: ['my parent needs care', 'caring for my mother', 'caring for my father', 'elderly parent', 'aging parents'],
+        keywords: ['eldercare', 'caregiver', 'aging', 'elderly'] }),
+    (0, builder_1.E)({ id: 'parent-moving-in', name: 'My parent is moving in with us', emoji: '🏠', category: 'important', tasks: (0, builder_1.care)('the multigenerational household'),
+        phrases: ['parent is moving in', 'mom is moving in with us', 'dad is moving in with us', 'multigenerational'], keywords: ['in-law', 'granny'] }),
+    (0, builder_1.E)({ id: 'assisted-living', name: "We're arranging assisted living", emoji: '🏡', category: 'important', tasks: (0, builder_1.care)('the move to assisted living'),
+        phrases: ['assisted living', 'nursing home', 'care home', 'memory care'], keywords: ['assisted', 'nursing', 'seniors'] }),
+    (0, builder_1.E)({ id: 'funeral-prearrangement', name: "I'm pre-arranging my funeral", emoji: '🕯️', category: 'important', tasks: (0, builder_1.legal)('the pre-arrangement'),
+        phrases: ['prearranging my funeral', 'funeral planning', 'prepaid funeral', 'end of life planning'], keywords: ['funeral', 'burial', 'cremation'] }),
+    (0, builder_1.E)({ id: 'life-insurance', name: "I'm buying life insurance", emoji: '☂️', category: 'important', tasks: (0, builder_1.finance)('the life insurance purchase'),
+        phrases: ['buying life insurance', 'need life insurance', 'life insurance quotes'], keywords: ['life', 'term', 'beneficiary'] }),
+    (0, builder_1.E)({ id: 'ltc-insurance', name: "I'm buying long-term care insurance", emoji: '🛏️', category: 'important', tasks: (0, builder_1.finance)('the long-term care coverage'),
+        phrases: ['long term care insurance', 'ltc insurance'], keywords: ['ltc'] }),
+    (0, builder_1.E)({ id: 'daycare-start', name: 'My child is starting daycare', emoji: '🧸', category: 'important', tasks: (0, builder_1.enrollment)('daycare'),
+        phrases: ['starting daycare', 'daycare waitlist', 'finding childcare', 'nursery place'], keywords: ['daycare', 'childcare', 'nursery', 'preschool'] }),
+    (0, builder_1.E)({ id: 'school-start', name: 'My child is starting school', emoji: '🎒', category: 'important', tasks: (0, builder_1.enrollment)('school'),
+        phrases: ['starting school', 'starting kindergarten', 'first day of school', 'school enrollment'], keywords: ['kindergarten', 'enrollment'] }),
+    (0, builder_1.E)({ id: 'child-to-college', name: 'My child is going to college', emoji: '🏫', category: 'important', tasks: (0, builder_1.enrollment)('your child\'s college'),
+        phrases: ['my child is going to college', 'son is going to college', 'daughter is going to university', 'kid off to college'],
+        keywords: ['tuition', 'dorm'] }),
+    (0, builder_1.E)({ id: 'teen-driver', name: 'My teen is learning to drive', emoji: '🚦', category: 'important', tasks: (0, builder_1.application)('the learner\'s licence', 'Licensing authority'),
+        phrases: ['teen is learning to drive', 'learners permit for my son', 'learners permit for my daughter', 'teenage driver'],
+        keywords: ['learner', 'permit', 'teen'] }),
+    (0, builder_1.E)({ id: 'child-turns-18', name: 'My child is turning 18', emoji: '🎓', category: 'important', tasks: (0, builder_1.legal)('your child\'s transition to adulthood'),
+        phrases: ['my child is turning 18', 'son turns 18', 'daughter turns 18'], keywords: ['custody', 'majority'] }),
+    (0, builder_1.E)({ id: 'hiring-nanny', name: "We're hiring a nanny", emoji: '👶', category: 'important', tasks: (0, builder_1.legal)('becoming a household employer'),
+        phrases: ['hiring a nanny', 'nanny contract', 'au pair', 'hiring a babysitter regularly'], keywords: ['nanny', 'babysitter', 'household'] }),
+    (0, builder_1.E)({ id: 'disaster-prep', name: "I'm preparing for natural disasters", emoji: '🌪️', category: 'important', tasks: (0, builder_1.homeProject)('the emergency preparedness setup', false),
+        phrases: ['disaster preparedness', 'emergency kit', 'preparing for hurricane season', 'earthquake preparedness'],
+        keywords: ['disaster', 'hurricane', 'earthquake', 'wildfire', 'preparedness'] }),
+    (0, builder_1.E)({ id: 'solar-panels', name: "We're installing solar panels", emoji: '☀️', category: 'important', tasks: (0, builder_1.homeProject)('the solar installation', true),
+        phrases: ['installing solar panels', 'going solar', 'solar installation'], keywords: ['solar', 'panels', 'net-metering'] }),
+    (0, builder_1.E)({ id: 'ev-purchase', name: "I'm buying an electric car", emoji: '🔌', category: 'important', tasks: (0, builder_1.purchase)('the electric car', { register: true, insure: true }),
+        phrases: ['buying an electric car', 'buying an ev', 'switching to electric'], keywords: ['ev', 'electric', 'tesla', 'charger'] }),
+    (0, builder_1.E)({ id: 'becoming-landlord', name: "I'm becoming a landlord", emoji: '🔑', category: 'important', tasks: (0, builder_1.legal)('the rental setup'),
+        phrases: ['becoming a landlord', 'renting out my place', 'renting out my apartment', 'first tenant'],
+        keywords: ['landlord', 'tenant', 'rental'] }),
+    (0, builder_1.E)({ id: 'airbnb-hosting', name: "I'm starting Airbnb hosting", emoji: '🛏️', category: 'important', tasks: (0, builder_1.application)('short-term rental hosting', 'Municipality + platform'),
+        phrases: ['starting airbnb', 'airbnb hosting', 'short term rental', 'listing on airbnb'], keywords: ['airbnb', 'host', 'str'] }),
+    (0, builder_1.E)({ id: 'investment-property', name: "I'm buying an investment property", emoji: '🏢', category: 'important', tasks: (0, builder_1.purchase)('the investment property', { insure: true }),
+        phrases: ['buying an investment property', 'investment property', 'rental property purchase'], keywords: ['investment', 'rental', 'duplex'] }),
+    (0, builder_1.E)({ id: 'vacation-home', name: "We're buying a vacation home", emoji: '🏖️', category: 'important', tasks: (0, builder_1.purchase)('the vacation home', { insure: true }),
+        phrases: ['buying a vacation home', 'buying a cottage', 'buying a cabin', 'second home'], keywords: ['cottage', 'cabin', 'lakehouse'] }),
+    (0, builder_1.E)({ id: 'boat-purchase', name: "I'm buying a boat", emoji: '⛵', category: 'important', tasks: (0, builder_1.purchase)('the boat', { register: true, insure: true }),
+        phrases: ['buying a boat', 'bought a boat', 'getting a boat'], keywords: ['boat', 'sailboat', 'yacht', 'marina'] }),
+    (0, builder_1.E)({ id: 'motorcycle-purchase', name: "I'm buying a motorcycle", emoji: '🏍️', category: 'important', tasks: (0, builder_1.purchase)('the motorcycle', { register: true, insure: true }),
+        phrases: ['buying a motorcycle', 'bought a motorcycle', 'getting a bike'], keywords: ['motorcycle', 'motorbike'] }),
+    (0, builder_1.E)({ id: 'rv-purchase', name: "We're buying an RV", emoji: '🚐', category: 'important', tasks: (0, builder_1.purchase)('the RV', { register: true, insure: true }),
+        phrases: ['buying an rv', 'buying a camper', 'buying a motorhome'], keywords: ['rv', 'camper', 'motorhome', 'caravan'] }),
+    (0, builder_1.E)({ id: 'running-for-office', name: "I'm running for local office", emoji: '🏛️', category: 'important', tasks: (0, builder_1.application)('the candidacy', 'Electoral authority'),
+        phrases: ['running for office', 'running for city council', 'running for school board', 'local election candidacy'],
+        keywords: ['candidacy', 'campaign', 'council'] }),
+];
+
+});
+__define("templates/extraLeisure", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extraLeisure = void 0;
+const builder_1 = require("./builder");
+/** Extended leisure & lifestyle catalog — compact, archetype-based events. */
+exports.extraLeisure = [
+    (0, builder_1.E)({ id: 'kids-birthday-party', name: "I'm planning my kid's birthday party", emoji: '🎈', category: 'leisure', tasks: (0, builder_1.kidParty)("the birthday party"),
+        summary: 'Venue, invitations, RSVPs, allergies, cake and activities — a kid\'s party is a small event production with a hard deadline.',
+        phrases: ["son's birthday", "daughter's birthday", "kid's birthday", 'birthday party', "my child's birthday", '5th birthday', 'first birthday'],
+        keywords: ['birthday', 'party', 'son', 'daughter', 'kid', 'kids', 'child', 'turning'] }),
+    (0, builder_1.E)({ id: 'adult-birthday-party', name: "I'm planning a birthday party", emoji: '🎂', category: 'leisure', tasks: (0, builder_1.celebration)('the birthday party'),
+        phrases: ['my birthday party', 'birthday party', 'planning a birthday', 'birthday dinner'],
+        keywords: ['birthday', 'party'] }),
+    (0, builder_1.E)({ id: 'surprise-party', name: "I'm planning a surprise party", emoji: '🤫', category: 'leisure', tasks: (0, builder_1.celebration)('the surprise party'),
+        phrases: ['surprise party', 'planning a surprise'], keywords: ['surprise', 'party'] }),
+    (0, builder_1.E)({ id: 'graduation-party', name: "We're planning a graduation party", emoji: '🎓', category: 'leisure', tasks: (0, builder_1.celebration)('the graduation party'),
+        phrases: ['graduation party', 'grad party'], keywords: ['graduation', 'party'] }),
+    (0, builder_1.E)({ id: 'baby-shower', name: "We're planning a baby shower", emoji: '🍼', category: 'leisure', tasks: (0, builder_1.celebration)('the baby shower'),
+        phrases: ['baby shower', 'planning a shower for'], keywords: ['shower', 'registry'] }),
+    (0, builder_1.E)({ id: 'gender-reveal', name: "We're planning a gender reveal", emoji: '🎀', category: 'leisure', tasks: (0, builder_1.celebration)('the gender reveal'),
+        phrases: ['gender reveal'], keywords: ['reveal'] }),
+    (0, builder_1.E)({ id: 'bridal-shower', name: "We're planning a bridal shower", emoji: '💐', category: 'leisure', tasks: (0, builder_1.celebration)('the bridal shower'),
+        phrases: ['bridal shower', 'hen party', 'hen do'], keywords: ['bridal', 'hen'] }),
+    (0, builder_1.E)({ id: 'bachelor-party', name: "I'm planning a bachelor party", emoji: '🍻', category: 'leisure', tasks: (0, builder_1.celebration)('the bachelor party'),
+        phrases: ['bachelor party', 'stag party', 'stag do'], keywords: ['bachelor', 'stag', 'groomsmen'] }),
+    (0, builder_1.E)({ id: 'bachelorette-party', name: "I'm planning a bachelorette party", emoji: '🥳', category: 'leisure', tasks: (0, builder_1.celebration)('the bachelorette party'),
+        phrases: ['bachelorette party', 'bachelorette weekend'], keywords: ['bachelorette', 'bridesmaids'] }),
+    (0, builder_1.E)({ id: 'retirement-party', name: "We're planning a retirement party", emoji: '🎊', category: 'leisure', tasks: (0, builder_1.celebration)('the retirement party'),
+        phrases: ['retirement party', 'retirement send-off'], keywords: ['send-off'] }),
+    (0, builder_1.E)({ id: 'housewarming', name: "We're planning a housewarming", emoji: '🏡', category: 'leisure', tasks: (0, builder_1.celebration)('the housewarming'),
+        phrases: ['housewarming', 'house warming party'], keywords: ['housewarming'] }),
+    (0, builder_1.E)({ id: 'engagement-party', name: "We're planning an engagement party", emoji: '🥂', category: 'leisure', tasks: (0, builder_1.celebration)('the engagement party'),
+        phrases: ['engagement party'], keywords: ['toast'] }),
+    (0, builder_1.E)({ id: 'family-reunion', name: "I'm organizing a family reunion", emoji: '👨‍👩‍👧‍👦', category: 'leisure', tasks: (0, builder_1.celebration)('the family reunion'),
+        phrases: ['family reunion', 'organizing a reunion', 'family get together'], keywords: ['reunion', 'relatives', 'family'] }),
+    (0, builder_1.E)({ id: 'holiday-hosting', name: "I'm hosting the holidays", emoji: '🦃', category: 'leisure', tasks: (0, builder_1.celebration)('the holiday dinner'),
+        phrases: ['hosting thanksgiving', 'hosting christmas', 'hosting the holidays', 'holiday dinner at ours'],
+        keywords: ['thanksgiving', 'christmas', 'hanukkah', 'hosting', 'holidays'] }),
+    (0, builder_1.E)({ id: 'dinner-party', name: "I'm hosting a dinner party", emoji: '🍽️', category: 'leisure', tasks: (0, builder_1.celebration)('the dinner party'),
+        phrases: ['dinner party', 'hosting a dinner'], keywords: ['dinner', 'guests', 'menu'] }),
+    (0, builder_1.E)({ id: 'backyard-bbq', name: "I'm hosting a barbecue", emoji: '🍔', category: 'leisure', tasks: (0, builder_1.celebration)('the barbecue'),
+        phrases: ['hosting a barbecue', 'backyard bbq', 'cookout'], keywords: ['bbq', 'barbecue', 'grill', 'cookout'] }),
+    (0, builder_1.E)({ id: 'road-trip', name: "We're planning a road trip", emoji: '🛣️', category: 'leisure', tasks: (0, builder_1.trip)('the road trip', false),
+        phrases: ['road trip', 'driving across', 'cross country drive'], keywords: ['roadtrip', 'drive', 'route'] }),
+    (0, builder_1.E)({ id: 'camping-trip', name: "We're going camping", emoji: '🏕️', category: 'leisure', tasks: (0, builder_1.trip)('the camping trip', false),
+        phrases: ['going camping', 'camping trip', 'booking a campsite'], keywords: ['camping', 'campsite', 'tent', 'hiking'] }),
+    (0, builder_1.E)({ id: 'national-parks-trip', name: "We're visiting national parks", emoji: '🏞️', category: 'leisure', tasks: (0, builder_1.trip)('the national parks trip', false),
+        phrases: ['national park trip', 'visiting yellowstone', 'national parks tour'], keywords: ['park', 'parks', 'yellowstone', 'yosemite', 'banff'] }),
+    (0, builder_1.E)({ id: 'ski-trip', name: "We're planning a ski trip", emoji: '⛷️', category: 'leisure', tasks: (0, builder_1.trip)('the ski trip', false),
+        phrases: ['ski trip', 'ski vacation', 'going skiing', 'snowboarding trip'], keywords: ['ski', 'skiing', 'snowboard', 'slopes', 'resort'] }),
+    (0, builder_1.E)({ id: 'beach-vacation', name: "We're planning a beach vacation", emoji: '🏖️', category: 'leisure', tasks: (0, builder_1.trip)('the beach vacation', false),
+        phrases: ['beach vacation', 'beach trip', 'week at the beach'], keywords: ['beach', 'seaside', 'resort'] }),
+    (0, builder_1.E)({ id: 'cruise', name: "We're going on a cruise", emoji: '🛳️', category: 'leisure', tasks: (0, builder_1.trip)('the cruise', true),
+        phrases: ['going on a cruise', 'booked a cruise', 'cruise vacation'], keywords: ['cruise', 'cabin', 'port'] }),
+    (0, builder_1.E)({ id: 'theme-park-trip', name: "We're planning a theme park trip", emoji: '🎢', category: 'leisure', tasks: (0, builder_1.trip)('the theme park trip', false),
+        phrases: ['theme park trip', 'taking the kids to disney', 'disney trip', 'universal studios trip'],
+        keywords: ['disney', 'disneyland', 'universal', 'rides'] }),
+    (0, builder_1.E)({ id: 'backpacking-trip', name: "I'm going backpacking", emoji: '🎒', category: 'leisure', tasks: (0, builder_1.trip)('the backpacking trip', true),
+        phrases: ['going backpacking', 'backpacking through', 'backpacking trip'], keywords: ['backpacking', 'hostels', 'interrail'] }),
+    (0, builder_1.E)({ id: 'honeymoon', name: "We're planning our honeymoon", emoji: '🌙', category: 'leisure', tasks: (0, builder_1.trip)('the honeymoon', true),
+        phrases: ['planning our honeymoon', 'honeymoon'], keywords: ['honeymoon', 'newlyweds'] }),
+    (0, builder_1.E)({ id: 'babymoon', name: "We're planning a babymoon", emoji: '🤰', category: 'leisure', tasks: (0, builder_1.trip)('the babymoon', false),
+        phrases: ['babymoon'], keywords: ['babymoon'] }),
+    (0, builder_1.E)({ id: 'safari', name: "We're planning a safari", emoji: '🦁', category: 'leisure', tasks: (0, builder_1.trip)('the safari', true),
+        phrases: ['planning a safari', 'safari trip', 'going on safari'], keywords: ['safari', 'kenya', 'tanzania'] }),
+    (0, builder_1.E)({ id: 'music-festival', name: "I'm going to a music festival", emoji: '🎪', category: 'leisure', tasks: (0, builder_1.trip)('the festival weekend', false),
+        phrases: ['music festival', 'festival tickets', 'going to coachella', 'going to glastonbury'],
+        keywords: ['festival', 'coachella', 'glastonbury', 'tickets', 'camping'] }),
+    (0, builder_1.E)({ id: 'big-game-trip', name: "I'm traveling to a big game", emoji: '🏟️', category: 'leisure', tasks: (0, builder_1.trip)('the game weekend', false),
+        phrases: ['going to the super bowl', 'tickets to the final', 'away game trip', 'world cup trip'],
+        keywords: ['tickets', 'stadium', 'playoffs', 'finals'] }),
+    (0, builder_1.E)({ id: 'visiting-family-overseas', name: "We're visiting family overseas", emoji: '👪', category: 'leisure', tasks: (0, builder_1.trip)('the family visit', true),
+        phrases: ['visiting family overseas', 'visiting family abroad', 'seeing family back home'],
+        keywords: ['grandparents', 'homeland'] }),
+    (0, builder_1.E)({ id: 'hosting-overseas-guests', name: "We're hosting guests from abroad", emoji: '🛬', category: 'leisure', tasks: (0, builder_1.celebration)('the visit'),
+        phrases: ['hosting guests from abroad', 'family visiting from overseas', 'in-laws visiting'],
+        keywords: ['guests', 'visitors', 'invitation letter'] }),
+    (0, builder_1.E)({ id: 'exchange-student', name: "We're hosting an exchange student", emoji: '🌐', category: 'leisure', tasks: (0, builder_1.celebration)('hosting the exchange student'),
+        phrases: ['hosting an exchange student', 'host family'], keywords: ['exchange', 'host', 'student'] }),
+    (0, builder_1.E)({ id: 'summer-camp', name: "I'm arranging summer camp for the kids", emoji: '⛺', category: 'leisure', tasks: (0, builder_1.hobby)('summer camp'),
+        phrases: ['summer camp', 'camp registration', 'day camp for the kids'], keywords: ['camp', 'summer', 'counselor'] }),
+    (0, builder_1.E)({ id: 'kids-sports-season', name: "My kid's sports season is starting", emoji: '⚽', category: 'leisure', tasks: (0, builder_1.hobby)("the kids' sports season"),
+        phrases: ['sports season is starting', 'signing up for soccer', 'little league', 'hockey season'],
+        keywords: ['soccer', 'hockey', 'league', 'practice', 'season'] }),
+    (0, builder_1.E)({ id: 'marathon-training', name: "I'm training for a marathon", emoji: '🏃', category: 'leisure', tasks: (0, builder_1.sport)('the marathon'),
+        phrases: ['training for a marathon', 'marathon training', 'signed up for a marathon', 'half marathon'],
+        keywords: ['marathon', 'running', 'race', 'training'] }),
+    (0, builder_1.E)({ id: 'triathlon', name: "I'm training for a triathlon", emoji: '🏊', category: 'leisure', tasks: (0, builder_1.sport)('the triathlon'),
+        phrases: ['training for a triathlon', 'doing a triathlon', 'ironman'], keywords: ['triathlon', 'ironman', 'swim'] }),
+    (0, builder_1.E)({ id: 'cycling-event', name: "I'm training for a cycling event", emoji: '🚴', category: 'leisure', tasks: (0, builder_1.sport)('the cycling event'),
+        phrases: ['cycling event', 'century ride', 'gran fondo', 'bike race'], keywords: ['cycling', 'fondo', 'peloton'] }),
+    (0, builder_1.E)({ id: 'joining-gym', name: "I'm starting a fitness routine", emoji: '💪', category: 'leisure', tasks: (0, builder_1.hobby)('the fitness routine'),
+        phrases: ['joining a gym', 'starting a fitness routine', 'getting in shape', 'new gym membership', 'personal trainer'],
+        keywords: ['gym', 'fitness', 'workout', 'trainer', 'crossfit'] }),
+    (0, builder_1.E)({ id: 'learning-to-drive', name: "I'm learning to drive", emoji: '🚗', category: 'leisure', tasks: (0, builder_1.licence)('your driving licence', 'Licensing authority'),
+        phrases: ['learning to drive', 'driving lessons', 'getting my licence', 'getting my license', 'driving test'],
+        keywords: ['driving', 'lessons', 'licence', 'license', 'instructor'] }),
+    (0, builder_1.E)({ id: 'learning-instrument', name: "I'm learning an instrument", emoji: '🎸', category: 'leisure', tasks: (0, builder_1.hobby)('the instrument'),
+        phrases: ['learning an instrument', 'learning guitar', 'learning piano', 'music lessons'],
+        keywords: ['guitar', 'piano', 'violin', 'instrument', 'lessons'] }),
+    (0, builder_1.E)({ id: 'learning-language', name: "I'm learning a language", emoji: '🗣️', category: 'leisure', tasks: (0, builder_1.hobby)('the language'),
+        phrases: ['learning a language', 'learning spanish', 'learning french', 'language classes'],
+        keywords: ['language', 'spanish', 'french', 'duolingo', 'fluent'] }),
+    (0, builder_1.E)({ id: 'cooking-classes', name: "I'm taking cooking classes", emoji: '👨‍🍳', category: 'leisure', tasks: (0, builder_1.hobby)('the cooking course'),
+        phrases: ['cooking classes', 'learning to cook', 'culinary course'], keywords: ['cooking', 'culinary', 'baking'] }),
+    (0, builder_1.E)({ id: 'art-classes', name: "I'm taking art classes", emoji: '🎨', category: 'leisure', tasks: (0, builder_1.hobby)('the art classes'),
+        phrases: ['art classes', 'painting classes', 'pottery class', 'drawing lessons'],
+        keywords: ['art', 'painting', 'pottery', 'drawing', 'sculpture'] }),
+    (0, builder_1.E)({ id: 'dance-classes', name: "We're taking dance classes", emoji: '💃', category: 'leisure', tasks: (0, builder_1.hobby)('the dance classes'),
+        phrases: ['dance classes', 'learning to dance', 'salsa lessons', 'ballroom dancing'],
+        keywords: ['dance', 'dancing', 'salsa', 'ballroom'] }),
+    (0, builder_1.E)({ id: 'book-club', name: "I'm starting a book club", emoji: '📖', category: 'leisure', tasks: (0, builder_1.hobby)('the book club'),
+        phrases: ['starting a book club', 'book club'], keywords: ['book', 'reading', 'club'] }),
+    (0, builder_1.E)({ id: 'starting-podcast', name: "I'm starting a podcast", emoji: '🎙️', category: 'leisure', tasks: (0, builder_1.digital)('the podcast'),
+        phrases: ['starting a podcast', 'launching a podcast'], keywords: ['podcast', 'episodes', 'microphone'] }),
+    (0, builder_1.E)({ id: 'starting-youtube', name: "I'm starting a YouTube channel", emoji: '📹', category: 'leisure', tasks: (0, builder_1.digital)('the channel'),
+        phrases: ['starting a youtube channel', 'becoming a youtuber', 'making videos'], keywords: ['youtube', 'channel', 'videos', 'vlog'] }),
+    (0, builder_1.E)({ id: 'starting-blog', name: "I'm starting a blog / newsletter", emoji: '📝', category: 'leisure', tasks: (0, builder_1.digital)('the blog'),
+        phrases: ['starting a blog', 'starting a newsletter', 'launching a substack'], keywords: ['blog', 'newsletter', 'substack', 'writing'] }),
+    (0, builder_1.E)({ id: 'writing-novel', name: "I'm writing a novel", emoji: '✍️', category: 'leisure', tasks: (0, builder_1.hobby)('the novel'),
+        phrases: ['writing a novel', 'writing a book', 'nanowrimo'], keywords: ['novel', 'manuscript', 'chapters'] }),
+    (0, builder_1.E)({ id: 'volunteering', name: "I'm starting to volunteer", emoji: '🤲', category: 'leisure', tasks: (0, builder_1.hobby)('the volunteering'),
+        phrases: ['starting to volunteer', 'volunteering at', 'volunteer work'], keywords: ['volunteer', 'volunteering', 'shelter'] }),
+    (0, builder_1.E)({ id: 'charity-fundraiser', name: "I'm organizing a fundraiser", emoji: '🎗️', category: 'leisure', tasks: (0, builder_1.celebration)('the fundraiser'),
+        phrases: ['organizing a fundraiser', 'charity event', 'fundraising drive'], keywords: ['fundraiser', 'charity', 'donations'] }),
+    (0, builder_1.E)({ id: 'community-garden', name: "I'm joining a community garden", emoji: '🌱', category: 'leisure', tasks: (0, builder_1.hobby)('the community garden plot'),
+        phrases: ['community garden', 'allotment'], keywords: ['garden', 'allotment', 'plot'] }),
+    (0, builder_1.E)({ id: 'garden-overhaul', name: "We're redoing the garden", emoji: '🌳', category: 'leisure', tasks: (0, builder_1.homeProject)('the garden overhaul', false),
+        phrases: ['redoing the garden', 'landscaping the yard', 'garden makeover', 'new lawn'],
+        keywords: ['landscaping', 'garden', 'yard', 'lawn', 'patio'] }),
+    (0, builder_1.E)({ id: 'building-deck', name: "We're building a deck", emoji: '🪵', category: 'leisure', tasks: (0, builder_1.homeProject)('the deck build', true),
+        phrases: ['building a deck', 'new deck', 'building a patio'], keywords: ['deck', 'pergola'] }),
+    (0, builder_1.E)({ id: 'pool-install', name: "We're installing a pool", emoji: '🏊', category: 'leisure', tasks: (0, builder_1.homeProject)('the pool installation', true),
+        phrases: ['installing a pool', 'putting in a pool', 'swimming pool install'], keywords: ['pool', 'hot tub', 'jacuzzi'] }),
+    (0, builder_1.E)({ id: 'home-theater', name: "I'm building a home theater", emoji: '🎬', category: 'leisure', tasks: (0, builder_1.purchase)('the home theater setup', {}),
+        phrases: ['home theater', 'home cinema', 'media room'], keywords: ['theater', 'projector', 'surround'] }),
+    (0, builder_1.E)({ id: 'smart-home', name: "I'm setting up a smart home", emoji: '🏠', category: 'leisure', tasks: (0, builder_1.digital)('the smart home'),
+        phrases: ['smart home setup', 'home automation', 'smart lights and locks'], keywords: ['smart', 'automation', 'alexa', 'homekit'] }),
+    (0, builder_1.E)({ id: 'aquarium', name: "I'm setting up an aquarium", emoji: '🐠', category: 'leisure', tasks: (0, builder_1.purchase)('the aquarium', {}),
+        phrases: ['setting up an aquarium', 'fish tank', 'getting fish'], keywords: ['aquarium', 'fish', 'tank', 'reef'] }),
+    (0, builder_1.E)({ id: 'backyard-chickens', name: "We're getting backyard chickens", emoji: '🐔', category: 'leisure', tasks: (0, builder_1.licence)('keeping backyard chickens', 'Municipality'),
+        phrases: ['backyard chickens', 'getting chickens', 'chicken coop'], keywords: ['chickens', 'coop', 'hens'] }),
+    (0, builder_1.E)({ id: 'beekeeping', name: "I'm starting beekeeping", emoji: '🐝', category: 'leisure', tasks: (0, builder_1.licence)('beekeeping', 'Agricultural authority'),
+        phrases: ['starting beekeeping', 'getting bees', 'beehive'], keywords: ['bees', 'beekeeping', 'hive', 'honey'] }),
+    (0, builder_1.E)({ id: 'drone', name: 'I got a drone', emoji: '🛸', category: 'leisure', tasks: (0, builder_1.licence)('flying the drone', 'Aviation authority'),
+        phrases: ['got a drone', 'buying a drone', 'drone registration'], keywords: ['drone', 'faa', 'quadcopter'] }),
+    (0, builder_1.E)({ id: 'ham-radio', name: "I'm getting a ham radio licence", emoji: '📻', category: 'leisure', tasks: (0, builder_1.licence)('the amateur radio licence', 'Radio authority'),
+        phrases: ['ham radio licence', 'ham radio license', 'amateur radio'], keywords: ['ham', 'radio', 'callsign'] }),
+    (0, builder_1.E)({ id: 'scuba', name: "I'm getting scuba certified", emoji: '🤿', category: 'leisure', tasks: (0, builder_1.licence)('the scuba certification', 'PADI / SSI'),
+        phrases: ['scuba certification', 'getting scuba certified', 'learning to dive', 'padi course'],
+        keywords: ['scuba', 'diving', 'padi', 'openwater'] }),
+    (0, builder_1.E)({ id: 'pilot-license', name: "I'm getting a pilot licence", emoji: '🛩️', category: 'leisure', tasks: (0, builder_1.licence)('the private pilot licence', 'Aviation authority'),
+        phrases: ['pilot licence', 'pilot license', 'learning to fly', 'flight school'], keywords: ['pilot', 'flying', 'aviation', 'cessna'] }),
+    (0, builder_1.E)({ id: 'motorcycle-license', name: "I'm getting a motorcycle licence", emoji: '🏍️', category: 'leisure', tasks: (0, builder_1.licence)('the motorcycle licence', 'Licensing authority'),
+        phrases: ['motorcycle licence', 'motorcycle license', 'learning to ride'], keywords: ['rider', 'endorsement'] }),
+    (0, builder_1.E)({ id: 'sailing-course', name: "I'm learning to sail", emoji: '⛵', category: 'leisure', tasks: (0, builder_1.licence)('the sailing qualification', 'Sailing association'),
+        phrases: ['learning to sail', 'sailing course', 'sailing lessons'], keywords: ['sailing', 'sail', 'skipper'] }),
+    (0, builder_1.E)({ id: 'hunting-license', name: "I'm getting a hunting licence", emoji: '🦌', category: 'leisure', tasks: (0, builder_1.licence)('the hunting licence', 'Wildlife authority'),
+        phrases: ['hunting licence', 'hunting license', 'hunter safety course'], keywords: ['hunting', 'hunter', 'season'] }),
+    (0, builder_1.E)({ id: 'fishing-license', name: "I'm getting a fishing licence", emoji: '🎣', category: 'leisure', tasks: (0, builder_1.licence)('the fishing licence', 'Wildlife authority'),
+        phrases: ['fishing licence', 'fishing license', 'getting into fishing'], keywords: ['fishing', 'angling', 'flyfishing'] }),
+    (0, builder_1.E)({ id: 'boating-license', name: "I'm getting a boating licence", emoji: '🚤', category: 'leisure', tasks: (0, builder_1.licence)('the boating licence', 'Maritime authority'),
+        phrases: ['boating licence', 'boating license', 'boater safety course'], keywords: ['boating', 'boater'] }),
+    (0, builder_1.E)({ id: 'planning-proposal', name: "I'm planning a proposal", emoji: '💍', category: 'leisure', tasks: (0, builder_1.celebration)('the proposal'),
+        phrases: ['planning a proposal', 'planning to propose', 'going to propose', 'buying an engagement ring'],
+        keywords: ['propose', 'ring'] }),
+    (0, builder_1.E)({ id: 'gaming-pc', name: "I'm building a gaming PC", emoji: '🖥️', category: 'leisure', tasks: (0, builder_1.purchase)('the gaming PC', {}),
+        phrases: ['building a gaming pc', 'building a pc', 'new gaming rig'], keywords: ['pc', 'gpu', 'gaming', 'rig'] }),
+    (0, builder_1.E)({ id: 'photography', name: "I'm getting into photography", emoji: '📷', category: 'leisure', tasks: (0, builder_1.hobby)('photography'),
+        phrases: ['getting into photography', 'buying a camera', 'photography course'], keywords: ['photography', 'camera', 'lens'] }),
+    (0, builder_1.E)({ id: 'golf-membership', name: "I'm joining a golf club", emoji: '⛳', category: 'leisure', tasks: (0, builder_1.hobby)('golf'),
+        phrases: ['joining a golf club', 'golf membership', 'taking up golf'], keywords: ['golf', 'clubs', 'course'] }),
+    (0, builder_1.E)({ id: 'new-bicycle', name: "I'm buying a bicycle", emoji: '🚲', category: 'leisure', tasks: (0, builder_1.purchase)('the bicycle', { insure: true }),
+        phrases: ['buying a bike', 'buying a bicycle', 'new bike'], keywords: ['bicycle', 'bike', 'ebike'] }),
+];
+
+});
+__define("templates/extraMilestones", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extraMilestones = void 0;
+const builder_1 = require("./builder");
+/** Extended milestone catalog — compact, archetype-based events. */
+exports.extraMilestones = [
+    (0, builder_1.E)({ id: 'got-engaged', name: 'We got engaged', emoji: '💍', category: 'milestone', tasks: (0, builder_1.celebration)('the engagement celebration'),
+        phrases: ['we got engaged', 'i got engaged', 'got engaged', 'i proposed', 'she said yes', 'he said yes'],
+        keywords: ['engaged', 'engagement', 'proposal', 'fiance', 'fiancee'] }),
+    (0, builder_1.E)({ id: 'planning-wedding', name: 'We are planning our wedding', emoji: '👰', category: 'milestone', tasks: (0, builder_1.celebration)('the wedding'),
+        phrases: ['planning our wedding', 'planning my wedding', 'planning a wedding', 'wedding planning'],
+        keywords: ['wedding', 'bride', 'groom', 'venue', 'marry'] }),
+    (0, builder_1.E)({ id: 'turned-21', name: 'I turned 21', emoji: '🥂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(21, 'Full legal capacity in most places: contracts, credit and accounts fully in your name — review what should now be yours alone.', 'Baseline check-up and an honest look at habits that compound from here.'),
+        phrases: ['i turned 21', 'turning 21', 'my 21st birthday'], keywords: ['21', 'twenty-one'] }),
+    (0, builder_1.E)({ id: 'turned-25', name: 'I turned 25', emoji: '🎉', category: 'milestone',
+        tasks: (0, builder_1.birthday)(25, 'Car insurance rates typically drop at 25 — requote everything; start retirement contributions if you haven\'t.', 'Establish a primary doctor and dentist as an adult, not just when something hurts.'),
+        phrases: ['i turned 25', 'turning 25', 'my 25th birthday'], keywords: ['25', 'twenty-five'] }),
+    (0, builder_1.E)({ id: 'turned-30', name: 'I turned 30', emoji: '🎂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(30, 'Decade check: emergency fund, retirement rate, insurance coverage, and a will if anyone depends on you.', 'Baseline numbers worth tracking from 30: blood pressure, cholesterol, skin check.'),
+        phrases: ['i turned 30', 'turning 30', 'i am turning 30', 'my 30th birthday'], keywords: ['30', 'thirty'] }),
+    (0, builder_1.E)({ id: 'turned-40', name: 'I turned 40', emoji: '🎂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(40, 'Mid-career money audit: retirement trajectory, life/disability insurance, estate documents, aging-parent planning.', 'Screenings start ramping at 40 — eye pressure, diabetes, heart risk; ask what applies to you.'),
+        phrases: ['i turned 40', 'turning 40', 'my 40th birthday'], keywords: ['40', 'forty'] }),
+    (0, builder_1.E)({ id: 'turned-50', name: 'I turned 50', emoji: '🎂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(50, 'Catch-up retirement contribution limits open at 50; get a real projection of your retirement date and income.', 'Colonoscopy and the full screening panel — 50 is when early detection earns its keep.'),
+        phrases: ['i turned 50', 'turning 50', 'my 50th birthday'], keywords: ['50', 'fifty'] }),
+    (0, builder_1.E)({ id: 'turned-60', name: 'I turned 60', emoji: '🎂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(60, 'Pension statements, claiming-age scenarios, and the retirement countdown plan — decisions in the next five years are mostly irreversible.', 'Annual check-ups become non-optional; review medications and bone density.'),
+        phrases: ['i turned 60', 'turning 60', 'my 60th birthday'], keywords: ['60', 'sixty'] }),
+    (0, builder_1.E)({ id: 'turned-65', name: 'I turned 65', emoji: '🎂', category: 'milestone',
+        tasks: (0, builder_1.birthday)(65, 'Government health coverage enrollment windows (e.g. Medicare) open around 65 with lifelong late penalties — this is the deadline birthday.', 'Enroll in senior health programs and schedule the works: hearing, vision, vaccines.'),
+        phrases: ['i turned 65', 'turning 65', 'my 65th birthday'], keywords: ['65', 'sixty-five', 'medicare'] }),
+    (0, builder_1.E)({ id: 'started-college', name: "I'm starting college", emoji: '🎒', category: 'milestone', tasks: (0, builder_1.enrollment)('college'),
+        phrases: ['starting college', 'starting university', 'going to college', 'off to university', 'i got into college'],
+        keywords: ['freshman', 'enrollment', 'campus', 'dorm'] }),
+    (0, builder_1.E)({ id: 'finished-high-school', name: 'I finished high school', emoji: '🎓', category: 'milestone', tasks: (0, builder_1.enrollment)('what comes after high school'),
+        phrases: ['finished high school', 'graduated high school', 'high school graduation'],
+        keywords: ['school', 'graduation'] }),
+    (0, builder_1.E)({ id: 'first-job-ever', name: 'I got my first job', emoji: '🧾', category: 'milestone', tasks: (0, builder_1.career)('your first job'),
+        phrases: ['my first job', 'got my first job', 'first job ever', 'starting my first job'],
+        keywords: ['first', 'paycheck', 'payslip'] }),
+    (0, builder_1.E)({ id: 'first-apartment', name: "I'm moving into my first apartment", emoji: '🔑', category: 'milestone', tasks: (0, builder_1.renting)('your first apartment'),
+        phrases: ['my first apartment', 'first apartment', 'moving out of my parents', 'moving out for the first time'],
+        keywords: ['renting', 'landlord', 'roommate'] }),
+    (0, builder_1.E)({ id: 'became-citizen', name: 'I became a citizen', emoji: '🗽', category: 'milestone', tasks: (0, builder_1.application)('citizenship', 'Citizenship authority'),
+        phrases: ['became a citizen', 'becoming a citizen', 'citizenship ceremony', 'applying for citizenship', 'naturalization'],
+        keywords: ['citizen', 'citizenship', 'naturalization', 'oath'] }),
+    (0, builder_1.E)({ id: 'got-permanent-residency', name: 'I got permanent residency', emoji: '🛂', category: 'milestone', tasks: (0, builder_1.application)('permanent residency', 'Immigration authority'),
+        phrases: ['got permanent residency', 'got my green card', 'became a permanent resident', 'received permanent residence'],
+        keywords: ['residency', 'resident'] }),
+    (0, builder_1.E)({ id: 'adopted-a-child', name: 'We adopted a child', emoji: '🤱', category: 'milestone', tasks: (0, builder_1.legal)('the adoption'),
+        phrases: ['we adopted a child', 'adopting a child', 'we are adopting', 'adoption process'],
+        keywords: ['adoption', 'adoptive'] }),
+    (0, builder_1.E)({ id: 'fostering-a-child', name: 'We are fostering a child', emoji: '🏡', category: 'milestone', tasks: (0, builder_1.application)('foster care licensing', 'Family services'),
+        phrases: ['fostering a child', 'becoming foster parents', 'foster care', 'we are fostering'],
+        keywords: ['foster', 'fostering'] }),
+    (0, builder_1.E)({ id: 'became-grandparent', name: 'I became a grandparent', emoji: '👵', category: 'milestone', tasks: (0, builder_1.care)('supporting the new family'),
+        phrases: ['became a grandparent', 'becoming a grandparent', 'my first grandchild', 'i am a grandmother', 'i am a grandfather'],
+        keywords: ['grandchild', 'grandparent', 'grandson', 'granddaughter'] }),
+    (0, builder_1.E)({ id: 'empty-nest', name: 'Our last child moved out', emoji: '🕊️', category: 'milestone', tasks: (0, builder_1.finance)('the empty-nest reset'),
+        phrases: ['last child moved out', 'empty nest', 'kids moved out', 'children left home'],
+        keywords: ['nest', 'downsize', 'downsizing'] }),
+    (0, builder_1.E)({ id: 'paid-off-mortgage', name: 'We paid off the mortgage', emoji: '🏠', category: 'milestone', tasks: (0, builder_1.finance)('life after the mortgage'),
+        phrases: ['paid off the mortgage', 'paid off our mortgage', 'mortgage free', 'final mortgage payment'],
+        keywords: ['payoff', 'lien'] }),
+    (0, builder_1.E)({ id: 'paid-off-student-loans', name: 'I paid off my student loans', emoji: '🎓', category: 'milestone', tasks: (0, builder_1.finance)('life after student loans'),
+        phrases: ['paid off my student loans', 'student loans paid off', 'loan free', 'made my last loan payment'],
+        keywords: ['loans', 'payoff'] }),
+    (0, builder_1.E)({ id: 'debt-free', name: 'I became debt-free', emoji: '🎉', category: 'milestone', tasks: (0, builder_1.finance)('staying debt-free'),
+        phrases: ['debt free', 'paid off all my debt', 'out of debt'],
+        keywords: ['debt'] }),
+    (0, builder_1.E)({ id: 'windfall', name: 'I received a windfall', emoji: '💰', category: 'milestone', tasks: (0, builder_1.finance)('managing the windfall'),
+        phrases: ['won the lottery', 'received a windfall', 'came into money', 'got a large bonus', 'big inheritance'],
+        keywords: ['windfall', 'lottery', 'jackpot', 'bonus'] }),
+    (0, builder_1.E)({ id: 'received-inheritance', name: 'I received an inheritance', emoji: '🏛️', category: 'milestone', tasks: (0, builder_1.legal)('the inheritance'),
+        phrases: ['received an inheritance', 'i inherited', 'named in a will'],
+        keywords: ['inheritance', 'inherited', 'heir', 'bequest'] }),
+    (0, builder_1.E)({ id: 'published-a-book', name: 'I published a book', emoji: '📚', category: 'milestone', tasks: (0, builder_1.career)('publishing your book'),
+        phrases: ['published a book', 'publishing my book', 'my book is coming out', 'i wrote a book'],
+        keywords: ['published', 'publisher', 'author', 'isbn'] }),
+    (0, builder_1.E)({ id: 'earned-doctorate', name: 'I earned my doctorate', emoji: '🎓', category: 'milestone', tasks: (0, builder_1.career)('life after the doctorate'),
+        phrases: ['earned my doctorate', 'finished my phd', 'defended my thesis', 'got my phd', 'completed my doctorate'],
+        keywords: ['phd', 'doctorate', 'thesis', 'dissertation', 'postdoc'] }),
+    (0, builder_1.E)({ id: 'military-enlistment', name: "I'm enlisting in the military", emoji: '🎖️', category: 'milestone', tasks: (0, builder_1.application)('enlistment', 'Military recruitment'),
+        phrases: ['enlisting in the military', 'joining the military', 'joining the army', 'joining the navy', 'joining the air force'],
+        keywords: ['enlist', 'enlisting', 'military', 'army', 'navy', 'recruit'] }),
+    (0, builder_1.E)({ id: 'military-discharge', name: "I'm leaving the military", emoji: '🎖️', category: 'milestone', tasks: (0, builder_1.application)('veteran benefits and transition', 'Veterans affairs'),
+        phrases: ['leaving the military', 'getting discharged', 'end of my service', 'leaving the army'],
+        keywords: ['discharge', 'veteran', 'veterans', 'civilian'] }),
+    (0, builder_1.E)({ id: 'became-manager', name: 'I became a manager', emoji: '📈', category: 'milestone', tasks: (0, builder_1.career)('your first management role'),
+        phrases: ['became a manager', 'first management role', 'i am now a manager', 'leading a team for the first time'],
+        keywords: ['manager', 'management', 'promotion', 'team'] }),
+    (0, builder_1.E)({ id: 'started-nonprofit', name: "I'm starting a nonprofit", emoji: '🤝', category: 'milestone', tasks: (0, builder_1.application)('nonprofit registration', 'Registrar + tax authority'),
+        phrases: ['starting a nonprofit', 'starting a charity', 'founding a nonprofit', 'registering a charity'],
+        keywords: ['nonprofit', 'charity', 'foundation', 'ngo'] }),
+    (0, builder_1.E)({ id: 'legal-name-change', name: "I'm changing my legal name", emoji: '✍️', category: 'milestone', tasks: (0, builder_1.application)('the legal name change', 'Civil registry / court'),
+        phrases: ['changing my name', 'legal name change', 'change my legal name'],
+        keywords: ['name', 'rename'] }),
+    (0, builder_1.E)({ id: 'quit-smoking', name: 'I quit smoking', emoji: '🚭', category: 'milestone', tasks: (0, builder_1.care)('your quit plan'),
+        phrases: ['quit smoking', 'quitting smoking', 'stopped smoking', 'giving up cigarettes'],
+        keywords: ['smoking', 'cigarettes', 'nicotine', 'vaping'] }),
+    (0, builder_1.E)({ id: 'first-time-voter', name: "I'm voting for the first time", emoji: '🗳️', category: 'milestone', tasks: (0, builder_1.application)('voter registration and your first ballot', 'Electoral authority'),
+        phrases: ['voting for the first time', 'first time voting', 'my first election'],
+        keywords: ['vote', 'voting', 'election', 'ballot'] }),
+    (0, builder_1.E)({ id: 'child-baptism', name: "We're planning our child's baptism", emoji: '⛪', category: 'milestone', tasks: (0, builder_1.celebration)('the baptism'),
+        phrases: ['planning a baptism', "child's baptism", 'christening'],
+        keywords: ['baptism', 'christening', 'godparents'] }),
+    (0, builder_1.E)({ id: 'first-communion', name: "We're planning a first communion", emoji: '⛪', category: 'milestone', tasks: (0, builder_1.celebration)('the first communion'),
+        phrases: ['first communion'], keywords: ['communion'] }),
+    (0, builder_1.E)({ id: 'confirmation-ceremony', name: "We're planning a confirmation", emoji: '⛪', category: 'milestone', tasks: (0, builder_1.celebration)('the confirmation'),
+        phrases: ['planning a confirmation', 'confirmation ceremony'], keywords: ['confirmation'] }),
+    (0, builder_1.E)({ id: 'bar-mitzvah', name: "We're planning a bar/bat mitzvah", emoji: '✡️', category: 'milestone', tasks: (0, builder_1.celebration)('the bar/bat mitzvah'),
+        phrases: ['bar mitzvah', 'bat mitzvah'], keywords: ['mitzvah', 'synagogue', 'torah'] }),
+    (0, builder_1.E)({ id: 'quinceanera', name: "We're planning a quinceañera", emoji: '👗', category: 'milestone', tasks: (0, builder_1.celebration)('the quinceañera'),
+        phrases: ['quinceanera', 'quinceañera', '15th birthday party'], keywords: ['quince', 'fifteen'] }),
+    (0, builder_1.E)({ id: 'sweet-sixteen', name: "We're planning a sweet sixteen", emoji: '🎂', category: 'milestone', tasks: (0, builder_1.celebration)('the sweet sixteen'),
+        phrases: ['sweet sixteen', 'sweet 16', '16th birthday party'], keywords: ['sixteen', '16'] }),
+    (0, builder_1.E)({ id: 'moving-abroad', name: "I'm moving abroad", emoji: '🌍', category: 'milestone', tasks: (0, builder_1.trip)('the move abroad', true),
+        phrases: ['moving abroad', 'moving overseas', 'relocating abroad', 'moving to another country', 'emigrating'],
+        keywords: ['abroad', 'overseas', 'expat', 'emigrate', 'relocation'] }),
+    (0, builder_1.E)({ id: 'returning-from-abroad', name: "I'm moving back home from abroad", emoji: '🏠', category: 'milestone', tasks: (0, builder_1.trip)('the move back home', true),
+        phrases: ['moving back home', 'returning from abroad', 'repatriating', 'coming back home after living abroad'],
+        keywords: ['repatriation', 'returning', 'homecoming'] }),
+    (0, builder_1.E)({ id: 'gap-year', name: "I'm taking a gap year", emoji: '🌏', category: 'milestone', tasks: (0, builder_1.trip)('the gap year', true),
+        phrases: ['taking a gap year', 'gap year', 'year off to travel'],
+        keywords: ['gap', 'backpacking', 'sabbatical'] }),
+    (0, builder_1.E)({ id: 'semester-abroad', name: "I'm doing a semester abroad", emoji: '✈️', category: 'milestone', tasks: (0, builder_1.enrollment)('the semester abroad'),
+        phrases: ['semester abroad', 'studying abroad', 'exchange semester', 'study exchange'],
+        keywords: ['exchange', 'erasmus', 'studying'] }),
+    (0, builder_1.E)({ id: 'first-marathon', name: "I'm running my first marathon", emoji: '🏃', category: 'milestone', tasks: (0, builder_1.sport)('your first marathon'),
+        phrases: ['my first marathon', 'first marathon', 'running a marathon for the first time'],
+        keywords: ['marathon', '26.2', '42k'] }),
+];
+
+});
 __define("templates/gotMarried", function (exports, require, module) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
@@ -566,6 +1371,7 @@ exports.gotMarried = {
     name: 'I got married',
     emoji: '💍',
     category: 'milestone',
+    featured: true,
     summary: 'Marriage changes your tax filing status, insurance, beneficiaries and possibly your legal name — each with its own institution.',
     triggerPhrases: ['i got married', 'we got married', 'getting married', 'just married', 'i am married now'],
     keywords: ['married', 'marriage', 'wedding', 'spouse', 'wife', 'husband'],
@@ -662,6 +1468,7 @@ exports.immigrateCanada = {
     name: 'I want to immigrate to Canada',
     emoji: '🍁',
     category: 'milestone',
+    featured: true,
     summary: 'A structured path from eligibility analysis to a submitted application: document checklist, language tests, credential assessment, proof of funds, timeline and status monitoring.',
     triggerPhrases: [
         'i want to immigrate to canada',
@@ -872,6 +1679,7 @@ exports.newJob = {
     name: 'I got a new job',
     emoji: '💼',
     category: 'important',
+    featured: true,
     summary: 'The first month at a new employer is full of one-shot windows: benefits enrollment, retirement matching, and moving money and coverage over from the old job.',
     triggerPhrases: [
         'i got a new job',
@@ -973,6 +1781,7 @@ exports.lostJob = {
     name: 'I lost my job',
     emoji: '📉',
     category: 'important',
+    featured: true,
     summary: 'The week after a job ends is deadline-dense: unemployment claims, health coverage continuation and severance review all have short windows.',
     triggerPhrases: [
         'i lost my job',
@@ -1064,6 +1873,7 @@ exports.boughtCar = {
     name: 'I bought a car',
     emoji: '🚗',
     category: 'important',
+    featured: true,
     summary: 'A car is only legally yours to drive once insurance, title and registration line up — each with its own office and deadline.',
     triggerPhrases: [
         'i bought a car',
@@ -1150,6 +1960,7 @@ exports.lovedOnePassed = {
     name: 'A loved one passed away',
     emoji: '🕊️',
     category: 'important',
+    featured: true,
     summary: 'Grief comes with a case file no one warns you about. This plan sequences the administration — certificates, agencies, accounts, estate — so nothing urgent is missed.',
     triggerPhrases: [
         'passed away',
@@ -1266,7 +2077,7 @@ exports.lovedOnePassed = {
 __define("templates/index", function (exports, require, module) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.eventsByCategory = exports.getEventTemplate = exports.EVENT_CATALOG = void 0;
+exports.featuredByCategory = exports.eventsByCategory = exports.getEventTemplate = exports.EVENT_CATALOG = void 0;
 const types_1 = require("../types");
 const moved_1 = require("./moved");
 const startedBusiness_1 = require("./startedBusiness");
@@ -1276,9 +2087,16 @@ const newChild_1 = require("./newChild");
 const milestones_1 = require("./milestones");
 const important_1 = require("./important");
 const leisure_1 = require("./leisure");
-/** The catalog of life events the platform can administer, in category order. */
+const extraMilestones_1 = require("./extraMilestones");
+const extraImportant_1 = require("./extraImportant");
+const extraLeisure_1 = require("./extraLeisure");
+/**
+ * The catalog of life events the platform can administer. Featured events
+ * (deeply authored) come first per category; the archetype-based long tail
+ * follows and is reachable through typing / intent matching.
+ */
 exports.EVENT_CATALOG = [
-    // Milestones — roughly in life order
+    // Featured milestones — roughly in life order
     milestones_1.turned18,
     milestones_1.graduatedCollege,
     gotMarried_1.gotMarried,
@@ -1287,17 +2105,21 @@ exports.EVENT_CATALOG = [
     immigrateCanada_1.immigrateCanada,
     milestones_1.gotDivorced,
     milestones_1.retired,
-    // Important events
+    // Featured important events
     moved_1.moved,
     important_1.newJob,
     important_1.lostJob,
     startedBusiness_1.startedBusiness,
     important_1.boughtCar,
     important_1.lovedOnePassed,
-    // Leisure & lifestyle
+    // Featured leisure & lifestyle
     leisure_1.tripAbroad,
     leisure_1.newPet,
     leisure_1.homeRenovation,
+    // The long tail
+    ...extraMilestones_1.extraMilestones,
+    ...extraImportant_1.extraImportant,
+    ...extraLeisure_1.extraLeisure,
 ];
 function getEventTemplate(id) {
     return exports.EVENT_CATALOG.find((e) => e.id === id);
@@ -1311,6 +2133,14 @@ function eventsByCategory() {
     })).filter((g) => g.events.length > 0);
 }
 exports.eventsByCategory = eventsByCategory;
+/** Only featured events, grouped — what the home-screen picker shows. */
+function featuredByCategory() {
+    return types_1.CATEGORY_ORDER.map((category) => ({
+        category,
+        events: exports.EVENT_CATALOG.filter((e) => e.category === category && e.featured === true),
+    })).filter((g) => g.events.length > 0);
+}
+exports.featuredByCategory = featuredByCategory;
 
 });
 __define("templates/leisure", function (exports, require, module) {
@@ -1323,6 +2153,7 @@ exports.tripAbroad = {
     name: 'I planned a trip abroad',
     emoji: '✈️',
     category: 'leisure',
+    featured: true,
     summary: 'International travel has an admin critical path — passports, visas, insurance, money and the house you leave behind — and most of it has lead times.',
     triggerPhrases: [
         'trip to europe',
@@ -1444,6 +2275,7 @@ exports.newPet = {
     name: 'We got a pet',
     emoji: '🐶',
     category: 'leisure',
+    featured: true,
     summary: 'A new pet comes with a small legal identity of its own: registration, vaccinations, insurance and a vet relationship.',
     triggerPhrases: [
         'we got a dog',
@@ -1530,6 +2362,7 @@ exports.homeRenovation = {
     name: "I'm renovating my home",
     emoji: '🔨',
     category: 'leisure',
+    featured: true,
     summary: 'Renovation is a construction project with your name on the permits: scope, contractors, municipal approval and insurance all before the first wall opens.',
     triggerPhrases: [
         'renovating my home',
@@ -1638,9 +2471,10 @@ exports.turned18 = {
     name: 'I turned 18',
     emoji: '🎂',
     category: 'milestone',
+    featured: true,
     summary: 'Legal adulthood switches you from "dependent" to "person the system deals with directly": voting, ID, banking, health privacy and your own credit file.',
     triggerPhrases: ['i turned 18', 'i just turned 18', 'turning 18', 'i am 18 now', 'became an adult', 'i turn 18'],
-    keywords: ['18', 'eighteen', 'adult', 'adulthood', 'birthday'],
+    keywords: ['18', 'eighteen', 'adulthood'],
     questions: [
         { id: 'birthday', prompt: 'When is (was) the 18th birthday?', kind: 'date' },
         {
@@ -1723,6 +2557,7 @@ exports.graduatedCollege = {
     name: 'I graduated college',
     emoji: '🎓',
     category: 'milestone',
+    featured: true,
     summary: 'Graduation quietly starts several clocks: student loan grace periods, health coverage age-outs, and the move off university systems.',
     triggerPhrases: [
         'i graduated college',
@@ -1829,6 +2664,7 @@ exports.boughtHouse = {
     name: 'I bought a house',
     emoji: '🏠',
     category: 'milestone',
+    featured: true,
     summary: 'Closing day is the middle, not the end: insurance, title, property tax, utilities and your estate documents all need to catch up with the deed.',
     triggerPhrases: [
         'i bought a house',
@@ -1948,6 +2784,7 @@ exports.gotDivorced = {
     name: 'I got divorced',
     emoji: '📄',
     category: 'milestone',
+    featured: true,
     summary: 'After the decree, every system that once knew you as a couple needs to be told individually: accounts, insurance, beneficiaries, taxes and names.',
     triggerPhrases: [
         'i got divorced',
@@ -2066,6 +2903,7 @@ exports.retired = {
     name: 'I retired',
     emoji: '🌅',
     category: 'milestone',
+    featured: true,
     summary: 'Retirement swaps one paycheck for several income streams — pension, government benefits, savings — each with its own application, timing rules and tax treatment.',
     triggerPhrases: [
         'i retired',
@@ -2182,6 +3020,7 @@ exports.moved = {
     name: 'I moved',
     emoji: '📦',
     category: 'important',
+    featured: true,
     summary: 'A change of address touches your licence, insurance, government records, banks, employer, utilities and tax records. This plan coordinates all of them.',
     triggerPhrases: [
         'i moved',
@@ -2403,6 +3242,7 @@ exports.newChild = {
     name: 'We had a baby',
     emoji: '👶',
     category: 'milestone',
+    featured: true,
     summary: 'A new child needs to exist administratively: birth registration, ID, health coverage, benefits, and updated taxes and beneficiaries.',
     triggerPhrases: ['we had a baby', 'i had a baby', 'new baby', 'my child was born', 'we are having a baby'],
     keywords: ['baby', 'child', 'born', 'birth', 'newborn', 'parental'],
@@ -2498,6 +3338,7 @@ exports.startedBusiness = {
     name: 'I started a business',
     emoji: '🏢',
     category: 'important',
+    featured: true,
     summary: 'Starting a business means satisfying half a dozen authorities in the right order: registration first, then tax accounts, then licences, insurance, payroll and accounting.',
     triggerPhrases: [
         'i started a business',
@@ -2728,6 +3569,7 @@ exports.DOMAIN_LABELS = {
     business: 'Business',
     education: 'Education',
     travel: 'Travel & bookings',
+    social: 'Events & celebrations',
 };
 exports.CATEGORY_LABELS = {
     milestone: 'Milestone events',
@@ -2750,7 +3592,7 @@ const DOMAIN_COLORS = {
   government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
   employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
   legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
-  travel:'#00ACC1',
+  travel:'#00ACC1', social:'#EC407A',
 };
 const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
 const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
@@ -2836,14 +3678,15 @@ function taskRowHtml(task, planId, subtitle) {
 }
 
 function matchesHtml() {
-  const matches = Intent.matchIntent(homeInput).slice(0, 3);
+  const matches = Intent.matchIntent(homeInput).slice(0, 6);
   if (!matches.length) return '';
-  return '<div class="p-card"><div class="p-section" style="margin-top:0">Sounds like…</div>' +
+  return '<div class="p-suggest">' +
     matches.map((m) =>
       '<button class="p-match" data-nav-intake="' + esc(m.event.id) + '">' +
       '<span class="me">' + m.event.emoji + '</span>' +
-      '<span style="flex:1;min-width:0"><div class="mn">' + esc(m.event.name) + '</div>' +
-      '<div class="md">' + esc(m.event.summary) + '</div></span></button>'
+      '<span class="mn">' + esc(m.event.name) + '</span>' +
+      '<span class="mc mc-' + m.event.category + '">' + esc(Types.CATEGORY_LABELS[m.event.category].split(' ')[0]) + '</span>' +
+      '</button>'
     ).join('') + '</div>';
 }
 
@@ -2856,17 +3699,21 @@ function renderHome() {
     '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
     '</div>' +
     '<div id="p-matches">' + matchesHtml() + '</div>' +
-    Catalog.eventsByCategory().map((g) =>
+    Catalog.featuredByCategory().map((g) =>
       '<div class="p-section">' + esc(Types.CATEGORY_LABELS[g.category]) + '</div><div class="p-chiprow">' +
       g.events.map((e) =>
         '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
       '</div>').join('') +
+    '<div class="p-cataloghint">…and ' +
+    (Catalog.EVENT_CATALOG.length - Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0)) +
+    ' more events in the catalog — just describe what happened above.</div>' +
     '<div class="p-section">Active plans</div>';
   if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
   for (const plan of plans) {
     const pr = Progress.planProgress(plan, simToday);
     html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
-      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) + '</span>' +
+      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) +
+      (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
       '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
       '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
       (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
@@ -2931,6 +3778,7 @@ function renderPlan() {
   const pr = Progress.planProgress(plan, simToday);
   const groups = Progress.groupByDomain(plan);
   let html = '<h1 class="p-h1" style="font-size:22px">' + plan.emoji + ' ' + esc(plan.eventName) + '</h1>' +
+    (plan.milestone ? '<div class="p-star" style="margin-top:2px">⭐ Milestone</div>' : '') +
     '<p class="p-sub" style="font-size:12px">Event date ' + plan.eventDate + ' · ' + pr.done + '/' + pr.total + ' done' +
     (pr.overdue ? ' · <b style="color:#C62828">' + pr.overdue + ' overdue</b>' : '') + '</p>' +
     '<div class="p-progress" style="margin-bottom:16px"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></div>';
@@ -3119,14 +3967,16 @@ const SCENARIOS = [
   'I started a business',
   'I want to immigrate to Canada',
   'i graduated college',
-  'I turned 18',
+  "i planned my son's 5th birthday party",
+  'planned my marriage anniversary',
   'I got a new job',
   'I was laid off',
   'I bought a house',
   'I retired',
   'I planned a family trip to Europe',
   'we adopted a puppy',
-  'renovating the kitchen',
+  'my identity was stolen',
+  'training for a triathlon',
 ];
 const scEl = document.getElementById('scenarios');
 for (const s of SCENARIOS) {

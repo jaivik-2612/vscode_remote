@@ -7,10 +7,11 @@ export const turned18: LifeEventTemplate = {
   name: 'I turned 18',
   emoji: '🎂',
   category: 'milestone',
+  featured: true,
   summary:
     'Legal adulthood switches you from "dependent" to "person the system deals with directly": voting, ID, banking, health privacy and your own credit file.',
   triggerPhrases: ['i turned 18', 'i just turned 18', 'turning 18', 'i am 18 now', 'became an adult', 'i turn 18'],
-  keywords: ['18', 'eighteen', 'adult', 'adulthood', 'birthday'],
+  keywords: ['18', 'eighteen', 'adulthood'],
   questions: [
     { id: 'birthday', prompt: 'When is (was) the 18th birthday?', kind: 'date' },
     {
@@ -94,6 +95,7 @@ export const graduatedCollege: LifeEventTemplate = {
   name: 'I graduated college',
   emoji: '🎓',
   category: 'milestone',
+  featured: true,
   summary:
     'Graduation quietly starts several clocks: student loan grace periods, health coverage age-outs, and the move off university systems.',
   triggerPhrases: [
@@ -202,6 +204,7 @@ export const boughtHouse: LifeEventTemplate = {
   name: 'I bought a house',
   emoji: '🏠',
   category: 'milestone',
+  featured: true,
   summary:
     'Closing day is the middle, not the end: insurance, title, property tax, utilities and your estate documents all need to catch up with the deed.',
   triggerPhrases: [
@@ -323,6 +326,7 @@ export const gotDivorced: LifeEventTemplate = {
   name: 'I got divorced',
   emoji: '📄',
   category: 'milestone',
+  featured: true,
   summary:
     'After the decree, every system that once knew you as a couple needs to be told individually: accounts, insurance, beneficiaries, taxes and names.',
   triggerPhrases: [
@@ -443,6 +447,7 @@ export const retired: LifeEventTemplate = {
   name: 'I retired',
   emoji: '🌅',
   category: 'milestone',
+  featured: true,
   summary:
     'Retirement swaps one paycheck for several income streams — pension, government benefits, savings — each with its own application, timing rules and tax treatment.',
   triggerPhrases: [
