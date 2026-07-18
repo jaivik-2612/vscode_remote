@@ -1,7 +1,7 @@
 export type RootStackParamList = {
   Tabs: undefined;
   Intake: { eventId: string };
-  Plan: { planId: string };
+  Plan: { planId: string; celebrate?: boolean };
   TaskDetail: { planId: string; taskId: string };
 };
 

@@ -1,15 +1,17 @@
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Alert,
   Linking,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { celebrationMessage } from '../core/celebration';
 import { groupByDomain, planProgress } from '../core/progress';
 import { AFFILIATE_DISCLOSURE, productUrl, productsForPlan } from '../core/products';
 import { RootStackParamList } from '../navigation';
@@ -29,6 +31,7 @@ export default function PlanScreen() {
   const { colors } = useTheme();
   const plan = state.plans.find((p) => p.id === params.planId);
   const today = todayIso();
+  const [celebrating, setCelebrating] = useState(params.celebrate === true);
 
   if (!plan) {
     return (
@@ -55,8 +58,41 @@ export default function PlanScreen() {
       },
     ]);
 
+  const firstName = state.profile?.name ? state.profile.name.trim().split(' ')[0] : '';
+
   return (
     <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
+      <Modal
+        visible={celebrating}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCelebrating(false)}
+      >
+        <View style={styles.celebrateOverlay}>
+          <View style={[styles.celebrateCard, { backgroundColor: colors.card }]}>
+            <Text style={styles.celebrateConfetti}>🎊 ✨ 🎉 ✨ 🎊</Text>
+            <Text style={styles.celebrateEmoji}>{plan.emoji}</Text>
+            <Text style={[styles.celebrateTitle, { color: colors.ink }]}>
+              Congratulations{firstName ? `, ${firstName}` : ''}!
+            </Text>
+            <Text style={[styles.celebrateMsg, { color: colors.ink }]}>
+              {celebrationMessage(plan.eventId)}
+            </Text>
+            <Text style={[styles.celebrateSub, { color: colors.muted }]}>
+              Your plan is ready — LifeOS handles the paperwork while you enjoy the moment.
+            </Text>
+            <TouchableOpacity
+              style={[styles.celebrateCta, { backgroundColor: colors.accent }]}
+              onPress={() => setCelebrating(false)}
+            >
+              <Text style={[styles.celebrateCtaText, { color: colors.onAccent }]}>
+                See my plan 🎉
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <Text style={[styles.planTitle, { color: colors.ink }]}>
         {plan.emoji} {plan.eventName}
       </Text>
@@ -145,4 +181,29 @@ const styles = StyleSheet.create({
   disclosure: { fontSize: 10, marginTop: 2, marginBottom: spacing.sm },
   deleteButton: { alignItems: 'center', padding: spacing.md },
   deleteText: { fontWeight: '600' },
+  celebrateOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10, 15, 30, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  celebrateCard: {
+    width: '100%',
+    borderRadius: 24,
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  celebrateConfetti: { fontSize: 16, marginBottom: spacing.sm },
+  celebrateEmoji: { fontSize: 46 },
+  celebrateTitle: { fontSize: 22, fontWeight: '800', marginTop: spacing.sm },
+  celebrateMsg: { fontSize: 14, fontWeight: '600', textAlign: 'center', marginTop: 6, lineHeight: 20 },
+  celebrateSub: { fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 17 },
+  celebrateCta: {
+    borderRadius: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    marginTop: spacing.md,
+  },
+  celebrateCtaText: { fontSize: 15, fontWeight: '700' },
 });

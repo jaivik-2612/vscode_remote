@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { shouldCelebrate } from '../core/celebration';
 import { generatePlan } from '../core/planner';
 import { getEventTemplate } from '../core/templates';
 import { IntakeQuestion } from '../core/types';
@@ -50,7 +51,7 @@ export default function IntakeScreen() {
   const createPlan = () => {
     const plan = generatePlan({ template, eventDate, answers });
     dispatch({ type: 'addPlan', plan });
-    navigation.replace('Plan', { planId: plan.id });
+    navigation.replace('Plan', { planId: plan.id, celebrate: shouldCelebrate(plan) });
   };
 
   const renderQuestion = (q: IntakeQuestion) => {
