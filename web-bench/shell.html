@@ -1,0 +1,736 @@
+<title>LifeOS — Test Bench</title>
+<style>
+  :root {
+    --bg: #EDEEF1;
+    --panel: #FFFFFF;
+    --ink: #1B1D22;
+    --muted: #667085;
+    --line: #E0E2E8;
+    --accent: #2F6FED;
+    --accent-soft: #E8F0FE;
+    --good: #2E7D32;
+    --bad: #C62828;
+    --warn: #B26A00;
+    --bezel: #23262D;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+      --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+      --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #EDEEF1; --panel: #FFFFFF; --ink: #1B1D22; --muted: #667085;
+    --line: #E0E2E8; --accent: #2F6FED; --accent-soft: #E8F0FE;
+    --good: #2E7D32; --bad: #C62828; --warn: #B26A00; --bezel: #23262D;
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+    --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+    --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.45;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .topbar h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .01em; }
+  .topbar h1 .tag {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 2px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .topbar .spacer { flex: 1; }
+  .field { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .field input[type="date"] {
+    font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .btn-ghost {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+  }
+  .btn-ghost:hover { color: var(--bad); border-color: var(--bad); }
+
+  .bench {
+    display: flex; gap: 32px; justify-content: center; align-items: flex-start;
+    padding: 32px 24px 64px; flex-wrap: wrap;
+  }
+
+  /* ---------- Phone ---------- */
+  .phone {
+    width: 396px; flex: none;
+    background: var(--bezel); border-radius: 48px; padding: 12px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.18);
+  }
+  .screen {
+    position: relative;
+    width: 372px; height: 760px; border-radius: 38px; overflow: hidden;
+    background: #F7F7F5; color: #1A1A1A;
+    display: flex; flex-direction: column;
+  }
+  .statusbar {
+    flex: none; height: 34px; display: flex; align-items: center;
+    justify-content: space-between; padding: 0 22px;
+    font-size: 12px; font-weight: 600; color: #1A1A1A;
+  }
+  .p-header {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 8px;
+  }
+  .p-header .back {
+    background: none; border: none; color: #2F6FED; font-size: 15px;
+    font-weight: 600; padding: 6px 8px; border-radius: 8px;
+  }
+  .p-header .p-htitle { font-size: 15px; font-weight: 600; color: #1A1A1A; }
+  .p-body { flex: 1; overflow-y: auto; padding: 4px 16px 24px; }
+  .tabbar {
+    flex: none; display: flex; border-top: 1px solid #E6E4E0; background: #FFFFFF;
+    padding: 6px 0 14px;
+  }
+  .tabbar button {
+    flex: 1; background: none; border: none; padding: 6px 0 2px;
+    font-size: 11px; color: #6B6B6B; display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+  }
+  .tabbar button .ticon { font-size: 20px; }
+  .tabbar button.active { color: #2F6FED; font-weight: 700; }
+
+  /* app interior — mirrors the RN styles */
+  .p-h1 { font-size: 26px; font-weight: 700; margin: 10px 0 2px; }
+  .p-sub { font-size: 14px; color: #6B6B6B; margin: 0 0 14px; }
+  .p-input {
+    width: 100%; background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; font-size: 15px; font-family: var(--sans); color: #1A1A1A;
+    min-height: 56px; resize: none; margin-bottom: 8px;
+  }
+  .p-section {
+    font-size: 11px; font-weight: 700; color: #6B6B6B; text-transform: uppercase;
+    letter-spacing: .05em; margin: 14px 0 8px;
+  }
+  .p-card {
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .p-card.danger { border-color: #C62828; }
+  .p-chiprow { display: flex; flex-wrap: wrap; }
+  .p-chip {
+    border-radius: 999px; border: 1px solid #E6E4E0; background: #FFF;
+    padding: 7px 13px; margin: 0 8px 8px 0; font-size: 13px; color: #1A1A1A;
+  }
+  .p-chip.sel { background: #E8F0FE; border-color: #2F6FED; color: #2F6FED; font-weight: 600; }
+  .p-match { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 8px 0; border-bottom: 1px solid #F0EFEC; }
+  .p-match:last-child { border-bottom: none; }
+  .p-match .me { font-size: 22px; }
+  .p-match .mn { font-size: 15px; font-weight: 600; color: #1A1A1A; }
+  .p-match .md { font-size: 12px; color: #6B6B6B; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
+    border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .p-planrow .nm { font-size: 15px; font-weight: 600; }
+  .p-planrow .ct { font-size: 12px; color: #6B6B6B; }
+  .p-progress { height: 8px; border-radius: 4px; background: #E6E4E0; overflow: hidden; }
+  .p-progress i { display: block; height: 100%; background: #2F6FED; border-radius: 4px; }
+  .p-overdue { color: #C62828; font-size: 12px; font-weight: 600; margin-top: 8px; }
+  .p-empty { color: #6B6B6B; font-size: 13px; }
+  .p-task { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 9px 0; border-bottom: 1px solid #F0EFEC; }
+  .p-task:last-child { border-bottom: none; }
+  .p-task .dot { flex: none; width: 10px; height: 10px; border-radius: 5px; }
+  .p-task .tt { font-size: 14px; color: #1A1A1A; }
+  .p-task.done .tt { color: #6B6B6B; text-decoration: line-through; }
+  .p-task .ts { font-size: 11px; color: #6B6B6B; margin-top: 1px; }
+  .p-task .pr { flex: none; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .p-ghead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .p-ghead .gdot { width: 12px; height: 12px; border-radius: 6px; }
+  .p-ghead .gl { flex: 1; font-size: 15px; font-weight: 700; }
+  .p-ghead .gc { font-size: 12px; color: #6B6B6B; }
+  .p-cta { display: block; width: 100%; background: #2F6FED; color: #FFF; border: none;
+    border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 700; margin-top: 6px; }
+  .p-hint { font-size: 11px; color: #6B6B6B; text-align: center; margin-top: 8px; }
+  .p-del { display: block; width: 100%; background: none; border: none; color: #C62828;
+    font-weight: 600; padding: 14px; }
+  .p-q { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .p-text { width: 100%; background: #F7F7F5; border: 1px solid #E6E4E0; border-radius: 10px;
+    padding: 9px; font-size: 14px; font-family: var(--sans); color: #1A1A1A; }
+  .p-desc { font-size: 14px; line-height: 1.55; margin: 0; }
+  .p-meta { font-size: 12px; color: #6B6B6B; margin-top: 8px; }
+  .p-meta.strong { font-weight: 600; }
+  .p-doc { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 6px 0; font-size: 14px; color: #1A1A1A; }
+  .p-doc .cb { font-size: 17px; color: #2F6FED; }
+  .p-doc.on .dn { color: #6B6B6B; text-decoration: line-through; }
+  .p-block { font-size: 13px; padding: 3px 0; }
+
+  /* ---------- Inspector ---------- */
+  .inspector { width: 400px; flex: none; display: flex; flex-direction: column; gap: 16px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 10px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .09em;
+  }
+  .panel p.note { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+  .scenarios { display: flex; flex-wrap: wrap; gap: 8px; }
+  .scenarios button {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px;
+  }
+  .scenarios button:hover { border-color: var(--accent); color: var(--accent); }
+  .imatch { border-top: 1px solid var(--line); padding: 8px 0; }
+  .imatch:first-of-type { border-top: none; }
+  .imatch .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .imatch .id { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .imatch .score { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .imatch .ev { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .imatch .ev span {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px;
+    font-family: var(--mono); font-size: 12px; }
+  .kv dt { color: var(--muted); margin: 0; }
+  .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .kv dd.bad { color: var(--bad); font-weight: 600; }
+  .kv dd.good { color: var(--good); }
+  .actions-row { display: flex; gap: 8px; margin-top: 10px; }
+  .actions-row button {
+    flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 7px; font-family: var(--mono); font-size: 11px;
+  }
+  .actions-row button:hover { border-color: var(--accent); color: var(--accent); }
+  .log { font-family: var(--mono); font-size: 11px; max-height: 190px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 3px; }
+  .log div { color: var(--muted); }
+  .log div b { color: var(--ink); font-weight: 600; }
+  .log .t { color: var(--accent); }
+  .checklist { margin: 0; padding: 0 0 0 2px; list-style: none; font-size: 13px; }
+  .checklist li { padding: 3px 0; color: var(--muted); }
+  .checklist li::before { content: "→ "; color: var(--accent); font-family: var(--mono); }
+  dialog#jsonbox { max-width: 560px; width: 90vw; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--panel); color: var(--ink); padding: 16px; }
+  dialog#jsonbox::backdrop { background: rgba(0,0,0,.45); }
+  dialog#jsonbox pre { max-height: 60vh; overflow: auto; background: var(--bg);
+    border-radius: 8px; padding: 12px; font-size: 11px; margin: 10px 0 0; }
+
+  @media (max-width: 900px) {
+    .bench { padding: 16px 8px 48px; gap: 20px; }
+    .inspector { width: min(400px, 96vw); }
+    .phone { transform-origin: top center; }
+  }
+  @media (max-width: 420px) {
+    .phone { width: 100%; border-radius: 32px; padding: 8px; }
+    .screen { width: 100%; height: 78vh; border-radius: 26px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .p-body { scroll-behavior: smooth; }
+  }
+</style>
+
+<header class="topbar">
+  <h1>LifeOS<span class="tag">test bench</span></h1>
+  <span class="field" title="The engine computes overdue/urgency against this date — move it forward to test overdue states.">
+    simulated today
+    <input type="date" id="sim-today" />
+  </span>
+  <span class="spacer"></span>
+  <button class="btn-ghost" id="reset-btn" title="Clears all plans from browser storage">reset data</button>
+</header>
+
+<main class="bench">
+  <div class="phone" aria-label="Phone simulator running LifeOS">
+    <div class="screen">
+      <div class="statusbar"><span>9:41</span><span>LifeOS</span></div>
+      <div class="p-header" id="p-header"></div>
+      <div class="p-body" id="p-body"></div>
+      <div class="tabbar" id="p-tabbar"></div>
+    </div>
+  </div>
+
+  <aside class="inspector">
+    <section class="panel">
+      <h2>What this is</h2>
+      <p class="note">A browser build of the LifeOS mobile app (Android/iOS, React&nbsp;Native).
+      The phone runs the <em>exact engine code</em> from <code>src/core/</code> — intent matcher,
+      planner, dependency graph — transpiled from the repo's TypeScript. Plans persist in this
+      browser. Things worth testing:</p>
+      <ul class="checklist">
+        <li>Type "I moved" (or a paraphrase) — watch match scores below</li>
+        <li>Answer intake questions — Yes/No answers add/remove tasks</li>
+        <li>Complete "Check the business name" — watch registration unblock</li>
+        <li>Move the simulated date forward — Timeline turns overdue red</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <div class="scenarios" id="scenarios"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Intent matcher</h2>
+      <div id="intent-out"><p class="note">Type into the phone's input to see live match scoring.</p></div>
+    </section>
+
+    <section class="panel" id="plan-panel" hidden>
+      <h2>Current plan</h2>
+      <dl class="kv" id="plan-stats"></dl>
+      <div class="actions-row">
+        <button id="json-btn">view JSON</button>
+        <button id="copy-btn">copy JSON</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Action log</h2>
+      <div class="log" id="log"><div>— session start —</div></div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="jsonbox">
+  <h2 style="margin:0;font-size:13px;font-family:var(--mono)">plan JSON</h2>
+  <pre id="jsonpre"></pre>
+  <div class="actions-row"><button onclick="document.getElementById('jsonbox').close()">close</button></div>
+</dialog>
+
+<script>
+/* ===== module shim for the transpiled engine (CommonJS) ===== */
+const __modules = {}, __cache = {};
+function __define(name, fn) { __modules[name] = fn; }
+function __resolve(from, dep) {
+  if (!dep.startsWith('.')) return dep;
+  const parts = from.split('/').slice(0, -1).concat(dep.split('/'));
+  const out = [];
+  for (const p of parts) {
+    if (p === '.' || p === '') continue;
+    else if (p === '..') out.pop();
+    else out.push(p);
+  }
+  let name = out.join('/');
+  if (__modules[name + '/index']) name = name + '/index';
+  return name;
+}
+function __require(name) {
+  if (__cache[name]) return __cache[name].exports;
+  const mod = (__cache[name] = { exports: {} });
+  __modules[name](mod.exports, (d) => __require(__resolve(name, d)), mod);
+  return mod.exports;
+}
+/*__MODULES__*/
+/* ===== engine handles ===== */
+const Intent = __require('intent');
+const Planner = __require('planner');
+const Progress = __require('progress');
+const Catalog = __require('templates/index');
+const Types = __require('types');
+
+/* mirrors src/theme.ts */
+const DOMAIN_COLORS = {
+  government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
+  employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
+  legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
+};
+const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
+const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
+const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'🔒', pending:'○' };
+
+/* ===== state ===== */
+const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1';
+function realToday() { return new Date().toISOString().slice(0, 10); }
+let plans = [];
+try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]'); } catch (e) { plans = []; }
+let simToday = localStorage.getItem(K_TODAY) || realToday();
+let route = { name: 'home' };
+let backStack = [];
+let homeInput = '';
+let intakeAnswers = {};
+
+function save() { localStorage.setItem(K_PLANS, JSON.stringify(plans)); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===== action log ===== */
+const logEl = document.getElementById('log');
+function log(msg) {
+  const d = document.createElement('div');
+  const t = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = '<span class="t">' + t + '</span> ' + msg;
+  logEl.prepend(d);
+  while (logEl.children.length > 60) logEl.lastChild.remove();
+}
+
+/* ===== navigation ===== */
+function navigate(next, replace) {
+  if (!replace) backStack.push(route);
+  route = next;
+  renderAll();
+}
+function goBack() {
+  route = backStack.pop() || { name: 'home' };
+  renderAll();
+}
+
+/* ===== store ops ===== */
+function addPlan(plan) {
+  plans = [plan, ...plans]; save();
+  log('<b>generatePlan</b> ' + esc(plan.eventId) + ' → ' + plan.tasks.length + ' tasks');
+}
+function removePlan(planId) {
+  const p = plans.find((x) => x.id === planId);
+  plans = plans.filter((x) => x.id !== planId); save();
+  log('<b>removePlan</b> ' + esc(p ? p.eventId : planId));
+}
+function setTaskStatus(planId, taskId, status) {
+  plans = plans.map((p) => {
+    if (p.id !== planId) return p;
+    const updated = { ...p, tasks: p.tasks.map((t) => t.id === taskId ? { ...t, status } : t) };
+    return Planner.reconcileBlocked(updated);
+  });
+  save();
+  log('<b>setTaskStatus</b> ' + esc(taskId.split('.').pop()) + ' → ' + esc(status));
+}
+function toggleDocument(planId, taskId, name) {
+  plans = plans.map((p) => p.id !== planId ? p : ({
+    ...p,
+    tasks: p.tasks.map((t) => t.id !== taskId ? t : ({
+      ...t, documents: t.documents.map((d) => d.name === name ? { ...d, collected: !d.collected } : d),
+    })),
+  }));
+  save();
+  log('<b>toggleDocument</b> ' + esc(name));
+}
+
+/* ===== phone rendering ===== */
+const headerEl = document.getElementById('p-header');
+const bodyEl = document.getElementById('p-body');
+const tabbarEl = document.getElementById('p-tabbar');
+
+function taskRowHtml(task, planId, subtitle) {
+  const resolved = task.status === 'done' || task.status === 'skipped';
+  return '<button class="p-task' + (resolved ? ' done' : '') + '" data-nav-task="' + esc(planId) + '|' + esc(task.id) + '">' +
+    '<span class="dot" style="background:' + DOMAIN_COLORS[task.domain] + '"></span>' +
+    '<span style="flex:1;min-width:0"><span class="tt">' + STATUS_GLYPH[task.status] + ' ' + esc(task.title) + '</span>' +
+    '<div class="ts">' + esc(subtitle || ('Due ' + task.dueDate + (task.authority ? ' · ' + task.authority : ''))) + '</div></span>' +
+    '<span class="pr" style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</span></button>';
+}
+
+function matchesHtml() {
+  const matches = Intent.matchIntent(homeInput).slice(0, 3);
+  if (!matches.length) return '';
+  return '<div class="p-card"><div class="p-section" style="margin-top:0">Sounds like…</div>' +
+    matches.map((m) =>
+      '<button class="p-match" data-nav-intake="' + esc(m.event.id) + '">' +
+      '<span class="me">' + m.event.emoji + '</span>' +
+      '<span style="flex:1;min-width:0"><div class="mn">' + esc(m.event.name) + '</div>' +
+      '<div class="md">' + esc(m.event.summary) + '</div></span></button>'
+    ).join('') + '</div>';
+}
+
+function renderHome() {
+  headerEl.innerHTML = '';
+  let html = '<h1 class="p-h1">What happened?</h1>' +
+    '<p class="p-sub">Tell LifeOS about a life event and it maps out everything affected — every institution, deadline and document.</p>' +
+    '<textarea class="p-input" id="p-freetext" rows="2" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
+    '<div id="p-matches">' + matchesHtml() + '</div>' +
+    '<div class="p-section">Or pick an event</div><div class="p-chiprow">' +
+    Catalog.EVENT_CATALOG.map((e) =>
+      '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
+    '</div><div class="p-section">Active plans</div>';
+  if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
+  for (const plan of plans) {
+    const pr = Progress.planProgress(plan, simToday);
+    html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
+      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) + '</span>' +
+      '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
+      '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+      (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
+      '</button>';
+  }
+  bodyEl.innerHTML = html;
+  const ta = document.getElementById('p-freetext');
+  ta.addEventListener('input', () => {
+    homeInput = ta.value;
+    document.getElementById('p-matches').innerHTML = matchesHtml();
+    renderIntentPanel();
+  });
+}
+
+function renderIntake() {
+  const template = Catalog.getEventTemplate(route.eventId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">New plan</span>';
+  if (!template) { bodyEl.innerHTML = '<p class="p-empty">Unknown event.</p>'; return; }
+  let html = '<h1 class="p-h1" style="font-size:22px">' + template.emoji + ' ' + esc(template.name) + '</h1>' +
+    '<p class="p-sub">' + esc(template.summary) + '</p>';
+  for (const q of template.questions) {
+    html += '<div class="p-card"><p class="p-q">' + esc(q.prompt) + '</p>';
+    if (q.kind === 'boolean') {
+      html += '<div class="p-chiprow">' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === true ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|1">Yes</button>' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === false ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|0">No</button></div>';
+    } else if (q.kind === 'choice') {
+      html += '<div class="p-chiprow">' + (q.choices || []).map((c) =>
+        '<button class="p-chip' + (intakeAnswers[q.id] === c ? ' sel' : '') + '" data-ans-choice="' + esc(q.id) + '|' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>';
+    } else if (q.kind === 'date') {
+      html += '<input class="p-text" type="date" value="' + esc(intakeAnswers[q.id] || simToday) + '" data-ans-text="' + esc(q.id) + '">';
+    } else {
+      html += '<input class="p-text" type="text" placeholder="Type here…" value="' + esc(intakeAnswers[q.id] || '') + '" data-ans-text="' + esc(q.id) + '">';
+    }
+    html += '</div>';
+  }
+  html += '<button class="p-cta" data-build="' + esc(template.id) + '">Build my plan</button>' +
+    '<p class="p-hint">Unanswered yes/no questions are treated as "No" — you can always regenerate the plan.</p>';
+  bodyEl.innerHTML = html;
+  bodyEl.querySelectorAll('[data-ans-text]').forEach((el) => {
+    el.addEventListener('input', () => { intakeAnswers[el.dataset.ansText] = el.value; });
+  });
+}
+
+function renderPlan() {
+  const plan = plans.find((p) => p.id === route.planId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Plan</span>';
+  if (!plan) { bodyEl.innerHTML = '<p class="p-empty">Plan not found.</p>'; return; }
+  const pr = Progress.planProgress(plan, simToday);
+  const groups = Progress.groupByDomain(plan);
+  let html = '<h1 class="p-h1" style="font-size:22px">' + plan.emoji + ' ' + esc(plan.eventName) + '</h1>' +
+    '<p class="p-sub" style="font-size:12px">Event date ' + plan.eventDate + ' · ' + pr.done + '/' + pr.total + ' done' +
+    (pr.overdue ? ' · <b style="color:#C62828">' + pr.overdue + ' overdue</b>' : '') + '</p>' +
+    '<div class="p-progress" style="margin-bottom:16px"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></div>';
+  for (const g of groups) {
+    const resolved = g.tasks.filter((t) => t.status === 'done' || t.status === 'skipped').length;
+    html += '<div class="p-card"><div class="p-ghead">' +
+      '<span class="gdot" style="background:' + DOMAIN_COLORS[g.domain] + '"></span>' +
+      '<span class="gl">' + esc(g.label) + '</span><span class="gc">' + resolved + '/' + g.tasks.length + '</span></div>' +
+      g.tasks.map((t) => taskRowHtml(t, plan.id)).join('') + '</div>';
+  }
+  html += '<button class="p-del" data-del-plan="' + esc(plan.id) + '">Delete this plan</button>';
+  bodyEl.innerHTML = html;
+}
+
+function renderTask() {
+  const plan = plans.find((p) => p.id === route.planId);
+  const task = plan && plan.tasks.find((t) => t.id === route.taskId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Task</span>';
+  if (!task) { bodyEl.innerHTML = '<p class="p-empty">Task not found.</p>'; return; }
+  const blockers = task.dependsOn
+    .map((id) => plan.tasks.find((t) => t.id === id))
+    .filter((t) => t && t.status !== 'done' && t.status !== 'skipped');
+  let html = '<h1 class="p-h1" style="font-size:20px">' + esc(task.title) + '</h1>' +
+    '<p class="p-sub" style="font-size:12px">' + esc(Types.DOMAIN_LABELS[task.domain]) +
+    ' · <b style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</b></p>' +
+    '<div class="p-card"><p class="p-desc">' + esc(task.description) + '</p>' +
+    (task.authority ? '<p class="p-meta">Handled by: ' + esc(task.authority) + '</p>' : '') +
+    '<p class="p-meta strong">Start ' + task.startDate + ' · Due ' + task.dueDate + '</p></div>';
+  if (task.status === 'blocked' && blockers.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Waiting on</div>' +
+      blockers.map((b) => '<div class="p-block">🔒 ' + esc(b.title) + '</div>').join('') + '</div>';
+  }
+  const opts = [['pending', 'To do'], ['in_progress', 'In progress'], ['done', 'Done'], ['skipped', 'Not applicable']];
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Status</div><div class="p-chiprow">' +
+    opts.map(([s, l]) => '<button class="p-chip' + (task.status === s ? ' sel' : '') + '" data-status="' + s + '">' + l + '</button>').join('') +
+    '</div></div>';
+  if (task.documents.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Documents needed</div>' +
+      task.documents.map((d) =>
+        '<button class="p-doc' + (d.collected ? ' on' : '') + '" data-doc="' + esc(d.name) + '">' +
+        '<span class="cb">' + (d.collected ? '☑' : '☐') + '</span><span class="dn">' + esc(d.name) + '</span></button>').join('') +
+      '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTimeline() {
+  headerEl.innerHTML = '';
+  const timeline = Progress.buildTimeline(plans, simToday);
+  const overdue = timeline.filter((e) => e.daysUntilDue < 0);
+  const upcoming = timeline.filter((e) => e.daysUntilDue >= 0);
+  const label = (d) => d < 0 ? (-d) + 'd overdue' : d === 0 ? 'due today' : 'in ' + d + 'd';
+  let html = '<h1 class="p-h1">Timeline</h1><p class="p-sub">Every deadline from every plan, in one place.</p>';
+  if (!timeline.length) html += '<p class="p-empty">Nothing due — create a plan from the Home tab.</p>';
+  if (overdue.length) {
+    html += '<div class="p-card danger"><div class="p-section" style="margin-top:0;color:#C62828">Overdue</div>' +
+      overdue.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
+  }
+  if (upcoming.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Upcoming</div>' +
+      upcoming.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTabbar() {
+  const onTabs = route.name === 'home' || route.name === 'timeline';
+  tabbarEl.style.display = onTabs ? 'flex' : 'none';
+  if (!onTabs) return;
+  tabbarEl.innerHTML =
+    '<button class="' + (route.name === 'home' ? 'active' : '') + '" data-tab="home"><span class="ticon">🏠</span>Home</button>' +
+    '<button class="' + (route.name === 'timeline' ? 'active' : '') + '" data-tab="timeline"><span class="ticon">📅</span>Timeline</button>';
+}
+
+function renderPhone() {
+  if (route.name === 'home') renderHome();
+  else if (route.name === 'intake') renderIntake();
+  else if (route.name === 'plan') renderPlan();
+  else if (route.name === 'task') renderTask();
+  else if (route.name === 'timeline') renderTimeline();
+  renderTabbar();
+}
+
+/* ===== inspector rendering ===== */
+function renderIntentPanel() {
+  const out = document.getElementById('intent-out');
+  if (!homeInput.trim()) {
+    out.innerHTML = '<p class="note">Type into the phone’s input to see live match scoring.</p>';
+    return;
+  }
+  const matches = Intent.matchIntent(homeInput);
+  if (!matches.length) {
+    out.innerHTML = '<p class="note">No catalog event matches <code>' + esc(homeInput) + '</code>.</p>';
+    return;
+  }
+  out.innerHTML = matches.map((m) =>
+    '<div class="imatch"><div class="row"><span class="id">' + esc(m.event.id) + '</span>' +
+    '<span class="score">score ' + m.score + '</span></div>' +
+    '<div class="ev">' + m.matchedOn.map((e) => '<span>' + esc(e) + '</span>').join('') + '</div></div>'
+  ).join('');
+}
+
+function renderPlanPanel() {
+  const panel = document.getElementById('plan-panel');
+  const planId = route.name === 'plan' ? route.planId : route.name === 'task' ? route.planId : null;
+  const plan = planId && plans.find((p) => p.id === planId);
+  if (!plan) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const pr = Progress.planProgress(plan, simToday);
+  const blocked = plan.tasks.filter((t) => t.status === 'blocked').length;
+  const domains = new Set(plan.tasks.map((t) => t.domain)).size;
+  const docs = plan.tasks.reduce((n, t) => n + t.documents.length, 0);
+  const docsDone = plan.tasks.reduce((n, t) => n + t.documents.filter((d) => d.collected).length, 0);
+  const gated = Catalog.getEventTemplate(plan.eventId).tasks.length - plan.tasks.length;
+  document.getElementById('plan-stats').innerHTML =
+    '<dt>plan id</dt><dd>' + esc(plan.id.slice(0, 22)) + '…</dd>' +
+    '<dt>tasks (after gating)</dt><dd>' + pr.total + (gated ? ' <span style="color:var(--muted)">(-' + gated + ' gated out)</span>' : '') + '</dd>' +
+    '<dt>domains touched</dt><dd>' + domains + '</dd>' +
+    '<dt>resolved</dt><dd class="good">' + pr.done + '</dd>' +
+    '<dt>blocked by deps</dt><dd>' + blocked + '</dd>' +
+    '<dt>overdue @ sim date</dt><dd class="' + (pr.overdue ? 'bad' : '') + '">' + pr.overdue + '</dd>' +
+    '<dt>documents collected</dt><dd>' + docsDone + '/' + docs + '</dd>';
+  document.getElementById('json-btn').onclick = () => {
+    document.getElementById('jsonpre').textContent = JSON.stringify(plan, null, 2);
+    document.getElementById('jsonbox').showModal();
+  };
+  document.getElementById('copy-btn').onclick = () => {
+    navigator.clipboard.writeText(JSON.stringify(plan, null, 2)).then(() => log('plan JSON copied'));
+  };
+}
+
+function renderAll() {
+  renderPhone();
+  renderIntentPanel();
+  renderPlanPanel();
+}
+
+/* ===== phone event delegation ===== */
+document.querySelector('.screen').addEventListener('click', (ev) => {
+  const el = ev.target.closest('button, [data-back]');
+  if (!el) return;
+  if (el.hasAttribute('data-back')) { goBack(); return; }
+  if (el.dataset.tab) { route = { name: el.dataset.tab }; backStack = []; renderAll(); return; }
+  if (el.dataset.navIntake) { intakeAnswers = {}; navigate({ name: 'intake', eventId: el.dataset.navIntake }); return; }
+  if (el.dataset.navPlan) { navigate({ name: 'plan', planId: el.dataset.navPlan }); return; }
+  if (el.dataset.navTask) {
+    const [planId, taskId] = el.dataset.navTask.split('|');
+    navigate({ name: 'task', planId, taskId }); return;
+  }
+  if (el.dataset.ansBool) {
+    const [id, v] = el.dataset.ansBool.split('|');
+    intakeAnswers[id] = v === '1'; renderPhone(); return;
+  }
+  if (el.dataset.ansChoice) {
+    const [id, v] = el.dataset.ansChoice.split('|');
+    intakeAnswers[id] = v; renderPhone(); return;
+  }
+  if (el.dataset.build) {
+    const template = Catalog.getEventTemplate(el.dataset.build);
+    const dateQ = template.questions.find((q) => q.kind === 'date');
+    const eventDate = (dateQ && intakeAnswers[dateQ.id]) || simToday;
+    const plan = Planner.generatePlan({ template, eventDate, answers: intakeAnswers });
+    addPlan(plan);
+    backStack = [{ name: 'home' }];
+    route = { name: 'plan', planId: plan.id };
+    renderAll(); return;
+  }
+  if (el.dataset.delPlan) {
+    if (confirm('Remove this plan and all its tasks?')) {
+      removePlan(el.dataset.delPlan); route = { name: 'home' }; backStack = []; renderAll();
+    }
+    return;
+  }
+  if (el.dataset.status) {
+    setTaskStatus(route.planId, route.taskId, el.dataset.status); renderAll(); return;
+  }
+  if (el.dataset.doc !== undefined && el.dataset.doc !== '') {
+    toggleDocument(route.planId, route.taskId, el.dataset.doc); renderAll(); return;
+  }
+});
+
+/* ===== bench controls ===== */
+const SCENARIOS = [
+  'I moved',
+  'I started a business',
+  'I want to immigrate to Canada',
+  'just signed a lease on a new apartment across town',
+  'going freelance and forming an LLC',
+  'we had a baby',
+  'we got married',
+];
+const scEl = document.getElementById('scenarios');
+for (const s of SCENARIOS) {
+  const b = document.createElement('button');
+  b.textContent = '“' + s + '”';
+  b.addEventListener('click', () => {
+    homeInput = s; route = { name: 'home' }; backStack = [];
+    renderAll();
+    log('scenario: <b>' + esc(s) + '</b>');
+  });
+  scEl.appendChild(b);
+}
+
+const todayInput = document.getElementById('sim-today');
+todayInput.value = simToday;
+todayInput.addEventListener('change', () => {
+  simToday = todayInput.value || realToday();
+  localStorage.setItem(K_TODAY, simToday);
+  log('simulated today → <b>' + simToday + '</b>');
+  renderAll();
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  if (!confirm('Clear all plans and reset the simulated date?')) return;
+  localStorage.removeItem(K_PLANS); localStorage.removeItem(K_TODAY);
+  plans = []; simToday = realToday(); todayInput.value = simToday;
+  homeInput = ''; route = { name: 'home' }; backStack = [];
+  log('<b>reset</b> — storage cleared');
+  renderAll();
+});
+
+renderAll();
+</script>

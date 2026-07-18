@@ -1,0 +1,1835 @@
+<title>LifeOS — Test Bench</title>
+<style>
+  :root {
+    --bg: #EDEEF1;
+    --panel: #FFFFFF;
+    --ink: #1B1D22;
+    --muted: #667085;
+    --line: #E0E2E8;
+    --accent: #2F6FED;
+    --accent-soft: #E8F0FE;
+    --good: #2E7D32;
+    --bad: #C62828;
+    --warn: #B26A00;
+    --bezel: #23262D;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+      --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+      --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #EDEEF1; --panel: #FFFFFF; --ink: #1B1D22; --muted: #667085;
+    --line: #E0E2E8; --accent: #2F6FED; --accent-soft: #E8F0FE;
+    --good: #2E7D32; --bad: #C62828; --warn: #B26A00; --bezel: #23262D;
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+    --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+    --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.45;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .topbar h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .01em; }
+  .topbar h1 .tag {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 2px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .topbar .spacer { flex: 1; }
+  .field { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .field input[type="date"] {
+    font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .btn-ghost {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+  }
+  .btn-ghost:hover { color: var(--bad); border-color: var(--bad); }
+
+  .bench {
+    display: flex; gap: 32px; justify-content: center; align-items: flex-start;
+    padding: 32px 24px 64px; flex-wrap: wrap;
+  }
+
+  /* ---------- Phone ---------- */
+  .phone {
+    width: 396px; flex: none;
+    background: var(--bezel); border-radius: 48px; padding: 12px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.18);
+  }
+  .screen {
+    position: relative;
+    width: 372px; height: 760px; border-radius: 38px; overflow: hidden;
+    background: #F7F7F5; color: #1A1A1A;
+    display: flex; flex-direction: column;
+  }
+  .statusbar {
+    flex: none; height: 34px; display: flex; align-items: center;
+    justify-content: space-between; padding: 0 22px;
+    font-size: 12px; font-weight: 600; color: #1A1A1A;
+  }
+  .p-header {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 8px;
+  }
+  .p-header .back {
+    background: none; border: none; color: #2F6FED; font-size: 15px;
+    font-weight: 600; padding: 6px 8px; border-radius: 8px;
+  }
+  .p-header .p-htitle { font-size: 15px; font-weight: 600; color: #1A1A1A; }
+  .p-body { flex: 1; overflow-y: auto; padding: 4px 16px 24px; }
+  .tabbar {
+    flex: none; display: flex; border-top: 1px solid #E6E4E0; background: #FFFFFF;
+    padding: 6px 0 14px;
+  }
+  .tabbar button {
+    flex: 1; background: none; border: none; padding: 6px 0 2px;
+    font-size: 11px; color: #6B6B6B; display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+  }
+  .tabbar button .ticon { font-size: 20px; }
+  .tabbar button.active { color: #2F6FED; font-weight: 700; }
+
+  /* app interior — mirrors the RN styles */
+  .p-h1 { font-size: 26px; font-weight: 700; margin: 10px 0 2px; }
+  .p-sub { font-size: 14px; color: #6B6B6B; margin: 0 0 14px; }
+  .p-input {
+    width: 100%; background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; font-size: 15px; font-family: var(--sans); color: #1A1A1A;
+    min-height: 56px; resize: none; margin-bottom: 8px;
+  }
+  .p-section {
+    font-size: 11px; font-weight: 700; color: #6B6B6B; text-transform: uppercase;
+    letter-spacing: .05em; margin: 14px 0 8px;
+  }
+  .p-card {
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .p-card.danger { border-color: #C62828; }
+  .p-chiprow { display: flex; flex-wrap: wrap; }
+  .p-chip {
+    border-radius: 999px; border: 1px solid #E6E4E0; background: #FFF;
+    padding: 7px 13px; margin: 0 8px 8px 0; font-size: 13px; color: #1A1A1A;
+  }
+  .p-chip.sel { background: #E8F0FE; border-color: #2F6FED; color: #2F6FED; font-weight: 600; }
+  .p-match { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 8px 0; border-bottom: 1px solid #F0EFEC; }
+  .p-match:last-child { border-bottom: none; }
+  .p-match .me { font-size: 22px; }
+  .p-match .mn { font-size: 15px; font-weight: 600; color: #1A1A1A; }
+  .p-match .md { font-size: 12px; color: #6B6B6B; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden; }
+  .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
+    border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .p-planrow .nm { font-size: 15px; font-weight: 600; }
+  .p-planrow .ct { font-size: 12px; color: #6B6B6B; }
+  .p-progress { height: 8px; border-radius: 4px; background: #E6E4E0; overflow: hidden; }
+  .p-progress i { display: block; height: 100%; background: #2F6FED; border-radius: 4px; }
+  .p-overdue { color: #C62828; font-size: 12px; font-weight: 600; margin-top: 8px; }
+  .p-empty { color: #6B6B6B; font-size: 13px; }
+  .p-task { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 9px 0; border-bottom: 1px solid #F0EFEC; }
+  .p-task:last-child { border-bottom: none; }
+  .p-task .dot { flex: none; width: 10px; height: 10px; border-radius: 5px; }
+  .p-task .tt { font-size: 14px; color: #1A1A1A; }
+  .p-task.done .tt { color: #6B6B6B; text-decoration: line-through; }
+  .p-task .ts { font-size: 11px; color: #6B6B6B; margin-top: 1px; }
+  .p-task .pr { flex: none; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .p-ghead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .p-ghead .gdot { width: 12px; height: 12px; border-radius: 6px; }
+  .p-ghead .gl { flex: 1; font-size: 15px; font-weight: 700; }
+  .p-ghead .gc { font-size: 12px; color: #6B6B6B; }
+  .p-cta { display: block; width: 100%; background: #2F6FED; color: #FFF; border: none;
+    border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 700; margin-top: 6px; }
+  .p-hint { font-size: 11px; color: #6B6B6B; text-align: center; margin-top: 8px; }
+  .p-del { display: block; width: 100%; background: none; border: none; color: #C62828;
+    font-weight: 600; padding: 14px; }
+  .p-q { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .p-text { width: 100%; background: #F7F7F5; border: 1px solid #E6E4E0; border-radius: 10px;
+    padding: 9px; font-size: 14px; font-family: var(--sans); color: #1A1A1A; }
+  .p-desc { font-size: 14px; line-height: 1.55; margin: 0; }
+  .p-meta { font-size: 12px; color: #6B6B6B; margin-top: 8px; }
+  .p-meta.strong { font-weight: 600; }
+  .p-doc { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 6px 0; font-size: 14px; color: #1A1A1A; }
+  .p-doc .cb { font-size: 17px; color: #2F6FED; }
+  .p-doc.on .dn { color: #6B6B6B; text-decoration: line-through; }
+  .p-block { font-size: 13px; padding: 3px 0; }
+
+  /* ---------- Inspector ---------- */
+  .inspector { width: 400px; flex: none; display: flex; flex-direction: column; gap: 16px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 10px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .09em;
+  }
+  .panel p.note { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+  .scenarios { display: flex; flex-wrap: wrap; gap: 8px; }
+  .scenarios button {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px;
+  }
+  .scenarios button:hover { border-color: var(--accent); color: var(--accent); }
+  .imatch { border-top: 1px solid var(--line); padding: 8px 0; }
+  .imatch:first-of-type { border-top: none; }
+  .imatch .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .imatch .id { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .imatch .score { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .imatch .ev { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .imatch .ev span {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px;
+    font-family: var(--mono); font-size: 12px; }
+  .kv dt { color: var(--muted); margin: 0; }
+  .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .kv dd.bad { color: var(--bad); font-weight: 600; }
+  .kv dd.good { color: var(--good); }
+  .actions-row { display: flex; gap: 8px; margin-top: 10px; }
+  .actions-row button {
+    flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 7px; font-family: var(--mono); font-size: 11px;
+  }
+  .actions-row button:hover { border-color: var(--accent); color: var(--accent); }
+  .log { font-family: var(--mono); font-size: 11px; max-height: 190px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 3px; }
+  .log div { color: var(--muted); }
+  .log div b { color: var(--ink); font-weight: 600; }
+  .log .t { color: var(--accent); }
+  .checklist { margin: 0; padding: 0 0 0 2px; list-style: none; font-size: 13px; }
+  .checklist li { padding: 3px 0; color: var(--muted); }
+  .checklist li::before { content: "→ "; color: var(--accent); font-family: var(--mono); }
+  dialog#jsonbox { max-width: 560px; width: 90vw; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--panel); color: var(--ink); padding: 16px; }
+  dialog#jsonbox::backdrop { background: rgba(0,0,0,.45); }
+  dialog#jsonbox pre { max-height: 60vh; overflow: auto; background: var(--bg);
+    border-radius: 8px; padding: 12px; font-size: 11px; margin: 10px 0 0; }
+
+  @media (max-width: 900px) {
+    .bench { padding: 16px 8px 48px; gap: 20px; }
+    .inspector { width: min(400px, 96vw); }
+    .phone { transform-origin: top center; }
+  }
+  @media (max-width: 420px) {
+    .phone { width: 100%; border-radius: 32px; padding: 8px; }
+    .screen { width: 100%; height: 78vh; border-radius: 26px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .p-body { scroll-behavior: smooth; }
+  }
+</style>
+
+<header class="topbar">
+  <h1>LifeOS<span class="tag">test bench</span></h1>
+  <span class="field" title="The engine computes overdue/urgency against this date — move it forward to test overdue states.">
+    simulated today
+    <input type="date" id="sim-today" />
+  </span>
+  <span class="spacer"></span>
+  <button class="btn-ghost" id="reset-btn" title="Clears all plans from browser storage">reset data</button>
+</header>
+
+<main class="bench">
+  <div class="phone" aria-label="Phone simulator running LifeOS">
+    <div class="screen">
+      <div class="statusbar"><span>9:41</span><span>LifeOS</span></div>
+      <div class="p-header" id="p-header"></div>
+      <div class="p-body" id="p-body"></div>
+      <div class="tabbar" id="p-tabbar"></div>
+    </div>
+  </div>
+
+  <aside class="inspector">
+    <section class="panel">
+      <h2>What this is</h2>
+      <p class="note">A browser build of the LifeOS mobile app (Android/iOS, React&nbsp;Native).
+      The phone runs the <em>exact engine code</em> from <code>src/core/</code> — intent matcher,
+      planner, dependency graph — transpiled from the repo's TypeScript. Plans persist in this
+      browser. Things worth testing:</p>
+      <ul class="checklist">
+        <li>Type "I moved" (or a paraphrase) — watch match scores below</li>
+        <li>Answer intake questions — Yes/No answers add/remove tasks</li>
+        <li>Complete "Check the business name" — watch registration unblock</li>
+        <li>Move the simulated date forward — Timeline turns overdue red</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <div class="scenarios" id="scenarios"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Intent matcher</h2>
+      <div id="intent-out"><p class="note">Type into the phone's input to see live match scoring.</p></div>
+    </section>
+
+    <section class="panel" id="plan-panel" hidden>
+      <h2>Current plan</h2>
+      <dl class="kv" id="plan-stats"></dl>
+      <div class="actions-row">
+        <button id="json-btn">view JSON</button>
+        <button id="copy-btn">copy JSON</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Action log</h2>
+      <div class="log" id="log"><div>— session start —</div></div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="jsonbox">
+  <h2 style="margin:0;font-size:13px;font-family:var(--mono)">plan JSON</h2>
+  <pre id="jsonpre"></pre>
+  <div class="actions-row"><button onclick="document.getElementById('jsonbox').close()">close</button></div>
+</dialog>
+
+<script>
+/* ===== module shim for the transpiled engine (CommonJS) ===== */
+const __modules = {}, __cache = {};
+function __define(name, fn) { __modules[name] = fn; }
+function __resolve(from, dep) {
+  if (!dep.startsWith('.')) return dep;
+  const parts = from.split('/').slice(0, -1).concat(dep.split('/'));
+  const out = [];
+  for (const p of parts) {
+    if (p === '.' || p === '') continue;
+    else if (p === '..') out.pop();
+    else out.push(p);
+  }
+  let name = out.join('/');
+  if (__modules[name + '/index']) name = name + '/index';
+  return name;
+}
+function __require(name) {
+  if (__cache[name]) return __cache[name].exports;
+  const mod = (__cache[name] = { exports: {} });
+  __modules[name](mod.exports, (d) => __require(__resolve(name, d)), mod);
+  return mod.exports;
+}
+__define("types", function (exports, require, module) {
+"use strict";
+/**
+ * Core domain model for the Universal Life Administration Platform.
+ *
+ * The world is administratively fragmented: one life event (moving, starting a
+ * business, immigrating) fans out into obligations across many unrelated
+ * institutions. These types model that fan-out declaratively so a single
+ * planner can turn "what happened" into a coordinated, deadline-aware plan.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DOMAIN_LABELS = void 0;
+exports.DOMAIN_LABELS = {
+    government: 'Government records',
+    finance: 'Banks & finance',
+    insurance: 'Insurance',
+    tax: 'Tax',
+    employment: 'Employer & work',
+    utilities: 'Utilities & services',
+    housing: 'Housing',
+    health: 'Health',
+    legal: 'Legal',
+    immigration: 'Immigration',
+    business: 'Business',
+    education: 'Education',
+};
+
+});
+__define("templates/moved", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.moved = void 0;
+/**
+ * "I moved." — a change of address fans out across a dozen institutions,
+ * most of which have legal notification deadlines.
+ */
+exports.moved = {
+    id: 'moved',
+    name: 'I moved',
+    emoji: '📦',
+    summary: 'A change of address touches your licence, insurance, government records, banks, employer, utilities and tax records. This plan coordinates all of them.',
+    triggerPhrases: [
+        'i moved',
+        'we moved',
+        'i am moving',
+        "i'm moving",
+        'moved house',
+        'changed address',
+        'change of address',
+        'new apartment',
+        'new house',
+        'relocated',
+    ],
+    keywords: ['move', 'moving', 'moved', 'address', 'relocate', 'relocation', 'apartment', 'house'],
+    questions: [
+        { id: 'move_date', prompt: 'When is (was) the move?', kind: 'date' },
+        { id: 'new_address', prompt: 'What is the new address?', kind: 'text' },
+        {
+            id: 'crossed_state',
+            prompt: 'Did you move to a different state/province?',
+            kind: 'boolean',
+            gatesTasks: ['moved.new_licence', 'moved.vehicle_reregister', 'moved.voter_reregister'],
+        },
+        {
+            id: 'owns_vehicle',
+            prompt: 'Do you own a vehicle?',
+            kind: 'boolean',
+            gatesTasks: ['moved.vehicle_address', 'moved.vehicle_reregister', 'moved.auto_insurance'],
+        },
+        {
+            id: 'renting',
+            prompt: 'Are you renting the new place?',
+            kind: 'boolean',
+            gatesTasks: ['moved.renters_insurance'],
+        },
+    ],
+    tasks: [
+        {
+            id: 'moved.mail_forwarding',
+            title: 'Set up mail forwarding',
+            description: 'File a change-of-address with the postal service so mail follows you while you update every institution individually. This is the safety net for anything you miss.',
+            domain: 'government',
+            priority: 'critical',
+            authority: 'Postal service',
+            startOffsetDays: -14,
+            dueOffsetDays: 0,
+            documents: ['Photo ID', 'Old and new address'],
+        },
+        {
+            id: 'moved.licence_address',
+            title: "Update driver's licence address",
+            description: "Most jurisdictions legally require the address on your driver's licence to be updated within 10–30 days of moving.",
+            domain: 'government',
+            priority: 'critical',
+            authority: 'DMV / licensing authority',
+            startOffsetDays: 0,
+            dueOffsetDays: 14,
+            documents: ["Driver's licence", 'Proof of new address (lease or utility bill)'],
+        },
+        {
+            id: 'moved.new_licence',
+            title: "Get a new state/province driver's licence",
+            description: 'Moving across a state or provincial border usually means exchanging your licence for a local one within a legal deadline.',
+            domain: 'government',
+            priority: 'critical',
+            authority: 'DMV / licensing authority',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            documents: ['Current licence', 'Proof of residence', 'Identity documents'],
+            dependsOn: ['moved.mail_forwarding'],
+        },
+        {
+            id: 'moved.voter_reregister',
+            title: 'Re-register to vote',
+            description: 'Voter registration is tied to your address; re-register in the new jurisdiction.',
+            domain: 'government',
+            priority: 'medium',
+            authority: 'Electoral authority',
+            startOffsetDays: 0,
+            dueOffsetDays: 45,
+            documents: ['Proof of new address'],
+        },
+        {
+            id: 'moved.tax_address',
+            title: 'Update address with the tax authority',
+            description: 'The tax authority sends refunds, assessments and legal notices to your registered address. Update it so nothing legally important goes missing.',
+            domain: 'tax',
+            priority: 'high',
+            authority: 'Tax authority (IRS / CRA / HMRC…)',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            documents: ['Tax ID / SSN / SIN'],
+        },
+        {
+            id: 'moved.employer',
+            title: 'Notify your employer / payroll',
+            description: 'Payroll, tax withholding and benefits mailings depend on your address on file. A state/province change can also change your tax withholding.',
+            domain: 'employment',
+            priority: 'high',
+            authority: 'Employer HR',
+            startOffsetDays: -7,
+            dueOffsetDays: 7,
+        },
+        {
+            id: 'moved.banks',
+            title: 'Update address at banks and card issuers',
+            description: 'Update every bank account, credit card and investment account. Statements and replacement cards go to the address on file.',
+            domain: 'finance',
+            priority: 'high',
+            authority: 'Each bank / issuer',
+            startOffsetDays: 0,
+            dueOffsetDays: 14,
+        },
+        {
+            id: 'moved.home_insurance',
+            title: 'Move or replace home/contents insurance',
+            description: 'Your policy covers a specific address. Transfer or rewrite the policy effective on move day so there is no coverage gap.',
+            domain: 'insurance',
+            priority: 'critical',
+            authority: 'Insurer',
+            startOffsetDays: -21,
+            dueOffsetDays: 0,
+            documents: ['Current policy', 'New address details'],
+        },
+        {
+            id: 'moved.renters_insurance',
+            title: "Set up renter's insurance for the new place",
+            description: "Many leases require proof of renter's insurance before key handover.",
+            domain: 'insurance',
+            priority: 'high',
+            authority: 'Insurer',
+            startOffsetDays: -14,
+            dueOffsetDays: 0,
+            documents: ['Lease agreement'],
+        },
+        {
+            id: 'moved.auto_insurance',
+            title: 'Update auto insurance address',
+            description: 'Premiums and coverage validity depend on where the vehicle is kept. Update the garaging address effective move day.',
+            domain: 'insurance',
+            priority: 'high',
+            authority: 'Auto insurer',
+            startOffsetDays: -7,
+            dueOffsetDays: 7,
+        },
+        {
+            id: 'moved.vehicle_address',
+            title: 'Update vehicle registration address',
+            description: 'Vehicle registration records must show your current address.',
+            domain: 'government',
+            priority: 'high',
+            authority: 'Vehicle registry',
+            startOffsetDays: 0,
+            dueOffsetDays: 14,
+            documents: ['Registration certificate'],
+        },
+        {
+            id: 'moved.vehicle_reregister',
+            title: 'Re-register vehicle in new state/province',
+            description: 'Crossing a state/provincial border usually requires re-registering the vehicle and may require an inspection.',
+            domain: 'government',
+            priority: 'high',
+            authority: 'Vehicle registry',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            documents: ['Title / registration', 'Proof of insurance', 'Inspection certificate'],
+            dependsOn: ['moved.auto_insurance'],
+        },
+        {
+            id: 'moved.utilities_close',
+            title: 'Close / transfer utilities at the old address',
+            description: 'Electricity, gas, water, internet: schedule final readings and account closure or transfer for move-out day so you stop paying for the old place.',
+            domain: 'utilities',
+            priority: 'high',
+            authority: 'Each utility provider',
+            startOffsetDays: -21,
+            dueOffsetDays: 0,
+        },
+        {
+            id: 'moved.utilities_open',
+            title: 'Open utilities at the new address',
+            description: 'Arrange electricity, gas, water and internet to be active from day one; some providers need 2–3 weeks of lead time.',
+            domain: 'utilities',
+            priority: 'critical',
+            authority: 'Each utility provider',
+            startOffsetDays: -21,
+            dueOffsetDays: 0,
+        },
+        {
+            id: 'moved.health_records',
+            title: 'Update health insurance and find new providers',
+            description: 'Update your address with your health insurer, and if you changed regions, check network coverage and transfer prescriptions and medical records.',
+            domain: 'health',
+            priority: 'medium',
+            authority: 'Health insurer / clinics',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+        },
+        {
+            id: 'moved.subscriptions',
+            title: 'Update subscriptions and deliveries',
+            description: 'Online shopping defaults, meal kits, gym membership, and any recurring deliveries.',
+            domain: 'utilities',
+            priority: 'low',
+            authority: 'Various',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+        },
+    ],
+};
+
+});
+__define("templates/startedBusiness", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.startedBusiness = void 0;
+/**
+ * "I started a business." — registration, tax accounts, insurance, licences,
+ * payroll, accounting and ongoing compliance, sequenced in the order the
+ * institutions themselves require.
+ */
+exports.startedBusiness = {
+    id: 'started-business',
+    name: 'I started a business',
+    emoji: '🏢',
+    summary: 'Starting a business means satisfying half a dozen authorities in the right order: registration first, then tax accounts, then licences, insurance, payroll and accounting.',
+    triggerPhrases: [
+        'i started a business',
+        'starting a business',
+        'start a business',
+        'open a company',
+        'opened a company',
+        'i am self employed now',
+        'founded a startup',
+        'incorporate',
+        'register a business',
+    ],
+    keywords: [
+        'business',
+        'company',
+        'startup',
+        'incorporate',
+        'incorporation',
+        'llc',
+        'freelance',
+        'self-employed',
+        'entrepreneur',
+        'founder',
+    ],
+    questions: [
+        { id: 'start_date', prompt: 'When do (did) you start operating?', kind: 'date' },
+        { id: 'business_name', prompt: 'What is the business called?', kind: 'text' },
+        {
+            id: 'structure',
+            prompt: 'What legal structure?',
+            kind: 'choice',
+            choices: ['Sole proprietorship', 'LLC / Ltd', 'Corporation', 'Partnership', 'Not sure yet'],
+        },
+        {
+            id: 'has_employees',
+            prompt: 'Will you hire employees in the first year?',
+            kind: 'boolean',
+            gatesTasks: ['biz.payroll', 'biz.workers_comp', 'biz.employer_accounts'],
+        },
+        {
+            id: 'has_premises',
+            prompt: 'Will you have physical premises (office, shop, workshop)?',
+            kind: 'boolean',
+            gatesTasks: ['biz.premises_licence', 'biz.premises_insurance'],
+        },
+    ],
+    tasks: [
+        {
+            id: 'biz.name_check',
+            title: 'Check and reserve the business name',
+            description: 'Search the corporate registry and trademark database before anything else — every later registration references this name.',
+            domain: 'business',
+            priority: 'critical',
+            authority: 'Corporate registry',
+            startOffsetDays: -30,
+            dueOffsetDays: -21,
+        },
+        {
+            id: 'biz.register',
+            title: 'Register the business entity',
+            description: 'File the incorporation / registration with the corporate registry. This creates the legal entity every other account hangs off.',
+            domain: 'business',
+            priority: 'critical',
+            authority: 'Corporate registry',
+            startOffsetDays: -21,
+            dueOffsetDays: -7,
+            documents: ['Founder ID', 'Registered address', 'Articles / operating agreement'],
+            dependsOn: ['biz.name_check'],
+        },
+        {
+            id: 'biz.tax_id',
+            title: 'Get a business tax ID',
+            description: 'Obtain the federal tax identifier (EIN / business number). Banks, payroll and tax filings all require it.',
+            domain: 'tax',
+            priority: 'critical',
+            authority: 'Tax authority',
+            startOffsetDays: -14,
+            dueOffsetDays: 0,
+            documents: ['Registration certificate'],
+            dependsOn: ['biz.register'],
+        },
+        {
+            id: 'biz.sales_tax',
+            title: 'Register for sales tax / VAT / GST',
+            description: 'If you sell taxable goods or services, register for the applicable consumption tax account before your first sale, or as soon as you cross the threshold.',
+            domain: 'tax',
+            priority: 'high',
+            authority: 'Tax authority',
+            startOffsetDays: -14,
+            dueOffsetDays: 14,
+            dependsOn: ['biz.tax_id'],
+        },
+        {
+            id: 'biz.bank_account',
+            title: 'Open a business bank account',
+            description: 'Keep business and personal money separate from day one — commingling breaks liability protection and makes accounting miserable.',
+            domain: 'finance',
+            priority: 'critical',
+            authority: 'Bank',
+            startOffsetDays: -7,
+            dueOffsetDays: 7,
+            documents: ['Registration certificate', 'Tax ID', 'Founder ID'],
+            dependsOn: ['biz.tax_id'],
+        },
+        {
+            id: 'biz.licences',
+            title: 'Get industry licences and permits',
+            description: 'Check federal, state/provincial and municipal requirements for your industry — food handling, trades, professional services and transport are all licensed.',
+            domain: 'legal',
+            priority: 'critical',
+            authority: 'Licensing authorities',
+            startOffsetDays: -30,
+            dueOffsetDays: 0,
+            dependsOn: ['biz.register'],
+        },
+        {
+            id: 'biz.premises_licence',
+            title: 'Get premises permits (zoning, occupancy, signage)',
+            description: 'Physical premises need zoning clearance, an occupancy permit and often a signage permit.',
+            domain: 'legal',
+            priority: 'high',
+            authority: 'Municipality',
+            startOffsetDays: -30,
+            dueOffsetDays: 0,
+        },
+        {
+            id: 'biz.liability_insurance',
+            title: 'Get general liability insurance',
+            description: 'Clients and landlords routinely require proof of liability coverage; get quotes early because underwriting can take weeks.',
+            domain: 'insurance',
+            priority: 'high',
+            authority: 'Insurer / broker',
+            startOffsetDays: -14,
+            dueOffsetDays: 7,
+        },
+        {
+            id: 'biz.premises_insurance',
+            title: 'Insure the premises and contents',
+            description: 'Property, contents and business-interruption coverage for the physical location.',
+            domain: 'insurance',
+            priority: 'high',
+            authority: 'Insurer / broker',
+            startOffsetDays: -14,
+            dueOffsetDays: 0,
+        },
+        {
+            id: 'biz.employer_accounts',
+            title: 'Register as an employer',
+            description: 'Before the first hire: employer tax withholding account, unemployment insurance account, and any mandatory pension scheme registration.',
+            domain: 'employment',
+            priority: 'critical',
+            authority: 'Tax & labour authorities',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            dependsOn: ['biz.tax_id'],
+        },
+        {
+            id: 'biz.payroll',
+            title: 'Set up payroll',
+            description: 'Choose a payroll system, set pay schedules, and configure withholding and remittance so the first payday is compliant.',
+            domain: 'employment',
+            priority: 'high',
+            authority: 'Payroll provider',
+            startOffsetDays: 7,
+            dueOffsetDays: 45,
+            dependsOn: ['biz.employer_accounts', 'biz.bank_account'],
+        },
+        {
+            id: 'biz.workers_comp',
+            title: "Get workers' compensation coverage",
+            description: "Mandatory in most jurisdictions from the first employee's first day.",
+            domain: 'insurance',
+            priority: 'critical',
+            authority: "Workers' comp board / insurer",
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            dependsOn: ['biz.employer_accounts'],
+        },
+        {
+            id: 'biz.accounting',
+            title: 'Set up accounting and bookkeeping',
+            description: 'Pick accounting software or an accountant, set the chart of accounts, and connect the business bank account. Do this before transactions pile up.',
+            domain: 'finance',
+            priority: 'high',
+            authority: 'Accountant / software',
+            startOffsetDays: 0,
+            dueOffsetDays: 21,
+            dependsOn: ['biz.bank_account'],
+        },
+        {
+            id: 'biz.compliance_calendar',
+            title: 'Build the compliance calendar',
+            description: 'Map every recurring obligation — tax instalments, annual returns, licence renewals, payroll remittances — into a calendar with reminders. Missed filings are the #1 cause of penalties for new businesses.',
+            domain: 'legal',
+            priority: 'high',
+            authority: 'Multiple',
+            startOffsetDays: 14,
+            dueOffsetDays: 45,
+            dependsOn: ['biz.register', 'biz.tax_id'],
+        },
+    ],
+};
+
+});
+__define("templates/immigrateCanada", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.immigrateCanada = void 0;
+/**
+ * "I want to immigrate to Canada." — the plan runs from eligibility analysis
+ * through document collection, application package, and post-submission
+ * status monitoring. Offsets are relative to the target submission date.
+ */
+exports.immigrateCanada = {
+    id: 'immigrate-canada',
+    name: 'I want to immigrate to Canada',
+    emoji: '🍁',
+    summary: 'A structured path from eligibility analysis to a submitted application: document checklist, language tests, credential assessment, proof of funds, timeline and status monitoring.',
+    triggerPhrases: [
+        'i want to immigrate to canada',
+        'immigrate to canada',
+        'move to canada',
+        'moving to canada',
+        'canadian permanent residence',
+        'express entry',
+        'apply for canada pr',
+    ],
+    keywords: [
+        'immigrate',
+        'immigration',
+        'canada',
+        'canadian',
+        'visa',
+        'permanent',
+        'residence',
+        'express',
+        'entry',
+        'pr',
+        'ircc',
+    ],
+    questions: [
+        { id: 'target_date', prompt: 'Target date to submit the application?', kind: 'date' },
+        {
+            id: 'pathway',
+            prompt: 'Which pathway are you considering?',
+            kind: 'choice',
+            choices: [
+                'Express Entry (skilled worker)',
+                'Provincial Nominee Program',
+                'Family sponsorship',
+                'Study permit first',
+                'Not sure yet',
+            ],
+        },
+        {
+            id: 'has_spouse',
+            prompt: 'Is a spouse or partner included in the application?',
+            kind: 'boolean',
+            gatesTasks: ['imm.spouse_docs', 'imm.spouse_language'],
+        },
+        {
+            id: 'has_degree',
+            prompt: 'Do you have a post-secondary degree from outside Canada?',
+            kind: 'boolean',
+            gatesTasks: ['imm.eca'],
+        },
+    ],
+    tasks: [
+        {
+            id: 'imm.eligibility',
+            title: 'Run the eligibility analysis',
+            description: 'Score yourself against the pathway criteria (age, education, language, work experience, funds). This decides the pathway and whether the rest of the plan is worth starting.',
+            domain: 'immigration',
+            priority: 'critical',
+            authority: 'IRCC criteria',
+            startOffsetDays: -270,
+            dueOffsetDays: -240,
+        },
+        {
+            id: 'imm.language_test',
+            title: 'Book and take a language test (IELTS / CELPIP / TEF)',
+            description: 'Language scores drive skilled-worker points and expire after 2 years. Test seats book out weeks ahead; results take ~2 weeks.',
+            domain: 'immigration',
+            priority: 'critical',
+            authority: 'Approved test centre',
+            startOffsetDays: -240,
+            dueOffsetDays: -150,
+            documents: ['Passport'],
+            dependsOn: ['imm.eligibility'],
+        },
+        {
+            id: 'imm.eca',
+            title: 'Get an Educational Credential Assessment (ECA)',
+            description: 'Foreign degrees must be assessed by a designated organization (e.g. WES). Processing takes 1–3 months — start early.',
+            domain: 'education',
+            priority: 'critical',
+            authority: 'WES / designated org',
+            startOffsetDays: -240,
+            dueOffsetDays: -120,
+            documents: ['Degree certificates', 'Transcripts sent directly by institution'],
+            dependsOn: ['imm.eligibility'],
+        },
+        {
+            id: 'imm.passport',
+            title: 'Ensure passports are valid',
+            description: 'Every applicant needs a passport valid well beyond the target landing date. Renew now if it expires within 2 years.',
+            domain: 'government',
+            priority: 'high',
+            authority: 'Passport office',
+            startOffsetDays: -240,
+            dueOffsetDays: -180,
+        },
+        {
+            id: 'imm.work_history',
+            title: 'Compile the work history evidence',
+            description: 'Reference letters on company letterhead stating title, duties, dates, hours and salary — matched to the official occupation classification (NOC). The most commonly refused document.',
+            domain: 'employment',
+            priority: 'critical',
+            authority: 'Current & past employers',
+            startOffsetDays: -210,
+            dueOffsetDays: -90,
+            documents: ['Reference letters', 'Employment contracts', 'Pay slips'],
+            dependsOn: ['imm.eligibility'],
+        },
+        {
+            id: 'imm.police_certs',
+            title: 'Obtain police certificates',
+            description: 'One from every country you lived in for 6+ months since age 18. Some countries take months — order in parallel, early.',
+            domain: 'legal',
+            priority: 'high',
+            authority: 'Police authorities per country',
+            startOffsetDays: -180,
+            dueOffsetDays: -60,
+            documents: ['ID documents', 'Address history'],
+        },
+        {
+            id: 'imm.proof_of_funds',
+            title: 'Prepare proof of settlement funds',
+            description: 'Official bank letters showing the required amount, held for 6+ months. Large recent deposits need documented explanations.',
+            domain: 'finance',
+            priority: 'critical',
+            authority: 'Your banks',
+            startOffsetDays: -180,
+            dueOffsetDays: -30,
+            documents: ['Bank letters', '6-month statements'],
+        },
+        {
+            id: 'imm.spouse_language',
+            title: 'Spouse language test (optional points)',
+            description: 'A spouse language test adds points; weigh cost vs. benefit for your score.',
+            domain: 'immigration',
+            priority: 'medium',
+            authority: 'Approved test centre',
+            startOffsetDays: -210,
+            dueOffsetDays: -120,
+        },
+        {
+            id: 'imm.spouse_docs',
+            title: 'Compile spouse/partner documents',
+            description: 'Marriage certificate or proof of common-law relationship, plus spouse ID, ECA and police certificates.',
+            domain: 'legal',
+            priority: 'high',
+            authority: 'Various',
+            startOffsetDays: -180,
+            dueOffsetDays: -60,
+            documents: ['Marriage / relationship proof', 'Spouse passport'],
+        },
+        {
+            id: 'imm.profile',
+            title: 'Create the online profile / enter the pool',
+            description: 'Submit the Express Entry profile (or PNP registration). Scores from the language test and ECA are entered here — accuracy matters, misrepresentation bans you for 5 years.',
+            domain: 'immigration',
+            priority: 'critical',
+            authority: 'IRCC',
+            startOffsetDays: -120,
+            dueOffsetDays: -90,
+            dependsOn: ['imm.language_test', 'imm.eca', 'imm.work_history'],
+        },
+        {
+            id: 'imm.medical',
+            title: 'Immigration medical exam',
+            description: 'Book with an IRCC-approved panel physician. Usually done after the invitation to apply; results are valid 12 months.',
+            domain: 'health',
+            priority: 'high',
+            authority: 'Panel physician',
+            startOffsetDays: -60,
+            dueOffsetDays: -21,
+            documents: ['Passport', 'Medical history'],
+            dependsOn: ['imm.profile'],
+        },
+        {
+            id: 'imm.application',
+            title: 'Assemble and submit the application package',
+            description: 'Compile every document against the personalized checklist, complete the forms, pay the fees, and submit before the invitation deadline (typically 60 days).',
+            domain: 'immigration',
+            priority: 'critical',
+            authority: 'IRCC',
+            startOffsetDays: -30,
+            dueOffsetDays: 0,
+            documents: ['All collected documents', 'Fee payment'],
+            dependsOn: ['imm.profile', 'imm.police_certs', 'imm.proof_of_funds', 'imm.medical'],
+        },
+        {
+            id: 'imm.monitor',
+            title: 'Monitor application status & respond to requests',
+            description: 'Track the application account for biometrics requests, additional document requests and the final decision. Requests usually have 30-day response windows.',
+            domain: 'immigration',
+            priority: 'high',
+            authority: 'IRCC',
+            startOffsetDays: 0,
+            dueOffsetDays: 180,
+            dependsOn: ['imm.application'],
+        },
+    ],
+};
+
+});
+__define("templates/gotMarried", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.gotMarried = void 0;
+exports.gotMarried = {
+    id: 'got-married',
+    name: 'I got married',
+    emoji: '💍',
+    summary: 'Marriage changes your tax filing status, insurance, beneficiaries and possibly your legal name — each with its own institution.',
+    triggerPhrases: ['i got married', 'we got married', 'getting married', 'just married', 'i am married now'],
+    keywords: ['married', 'marriage', 'wedding', 'spouse', 'wife', 'husband'],
+    questions: [
+        { id: 'marriage_date', prompt: 'When is (was) the wedding?', kind: 'date' },
+        {
+            id: 'name_change',
+            prompt: 'Is anyone changing their legal name?',
+            kind: 'boolean',
+            gatesTasks: ['mar.name_id', 'mar.name_everywhere'],
+        },
+    ],
+    tasks: [
+        {
+            id: 'mar.certificate',
+            title: 'Obtain certified marriage certificates',
+            description: 'Order several certified copies — almost every downstream change requires one.',
+            domain: 'government',
+            priority: 'critical',
+            authority: 'Vital records office',
+            startOffsetDays: 0,
+            dueOffsetDays: 21,
+        },
+        {
+            id: 'mar.tax_status',
+            title: 'Update tax filing status',
+            description: 'Notify the tax authority and review withholding — marriage changes brackets and credits.',
+            domain: 'tax',
+            priority: 'high',
+            authority: 'Tax authority',
+            startOffsetDays: 0,
+            dueOffsetDays: 60,
+            dependsOn: ['mar.certificate'],
+        },
+        {
+            id: 'mar.insurance',
+            title: 'Merge or update insurance policies',
+            description: 'Add spouse to health coverage (there is usually a 30–60 day enrollment window), and review auto/home bundles.',
+            domain: 'insurance',
+            priority: 'critical',
+            authority: 'Insurers / employer benefits',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            dependsOn: ['mar.certificate'],
+        },
+        {
+            id: 'mar.beneficiaries',
+            title: 'Update beneficiaries and emergency contacts',
+            description: 'Pension, life insurance, retirement accounts and wills — beneficiary designations override wills in many places.',
+            domain: 'finance',
+            priority: 'high',
+            authority: 'Banks / pension / insurer',
+            startOffsetDays: 0,
+            dueOffsetDays: 60,
+        },
+        {
+            id: 'mar.name_id',
+            title: 'Update legal name on core ID',
+            description: 'Passport, driver’s licence and social security / national ID, in that order of dependency.',
+            domain: 'government',
+            priority: 'high',
+            authority: 'ID authorities',
+            startOffsetDays: 21,
+            dueOffsetDays: 90,
+            documents: ['Marriage certificate'],
+            dependsOn: ['mar.certificate'],
+        },
+        {
+            id: 'mar.name_everywhere',
+            title: 'Propagate the new name everywhere else',
+            description: 'Banks, employer, insurers, subscriptions — after core ID is updated.',
+            domain: 'finance',
+            priority: 'medium',
+            authority: 'Various',
+            startOffsetDays: 90,
+            dueOffsetDays: 150,
+            dependsOn: ['mar.name_id'],
+        },
+    ],
+};
+
+});
+__define("templates/newChild", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.newChild = void 0;
+exports.newChild = {
+    id: 'new-child',
+    name: 'We had a baby',
+    emoji: '👶',
+    summary: 'A new child needs to exist administratively: birth registration, ID, health coverage, benefits, and updated taxes and beneficiaries.',
+    triggerPhrases: ['we had a baby', 'i had a baby', 'new baby', 'my child was born', 'we are having a baby'],
+    keywords: ['baby', 'child', 'born', 'birth', 'newborn', 'parental'],
+    questions: [
+        { id: 'birth_date', prompt: 'Date of birth (or due date)?', kind: 'date' },
+        {
+            id: 'taking_leave',
+            prompt: 'Is a parent taking parental leave?',
+            kind: 'boolean',
+            gatesTasks: ['baby.leave'],
+        },
+    ],
+    tasks: [
+        {
+            id: 'baby.birth_registration',
+            title: 'Register the birth',
+            description: 'File the birth registration — the legal root document for everything that follows. Deadlines are short (often 30 days).',
+            domain: 'government',
+            priority: 'critical',
+            authority: 'Vital records office',
+            startOffsetDays: 0,
+            dueOffsetDays: 21,
+        },
+        {
+            id: 'baby.ssn',
+            title: 'Get the child a tax/social security number',
+            description: 'Required for tax credits, benefits and opening savings accounts.',
+            domain: 'government',
+            priority: 'high',
+            authority: 'Social security / tax authority',
+            startOffsetDays: 7,
+            dueOffsetDays: 60,
+            dependsOn: ['baby.birth_registration'],
+        },
+        {
+            id: 'baby.health_enrollment',
+            title: 'Add the child to health coverage',
+            description: 'Enrollment windows after birth are typically 30–60 days; missing them means waiting for open enrollment.',
+            domain: 'health',
+            priority: 'critical',
+            authority: 'Health insurer / employer benefits',
+            startOffsetDays: 0,
+            dueOffsetDays: 30,
+            documents: ['Birth certificate'],
+            dependsOn: ['baby.birth_registration'],
+        },
+        {
+            id: 'baby.leave',
+            title: 'File parental leave and benefits',
+            description: 'Employer notification plus the government benefit claim, each with its own forms and timelines.',
+            domain: 'employment',
+            priority: 'critical',
+            authority: 'Employer + benefits agency',
+            startOffsetDays: -30,
+            dueOffsetDays: 14,
+        },
+        {
+            id: 'baby.child_benefits',
+            title: 'Apply for child benefits / tax credits',
+            description: 'Most jurisdictions have monthly child benefits that only pay from application date — apply early.',
+            domain: 'tax',
+            priority: 'high',
+            authority: 'Tax / benefits authority',
+            startOffsetDays: 7,
+            dueOffsetDays: 60,
+            dependsOn: ['baby.birth_registration'],
+        },
+        {
+            id: 'baby.beneficiaries',
+            title: 'Update wills, beneficiaries and guardianship',
+            description: 'Name a guardian and update life insurance and pension beneficiaries.',
+            domain: 'legal',
+            priority: 'high',
+            authority: 'Lawyer / insurers',
+            startOffsetDays: 0,
+            dueOffsetDays: 90,
+        },
+    ],
+};
+
+});
+__define("templates/index", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getEventTemplate = exports.EVENT_CATALOG = void 0;
+const moved_1 = require("./moved");
+const startedBusiness_1 = require("./startedBusiness");
+const immigrateCanada_1 = require("./immigrateCanada");
+const gotMarried_1 = require("./gotMarried");
+const newChild_1 = require("./newChild");
+/** The catalog of life events the platform can administer. */
+exports.EVENT_CATALOG = [
+    moved_1.moved,
+    startedBusiness_1.startedBusiness,
+    immigrateCanada_1.immigrateCanada,
+    gotMarried_1.gotMarried,
+    newChild_1.newChild,
+];
+function getEventTemplate(id) {
+    return exports.EVENT_CATALOG.find((e) => e.id === id);
+}
+exports.getEventTemplate = getEventTemplate;
+
+});
+__define("intent", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.bestMatch = exports.matchIntent = void 0;
+const templates_1 = require("./templates");
+/**
+ * Matches free-form user input ("I moved", "we're having a baby") against the
+ * event catalog. Deliberately simple and fully offline: exact/substring phrase
+ * matching scores highest, then keyword overlap. Returns ranked matches with
+ * the evidence that produced them, so the UI can explain itself.
+ */
+function normalize(text) {
+    return text
+        .toLowerCase()
+        .replace(/[’']/g, "'")
+        .replace(/[^a-z0-9'\s-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function tokenize(text) {
+    return normalize(text).split(' ').filter(Boolean);
+}
+const PHRASE_SCORE = 10;
+const KEYWORD_SCORE = 2;
+function scoreEvent(input, event) {
+    const norm = normalize(input);
+    const tokens = new Set(tokenize(input));
+    let score = 0;
+    const matchedOn = [];
+    for (const phrase of event.triggerPhrases) {
+        if (norm.includes(normalize(phrase))) {
+            score += PHRASE_SCORE;
+            matchedOn.push(phrase);
+        }
+    }
+    for (const keyword of event.keywords) {
+        if (tokens.has(normalize(keyword))) {
+            score += KEYWORD_SCORE;
+            matchedOn.push(keyword);
+        }
+    }
+    return { event, score, matchedOn };
+}
+/**
+ * Rank catalog events against the input. Returns only events with a non-zero
+ * score, best first. Empty input returns no matches.
+ */
+function matchIntent(input, catalog = templates_1.EVENT_CATALOG) {
+    if (!normalize(input))
+        return [];
+    return catalog
+        .map((event) => scoreEvent(input, event))
+        .filter((m) => m.score > 0)
+        .sort((a, b) => b.score - a.score);
+}
+exports.matchIntent = matchIntent;
+/** The single best match, or undefined when nothing in the catalog fits. */
+function bestMatch(input, catalog = templates_1.EVENT_CATALOG) {
+    return matchIntent(input, catalog)[0];
+}
+exports.bestMatch = bestMatch;
+
+});
+__define("planner", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.reconcileBlocked = exports.generatePlan = exports.addDays = void 0;
+/**
+ * Turns a life-event template + intake answers + event date into a concrete,
+ * deadline-aware plan:
+ *  - boolean intake answers gate optional tasks in or out
+ *  - offsets resolve to real ISO dates against the event date
+ *  - dependencies on excluded tasks are dropped
+ *  - tasks whose dependencies are incomplete start as 'blocked'
+ */
+function addDays(isoDate, days) {
+    const d = new Date(isoDate + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+exports.addDays = addDays;
+/** Task ids excluded because a gating boolean question was answered false (or unanswered). */
+function excludedTaskIds(questions, answers) {
+    const excluded = new Set();
+    for (const q of questions) {
+        if (q.kind === 'boolean' && q.gatesTasks) {
+            if (answers[q.id] !== true) {
+                for (const id of q.gatesTasks)
+                    excluded.add(id);
+            }
+        }
+    }
+    return excluded;
+}
+function toDocuments(template) {
+    return (template.documents ?? []).map((name) => ({ name, collected: false }));
+}
+function generatePlan(input) {
+    const { template, eventDate } = input;
+    const answers = input.answers ?? {};
+    const excluded = excludedTaskIds(template.questions, answers);
+    const included = template.tasks.filter((t) => !excluded.has(t.id));
+    const includedIds = new Set(included.map((t) => t.id));
+    const tasks = included.map((t) => {
+        const dependsOn = (t.dependsOn ?? []).filter((id) => includedIds.has(id));
+        return {
+            id: t.id,
+            templateId: t.id,
+            title: t.title,
+            description: t.description,
+            domain: t.domain,
+            priority: t.priority,
+            authority: t.authority,
+            startDate: addDays(eventDate, t.startOffsetDays),
+            dueDate: addDays(eventDate, t.dueOffsetDays),
+            status: dependsOn.length > 0 ? 'blocked' : 'pending',
+            dependsOn,
+            documents: toDocuments(t),
+        };
+    });
+    tasks.sort((a, b) => (a.dueDate < b.dueDate ? -1 : a.dueDate > b.dueDate ? 1 : 0));
+    return {
+        id: input.planId ?? `plan-${template.id}-${Math.random().toString(36).slice(2, 10)}`,
+        eventId: template.id,
+        eventName: template.name,
+        emoji: template.emoji,
+        createdAt: input.createdAt ?? new Date().toISOString(),
+        eventDate,
+        answers,
+        tasks,
+    };
+}
+exports.generatePlan = generatePlan;
+/**
+ * Recompute blocked/pending across a plan after any status change:
+ * a task is blocked while any dependency is not done/skipped. Tasks the user
+ * explicitly set to in_progress/done/skipped are left alone.
+ */
+function reconcileBlocked(plan) {
+    const byId = new Map(plan.tasks.map((t) => [t.id, t]));
+    const tasks = plan.tasks.map((t) => {
+        if (t.status !== 'pending' && t.status !== 'blocked')
+            return t;
+        const blocked = t.dependsOn.some((id) => {
+            const dep = byId.get(id);
+            return dep !== undefined && dep.status !== 'done' && dep.status !== 'skipped';
+        });
+        const status = blocked ? 'blocked' : 'pending';
+        return status === t.status ? t : { ...t, status };
+    });
+    return { ...plan, tasks };
+}
+exports.reconcileBlocked = reconcileBlocked;
+
+});
+__define("progress", function (exports, require, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildTimeline = exports.daysBetween = exports.groupByDomain = exports.planProgress = void 0;
+const types_1 = require("./types");
+function planProgress(plan, todayIso) {
+    const total = plan.tasks.length;
+    const resolved = plan.tasks.filter((t) => t.status === 'done' || t.status === 'skipped');
+    const overdue = plan.tasks.filter((t) => t.status !== 'done' && t.status !== 'skipped' && t.dueDate < todayIso).length;
+    return {
+        total,
+        done: resolved.length,
+        fraction: total === 0 ? 1 : resolved.length / total,
+        overdue,
+    };
+}
+exports.planProgress = planProgress;
+/** Group a plan's tasks by domain, groups ordered by their earliest due date. */
+function groupByDomain(plan) {
+    const groups = new Map();
+    for (const task of plan.tasks) {
+        const list = groups.get(task.domain) ?? [];
+        list.push(task);
+        groups.set(task.domain, list);
+    }
+    return [...groups.entries()]
+        .map(([domain, tasks]) => ({ domain, label: types_1.DOMAIN_LABELS[domain], tasks }))
+        .sort((a, b) => (a.tasks[0].dueDate < b.tasks[0].dueDate ? -1 : 1));
+}
+exports.groupByDomain = groupByDomain;
+function daysBetween(fromIso, toIso) {
+    const from = new Date(fromIso + 'T00:00:00Z').getTime();
+    const to = new Date(toIso + 'T00:00:00Z').getTime();
+    return Math.round((to - from) / 86400000);
+}
+exports.daysBetween = daysBetween;
+/**
+ * The unified deadline feed across all active plans: every unresolved task,
+ * soonest deadline first.
+ */
+function buildTimeline(plans, todayIso) {
+    const entries = [];
+    for (const plan of plans) {
+        for (const task of plan.tasks) {
+            if (task.status === 'done' || task.status === 'skipped')
+                continue;
+            entries.push({
+                planId: plan.id,
+                planName: plan.eventName,
+                emoji: plan.emoji,
+                task,
+                daysUntilDue: daysBetween(todayIso, task.dueDate),
+            });
+        }
+    }
+    return entries.sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+}
+exports.buildTimeline = buildTimeline;
+
+});
+
+/* ===== engine handles ===== */
+const Intent = __require('intent');
+const Planner = __require('planner');
+const Progress = __require('progress');
+const Catalog = __require('templates/index');
+const Types = __require('types');
+
+/* mirrors src/theme.ts */
+const DOMAIN_COLORS = {
+  government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
+  employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
+  legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
+};
+const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
+const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
+const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'🔒', pending:'○' };
+
+/* ===== state ===== */
+const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1';
+function realToday() { return new Date().toISOString().slice(0, 10); }
+let plans = [];
+try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]'); } catch (e) { plans = []; }
+let simToday = localStorage.getItem(K_TODAY) || realToday();
+let route = { name: 'home' };
+let backStack = [];
+let homeInput = '';
+let intakeAnswers = {};
+
+function save() { localStorage.setItem(K_PLANS, JSON.stringify(plans)); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===== action log ===== */
+const logEl = document.getElementById('log');
+function log(msg) {
+  const d = document.createElement('div');
+  const t = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = '<span class="t">' + t + '</span> ' + msg;
+  logEl.prepend(d);
+  while (logEl.children.length > 60) logEl.lastChild.remove();
+}
+
+/* ===== navigation ===== */
+function navigate(next, replace) {
+  if (!replace) backStack.push(route);
+  route = next;
+  renderAll();
+}
+function goBack() {
+  route = backStack.pop() || { name: 'home' };
+  renderAll();
+}
+
+/* ===== store ops ===== */
+function addPlan(plan) {
+  plans = [plan, ...plans]; save();
+  log('<b>generatePlan</b> ' + esc(plan.eventId) + ' → ' + plan.tasks.length + ' tasks');
+}
+function removePlan(planId) {
+  const p = plans.find((x) => x.id === planId);
+  plans = plans.filter((x) => x.id !== planId); save();
+  log('<b>removePlan</b> ' + esc(p ? p.eventId : planId));
+}
+function setTaskStatus(planId, taskId, status) {
+  plans = plans.map((p) => {
+    if (p.id !== planId) return p;
+    const updated = { ...p, tasks: p.tasks.map((t) => t.id === taskId ? { ...t, status } : t) };
+    return Planner.reconcileBlocked(updated);
+  });
+  save();
+  log('<b>setTaskStatus</b> ' + esc(taskId.split('.').pop()) + ' → ' + esc(status));
+}
+function toggleDocument(planId, taskId, name) {
+  plans = plans.map((p) => p.id !== planId ? p : ({
+    ...p,
+    tasks: p.tasks.map((t) => t.id !== taskId ? t : ({
+      ...t, documents: t.documents.map((d) => d.name === name ? { ...d, collected: !d.collected } : d),
+    })),
+  }));
+  save();
+  log('<b>toggleDocument</b> ' + esc(name));
+}
+
+/* ===== phone rendering ===== */
+const headerEl = document.getElementById('p-header');
+const bodyEl = document.getElementById('p-body');
+const tabbarEl = document.getElementById('p-tabbar');
+
+function taskRowHtml(task, planId, subtitle) {
+  const resolved = task.status === 'done' || task.status === 'skipped';
+  return '<button class="p-task' + (resolved ? ' done' : '') + '" data-nav-task="' + esc(planId) + '|' + esc(task.id) + '">' +
+    '<span class="dot" style="background:' + DOMAIN_COLORS[task.domain] + '"></span>' +
+    '<span style="flex:1;min-width:0"><span class="tt">' + STATUS_GLYPH[task.status] + ' ' + esc(task.title) + '</span>' +
+    '<div class="ts">' + esc(subtitle || ('Due ' + task.dueDate + (task.authority ? ' · ' + task.authority : ''))) + '</div></span>' +
+    '<span class="pr" style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</span></button>';
+}
+
+function matchesHtml() {
+  const matches = Intent.matchIntent(homeInput).slice(0, 3);
+  if (!matches.length) return '';
+  return '<div class="p-card"><div class="p-section" style="margin-top:0">Sounds like…</div>' +
+    matches.map((m) =>
+      '<button class="p-match" data-nav-intake="' + esc(m.event.id) + '">' +
+      '<span class="me">' + m.event.emoji + '</span>' +
+      '<span style="flex:1;min-width:0"><div class="mn">' + esc(m.event.name) + '</div>' +
+      '<div class="md">' + esc(m.event.summary) + '</div></span></button>'
+    ).join('') + '</div>';
+}
+
+function renderHome() {
+  headerEl.innerHTML = '';
+  let html = '<h1 class="p-h1">What happened?</h1>' +
+    '<p class="p-sub">Tell LifeOS about a life event and it maps out everything affected — every institution, deadline and document.</p>' +
+    '<textarea class="p-input" id="p-freetext" rows="2" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
+    '<div id="p-matches">' + matchesHtml() + '</div>' +
+    '<div class="p-section">Or pick an event</div><div class="p-chiprow">' +
+    Catalog.EVENT_CATALOG.map((e) =>
+      '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
+    '</div><div class="p-section">Active plans</div>';
+  if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
+  for (const plan of plans) {
+    const pr = Progress.planProgress(plan, simToday);
+    html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
+      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) + '</span>' +
+      '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
+      '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+      (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
+      '</button>';
+  }
+  bodyEl.innerHTML = html;
+  const ta = document.getElementById('p-freetext');
+  ta.addEventListener('input', () => {
+    homeInput = ta.value;
+    document.getElementById('p-matches').innerHTML = matchesHtml();
+    renderIntentPanel();
+  });
+}
+
+function renderIntake() {
+  const template = Catalog.getEventTemplate(route.eventId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">New plan</span>';
+  if (!template) { bodyEl.innerHTML = '<p class="p-empty">Unknown event.</p>'; return; }
+  let html = '<h1 class="p-h1" style="font-size:22px">' + template.emoji + ' ' + esc(template.name) + '</h1>' +
+    '<p class="p-sub">' + esc(template.summary) + '</p>';
+  for (const q of template.questions) {
+    html += '<div class="p-card"><p class="p-q">' + esc(q.prompt) + '</p>';
+    if (q.kind === 'boolean') {
+      html += '<div class="p-chiprow">' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === true ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|1">Yes</button>' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === false ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|0">No</button></div>';
+    } else if (q.kind === 'choice') {
+      html += '<div class="p-chiprow">' + (q.choices || []).map((c) =>
+        '<button class="p-chip' + (intakeAnswers[q.id] === c ? ' sel' : '') + '" data-ans-choice="' + esc(q.id) + '|' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>';
+    } else if (q.kind === 'date') {
+      html += '<input class="p-text" type="date" value="' + esc(intakeAnswers[q.id] || simToday) + '" data-ans-text="' + esc(q.id) + '">';
+    } else {
+      html += '<input class="p-text" type="text" placeholder="Type here…" value="' + esc(intakeAnswers[q.id] || '') + '" data-ans-text="' + esc(q.id) + '">';
+    }
+    html += '</div>';
+  }
+  html += '<button class="p-cta" data-build="' + esc(template.id) + '">Build my plan</button>' +
+    '<p class="p-hint">Unanswered yes/no questions are treated as "No" — you can always regenerate the plan.</p>';
+  bodyEl.innerHTML = html;
+  bodyEl.querySelectorAll('[data-ans-text]').forEach((el) => {
+    el.addEventListener('input', () => { intakeAnswers[el.dataset.ansText] = el.value; });
+  });
+}
+
+function renderPlan() {
+  const plan = plans.find((p) => p.id === route.planId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Plan</span>';
+  if (!plan) { bodyEl.innerHTML = '<p class="p-empty">Plan not found.</p>'; return; }
+  const pr = Progress.planProgress(plan, simToday);
+  const groups = Progress.groupByDomain(plan);
+  let html = '<h1 class="p-h1" style="font-size:22px">' + plan.emoji + ' ' + esc(plan.eventName) + '</h1>' +
+    '<p class="p-sub" style="font-size:12px">Event date ' + plan.eventDate + ' · ' + pr.done + '/' + pr.total + ' done' +
+    (pr.overdue ? ' · <b style="color:#C62828">' + pr.overdue + ' overdue</b>' : '') + '</p>' +
+    '<div class="p-progress" style="margin-bottom:16px"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></div>';
+  for (const g of groups) {
+    const resolved = g.tasks.filter((t) => t.status === 'done' || t.status === 'skipped').length;
+    html += '<div class="p-card"><div class="p-ghead">' +
+      '<span class="gdot" style="background:' + DOMAIN_COLORS[g.domain] + '"></span>' +
+      '<span class="gl">' + esc(g.label) + '</span><span class="gc">' + resolved + '/' + g.tasks.length + '</span></div>' +
+      g.tasks.map((t) => taskRowHtml(t, plan.id)).join('') + '</div>';
+  }
+  html += '<button class="p-del" data-del-plan="' + esc(plan.id) + '">Delete this plan</button>';
+  bodyEl.innerHTML = html;
+}
+
+function renderTask() {
+  const plan = plans.find((p) => p.id === route.planId);
+  const task = plan && plan.tasks.find((t) => t.id === route.taskId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Task</span>';
+  if (!task) { bodyEl.innerHTML = '<p class="p-empty">Task not found.</p>'; return; }
+  const blockers = task.dependsOn
+    .map((id) => plan.tasks.find((t) => t.id === id))
+    .filter((t) => t && t.status !== 'done' && t.status !== 'skipped');
+  let html = '<h1 class="p-h1" style="font-size:20px">' + esc(task.title) + '</h1>' +
+    '<p class="p-sub" style="font-size:12px">' + esc(Types.DOMAIN_LABELS[task.domain]) +
+    ' · <b style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</b></p>' +
+    '<div class="p-card"><p class="p-desc">' + esc(task.description) + '</p>' +
+    (task.authority ? '<p class="p-meta">Handled by: ' + esc(task.authority) + '</p>' : '') +
+    '<p class="p-meta strong">Start ' + task.startDate + ' · Due ' + task.dueDate + '</p></div>';
+  if (task.status === 'blocked' && blockers.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Waiting on</div>' +
+      blockers.map((b) => '<div class="p-block">🔒 ' + esc(b.title) + '</div>').join('') + '</div>';
+  }
+  const opts = [['pending', 'To do'], ['in_progress', 'In progress'], ['done', 'Done'], ['skipped', 'Not applicable']];
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Status</div><div class="p-chiprow">' +
+    opts.map(([s, l]) => '<button class="p-chip' + (task.status === s ? ' sel' : '') + '" data-status="' + s + '">' + l + '</button>').join('') +
+    '</div></div>';
+  if (task.documents.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Documents needed</div>' +
+      task.documents.map((d) =>
+        '<button class="p-doc' + (d.collected ? ' on' : '') + '" data-doc="' + esc(d.name) + '">' +
+        '<span class="cb">' + (d.collected ? '☑' : '☐') + '</span><span class="dn">' + esc(d.name) + '</span></button>').join('') +
+      '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTimeline() {
+  headerEl.innerHTML = '';
+  const timeline = Progress.buildTimeline(plans, simToday);
+  const overdue = timeline.filter((e) => e.daysUntilDue < 0);
+  const upcoming = timeline.filter((e) => e.daysUntilDue >= 0);
+  const label = (d) => d < 0 ? (-d) + 'd overdue' : d === 0 ? 'due today' : 'in ' + d + 'd';
+  let html = '<h1 class="p-h1">Timeline</h1><p class="p-sub">Every deadline from every plan, in one place.</p>';
+  if (!timeline.length) html += '<p class="p-empty">Nothing due — create a plan from the Home tab.</p>';
+  if (overdue.length) {
+    html += '<div class="p-card danger"><div class="p-section" style="margin-top:0;color:#C62828">Overdue</div>' +
+      overdue.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
+  }
+  if (upcoming.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Upcoming</div>' +
+      upcoming.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTabbar() {
+  const onTabs = route.name === 'home' || route.name === 'timeline';
+  tabbarEl.style.display = onTabs ? 'flex' : 'none';
+  if (!onTabs) return;
+  tabbarEl.innerHTML =
+    '<button class="' + (route.name === 'home' ? 'active' : '') + '" data-tab="home"><span class="ticon">🏠</span>Home</button>' +
+    '<button class="' + (route.name === 'timeline' ? 'active' : '') + '" data-tab="timeline"><span class="ticon">📅</span>Timeline</button>';
+}
+
+function renderPhone() {
+  if (route.name === 'home') renderHome();
+  else if (route.name === 'intake') renderIntake();
+  else if (route.name === 'plan') renderPlan();
+  else if (route.name === 'task') renderTask();
+  else if (route.name === 'timeline') renderTimeline();
+  renderTabbar();
+}
+
+/* ===== inspector rendering ===== */
+function renderIntentPanel() {
+  const out = document.getElementById('intent-out');
+  if (!homeInput.trim()) {
+    out.innerHTML = '<p class="note">Type into the phone’s input to see live match scoring.</p>';
+    return;
+  }
+  const matches = Intent.matchIntent(homeInput);
+  if (!matches.length) {
+    out.innerHTML = '<p class="note">No catalog event matches <code>' + esc(homeInput) + '</code>.</p>';
+    return;
+  }
+  out.innerHTML = matches.map((m) =>
+    '<div class="imatch"><div class="row"><span class="id">' + esc(m.event.id) + '</span>' +
+    '<span class="score">score ' + m.score + '</span></div>' +
+    '<div class="ev">' + m.matchedOn.map((e) => '<span>' + esc(e) + '</span>').join('') + '</div></div>'
+  ).join('');
+}
+
+function renderPlanPanel() {
+  const panel = document.getElementById('plan-panel');
+  const planId = route.name === 'plan' ? route.planId : route.name === 'task' ? route.planId : null;
+  const plan = planId && plans.find((p) => p.id === planId);
+  if (!plan) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const pr = Progress.planProgress(plan, simToday);
+  const blocked = plan.tasks.filter((t) => t.status === 'blocked').length;
+  const domains = new Set(plan.tasks.map((t) => t.domain)).size;
+  const docs = plan.tasks.reduce((n, t) => n + t.documents.length, 0);
+  const docsDone = plan.tasks.reduce((n, t) => n + t.documents.filter((d) => d.collected).length, 0);
+  const gated = Catalog.getEventTemplate(plan.eventId).tasks.length - plan.tasks.length;
+  document.getElementById('plan-stats').innerHTML =
+    '<dt>plan id</dt><dd>' + esc(plan.id.slice(0, 22)) + '…</dd>' +
+    '<dt>tasks (after gating)</dt><dd>' + pr.total + (gated ? ' <span style="color:var(--muted)">(-' + gated + ' gated out)</span>' : '') + '</dd>' +
+    '<dt>domains touched</dt><dd>' + domains + '</dd>' +
+    '<dt>resolved</dt><dd class="good">' + pr.done + '</dd>' +
+    '<dt>blocked by deps</dt><dd>' + blocked + '</dd>' +
+    '<dt>overdue @ sim date</dt><dd class="' + (pr.overdue ? 'bad' : '') + '">' + pr.overdue + '</dd>' +
+    '<dt>documents collected</dt><dd>' + docsDone + '/' + docs + '</dd>';
+  document.getElementById('json-btn').onclick = () => {
+    document.getElementById('jsonpre').textContent = JSON.stringify(plan, null, 2);
+    document.getElementById('jsonbox').showModal();
+  };
+  document.getElementById('copy-btn').onclick = () => {
+    navigator.clipboard.writeText(JSON.stringify(plan, null, 2)).then(() => log('plan JSON copied'));
+  };
+}
+
+function renderAll() {
+  renderPhone();
+  renderIntentPanel();
+  renderPlanPanel();
+}
+
+/* ===== phone event delegation ===== */
+document.querySelector('.screen').addEventListener('click', (ev) => {
+  const el = ev.target.closest('button, [data-back]');
+  if (!el) return;
+  if (el.hasAttribute('data-back')) { goBack(); return; }
+  if (el.dataset.tab) { route = { name: el.dataset.tab }; backStack = []; renderAll(); return; }
+  if (el.dataset.navIntake) { intakeAnswers = {}; navigate({ name: 'intake', eventId: el.dataset.navIntake }); return; }
+  if (el.dataset.navPlan) { navigate({ name: 'plan', planId: el.dataset.navPlan }); return; }
+  if (el.dataset.navTask) {
+    const [planId, taskId] = el.dataset.navTask.split('|');
+    navigate({ name: 'task', planId, taskId }); return;
+  }
+  if (el.dataset.ansBool) {
+    const [id, v] = el.dataset.ansBool.split('|');
+    intakeAnswers[id] = v === '1'; renderPhone(); return;
+  }
+  if (el.dataset.ansChoice) {
+    const [id, v] = el.dataset.ansChoice.split('|');
+    intakeAnswers[id] = v; renderPhone(); return;
+  }
+  if (el.dataset.build) {
+    const template = Catalog.getEventTemplate(el.dataset.build);
+    const dateQ = template.questions.find((q) => q.kind === 'date');
+    const eventDate = (dateQ && intakeAnswers[dateQ.id]) || simToday;
+    const plan = Planner.generatePlan({ template, eventDate, answers: intakeAnswers });
+    addPlan(plan);
+    backStack = [{ name: 'home' }];
+    route = { name: 'plan', planId: plan.id };
+    renderAll(); return;
+  }
+  if (el.dataset.delPlan) {
+    if (confirm('Remove this plan and all its tasks?')) {
+      removePlan(el.dataset.delPlan); route = { name: 'home' }; backStack = []; renderAll();
+    }
+    return;
+  }
+  if (el.dataset.status) {
+    setTaskStatus(route.planId, route.taskId, el.dataset.status); renderAll(); return;
+  }
+  if (el.dataset.doc !== undefined && el.dataset.doc !== '') {
+    toggleDocument(route.planId, route.taskId, el.dataset.doc); renderAll(); return;
+  }
+});
+
+/* ===== bench controls ===== */
+const SCENARIOS = [
+  'I moved',
+  'I started a business',
+  'I want to immigrate to Canada',
+  'just signed a lease on a new apartment across town',
+  'going freelance and forming an LLC',
+  'we had a baby',
+  'we got married',
+];
+const scEl = document.getElementById('scenarios');
+for (const s of SCENARIOS) {
+  const b = document.createElement('button');
+  b.textContent = '“' + s + '”';
+  b.addEventListener('click', () => {
+    homeInput = s; route = { name: 'home' }; backStack = [];
+    renderAll();
+    log('scenario: <b>' + esc(s) + '</b>');
+  });
+  scEl.appendChild(b);
+}
+
+const todayInput = document.getElementById('sim-today');
+todayInput.value = simToday;
+todayInput.addEventListener('change', () => {
+  simToday = todayInput.value || realToday();
+  localStorage.setItem(K_TODAY, simToday);
+  log('simulated today → <b>' + simToday + '</b>');
+  renderAll();
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  if (!confirm('Clear all plans and reset the simulated date?')) return;
+  localStorage.removeItem(K_PLANS); localStorage.removeItem(K_TODAY);
+  plans = []; simToday = realToday(); todayInput.value = simToday;
+  homeInput = ''; route = { name: 'home' }; backStack = [];
+  log('<b>reset</b> — storage cleared');
+  renderAll();
+});
+
+renderAll();
+</script>

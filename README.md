@@ -62,6 +62,19 @@ Key engine behaviors:
 
 Everything runs on-device and offline; plans persist in AsyncStorage.
 
+## Web test bench
+
+No emulator needed to try the product: `web-bench/lifeos-test-bench.html` is a
+self-contained page with a phone simulator running the **exact engine code**
+(transpiled from `src/core/`) plus an inspector showing intent-match scores,
+plan statistics, gated-out tasks and an action log. A "simulated today" control
+lets you fast-forward time to test overdue states. Open the file in any
+browser, or rebuild it after engine changes with:
+
+```bash
+npm run bench   # transpiles src/core → injects into web-bench/shell.html
+```
+
 ## Running it
 
 ```bash
