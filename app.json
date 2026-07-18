@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "LifeOS",
+    "slug": "lifeos",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "platforms": ["ios", "android"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lifeos.app"
+    },
+    "android": {
+      "package": "com.lifeos.app"
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}
