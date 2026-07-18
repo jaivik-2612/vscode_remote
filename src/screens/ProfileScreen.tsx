@@ -2,15 +2,17 @@ import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { COUNTRIES, UserProfile } from '../core/resources';
 import { useStore } from '../state/store';
+import { useTheme } from '../state/theme';
 import { Card, Chip } from '../components/ui';
-import { colors, spacing } from '../theme';
+import { spacing } from '../theme';
 
 /**
  * The sign-up / profile form: basic details that let LifeOS localize task
- * guidance (and, later, tailor whole plans) to the user's country and region.
+ * guidance and product links to the user's country and region.
  */
 export default function ProfileScreen() {
   const { state, dispatch } = useStore();
+  const { colors } = useTheme();
   const existing = state.profile;
   const [name, setName] = useState(existing?.name ?? '');
   const [country, setCountry] = useState(existing?.country ?? '');
@@ -27,40 +29,50 @@ export default function ProfileScreen() {
     setTimeout(() => setSaved(false), 2000);
   };
 
+  const inputStyle = [
+    styles.input,
+    { backgroundColor: colors.bg, borderColor: colors.line, color: colors.ink },
+  ];
+
   return (
-    <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
-      <Text style={styles.heading}>Your profile</Text>
-      <Text style={styles.subheading}>
+    <ScrollView
+      style={[styles.screen, { backgroundColor: colors.bg }]}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={[styles.heading, { color: colors.ink }]}>Your profile</Text>
+      <Text style={[styles.subheading, { color: colors.muted }]}>
         Where you live decides which offices, forms and deadlines apply. LifeOS uses this to link
         each task to the right authority for you.
       </Text>
 
       <Card>
-        <Text style={styles.label}>Name</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Your name"
-          placeholderTextColor={colors.textSecondary} />
+        <Text style={[styles.label, { color: colors.muted }]}>Name</Text>
+        <TextInput style={inputStyle} value={name} onChangeText={setName} placeholder="Your name"
+          placeholderTextColor={colors.muted} />
 
-        <Text style={styles.label}>Country</Text>
+        <Text style={[styles.label, { color: colors.muted }]}>Country</Text>
         <View style={styles.chipWrap}>
           {COUNTRIES.map((c) => (
             <Chip key={c.code} label={c.name} selected={country === c.code} onPress={() => setCountry(c.code)} />
           ))}
         </View>
 
-        <Text style={styles.label}>{regionLabel}</Text>
-        <TextInput style={styles.input} value={region} onChangeText={setRegion}
+        <Text style={[styles.label, { color: colors.muted }]}>{regionLabel}</Text>
+        <TextInput style={inputStyle} value={region} onChangeText={setRegion}
           placeholder={`e.g. ${country === 'CA' ? 'Ontario' : country === 'GB' ? 'Greater London' : 'California'}`}
-          placeholderTextColor={colors.textSecondary} />
+          placeholderTextColor={colors.muted} />
 
-        <Text style={styles.label}>City</Text>
-        <TextInput style={styles.input} value={city} onChangeText={setCity} placeholder="City"
-          placeholderTextColor={colors.textSecondary} />
+        <Text style={[styles.label, { color: colors.muted }]}>City</Text>
+        <TextInput style={inputStyle} value={city} onChangeText={setCity} placeholder="City"
+          placeholderTextColor={colors.muted} />
       </Card>
 
-      <TouchableOpacity style={styles.cta} onPress={save}>
-        <Text style={styles.ctaText}>{saved ? 'Saved ✓' : 'Save profile'}</Text>
+      <TouchableOpacity style={[styles.cta, { backgroundColor: colors.accent }]} onPress={save}>
+        <Text style={[styles.ctaText, { color: colors.onAccent }]}>
+          {saved ? 'Saved ✓' : 'Save profile'}
+        </Text>
       </TouchableOpacity>
-      <Text style={styles.hint}>
+      <Text style={[styles.hint, { color: colors.muted }]}>
         Stored only on this device. Task resources update immediately.
       </Text>
       <View style={{ height: spacing.xl }} />
@@ -69,21 +81,20 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginTop: spacing.md },
-  subheading: {
-    fontSize: 15, color: colors.textSecondary, marginTop: spacing.xs, marginBottom: spacing.md,
+  screen: { flex: 1, padding: spacing.md },
+  heading: { fontSize: 28, fontWeight: '800', marginTop: spacing.md },
+  subheading: { fontSize: 14, marginTop: spacing.xs, marginBottom: spacing.md },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+    marginTop: spacing.sm,
   },
-  label: { fontSize: 13, fontWeight: '700', color: colors.textSecondary, marginBottom: spacing.xs, marginTop: spacing.sm },
-  input: {
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
-    borderRadius: 10, padding: spacing.sm, fontSize: 15, color: colors.text,
-  },
+  input: { borderWidth: 1, borderRadius: 12, padding: spacing.sm, fontSize: 15 },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap' },
-  cta: {
-    backgroundColor: colors.accent, borderRadius: 14, padding: spacing.md,
-    alignItems: 'center', marginTop: spacing.sm,
-  },
-  ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  hint: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm, textAlign: 'center' },
+  cta: { borderRadius: 24, padding: spacing.md, alignItems: 'center', marginTop: spacing.sm },
+  ctaText: { fontSize: 16, fontWeight: '700' },
+  hint: { fontSize: 12, marginTop: spacing.sm, textAlign: 'center' },
 });

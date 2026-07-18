@@ -13,50 +13,61 @@ import {
 } from 'react-native';
 import { matchIntent } from '../core/intent';
 import { EVENT_CATALOG, featuredByCategory } from '../core/templates';
-import { CATEGORY_LABELS } from '../core/types';
 import { planProgress } from '../core/progress';
+import { CATEGORY_LABELS } from '../core/types';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
-import { Card, Chip, ProgressBar } from '../components/ui';
-import { colors, spacing } from '../theme';
+import { useTheme } from '../state/theme';
+import { Card, SectionTitle } from '../components/ui';
+import { cardShadow, radius, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-/**
- * The front door: "Tell me what happened." Free-form input is matched against
- * the event catalog; suggestions and active plans live below it.
- */
+/** The Sky home: greeting, pill input, plan cards with progress, event tiles. */
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
   const { state } = useStore();
+  const { colors } = useTheme();
   const [input, setInput] = useState('');
   const today = todayIso();
 
   const matches = useMemo(() => matchIntent(input).slice(0, 6), [input]);
+
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const firstName = state.profile?.name ? state.profile.name.trim().split(' ')[0] : '';
 
   const goToBest = () => {
     const top = matches[0];
     if (top) navigation.navigate('Intake', { eventId: top.event.id });
   };
 
+  const longTail =
+    EVENT_CATALOG.length - featuredByCategory().reduce((n, g) => n + g.events.length, 0);
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
-        <Text style={styles.heading}>What happened?</Text>
-        <Text style={styles.subheading}>
-          Tell LifeOS about a life event and it maps out everything affected — every institution,
-          deadline and document.
+      <ScrollView
+        style={[styles.screen, { backgroundColor: colors.bg }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={[styles.hello, { color: colors.ink }]}>
+          {daypart}
+          {firstName ? `,\n${firstName}` : ''}.
+        </Text>
+        <Text style={[styles.tag, { color: colors.muted }]}>
+          What’s happening in your life? LifeOS handles the paperwork.
         </Text>
 
         {!state.profile?.country && (
           <TouchableOpacity
-            style={styles.profileNudge}
+            style={[styles.nudge, { backgroundColor: colors.soft }]}
             onPress={() => (navigation as any).navigate('Profile')}
           >
-            <Text style={styles.profileNudgeText}>
+            <Text style={[styles.nudgeText, { color: colors.accent }]}>
               👤 Set up your profile — country-specific links and guidance on every task →
             </Text>
           </TouchableOpacity>
@@ -64,9 +75,13 @@ export default function HomeScreen() {
 
         <View style={styles.inputRow}>
           <TextInput
-            style={styles.input}
+            style={[
+              styles.input,
+              cardShadow,
+              { backgroundColor: colors.card, color: colors.ink },
+            ]}
             placeholder='Try "I moved" or "I started a business"…'
-            placeholderTextColor={colors.textSecondary}
+            placeholderTextColor={colors.muted}
             value={input}
             onChangeText={setInput}
             multiline
@@ -75,12 +90,16 @@ export default function HomeScreen() {
             onSubmitEditing={goToBest}
           />
           <TouchableOpacity
-            style={[styles.goButton, matches.length === 0 && styles.goButtonDisabled]}
+            style={[
+              styles.goButton,
+              { backgroundColor: colors.accent },
+              matches.length === 0 && { opacity: 0.4 },
+            ]}
             disabled={matches.length === 0}
             onPress={goToBest}
             accessibilityLabel="Go"
           >
-            <Text style={styles.goText}>Go</Text>
+            <Text style={[styles.goText, { color: colors.onAccent }]}>→</Text>
           </TouchableOpacity>
         </View>
 
@@ -89,14 +108,14 @@ export default function HomeScreen() {
             {matches.map((m) => (
               <TouchableOpacity
                 key={m.event.id}
-                style={styles.matchRow}
+                style={[styles.matchRow, { borderBottomColor: colors.line }]}
                 onPress={() => navigation.navigate('Intake', { eventId: m.event.id })}
               >
                 <Text style={styles.matchEmoji}>{m.event.emoji}</Text>
-                <Text style={styles.matchName} numberOfLines={1}>
+                <Text style={[styles.matchName, { color: colors.ink }]} numberOfLines={1}>
                   {m.event.name}
                 </Text>
-                <Text style={[styles.matchCategory, categoryStyle[m.event.category]]}>
+                <Text style={[styles.matchCategory, { color: categoryColor(m.event.category, colors) }]}>
                   {CATEGORY_LABELS[m.event.category].split(' ')[0]}
                 </Text>
               </TouchableOpacity>
@@ -104,137 +123,148 @@ export default function HomeScreen() {
           </Card>
         )}
 
+        {state.plans.length > 0 && (
+          <>
+            <SectionTitle>Active plans</SectionTitle>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.planScroll}>
+              {state.plans.map((plan) => {
+                const progress = planProgress(plan, today);
+                const pct = Math.round(progress.fraction * 100);
+                return (
+                  <TouchableOpacity
+                    key={plan.id}
+                    style={[styles.planCard, cardShadow, { backgroundColor: colors.card }]}
+                    onPress={() => navigation.navigate('Plan', { planId: plan.id })}
+                  >
+                    <View style={[styles.pctCircle, { backgroundColor: colors.soft }]}>
+                      <Text style={[styles.pctText, { color: colors.accent }]}>{pct}%</Text>
+                    </View>
+                    <Text style={[styles.planName, { color: colors.ink }]} numberOfLines={2}>
+                      {plan.emoji} {plan.eventName}
+                      {plan.milestone ? ' ⭐' : ''}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.planMeta,
+                        { color: progress.overdue ? colors.danger : colors.muted },
+                      ]}
+                    >
+                      {progress.overdue
+                        ? `${progress.overdue} overdue`
+                        : `${progress.done}/${progress.total} done`}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
+
         {featuredByCategory().map((group) => (
           <View key={group.category}>
-            <Text style={styles.sectionTitle}>{CATEGORY_LABELS[group.category]}</Text>
-            <View style={styles.chipWrap}>
+            <SectionTitle>{CATEGORY_LABELS[group.category]}</SectionTitle>
+            <View style={styles.tileGrid}>
               {group.events.map((e) => (
-                <Chip
+                <TouchableOpacity
                   key={e.id}
-                  label={`${e.emoji} ${e.name}`}
+                  style={[styles.tile, cardShadow, { backgroundColor: colors.card }]}
                   onPress={() => navigation.navigate('Intake', { eventId: e.id })}
-                />
+                >
+                  <View style={[styles.tileEmoji, { backgroundColor: colors.soft }]}>
+                    <Text style={{ fontSize: 19 }}>{e.emoji}</Text>
+                  </View>
+                  <Text style={[styles.tileName, { color: colors.ink }]} numberOfLines={2}>
+                    {e.name}
+                  </Text>
+                </TouchableOpacity>
               ))}
             </View>
           </View>
         ))}
-        <Text style={styles.catalogHint}>
-          …and {EVENT_CATALOG.length - featuredByCategory().reduce((n, g) => n + g.events.length, 0)}{' '}
-          more events in the catalog — just describe what happened above.
+        <Text style={[styles.catalogHint, { color: colors.muted }]}>
+          …and {longTail} more events in the catalog — just describe what happened above.
         </Text>
-
-        <Text style={styles.sectionTitle}>Active plans</Text>
-        {state.plans.length === 0 && (
-          <Text style={styles.empty}>No plans yet. Start by telling LifeOS what happened.</Text>
-        )}
-        {state.plans.map((plan) => {
-          const progress = planProgress(plan, today);
-          return (
-            <TouchableOpacity
-              key={plan.id}
-              onPress={() => navigation.navigate('Plan', { planId: plan.id })}
-            >
-              <Card>
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>
-                    {plan.emoji} {plan.eventName}
-                    {plan.milestone ? '  ⭐' : ''}
-                  </Text>
-                  <Text style={styles.planMeta}>
-                    {progress.done}/{progress.total}
-                  </Text>
-                </View>
-                <ProgressBar fraction={progress.fraction} />
-                {progress.overdue > 0 && (
-                  <Text style={styles.overdue}>
-                    {progress.overdue} task{progress.overdue > 1 ? 's' : ''} overdue
-                  </Text>
-                )}
-              </Card>
-            </TouchableOpacity>
-          );
-        })}
         <View style={{ height: spacing.xl }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const categoryStyle = StyleSheet.create({
-  milestone: { color: '#B8860B' },
-  important: { color: colors.accent },
-  leisure: { color: colors.success },
-});
+function categoryColor(category: string, colors: { gold: string; accent: string; success: string }) {
+  if (category === 'milestone') return colors.gold;
+  if (category === 'leisure') return colors.success;
+  return colors.accent;
+}
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginTop: spacing.md },
-  subheading: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  profileNudge: {
-    backgroundColor: colors.accentSoft,
-    borderRadius: 12,
-    padding: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  profileNudgeText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    marginBottom: spacing.md,
-  },
+  screen: { flex: 1, padding: spacing.md },
+  hello: { fontSize: 30, fontWeight: '800', marginTop: spacing.md, lineHeight: 36 },
+  tag: { fontSize: 14, marginTop: 6, marginBottom: spacing.md },
+  nudge: { borderRadius: radius.small, padding: spacing.sm, marginBottom: spacing.md },
+  nudgeText: { fontSize: 13, fontWeight: '600' },
+  inputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
   input: {
     flex: 1,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 14,
-    padding: spacing.md,
-    fontSize: 16,
-    color: colors.text,
+    borderRadius: 28,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 15,
     minHeight: 56,
   },
   goButton: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     justifyContent: 'center',
-    backgroundColor: colors.accent,
-    borderRadius: 14,
-    paddingHorizontal: 18,
+    alignItems: 'center',
     marginLeft: spacing.sm,
   },
-  goButtonDisabled: { opacity: 0.4 },
-  goText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: spacing.sm },
-  matchRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
-  matchEmoji: { fontSize: 20, marginRight: spacing.sm },
-  matchName: { flex: 1, fontSize: 15, fontWeight: '600', color: colors.text },
-  matchCategory: { fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
-  catalogHint: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
-  },
-  empty: { color: colors.textSecondary, fontSize: 14, marginBottom: spacing.md },
-  planHeader: {
+  goText: { fontSize: 24, fontWeight: '700' },
+  matchRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  matchEmoji: { fontSize: 18, marginRight: spacing.sm },
+  matchName: { flex: 1, fontSize: 14, fontWeight: '600' },
+  matchCategory: { fontSize: 9, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
+  planScroll: { marginBottom: spacing.sm },
+  planCard: {
+    width: 150,
+    borderRadius: radius.card,
+    padding: spacing.md,
+    marginRight: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  pctCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    justifyContent: 'center',
     alignItems: 'center',
     marginBottom: spacing.sm,
   },
-  planName: { fontSize: 16, fontWeight: '600', color: colors.text },
-  planMeta: { fontSize: 13, color: colors.textSecondary },
-  overdue: { color: colors.danger, fontSize: 12, marginTop: spacing.sm, fontWeight: '600' },
+  pctText: { fontSize: 12, fontWeight: '800' },
+  planName: { fontSize: 13, fontWeight: '700', lineHeight: 17 },
+  planMeta: { fontSize: 11, fontWeight: '600', marginTop: 4 },
+  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
+  tile: {
+    width: '48.5%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 10,
+    marginBottom: 10,
+  },
+  tileEmoji: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  tileName: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 15 },
+  catalogHint: { fontSize: 12, marginTop: spacing.xs, marginBottom: spacing.sm },
 });

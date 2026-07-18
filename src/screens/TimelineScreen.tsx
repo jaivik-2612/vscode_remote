@@ -5,8 +5,9 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { buildTimeline } from '../core/progress';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
-import { Card, TaskRow } from '../components/ui';
-import { colors, spacing } from '../theme';
+import { useTheme } from '../state/theme';
+import { Card, SectionTitle, TaskRow } from '../components/ui';
+import { spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
@@ -20,6 +21,7 @@ function urgencyLabel(days: number): string {
 export default function TimelineScreen() {
   const navigation = useNavigation<Nav>();
   const { state } = useStore();
+  const { colors } = useTheme();
   const today = todayIso();
   const timeline = buildTimeline(state.plans, today);
 
@@ -27,19 +29,21 @@ export default function TimelineScreen() {
   const upcoming = timeline.filter((e) => e.daysUntilDue >= 0);
 
   return (
-    <ScrollView style={styles.screen}>
-      <Text style={styles.heading}>Timeline</Text>
-      <Text style={styles.subheading}>
+    <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
+      <Text style={[styles.heading, { color: colors.ink }]}>Timeline</Text>
+      <Text style={[styles.subheading, { color: colors.muted }]}>
         Every deadline from every plan, in one place.
       </Text>
 
       {timeline.length === 0 && (
-        <Text style={styles.empty}>Nothing due — create a plan from the Home tab.</Text>
+        <Text style={[styles.empty, { color: colors.muted }]}>
+          Nothing due — create a plan from the Home tab.
+        </Text>
       )}
 
       {overdue.length > 0 && (
-        <Card style={{ borderColor: colors.danger }}>
-          <Text style={[styles.sectionTitle, { color: colors.danger }]}>Overdue</Text>
+        <Card>
+          <Text style={[styles.overdueTitle, { color: colors.danger }]}>OVERDUE</Text>
           {overdue.map((entry) => (
             <TaskRow
               key={`${entry.planId}:${entry.task.id}`}
@@ -58,7 +62,7 @@ export default function TimelineScreen() {
 
       {upcoming.length > 0 && (
         <Card>
-          <Text style={styles.sectionTitle}>Upcoming</Text>
+          <SectionTitle>Upcoming</SectionTitle>
           {upcoming.map((entry) => (
             <TaskRow
               key={`${entry.planId}:${entry.task.id}`}
@@ -80,21 +84,14 @@ export default function TimelineScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginTop: spacing.md },
-  subheading: {
-    fontSize: 15,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  sectionTitle: {
-    fontSize: 13,
+  screen: { flex: 1, padding: spacing.md },
+  heading: { fontSize: 28, fontWeight: '800', marginTop: spacing.md },
+  subheading: { fontSize: 14, marginTop: spacing.xs, marginBottom: spacing.md },
+  overdueTitle: {
+    fontSize: 12,
     fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
     marginBottom: spacing.xs,
   },
-  empty: { color: colors.textSecondary, fontSize: 14 },
+  empty: { fontSize: 14 },
 });

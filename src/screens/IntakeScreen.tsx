@@ -14,27 +14,26 @@ import { getEventTemplate } from '../core/templates';
 import { IntakeQuestion } from '../core/types';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
+import { useTheme } from '../state/theme';
 import { Card, Chip } from '../components/ui';
-import { colors, spacing } from '../theme';
+import { spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Route = RouteProp<RootStackParamList, 'Intake'>;
 
-/**
- * A few tailoring questions before the plan is generated. Date questions
- * default to today; the first date answer becomes the plan's event date.
- */
+/** A few tailoring questions (max 5) before the plan is generated. */
 export default function IntakeScreen() {
   const navigation = useNavigation<Nav>();
   const { params } = useRoute<Route>();
   const { dispatch } = useStore();
+  const { colors } = useTheme();
   const template = getEventTemplate(params.eventId);
   const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
 
   if (!template) {
     return (
-      <View style={styles.screen}>
-        <Text style={styles.title}>Unknown event</Text>
+      <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+        <Text style={[styles.title, { color: colors.ink }]}>Unknown event</Text>
       </View>
     );
   }
@@ -71,48 +70,47 @@ export default function IntakeScreen() {
             ))}
           </View>
         );
-      case 'date':
-        return (
-          <TextInput
-            style={styles.input}
-            placeholder={`YYYY-MM-DD (default: ${todayIso()})`}
-            placeholderTextColor={colors.textSecondary}
-            value={typeof answers[q.id] === 'string' ? (answers[q.id] as string) : ''}
-            onChangeText={(v) => setAnswer(q.id, v)}
-            autoCapitalize="none"
-          />
-        );
       default:
         return (
           <TextInput
-            style={styles.input}
-            placeholder="Type here…"
-            placeholderTextColor={colors.textSecondary}
+            style={[
+              styles.input,
+              { backgroundColor: colors.bg, borderColor: colors.line, color: colors.ink },
+            ]}
+            placeholder={q.kind === 'date' ? `YYYY-MM-DD (default: ${todayIso()})` : 'Type here…'}
+            placeholderTextColor={colors.muted}
             value={typeof answers[q.id] === 'string' ? (answers[q.id] as string) : ''}
             onChangeText={(v) => setAnswer(q.id, v)}
+            autoCapitalize={q.kind === 'date' ? 'none' : 'sentences'}
           />
         );
     }
   };
 
   return (
-    <ScrollView style={styles.screen} keyboardShouldPersistTaps="handled">
-      <Text style={styles.title}>
+    <ScrollView
+      style={[styles.screen, { backgroundColor: colors.bg }]}
+      keyboardShouldPersistTaps="handled"
+    >
+      <Text style={[styles.title, { color: colors.ink }]}>
         {template.emoji} {template.name}
       </Text>
-      <Text style={styles.summary}>{template.summary}</Text>
+      <Text style={[styles.summary, { color: colors.muted }]}>{template.summary}</Text>
 
       {template.questions.map((q) => (
         <Card key={q.id}>
-          <Text style={styles.prompt}>{q.prompt}</Text>
+          <Text style={[styles.prompt, { color: colors.ink }]}>{q.prompt}</Text>
           {renderQuestion(q)}
         </Card>
       ))}
 
-      <TouchableOpacity style={styles.cta} onPress={createPlan}>
-        <Text style={styles.ctaText}>Build my plan</Text>
+      <TouchableOpacity
+        style={[styles.cta, { backgroundColor: colors.accent }]}
+        onPress={createPlan}
+      >
+        <Text style={[styles.ctaText, { color: colors.onAccent }]}>Build my plan</Text>
       </TouchableOpacity>
-      <Text style={styles.hint}>
+      <Text style={[styles.hint, { color: colors.muted }]}>
         Unanswered yes/no questions are treated as "No" — you can always regenerate the plan.
       </Text>
       <View style={{ height: spacing.xl }} />
@@ -121,27 +119,13 @@ export default function IntakeScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
-  title: { fontSize: 24, fontWeight: '700', color: colors.text, marginTop: spacing.sm },
-  summary: { fontSize: 15, color: colors.textSecondary, marginVertical: spacing.md },
-  prompt: { fontSize: 15, fontWeight: '600', color: colors.text, marginBottom: spacing.sm },
+  screen: { flex: 1, padding: spacing.md },
+  title: { fontSize: 24, fontWeight: '800', marginTop: spacing.sm },
+  summary: { fontSize: 15, marginVertical: spacing.md },
+  prompt: { fontSize: 15, fontWeight: '600', marginBottom: spacing.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  input: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 10,
-    padding: spacing.sm,
-    fontSize: 15,
-    color: colors.text,
-  },
-  cta: {
-    backgroundColor: colors.accent,
-    borderRadius: 14,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-  },
-  ctaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  hint: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm, textAlign: 'center' },
+  input: { borderWidth: 1, borderRadius: 12, padding: spacing.sm, fontSize: 15 },
+  cta: { borderRadius: 24, padding: spacing.md, alignItems: 'center', marginTop: spacing.sm },
+  ctaText: { fontSize: 16, fontWeight: '700' },
+  hint: { fontSize: 12, marginTop: spacing.sm, textAlign: 'center' },
 });

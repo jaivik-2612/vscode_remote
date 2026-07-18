@@ -1,13 +1,14 @@
 import { RouteProp, useRoute } from '@react-navigation/native';
 import React from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AFFILIATE_DISCLOSURE, amazonUrl, productsForTask } from '../core/products';
 import { countryName, resolveResources } from '../core/resources';
-import { TaskStatus } from '../core/types';
+import { DOMAIN_LABELS, TaskStatus } from '../core/types';
 import { RootStackParamList } from '../navigation';
 import { useStore } from '../state/store';
-import { Card, Chip, PriorityBadge } from '../components/ui';
-import { DOMAIN_LABELS } from '../core/types';
-import { colors, spacing } from '../theme';
+import { useTheme } from '../state/theme';
+import { Card, Chip, PriorityBadge, SectionTitle } from '../components/ui';
+import { spacing } from '../theme';
 
 type Route = RouteProp<RootStackParamList, 'TaskDetail'>;
 
@@ -18,17 +19,18 @@ const STATUS_OPTIONS: { status: TaskStatus; label: string }[] = [
   { status: 'skipped', label: 'Not applicable' },
 ];
 
-/** One obligation: what, who, by when, with which documents. */
+/** One obligation: what, who, by when, with which steps, documents and help. */
 export default function TaskDetailScreen() {
   const { params } = useRoute<Route>();
   const { state, dispatch } = useStore();
+  const { colors } = useTheme();
   const plan = state.plans.find((p) => p.id === params.planId);
   const task = plan?.tasks.find((t) => t.id === params.taskId);
 
   if (!plan || !task) {
     return (
-      <View style={styles.screen}>
-        <Text style={styles.title}>Task not found</Text>
+      <View style={[styles.screen, { backgroundColor: colors.bg }]}>
+        <Text style={[styles.title, { color: colors.ink }]}>Task not found</Text>
       </View>
     );
   }
@@ -38,25 +40,30 @@ export default function TaskDetailScreen() {
     .filter((t) => t && t.status !== 'done' && t.status !== 'skipped');
 
   const resources = resolveResources(task, state.profile);
+  const products = productsForTask(plan.eventId, task.templateId);
 
   return (
-    <ScrollView style={styles.screen}>
-      <Text style={styles.title}>{task.title}</Text>
+    <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
+      <Text style={[styles.title, { color: colors.ink }]}>{task.title}</Text>
       <View style={styles.metaRow}>
-        <Text style={styles.meta}>{DOMAIN_LABELS[task.domain]}</Text>
+        <Text style={[styles.meta, { color: colors.muted }]}>{DOMAIN_LABELS[task.domain]}</Text>
         <PriorityBadge priority={task.priority} />
       </View>
 
       <Card>
-        <Text style={styles.description}>{task.description}</Text>
-        {task.authority && <Text style={styles.authority}>Handled by: {task.authority}</Text>}
-        <Text style={styles.dates}>
+        <Text style={[styles.description, { color: colors.ink }]}>{task.description}</Text>
+        {task.authority && (
+          <Text style={[styles.authority, { color: colors.muted }]}>
+            Handled by: {task.authority}
+          </Text>
+        )}
+        <Text style={[styles.dates, { color: colors.muted }]}>
           Start {task.startDate} · Due {task.dueDate}
         </Text>
       </Card>
 
       <Card>
-        <Text style={styles.sectionTitle}>ⓘ How & where to do this</Text>
+        <SectionTitle>ⓘ How & where to do this</SectionTitle>
         {resources.map((r) => (
           <TouchableOpacity
             key={r.url}
@@ -64,12 +71,12 @@ export default function TaskDetailScreen() {
             onPress={() => Linking.openURL(r.url).catch(() => {})}
           >
             <Text style={styles.resourceIcon}>{r.kind === 'search' ? '🔎' : '🔗'}</Text>
-            <Text style={styles.resourceLabel} numberOfLines={2}>
+            <Text style={[styles.resourceLabel, { color: colors.accent }]} numberOfLines={2}>
               {r.label}
             </Text>
           </TouchableOpacity>
         ))}
-        <Text style={styles.resourceHint}>
+        <Text style={[styles.hint, { color: colors.muted }]}>
           {state.profile?.country
             ? `Localized for ${[state.profile.region, countryName(state.profile.country)]
                 .filter(Boolean)
@@ -78,11 +85,28 @@ export default function TaskDetailScreen() {
         </Text>
       </Card>
 
+      {products.length > 0 && (
+        <Card>
+          <SectionTitle>🛍️ Helpful products</SectionTitle>
+          {products.map((p) => (
+            <TouchableOpacity
+              key={p.label}
+              style={styles.resourceRow}
+              onPress={() => Linking.openURL(amazonUrl(p.query, state.profile)).catch(() => {})}
+            >
+              <Text style={styles.resourceIcon}>🛍️</Text>
+              <Text style={[styles.resourceLabel, { color: colors.accent }]}>{p.label}</Text>
+            </TouchableOpacity>
+          ))}
+          <Text style={[styles.hint, { color: colors.muted }]}>{AFFILIATE_DISCLOSURE}</Text>
+        </Card>
+      )}
+
       {task.status === 'blocked' && blockers.length > 0 && (
         <Card>
-          <Text style={styles.sectionTitle}>Waiting on</Text>
+          <SectionTitle>Waiting on</SectionTitle>
           {blockers.map((b) => (
-            <Text key={b!.id} style={styles.blocker}>
+            <Text key={b!.id} style={[styles.blocker, { color: colors.ink }]}>
               🔒 {b!.title}
             </Text>
           ))}
@@ -90,7 +114,7 @@ export default function TaskDetailScreen() {
       )}
 
       <Card>
-        <Text style={styles.sectionTitle}>Status</Text>
+        <SectionTitle>Status</SectionTitle>
         <View style={styles.chipRow}>
           {STATUS_OPTIONS.map((opt) => (
             <Chip
@@ -109,7 +133,7 @@ export default function TaskDetailScreen() {
           ))}
         </View>
         {task.status === 'blocked' && (
-          <Text style={styles.hint}>
+          <Text style={[styles.hint, { color: colors.muted }]}>
             This task is blocked until its prerequisites are done, but you can still set a status
             manually.
           </Text>
@@ -118,9 +142,9 @@ export default function TaskDetailScreen() {
 
       {task.steps.length > 0 && (
         <Card>
-          <Text style={styles.sectionTitle}>
+          <SectionTitle>
             Steps ({task.steps.filter((s) => s.done).length}/{task.steps.length})
-          </Text>
+          </SectionTitle>
           {task.steps.map((step) => (
             <TouchableOpacity
               key={step.name}
@@ -134,8 +158,18 @@ export default function TaskDetailScreen() {
                 })
               }
             >
-              <Text style={styles.docCheck}>{step.done ? '☑' : '☐'}</Text>
-              <Text style={[styles.docName, step.done && styles.docNameDone]}>{step.name}</Text>
+              <Text style={[styles.docCheck, { color: colors.accent }]}>
+                {step.done ? '☑' : '☐'}
+              </Text>
+              <Text
+                style={[
+                  styles.docName,
+                  { color: step.done ? colors.muted : colors.ink },
+                  step.done && styles.docNameDone,
+                ]}
+              >
+                {step.name}
+              </Text>
             </TouchableOpacity>
           ))}
         </Card>
@@ -143,7 +177,7 @@ export default function TaskDetailScreen() {
 
       {task.documents.length > 0 && (
         <Card>
-          <Text style={styles.sectionTitle}>Documents needed</Text>
+          <SectionTitle>Documents needed</SectionTitle>
           {task.documents.map((doc) => (
             <TouchableOpacity
               key={doc.name}
@@ -157,8 +191,18 @@ export default function TaskDetailScreen() {
                 })
               }
             >
-              <Text style={styles.docCheck}>{doc.collected ? '☑' : '☐'}</Text>
-              <Text style={[styles.docName, doc.collected && styles.docNameDone]}>{doc.name}</Text>
+              <Text style={[styles.docCheck, { color: colors.accent }]}>
+                {doc.collected ? '☑' : '☐'}
+              </Text>
+              <Text
+                style={[
+                  styles.docName,
+                  { color: doc.collected ? colors.muted : colors.ink },
+                  doc.collected && styles.docNameDone,
+                ]}
+              >
+                {doc.name}
+              </Text>
             </TouchableOpacity>
           ))}
         </Card>
@@ -169,30 +213,21 @@ export default function TaskDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.background, padding: spacing.md },
-  title: { fontSize: 22, fontWeight: '700', color: colors.text, marginTop: spacing.sm },
+  screen: { flex: 1, padding: spacing.md },
+  title: { fontSize: 22, fontWeight: '800', marginTop: spacing.sm },
   metaRow: { flexDirection: 'row', alignItems: 'center', marginVertical: spacing.sm },
-  meta: { fontSize: 13, color: colors.textSecondary },
-  description: { fontSize: 15, color: colors.text, lineHeight: 22 },
-  authority: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.sm },
-  dates: { fontSize: 13, color: colors.textSecondary, marginTop: spacing.xs, fontWeight: '600' },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: spacing.sm,
-  },
+  meta: { fontSize: 13 },
+  description: { fontSize: 15, lineHeight: 22 },
+  authority: { fontSize: 13, marginTop: spacing.sm },
+  dates: { fontSize: 13, marginTop: spacing.xs, fontWeight: '600' },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
-  blocker: { fontSize: 14, color: colors.text, paddingVertical: 4 },
-  hint: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs },
+  blocker: { fontSize: 14, paddingVertical: 4 },
+  hint: { fontSize: 11, marginTop: spacing.xs },
   resourceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 7 },
   resourceIcon: { fontSize: 14, marginRight: spacing.sm },
-  resourceLabel: { flex: 1, fontSize: 14, color: colors.accent, fontWeight: '600' },
-  resourceHint: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs },
+  resourceLabel: { flex: 1, fontSize: 14, fontWeight: '600' },
   docRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  docCheck: { fontSize: 18, marginRight: spacing.sm, color: colors.accent },
-  docName: { fontSize: 15, color: colors.text },
-  docNameDone: { color: colors.textSecondary, textDecorationLine: 'line-through' },
+  docCheck: { fontSize: 17, marginRight: spacing.sm },
+  docName: { fontSize: 15 },
+  docNameDone: { textDecorationLine: 'line-through' },
 });

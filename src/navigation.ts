@@ -9,4 +9,5 @@ export type TabParamList = {
   Home: undefined;
   Timeline: undefined;
   Profile: undefined;
+  Settings: undefined;
 };

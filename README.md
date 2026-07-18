@@ -72,6 +72,18 @@ Key engine behaviors:
 
 Everything runs on-device and offline; plans persist in AsyncStorage.
 
+## Monetization: affiliate product suggestions
+
+No charges, no ads. Life events come with shopping lists as well as paperwork,
+so plans show a "Things you might need" section (baby → newborn clothes,
+diapers, monitor; new job → work clothes, laptop) and some tasks carry
+anchored products (language test → IELTS prep book). The product database
+lives in `src/core/products.ts` — per-event packs rendered as Amazon search
+links that follow the user's profile country storefront. Links are plain for
+now; setting `AFFILIATE_TAG` in that file turns every link into an Amazon
+Associates affiliate link in one change. The required disclosure is shown
+wherever products appear.
+
 ## Web test bench
 
 No emulator needed to try the product: `web-bench/lifeos-test-bench.html` is a
