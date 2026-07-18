@@ -12,7 +12,8 @@ import {
   View,
 } from 'react-native';
 import { matchIntent } from '../core/intent';
-import { EVENT_CATALOG } from '../core/templates';
+import { eventsByCategory } from '../core/templates';
+import { CATEGORY_LABELS } from '../core/types';
 import { planProgress } from '../core/progress';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
@@ -93,16 +94,20 @@ export default function HomeScreen() {
           </Card>
         )}
 
-        <Text style={styles.sectionTitle}>Or pick an event</Text>
-        <View style={styles.chipWrap}>
-          {EVENT_CATALOG.map((e) => (
-            <Chip
-              key={e.id}
-              label={`${e.emoji} ${e.name}`}
-              onPress={() => navigation.navigate('Intake', { eventId: e.id })}
-            />
-          ))}
-        </View>
+        {eventsByCategory().map((group) => (
+          <View key={group.category}>
+            <Text style={styles.sectionTitle}>{CATEGORY_LABELS[group.category]}</Text>
+            <View style={styles.chipWrap}>
+              {group.events.map((e) => (
+                <Chip
+                  key={e.id}
+                  label={`${e.emoji} ${e.name}`}
+                  onPress={() => navigation.navigate('Intake', { eventId: e.id })}
+                />
+              ))}
+            </View>
+          </View>
+        ))}
 
         <Text style={styles.sectionTitle}>Active plans</Text>
         {state.plans.length === 0 && (

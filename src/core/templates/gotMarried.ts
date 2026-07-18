@@ -4,6 +4,7 @@ export const gotMarried: LifeEventTemplate = {
   id: 'got-married',
   name: 'I got married',
   emoji: '💍',
+  category: 'milestone',
   summary:
     'Marriage changes your tax filing status, insurance, beneficiaries and possibly your legal name — each with its own institution.',
   triggerPhrases: ['i got married', 'we got married', 'getting married', 'just married', 'i am married now'],

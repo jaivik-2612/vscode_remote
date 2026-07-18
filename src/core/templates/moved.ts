@@ -8,6 +8,7 @@ export const moved: LifeEventTemplate = {
   id: 'moved',
   name: 'I moved',
   emoji: '📦',
+  category: 'important',
   summary:
     'A change of address touches your licence, insurance, government records, banks, employer, utilities and tax records. This plan coordinates all of them.',
   triggerPhrases: [

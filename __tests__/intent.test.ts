@@ -33,6 +33,27 @@ describe('intent matching', () => {
     expect(matches[0].event.id).toBe('moved');
   });
 
+  test('milestone events match', () => {
+    expect(bestMatch('i graduated college')?.event.id).toBe('graduated-college');
+    expect(bestMatch('I just turned 18')?.event.id).toBe('turned-18');
+    expect(bestMatch('we bought a house')?.event.id).toBe('bought-house');
+    expect(bestMatch('I am retiring next spring')?.event.id).toBe('retired');
+    expect(bestMatch('we got divorced')?.event.id).toBe('got-divorced');
+  });
+
+  test('important events match', () => {
+    expect(bestMatch('I got a new job')?.event.id).toBe('new-job');
+    expect(bestMatch('I was laid off yesterday')?.event.id).toBe('lost-job');
+    expect(bestMatch('bought a used car')?.event.id).toBe('bought-car');
+    expect(bestMatch('my father passed away')?.event.id).toBe('loved-one-passed');
+  });
+
+  test('leisure events match', () => {
+    expect(bestMatch('I planned a family trip to Europe')?.event.id).toBe('trip-abroad');
+    expect(bestMatch('we adopted a puppy')?.event.id).toBe('new-pet');
+    expect(bestMatch('renovating the kitchen this fall')?.event.id).toBe('home-renovation');
+  });
+
   test('unrelated input matches nothing', () => {
     expect(matchIntent('what is the weather like today')).toHaveLength(0);
     expect(matchIntent('')).toHaveLength(0);

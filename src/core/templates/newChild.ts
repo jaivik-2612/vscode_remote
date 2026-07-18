@@ -4,6 +4,7 @@ export const newChild: LifeEventTemplate = {
   id: 'new-child',
   name: 'We had a baby',
   emoji: '👶',
+  category: 'milestone',
   summary:
     'A new child needs to exist administratively: birth registration, ID, health coverage, benefits, and updated taxes and beneficiaries.',
   triggerPhrases: ['we had a baby', 'i had a baby', 'new baby', 'my child was born', 'we are having a baby'],

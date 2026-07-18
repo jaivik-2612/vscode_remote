@@ -6,18 +6,17 @@ const path = require('path');
 
 const here = __dirname;
 const buildDir = path.join(here, 'build');
-const modules = [
-  'types',
-  'templates/moved',
-  'templates/startedBusiness',
-  'templates/immigrateCanada',
-  'templates/gotMarried',
-  'templates/newChild',
-  'templates/index',
-  'intent',
-  'planner',
-  'progress',
-];
+// Everything in build/ except tests — keeps the list in sync with src/core.
+function discover(dir, prefix) {
+  let out = [];
+  for (const entry of fs.readdirSync(path.join(buildDir, dir), { withFileTypes: true })) {
+    const rel = dir ? dir + '/' + entry.name : entry.name;
+    if (entry.isDirectory()) out = out.concat(discover(rel, prefix));
+    else if (entry.name.endsWith('.js')) out.push(rel.slice(0, -3));
+  }
+  return out;
+}
+const modules = discover('', '');
 
 let blob = '';
 for (const name of modules) {

@@ -9,6 +9,7 @@ export const immigrateCanada: LifeEventTemplate = {
   id: 'immigrate-canada',
   name: 'I want to immigrate to Canada',
   emoji: '🍁',
+  category: 'milestone',
   summary:
     'A structured path from eligibility analysis to a submitted application: document checklist, language tests, credential assessment, proof of funds, timeline and status monitoring.',
   triggerPhrases: [

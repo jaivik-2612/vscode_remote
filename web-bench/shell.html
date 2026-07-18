@@ -355,6 +355,7 @@ const DOMAIN_COLORS = {
   government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
   employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
   legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
+  travel:'#00ACC1',
 };
 const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
 const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
@@ -460,10 +461,12 @@ function renderHome() {
     '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
     '</div>' +
     '<div id="p-matches">' + matchesHtml() + '</div>' +
-    '<div class="p-section">Or pick an event</div><div class="p-chiprow">' +
-    Catalog.EVENT_CATALOG.map((e) =>
-      '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
-    '</div><div class="p-section">Active plans</div>';
+    Catalog.eventsByCategory().map((g) =>
+      '<div class="p-section">' + esc(Types.CATEGORY_LABELS[g.category]) + '</div><div class="p-chiprow">' +
+      g.events.map((e) =>
+        '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>').join('') +
+      '</div>').join('') +
+    '<div class="p-section">Active plans</div>';
   if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
   for (const plan of plans) {
     const pr = Progress.planProgress(plan, simToday);
@@ -720,10 +723,15 @@ const SCENARIOS = [
   'I moved',
   'I started a business',
   'I want to immigrate to Canada',
-  'just signed a lease on a new apartment across town',
-  'going freelance and forming an LLC',
-  'we had a baby',
-  'we got married',
+  'i graduated college',
+  'I turned 18',
+  'I got a new job',
+  'I was laid off',
+  'I bought a house',
+  'I retired',
+  'I planned a family trip to Europe',
+  'we adopted a puppy',
+  'renovating the kitchen',
 ];
 const scEl = document.getElementById('scenarios');
 for (const s of SCENARIOS) {

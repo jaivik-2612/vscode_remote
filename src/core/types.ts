@@ -20,7 +20,8 @@ export type Domain =
   | 'legal'
   | 'immigration'
   | 'business'
-  | 'education';
+  | 'education'
+  | 'travel';
 
 export const DOMAIN_LABELS: Record<Domain, string> = {
   government: 'Government records',
@@ -35,7 +36,23 @@ export const DOMAIN_LABELS: Record<Domain, string> = {
   immigration: 'Immigration',
   business: 'Business',
   education: 'Education',
+  travel: 'Travel & bookings',
 };
+
+/**
+ * The catalog is organized in three shelves: milestones (the big life
+ * transitions), important events (high-stakes admin that isn't a lifelong
+ * marker), and leisure (chosen projects that still carry real admin).
+ */
+export type EventCategory = 'milestone' | 'important' | 'leisure';
+
+export const CATEGORY_LABELS: Record<EventCategory, string> = {
+  milestone: 'Milestone events',
+  important: 'Important events',
+  leisure: 'Leisure & lifestyle',
+};
+
+export const CATEGORY_ORDER: EventCategory[] = ['milestone', 'important', 'leisure'];
 
 export type Priority = 'critical' | 'high' | 'medium' | 'low';
 
@@ -74,6 +91,7 @@ export interface LifeEventTemplate {
   name: string;
   emoji: string;
   summary: string;
+  category: EventCategory;
   /** Phrases and keywords used by the intent matcher. */
   triggerPhrases: string[];
   keywords: string[];

@@ -9,6 +9,7 @@ export const startedBusiness: LifeEventTemplate = {
   id: 'started-business',
   name: 'I started a business',
   emoji: '🏢',
+  category: 'important',
   summary:
     'Starting a business means satisfying half a dozen authorities in the right order: registration first, then tax accounts, then licences, insurance, payroll and accounting.',
   triggerPhrases: [
