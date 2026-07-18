@@ -33,6 +33,11 @@ export default function HomeScreen() {
 
   const matches = useMemo(() => matchIntent(input).slice(0, 3), [input]);
 
+  const goToBest = () => {
+    const top = matches[0];
+    if (top) navigation.navigate('Intake', { eventId: top.event.id });
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -45,14 +50,27 @@ export default function HomeScreen() {
           deadline and document.
         </Text>
 
-        <TextInput
-          style={styles.input}
-          placeholder='Try "I moved" or "I started a business"…'
-          placeholderTextColor={colors.textSecondary}
-          value={input}
-          onChangeText={setInput}
-          multiline
-        />
+        <View style={styles.inputRow}>
+          <TextInput
+            style={styles.input}
+            placeholder='Try "I moved" or "I started a business"…'
+            placeholderTextColor={colors.textSecondary}
+            value={input}
+            onChangeText={setInput}
+            multiline
+            blurOnSubmit
+            returnKeyType="go"
+            onSubmitEditing={goToBest}
+          />
+          <TouchableOpacity
+            style={[styles.goButton, matches.length === 0 && styles.goButtonDisabled]}
+            disabled={matches.length === 0}
+            onPress={goToBest}
+            accessibilityLabel="Go"
+          >
+            <Text style={styles.goText}>Go</Text>
+          </TouchableOpacity>
+        </View>
 
         {matches.length > 0 && (
           <Card>
@@ -131,7 +149,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.md,
   },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    marginBottom: spacing.md,
+  },
   input: {
+    flex: 1,
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -140,8 +164,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     minHeight: 56,
-    marginBottom: spacing.md,
   },
+  goButton: {
+    justifyContent: 'center',
+    backgroundColor: colors.accent,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    marginLeft: spacing.sm,
+  },
+  goButtonDisabled: { opacity: 0.4 },
+  goText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   sectionTitle: {
     fontSize: 13,
     fontWeight: '700',

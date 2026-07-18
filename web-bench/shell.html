@@ -114,11 +114,17 @@
   /* app interior — mirrors the RN styles */
   .p-h1 { font-size: 26px; font-weight: 700; margin: 10px 0 2px; }
   .p-sub { font-size: 14px; color: #6B6B6B; margin: 0 0 14px; }
+  .p-inputrow { display: flex; align-items: stretch; gap: 8px; margin-bottom: 8px; }
   .p-input {
-    width: 100%; background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    flex: 1; min-width: 0; background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
     padding: 14px; font-size: 15px; font-family: var(--sans); color: #1A1A1A;
-    min-height: 56px; resize: none; margin-bottom: 8px;
+    min-height: 56px; resize: none;
   }
+  .p-go {
+    flex: none; background: #2F6FED; color: #FFF; border: none; border-radius: 14px;
+    padding: 0 18px; font-size: 15px; font-weight: 700;
+  }
+  .p-go:disabled { opacity: .4; cursor: default; }
   .p-section {
     font-size: 11px; font-weight: 700; color: #6B6B6B; text-transform: uppercase;
     letter-spacing: .05em; margin: 14px 0 8px;
@@ -449,7 +455,10 @@ function renderHome() {
   headerEl.innerHTML = '';
   let html = '<h1 class="p-h1">What happened?</h1>' +
     '<p class="p-sub">Tell LifeOS about a life event and it maps out everything affected — every institution, deadline and document.</p>' +
-    '<textarea class="p-input" id="p-freetext" rows="2" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
+    '<div class="p-inputrow">' +
+    '<textarea class="p-input" id="p-freetext" rows="2" enterkeyhint="go" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
+    '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
+    '</div>' +
     '<div id="p-matches">' + matchesHtml() + '</div>' +
     '<div class="p-section">Or pick an event</div><div class="p-chiprow">' +
     Catalog.EVENT_CATALOG.map((e) =>
@@ -470,8 +479,21 @@ function renderHome() {
   ta.addEventListener('input', () => {
     homeInput = ta.value;
     document.getElementById('p-matches').innerHTML = matchesHtml();
+    document.getElementById('p-go').disabled = !Intent.matchIntent(homeInput).length;
     renderIntentPanel();
   });
+  ta.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); goToBest(); }
+  });
+}
+
+/* Enter / Go: open intake for the top-scored match. */
+function goToBest() {
+  const top = Intent.matchIntent(homeInput)[0];
+  if (!top) return;
+  log('go → <b>' + esc(top.event.id) + '</b> (top match)');
+  intakeAnswers = {};
+  navigate({ name: 'intake', eventId: top.event.id });
 }
 
 function renderIntake() {
@@ -653,6 +675,7 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   const el = ev.target.closest('button, [data-back]');
   if (!el) return;
   if (el.hasAttribute('data-back')) { goBack(); return; }
+  if (el.hasAttribute('data-go')) { goToBest(); return; }
   if (el.dataset.tab) { route = { name: el.dataset.tab }; backStack = []; renderAll(); return; }
   if (el.dataset.navIntake) { intakeAnswers = {}; navigate({ name: 'intake', eventId: el.dataset.navIntake }); return; }
   if (el.dataset.navPlan) { navigate({ name: 'plan', planId: el.dataset.navPlan }); return; }
