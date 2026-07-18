@@ -51,6 +51,17 @@ export default function HomeScreen() {
           deadline and document.
         </Text>
 
+        {!state.profile?.country && (
+          <TouchableOpacity
+            style={styles.profileNudge}
+            onPress={() => (navigation as any).navigate('Profile')}
+          >
+            <Text style={styles.profileNudgeText}>
+              👤 Set up your profile — country-specific links and guidance on every task →
+            </Text>
+          </TouchableOpacity>
+        )}
+
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -164,6 +175,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.md,
   },
+  profileNudge: {
+    backgroundColor: colors.accentSoft,
+    borderRadius: 12,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  profileNudgeText: { color: colors.accent, fontSize: 13, fontWeight: '600' },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'stretch',

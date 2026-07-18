@@ -1,6 +1,7 @@
 import { RouteProp, useRoute } from '@react-navigation/native';
 import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { countryName, resolveResources } from '../core/resources';
 import { TaskStatus } from '../core/types';
 import { RootStackParamList } from '../navigation';
 import { useStore } from '../state/store';
@@ -36,6 +37,8 @@ export default function TaskDetailScreen() {
     .map((id) => plan.tasks.find((t) => t.id === id))
     .filter((t) => t && t.status !== 'done' && t.status !== 'skipped');
 
+  const resources = resolveResources(task, state.profile);
+
   return (
     <ScrollView style={styles.screen}>
       <Text style={styles.title}>{task.title}</Text>
@@ -49,6 +52,29 @@ export default function TaskDetailScreen() {
         {task.authority && <Text style={styles.authority}>Handled by: {task.authority}</Text>}
         <Text style={styles.dates}>
           Start {task.startDate} · Due {task.dueDate}
+        </Text>
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>ⓘ How & where to do this</Text>
+        {resources.map((r) => (
+          <TouchableOpacity
+            key={r.url}
+            style={styles.resourceRow}
+            onPress={() => Linking.openURL(r.url).catch(() => {})}
+          >
+            <Text style={styles.resourceIcon}>{r.kind === 'search' ? '🔎' : '🔗'}</Text>
+            <Text style={styles.resourceLabel} numberOfLines={2}>
+              {r.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <Text style={styles.resourceHint}>
+          {state.profile?.country
+            ? `Localized for ${[state.profile.region, countryName(state.profile.country)]
+                .filter(Boolean)
+                .join(', ')} — change in Profile.`
+            : 'Set your country in the Profile tab for official local links.'}
         </Text>
       </Card>
 
@@ -161,6 +187,10 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
   blocker: { fontSize: 14, color: colors.text, paddingVertical: 4 },
   hint: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.xs },
+  resourceRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 7 },
+  resourceIcon: { fontSize: 14, marginRight: spacing.sm },
+  resourceLabel: { flex: 1, fontSize: 14, color: colors.accent, fontWeight: '600' },
+  resourceHint: { fontSize: 11, color: colors.textSecondary, marginTop: spacing.xs },
   docRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
   docCheck: { fontSize: 18, marginRight: spacing.sm, color: colors.accent },
   docName: { fontSize: 15, color: colors.text },

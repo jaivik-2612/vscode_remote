@@ -159,6 +159,13 @@
   .mc-important { color: #2F6FED; }
   .mc-leisure { color: #2E7D32; }
   .p-star { color: #B8860B; font-size: 12px; font-weight: 700; }
+  .p-resource { display: flex; gap: 10px; align-items: center; padding: 7px 0;
+    color: #2F6FED; font-size: 13px; font-weight: 600; text-decoration: none; }
+  .p-resource:hover { text-decoration: underline; }
+  .p-reshint { font-size: 11px; color: #6B6B6B; margin: 6px 0 0; }
+  .p-nudge { display: block; width: 100%; text-align: left; background: #E8F0FE; border: none;
+    border-radius: 12px; padding: 10px 12px; color: #2F6FED; font-size: 13px; font-weight: 600;
+    margin-bottom: 14px; }
   .p-cataloghint { font-size: 11px; color: #6B6B6B; margin: 2px 0 10px; }
   .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
     border-radius: 14px; padding: 14px; margin-bottom: 12px; }
@@ -364,6 +371,7 @@ const Planner = __require('planner');
 const Progress = __require('progress');
 const Catalog = __require('templates/index');
 const Types = __require('types');
+const Resources = __require('resources');
 
 /* mirrors src/theme.ts */
 const DOMAIN_COLORS = {
@@ -377,7 +385,7 @@ const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low
 const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'🔒', pending:'○' };
 
 /* ===== state ===== */
-const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1';
+const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1', K_PROFILE = 'lifeos.web.profile.v1';
 function realToday() { return new Date().toISOString().slice(0, 10); }
 /* Backfill fields added since a stored plan was created. */
 function migratePlan(p) {
@@ -390,10 +398,14 @@ function migratePlan(p) {
 let plans = [];
 try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]').map(migratePlan); } catch (e) { plans = []; }
 let simToday = localStorage.getItem(K_TODAY) || realToday();
+let profile = null;
+try { profile = JSON.parse(localStorage.getItem(K_PROFILE) || 'null'); } catch (e) { profile = null; }
 let route = { name: 'home' };
 let backStack = [];
 let homeInput = '';
 let intakeAnswers = {};
+let pendingDeletePlan = null;
+let profileDraft = null;
 
 function save() { localStorage.setItem(K_PLANS, JSON.stringify(plans)); }
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -493,6 +505,9 @@ function renderHome() {
   headerEl.innerHTML = '';
   let html = '<h1 class="p-h1">What happened?</h1>' +
     '<p class="p-sub">Tell LifeOS about a life event and it maps out everything affected — every institution, deadline and document.</p>' +
+    (!(profile && profile.country)
+      ? '<button class="p-nudge" data-tab="profile">👤 Set up your profile — country-specific links and guidance on every task →</button>'
+      : '') +
     '<div class="p-inputrow">' +
     '<textarea class="p-input" id="p-freetext" rows="2" enterkeyhint="go" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
     '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
@@ -606,6 +621,16 @@ function renderTask() {
     '<div class="p-card"><p class="p-desc">' + esc(task.description) + '</p>' +
     (task.authority ? '<p class="p-meta">Handled by: ' + esc(task.authority) + '</p>' : '') +
     '<p class="p-meta strong">Start ' + task.startDate + ' · Due ' + task.dueDate + '</p></div>';
+  const resources = Resources.resolveResources(task, profile);
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">ⓘ How &amp; where to do this</div>' +
+    resources.map((r) =>
+      '<a class="p-resource" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span>' + (r.kind === 'search' ? '🔎' : '🔗') + '</span><span>' + esc(r.label) + '</span></a>').join('') +
+    '<p class="p-reshint">' +
+    (profile && profile.country
+      ? 'Localized for ' + esc([profile.region, Resources.countryName(profile.country)].filter(Boolean).join(', ')) + ' — change in Profile.'
+      : 'Set your country in the Profile tab for official local links.') +
+    '</p></div>';
   if (task.status === 'blocked' && blockers.length) {
     html += '<div class="p-card"><div class="p-section" style="margin-top:0">Waiting on</div>' +
       blockers.map((b) => '<div class="p-block">🔒 ' + esc(b.title) + '</div>').join('') + '</div>';
@@ -652,12 +677,13 @@ function renderTimeline() {
 }
 
 function renderTabbar() {
-  const onTabs = route.name === 'home' || route.name === 'timeline';
+  const onTabs = route.name === 'home' || route.name === 'timeline' || route.name === 'profile';
   tabbarEl.style.display = onTabs ? 'flex' : 'none';
   if (!onTabs) return;
   tabbarEl.innerHTML =
     '<button class="' + (route.name === 'home' ? 'active' : '') + '" data-tab="home"><span class="ticon">🏠</span>Home</button>' +
-    '<button class="' + (route.name === 'timeline' ? 'active' : '') + '" data-tab="timeline"><span class="ticon">📅</span>Timeline</button>';
+    '<button class="' + (route.name === 'timeline' ? 'active' : '') + '" data-tab="timeline"><span class="ticon">📅</span>Timeline</button>' +
+    '<button class="' + (route.name === 'profile' ? 'active' : '') + '" data-tab="profile"><span class="ticon">👤</span>Profile</button>';
 }
 
 function renderPhone() {
@@ -666,7 +692,32 @@ function renderPhone() {
   else if (route.name === 'plan') renderPlan();
   else if (route.name === 'task') renderTask();
   else if (route.name === 'timeline') renderTimeline();
+  else if (route.name === 'profile') renderProfile();
   renderTabbar();
+}
+
+function renderProfile() {
+  headerEl.innerHTML = '';
+  if (!profileDraft) profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+  const p = profileDraft;
+  const regionLabel = (Resources.COUNTRIES.find((c) => c.code === p.country) || {}).regionLabel || 'State / region';
+  bodyEl.innerHTML =
+    '<h1 class="p-h1">Your profile</h1>' +
+    '<p class="p-sub">Where you live decides which offices, forms and deadlines apply. LifeOS uses this to link each task to the right authority for you.</p>' +
+    '<div class="p-card">' +
+    '<p class="p-q">Name</p><input class="p-text" id="pf-name" value="' + esc(p.name) + '" placeholder="Your name">' +
+    '<p class="p-q" style="margin-top:12px">Country</p><div class="p-chiprow">' +
+    Resources.COUNTRIES.map((c) =>
+      '<button class="p-chip' + (p.country === c.code ? ' sel' : '') + '" data-country="' + c.code + '">' + esc(c.name) + '</button>').join('') +
+    '</div>' +
+    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p><input class="p-text" id="pf-region" value="' + esc(p.region) + '" placeholder="e.g. California">' +
+    '<p class="p-q" style="margin-top:12px">City</p><input class="p-text" id="pf-city" value="' + esc(p.city) + '" placeholder="City">' +
+    '</div>' +
+    '<button class="p-cta" data-save-profile>Save profile</button>' +
+    '<p class="p-hint">Stored only in this browser. Task resources update immediately.</p>';
+  for (const [id, key] of [['pf-name', 'name'], ['pf-region', 'region'], ['pf-city', 'city']]) {
+    document.getElementById(id).addEventListener('input', (ev) => { profileDraft[key] = ev.target.value; });
+  }
 }
 
 /* ===== inspector rendering ===== */
@@ -732,7 +783,26 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   if (!el) return;
   if (el.hasAttribute('data-back')) { goBack(); return; }
   if (el.hasAttribute('data-go')) { goToBest(); return; }
-  if (el.dataset.tab) { route = { name: el.dataset.tab }; backStack = []; renderAll(); return; }
+  if (el.dataset.tab) {
+    if (el.dataset.tab === 'profile') profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+    route = { name: el.dataset.tab }; backStack = []; renderAll(); return;
+  }
+  if (el.dataset.country) {
+    profileDraft.country = el.dataset.country; renderPhone(); return;
+  }
+  if (el.hasAttribute('data-save-profile')) {
+    profile = {
+      name: (profileDraft.name || '').trim(),
+      country: profileDraft.country || '',
+      region: (profileDraft.region || '').trim(),
+      city: (profileDraft.city || '').trim(),
+    };
+    localStorage.setItem(K_PROFILE, JSON.stringify(profile));
+    log('<b>setProfile</b> ' + esc(profile.country || '—') + (profile.region ? ' / ' + esc(profile.region) : ''));
+    el.textContent = 'Saved ✓';
+    setTimeout(() => { if (document.body.contains(el)) el.textContent = 'Save profile'; }, 1500);
+    return;
+  }
   if (el.dataset.navIntake) { intakeAnswers = {}; navigate({ name: 'intake', eventId: el.dataset.navIntake }); return; }
   if (el.dataset.navPlan) { navigate({ name: 'plan', planId: el.dataset.navPlan }); return; }
   if (el.dataset.navTask) {
@@ -758,8 +828,19 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
     renderAll(); return;
   }
   if (el.dataset.delPlan) {
-    if (confirm('Remove this plan and all its tasks?')) {
+    // confirm() is blocked in sandboxed iframes — use an inline two-tap confirm.
+    if (pendingDeletePlan === el.dataset.delPlan) {
+      pendingDeletePlan = null;
       removePlan(el.dataset.delPlan); route = { name: 'home' }; backStack = []; renderAll();
+    } else {
+      pendingDeletePlan = el.dataset.delPlan;
+      el.textContent = 'Tap again to confirm delete';
+      setTimeout(() => {
+        if (pendingDeletePlan === el.dataset.delPlan) {
+          pendingDeletePlan = null;
+          if (document.body.contains(el)) el.textContent = 'Delete this plan';
+        }
+      }, 4000);
     }
     return;
   }
@@ -812,10 +893,18 @@ todayInput.addEventListener('change', () => {
   renderAll();
 });
 
-document.getElementById('reset-btn').addEventListener('click', () => {
-  if (!confirm('Clear all plans and reset the simulated date?')) return;
-  localStorage.removeItem(K_PLANS); localStorage.removeItem(K_TODAY);
-  plans = []; simToday = realToday(); todayInput.value = simToday;
+const resetBtn = document.getElementById('reset-btn');
+let confirmingReset = false;
+resetBtn.addEventListener('click', () => {
+  if (!confirmingReset) {
+    confirmingReset = true;
+    resetBtn.textContent = 'tap again to confirm';
+    setTimeout(() => { confirmingReset = false; resetBtn.textContent = 'reset data'; }, 4000);
+    return;
+  }
+  confirmingReset = false; resetBtn.textContent = 'reset data';
+  localStorage.removeItem(K_PLANS); localStorage.removeItem(K_TODAY); localStorage.removeItem(K_PROFILE);
+  plans = []; profile = null; simToday = realToday(); todayInput.value = simToday;
   homeInput = ''; route = { name: 'home' }; backStack = [];
   log('<b>reset</b> — storage cleared');
   renderAll();

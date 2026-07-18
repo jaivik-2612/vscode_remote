@@ -8,6 +8,7 @@ import React, {
   useRef,
 } from 'react';
 import { reconcileBlocked } from '../core/planner';
+import { UserProfile } from '../core/resources';
 import { Plan, TaskStatus } from '../core/types';
 
 /**
@@ -17,14 +18,17 @@ import { Plan, TaskStatus } from '../core/types';
  */
 
 const STORAGE_KEY = 'lifeos.plans.v1';
+const PROFILE_KEY = 'lifeos.profile.v1';
 
 interface State {
   plans: Plan[];
+  profile: UserProfile | null;
   hydrated: boolean;
 }
 
 type Action =
-  | { type: 'hydrate'; plans: Plan[] }
+  | { type: 'hydrate'; plans: Plan[]; profile: UserProfile | null }
+  | { type: 'setProfile'; profile: UserProfile }
   | { type: 'addPlan'; plan: Plan }
   | { type: 'removePlan'; planId: string }
   | { type: 'setTaskStatus'; planId: string; taskId: string; status: TaskStatus }
@@ -47,7 +51,9 @@ export function migratePlan(plan: Plan): Plan {
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'hydrate':
-      return { plans: action.plans.map(migratePlan), hydrated: true };
+      return { plans: action.plans.map(migratePlan), profile: action.profile, hydrated: true };
+    case 'setProfile':
+      return { ...state, profile: action.profile };
     case 'addPlan':
       return { ...state, plans: [action.plan, ...state.plans] };
     case 'removePlan':
@@ -117,15 +123,19 @@ interface StoreValue {
 const StoreContext = createContext<StoreValue | undefined>(undefined);
 
 export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { plans: [], hydrated: false });
+  const [state, dispatch] = useReducer(reducer, { plans: [], profile: null, hydrated: false });
   const hydratedRef = useRef(false);
 
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        dispatch({ type: 'hydrate', plans: raw ? (JSON.parse(raw) as Plan[]) : [] });
+    Promise.all([AsyncStorage.getItem(STORAGE_KEY), AsyncStorage.getItem(PROFILE_KEY)])
+      .then(([rawPlans, rawProfile]) => {
+        dispatch({
+          type: 'hydrate',
+          plans: rawPlans ? (JSON.parse(rawPlans) as Plan[]) : [],
+          profile: rawProfile ? (JSON.parse(rawProfile) as UserProfile) : null,
+        });
       })
-      .catch(() => dispatch({ type: 'hydrate', plans: [] }));
+      .catch(() => dispatch({ type: 'hydrate', plans: [], profile: null }));
   }, []);
 
   useEffect(() => {
@@ -136,7 +146,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state.plans)).catch(() => {});
-  }, [state.plans, state.hydrated]);
+    if (state.profile) {
+      AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(state.profile)).catch(() => {});
+    }
+  }, [state.plans, state.profile, state.hydrated]);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

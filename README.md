@@ -64,6 +64,11 @@ Key engine behaviors:
   tasks in or out rather than just collecting data.
 - **Document checklists** — each task instantiates its required documents as
   a per-task checklist.
+- **Country-aware resources** — every task has a "How & where to do this"
+  section: official links for the user's country (US/CA/GB/AU/IN today),
+  the domain's national portal, and a search localized to their region.
+  Driven by the profile (name, country, state/region, city) collected on the
+  Profile tab and stored on-device.
 
 Everything runs on-device and offline; plans persist in AsyncStorage.
 

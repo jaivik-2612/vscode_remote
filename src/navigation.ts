@@ -8,4 +8,5 @@ export type RootStackParamList = {
 export type TabParamList = {
   Home: undefined;
   Timeline: undefined;
+  Profile: undefined;
 };

@@ -11,7 +11,7 @@
     "web": "expo start --web",
     "test": "jest",
     "typecheck": "tsc --noEmit",
-    "bench": "tsc src/core/types.ts src/core/intent.ts src/core/planner.ts src/core/progress.ts src/core/templates/*.ts --module commonjs --target es2020 --outDir web-bench/build && node web-bench/assemble.js"
+    "bench": "tsc src/core/*.ts src/core/templates/*.ts --module commonjs --target es2020 --outDir web-bench/build && node web-bench/assemble.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",

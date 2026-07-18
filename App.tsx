@@ -11,6 +11,7 @@ import IntakeScreen from './src/screens/IntakeScreen';
 import PlanScreen from './src/screens/PlanScreen';
 import TaskDetailScreen from './src/screens/TaskDetailScreen';
 import TimelineScreen from './src/screens/TimelineScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
 import { colors } from './src/theme';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -34,6 +35,11 @@ function Tabs() {
         name="Timeline"
         component={TimelineScreen}
         options={{ tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 18 }}>📅</Text> }}
+      />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ tabBarIcon: ({ color }) => <Text style={{ color, fontSize: 18 }}>👤</Text> }}
       />
     </Tab.Navigator>
   );
