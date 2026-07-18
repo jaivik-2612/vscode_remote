@@ -12,7 +12,7 @@ import IntakeScreen from './src/screens/IntakeScreen';
 import PlanScreen from './src/screens/PlanScreen';
 import TaskDetailScreen from './src/screens/TaskDetailScreen';
 import TimelineScreen from './src/screens/TimelineScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
+import DashboardScreen from './src/screens/DashboardScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -34,8 +34,8 @@ function Tabs() {
       }}
     >
       <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarIcon: tabIcon('🏠') }} />
+      <Tab.Screen name="Dashboard" component={DashboardScreen} options={{ tabBarIcon: tabIcon('📊') }} />
       <Tab.Screen name="Timeline" component={TimelineScreen} options={{ tabBarIcon: tabIcon('📅') }} />
-      <Tab.Screen name="Profile" component={ProfileScreen} options={{ tabBarIcon: tabIcon('👤') }} />
       <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarIcon: tabIcon('⚙️') }} />
     </Tab.Navigator>
   );

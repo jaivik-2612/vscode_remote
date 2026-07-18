@@ -23,6 +23,41 @@ import { cardShadow, radius, spacing } from '../theme';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+/** The three most common events per category — the home Quick Add card. */
+const QUICK_ADD: {
+  label: string;
+  category: string;
+  items: { id: string; emoji: string; label: string }[];
+}[] = [
+  {
+    label: 'Milestones',
+    category: 'milestone',
+    items: [
+      { id: 'got-married', emoji: '💍', label: 'Married' },
+      { id: 'new-child', emoji: '👶', label: 'Baby' },
+      { id: 'bought-house', emoji: '🏠', label: 'House' },
+    ],
+  },
+  {
+    label: 'Important',
+    category: 'important',
+    items: [
+      { id: 'moved', emoji: '📦', label: 'Moved' },
+      { id: 'new-job', emoji: '💼', label: 'New job' },
+      { id: 'bought-car', emoji: '🚗', label: 'Car' },
+    ],
+  },
+  {
+    label: 'Leisure',
+    category: 'leisure',
+    items: [
+      { id: 'trip-abroad', emoji: '✈️', label: 'Trip' },
+      { id: 'new-pet', emoji: '🐶', label: 'Pet' },
+      { id: 'kids-birthday-party', emoji: '🎈', label: 'Party' },
+    ],
+  },
+];
+
 /** The Sky home: greeting, pill input, plan cards with progress, event tiles. */
 export default function HomeScreen() {
   const navigation = useNavigation<Nav>();
@@ -65,7 +100,7 @@ export default function HomeScreen() {
         {!state.profile?.country && (
           <TouchableOpacity
             style={[styles.nudge, { backgroundColor: colors.soft }]}
-            onPress={() => (navigation as any).navigate('Profile')}
+            onPress={() => (navigation as any).navigate('Settings')}
           >
             <Text style={[styles.nudgeText, { color: colors.accent }]}>
               👤 Set up your profile — country-specific links and guidance on every task →
@@ -160,31 +195,33 @@ export default function HomeScreen() {
           </>
         )}
 
-        {featuredByCategory().map((group) => (
-          <View key={group.category}>
-            <SectionTitle>{CATEGORY_LABELS[group.category]}</SectionTitle>
-            <View style={styles.tileGrid}>
-              {group.events.map((e) => (
-                <TouchableOpacity
-                  key={e.id}
-                  style={[styles.tile, cardShadow, { backgroundColor: colors.card }]}
-                  onPress={() => navigation.navigate('Intake', { eventId: e.id })}
-                >
-                  <View style={[styles.tileEmoji, { backgroundColor: colors.soft }]}>
-                    <Text style={{ fontSize: 19 }}>{e.emoji}</Text>
-                  </View>
-                  <Text style={[styles.tileName, { color: colors.ink }]} numberOfLines={2}>
-                    {e.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+        <SectionTitle>Quick add</SectionTitle>
+        <Card>
+          <View style={styles.quickCols}>
+            {QUICK_ADD.map((col) => (
+              <View key={col.label} style={styles.quickCol}>
+                <Text style={[styles.quickHead, { color: categoryColor(col.category, colors) }]}>
+                  {col.label}
+                </Text>
+                {col.items.map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.quickBtn, { backgroundColor: colors.bg }]}
+                    onPress={() => navigation.navigate('Intake', { eventId: item.id })}
+                  >
+                    <Text style={{ fontSize: 15 }}>{item.emoji}</Text>
+                    <Text style={[styles.quickLabel, { color: colors.ink }]} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ))}
           </View>
-        ))}
-        <Text style={[styles.catalogHint, { color: colors.muted }]}>
-          …and {longTail} more events in the catalog — just describe what happened above.
-        </Text>
-        <View style={{ height: spacing.xl }} />
+          <Text style={[styles.catalogHint, { color: colors.muted }]}>
+            …and {longTail}+ more events — just describe what happened above.
+          </Text>
+        </Card>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -248,23 +285,24 @@ const styles = StyleSheet.create({
   pctText: { fontSize: 12, fontWeight: '800' },
   planName: { fontSize: 13, fontWeight: '700', lineHeight: 17 },
   planMeta: { fontSize: 11, fontWeight: '600', marginTop: 4 },
-  tileGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  tile: {
-    width: '48.5%',
+  quickCols: { flexDirection: 'row', gap: 10 },
+  quickCol: { flex: 1, minWidth: 0 },
+  quickHead: {
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 8,
+  },
+  quickBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 16,
-    padding: 10,
-    marginBottom: 10,
-  },
-  tileEmoji: {
-    width: 38,
-    height: 38,
+    gap: 6,
     borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    marginBottom: 6,
   },
-  tileName: { flex: 1, fontSize: 12, fontWeight: '600', lineHeight: 15 },
-  catalogHint: { fontSize: 12, marginTop: spacing.xs, marginBottom: spacing.sm },
+  quickLabel: { flex: 1, fontSize: 12, fontWeight: '600' },
+  catalogHint: { fontSize: 10, marginTop: spacing.xs },
 });

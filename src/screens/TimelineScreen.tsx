@@ -25,8 +25,21 @@ export default function TimelineScreen() {
   const today = todayIso();
   const timeline = buildTimeline(state.plans, today);
 
-  const overdue = timeline.filter((e) => e.daysUntilDue < 0);
-  const upcoming = timeline.filter((e) => e.daysUntilDue >= 0);
+  const SEVERITY: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+  const bySeverity = [...timeline].sort(
+    (a, b) => SEVERITY[a.task.priority] - SEVERITY[b.task.priority] || a.daysUntilDue - b.daysUntilDue
+  );
+
+  const renderEntry = (entry: (typeof timeline)[number]) => (
+    <TaskRow
+      key={`${entry.planId}:${entry.task.id}`}
+      task={entry.task}
+      subtitle={`${entry.emoji} ${entry.planName} · ${urgencyLabel(entry.daysUntilDue)}`}
+      onPress={() =>
+        navigation.navigate('TaskDetail', { planId: entry.planId, taskId: entry.task.id })
+      }
+    />
+  );
 
   return (
     <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
@@ -35,48 +48,21 @@ export default function TimelineScreen() {
         Every deadline from every plan, in one place.
       </Text>
 
-      {timeline.length === 0 && (
+      {timeline.length === 0 ? (
         <Text style={[styles.empty, { color: colors.muted }]}>
           Nothing due — create a plan from the Home tab.
         </Text>
-      )}
-
-      {overdue.length > 0 && (
-        <Card>
-          <Text style={[styles.overdueTitle, { color: colors.danger }]}>OVERDUE</Text>
-          {overdue.map((entry) => (
-            <TaskRow
-              key={`${entry.planId}:${entry.task.id}`}
-              task={entry.task}
-              subtitle={`${entry.emoji} ${entry.planName} · ${urgencyLabel(entry.daysUntilDue)}`}
-              onPress={() =>
-                navigation.navigate('TaskDetail', {
-                  planId: entry.planId,
-                  taskId: entry.task.id,
-                })
-              }
-            />
-          ))}
-        </Card>
-      )}
-
-      {upcoming.length > 0 && (
-        <Card>
-          <SectionTitle>Upcoming</SectionTitle>
-          {upcoming.map((entry) => (
-            <TaskRow
-              key={`${entry.planId}:${entry.task.id}`}
-              task={entry.task}
-              subtitle={`${entry.emoji} ${entry.planName} · ${urgencyLabel(entry.daysUntilDue)}`}
-              onPress={() =>
-                navigation.navigate('TaskDetail', {
-                  planId: entry.planId,
-                  taskId: entry.task.id,
-                })
-              }
-            />
-          ))}
-        </Card>
+      ) : (
+        <>
+          <Card>
+            <SectionTitle>By severity</SectionTitle>
+            {bySeverity.map(renderEntry)}
+          </Card>
+          <Card>
+            <SectionTitle>By due date</SectionTitle>
+            {timeline.map(renderEntry)}
+          </Card>
+        </>
       )}
       <View style={{ height: spacing.xl }} />
     </ScrollView>

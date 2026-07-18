@@ -172,6 +172,24 @@
   .p-prod .pl { font-size: 12px; font-weight: 600; color: var(--p-ink, #1A1A1A); line-height: 1.3; }
   .p-prod .pa { font-size: 10px; color: var(--p-muted, #6B6B6B); }
   .p-disclosure { font-size: 10px; color: var(--p-muted, #6B6B6B); margin: 6px 0 12px; }
+  .p-quick { padding: 14px; }
+  .p-qcols { display: flex; gap: 10px; }
+  .p-qcol { flex: 1; min-width: 0; }
+  .p-qhead { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .p-qbtn { display: flex; align-items: center; gap: 6px; width: 100%; background: var(--p-bg, #F3F6FB);
+    border: none; border-radius: 12px; padding: 7px 8px; margin-bottom: 5px; font-size: 12px; font-weight: 600;
+    color: var(--p-ink, #1A1A1A); text-align: left; white-space: nowrap; overflow: hidden; }
+  .p-qbtn:hover { background: var(--p-soft, #E8F0FE); }
+  .p-qemoji { font-size: 15px; }
+  .p-qfoot { font-size: 10px; color: var(--p-muted, #6B6B6B); margin-top: 6px; }
+  .p-statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .p-stattile { background: var(--p-card, #FFF); border-radius: 16px; padding: 14px;
+    box-shadow: var(--p-shadow, none); border: 1px solid transparent; }
+  .p-stattile b { display: block; font-size: 24px; font-weight: 800; color: var(--p-accent, #2F6FED);
+    font-variant-numeric: tabular-nums; }
+  .p-stattile.bad b { color: #C62828; }
+  .p-stattile span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--p-muted, #6B6B6B); }
   .p-nudge { display: block; width: 100%; text-align: left; background: #E8F0FE; border: none;
     border-radius: 12px; padding: 10px 12px; color: #2F6FED; font-size: 13px; font-weight: 600;
     margin-bottom: 14px; }
@@ -5566,6 +5584,23 @@ function eventsHtml(startNo) {
   return out;
 }
 
+/** The three most common events per category — the home Quick Add card. */
+const QUICK_ADD = [
+  { label: 'Milestones', cls: 'mc-milestone', items: [['got-married', '💍', 'Married'], ['new-child', '👶', 'Baby'], ['bought-house', '🏠', 'House']] },
+  { label: 'Important', cls: 'mc-important', items: [['moved', '📦', 'Moved'], ['new-job', '💼', 'New job'], ['bought-car', '🚗', 'Car']] },
+  { label: 'Leisure', cls: 'mc-leisure', items: [['trip-abroad', '✈️', 'Trip'], ['new-pet', '🐶', 'Pet'], ['kids-birthday-party', '🎈', 'Party']] },
+];
+
+function quickAddHtml(longTail) {
+  return '<div class="p-section">Quick add</div><div class="p-card p-quick"><div class="p-qcols">' +
+    QUICK_ADD.map((col) =>
+      '<div class="p-qcol"><div class="p-qhead ' + col.cls + '">' + esc(col.label) + '</div>' +
+      col.items.map(([id, emoji, short]) =>
+        '<button class="p-qbtn" data-nav-intake="' + esc(id) + '"><span class="p-qemoji">' + emoji + '</span><span>' + esc(short) + '</span></button>').join('') +
+      '</div>').join('') +
+    '</div><div class="p-qfoot">…and ' + longTail + '+ more events — just describe what happened above.</div></div>';
+}
+
 function renderHome() {
   headerEl.innerHTML = '';
   const longTail = Catalog.EVENT_CATALOG.length -
@@ -5573,14 +5608,13 @@ function renderHome() {
   let sectionNo = 1;
   let html = greetingHtml() +
     (!(profile && profile.country)
-      ? '<button class="p-nudge" data-tab="profile">👤 Set up your profile — country-specific links and guidance on every task →</button>'
+      ? '<button class="p-nudge" data-tab="settings">👤 Set up your profile — country-specific links and guidance on every task →</button>'
       : '') +
     inputHtml() +
     '<div id="p-matches">' + matchesHtml() + '</div>' +
     (designId === 'noir' && plans.length ? statsHtml() : '') +
     plansHtml(sectionNo++) +
-    eventsHtml(plans.length ? sectionNo : 1) +
-    '<div class="p-cataloghint">…and ' + longTail + ' more events in the catalog — just describe what happened above.</div>';
+    quickAddHtml(longTail);
   bodyEl.innerHTML = html;
   const ta = document.getElementById('p-freetext');
   ta.addEventListener('input', () => {
@@ -5724,24 +5758,26 @@ function renderTask() {
 function renderTimeline() {
   headerEl.innerHTML = '';
   const timeline = Progress.buildTimeline(plans, simToday);
-  const overdue = timeline.filter((e) => e.daysUntilDue < 0);
-  const upcoming = timeline.filter((e) => e.daysUntilDue >= 0);
   const label = (d) => d < 0 ? (-d) + 'd overdue' : d === 0 ? 'due today' : 'in ' + d + 'd';
+  const row = (e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue));
+  const SEVERITY = { critical: 0, high: 1, medium: 2, low: 3 };
+  const bySeverity = [...timeline].sort(
+    (a, b) => SEVERITY[a.task.priority] - SEVERITY[b.task.priority] || a.daysUntilDue - b.daysUntilDue
+  );
   let html = '<h1 class="p-h1">Timeline</h1><p class="p-sub">Every deadline from every plan, in one place.</p>';
-  if (!timeline.length) html += '<p class="p-empty">Nothing due — create a plan from the Home tab.</p>';
-  if (overdue.length) {
-    html += '<div class="p-card danger"><div class="p-section" style="margin-top:0;color:#C62828">Overdue</div>' +
-      overdue.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
-  }
-  if (upcoming.length) {
-    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Upcoming</div>' +
-      upcoming.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue))).join('') + '</div>';
+  if (!timeline.length) {
+    html += '<p class="p-empty">Nothing due — create a plan from the Home tab.</p>';
+  } else {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">By severity</div>' +
+      bySeverity.map(row).join('') + '</div>' +
+      '<div class="p-card"><div class="p-section" style="margin-top:0">By due date</div>' +
+      timeline.map(row).join('') + '</div>';
   }
   bodyEl.innerHTML = html;
 }
 
 function renderTabbar() {
-  const tabs = [['home', '🏠', 'Home'], ['timeline', '📅', 'Timeline'], ['profile', '👤', 'Profile'], ['settings', '⚙️', 'Settings']];
+  const tabs = [['home', '🏠', 'Home'], ['dashboard', '📊', 'Dashboard'], ['timeline', '📅', 'Timeline'], ['settings', '⚙️', 'Settings']];
   const onTabs = tabs.some(([id]) => id === route.name);
   tabbarEl.className = 'tabbar tb-' + designId;
   tabbarEl.style.display = onTabs ? 'flex' : 'none';
@@ -5765,9 +5801,59 @@ function renderPhone() {
   else if (route.name === 'plan') renderPlan();
   else if (route.name === 'task') renderTask();
   else if (route.name === 'timeline') renderTimeline();
-  else if (route.name === 'profile') renderProfile();
+  else if (route.name === 'dashboard') renderDashboard();
   else if (route.name === 'settings') renderSettings();
   renderTabbar();
+}
+
+function renderDashboard() {
+  headerEl.innerHTML = '';
+  let html = '<h1 class="p-h1" style="margin-top:10px">My dashboard</h1>' +
+    '<p class="p-sub">Your life admin at a glance.</p>';
+  if (!plans.length) {
+    html += '<p class="p-empty">No plans yet — add an event from the Home tab and your progress will show up here.</p>';
+    bodyEl.innerHTML = html;
+    return;
+  }
+  const tl = Progress.buildTimeline(plans, simToday);
+  let done = 0, total = 0;
+  const inProgress = [];
+  for (const p of plans) {
+    for (const t of p.tasks) {
+      total++;
+      if (t.status === 'done' || t.status === 'skipped') done++;
+      if (t.status === 'in_progress') inProgress.push({ plan: p, task: t });
+    }
+  }
+  const due7 = tl.filter((e) => e.daysUntilDue >= 0 && e.daysUntilDue <= 7).length;
+  const overdue = tl.filter((e) => e.daysUntilDue < 0).length;
+
+  html += '<div class="p-statgrid">' +
+    '<div class="p-stattile"><b>' + plans.length + '</b><span>Active plans</span></div>' +
+    '<div class="p-stattile"><b>' + done + '/' + total + '</b><span>Tasks done</span></div>' +
+    '<div class="p-stattile"><b>' + due7 + '</b><span>Due in 7 days</span></div>' +
+    '<div class="p-stattile' + (overdue ? ' bad' : '') + '"><b>' + overdue + '</b><span>Overdue</span></div></div>';
+
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Plans</div>' +
+    plans.map((p) => {
+      const pr = Progress.planProgress(p, simToday);
+      return '<button class="p-planrow2" data-nav-plan="' + esc(p.id) + '">' +
+        '<span class="pr2-name">' + p.emoji + ' ' + esc(p.eventName) + (p.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="pr2-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+        '<span class="pr2-count">' + pr.done + '/' + pr.total + '</span></button>';
+    }).join('') + '</div>';
+
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Ongoing tasks</div>';
+  if (inProgress.length) {
+    html += inProgress.map(({ plan, task }) =>
+      taskRowHtml(task, plan.id, plan.emoji + ' ' + plan.eventName + ' · due ' + task.dueDate)).join('');
+  } else {
+    const next = tl.slice(0, 3);
+    html += '<p class="p-empty" style="margin-bottom:6px">Nothing marked in progress — here’s what’s next:</p>' +
+      next.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · due ' + e.task.dueDate)).join('');
+  }
+  html += '</div>';
+  bodyEl.innerHTML = html;
 }
 
 function renderSettings() {
@@ -5778,8 +5864,23 @@ function renderSettings() {
   );
   const themeChip = (v, label) =>
     '<button class="p-chip' + (themeSetting === v ? ' sel' : '') + '" data-theme-set="' + v + '">' + label + '</button>';
+  if (!profileDraft) profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+  const pd = profileDraft;
+  const regionLabel = (Resources.COUNTRIES.find((c) => c.code === pd.country) || {}).regionLabel || 'State / region';
   bodyEl.innerHTML =
     '<h1 class="p-h1" style="margin-top:10px">Settings</h1>' +
+    '<div class="p-section">Profile</div>' +
+    '<div class="p-card">' +
+    '<p class="p-q">Name</p><input class="p-text" id="pf-name" value="' + esc(pd.name) + '" placeholder="Your name">' +
+    '<p class="p-q" style="margin-top:12px">Country</p><div class="p-chiprow">' +
+    Resources.COUNTRIES.map((c) =>
+      '<button class="p-chip' + (pd.country === c.code ? ' sel' : '') + '" data-country="' + c.code + '">' + esc(c.name) + '</button>').join('') +
+    '</div>' +
+    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p><input class="p-text" id="pf-region" value="' + esc(pd.region) + '" placeholder="e.g. California">' +
+    '<p class="p-q" style="margin-top:12px">City</p><input class="p-text" id="pf-city" value="' + esc(pd.city) + '" placeholder="City">' +
+    '<button class="p-cta" style="margin-top:14px" data-save-profile>Save profile</button>' +
+    '<p class="p-hint">Powers country-specific task links and product storefronts.</p>' +
+    '</div>' +
     '<div class="p-section">Appearance</div>' +
     '<div class="p-card"><p class="p-q">Theme</p><div class="p-seg">' +
     themeChip('light', '☀️ Light') + themeChip('dark', '🌙 Dark') + themeChip('system', '⚙️ System') +
@@ -5793,27 +5894,6 @@ function renderSettings() {
     '<div class="p-card"><p class="p-about">LifeOS 0.1.0 — Universal Life Administration Platform.<br>' +
     Catalog.EVENT_CATALOG.length + ' life events · ' + stats.tasks + ' tasks · ' + stats.steps + ' checkable steps.<br>' +
     'All data stays on this device.</p></div>';
-}
-
-function renderProfile() {
-  headerEl.innerHTML = '';
-  if (!profileDraft) profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
-  const p = profileDraft;
-  const regionLabel = (Resources.COUNTRIES.find((c) => c.code === p.country) || {}).regionLabel || 'State / region';
-  bodyEl.innerHTML =
-    '<h1 class="p-h1">Your profile</h1>' +
-    '<p class="p-sub">Where you live decides which offices, forms and deadlines apply. LifeOS uses this to link each task to the right authority for you.</p>' +
-    '<div class="p-card">' +
-    '<p class="p-q">Name</p><input class="p-text" id="pf-name" value="' + esc(p.name) + '" placeholder="Your name">' +
-    '<p class="p-q" style="margin-top:12px">Country</p><div class="p-chiprow">' +
-    Resources.COUNTRIES.map((c) =>
-      '<button class="p-chip' + (p.country === c.code ? ' sel' : '') + '" data-country="' + c.code + '">' + esc(c.name) + '</button>').join('') +
-    '</div>' +
-    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p><input class="p-text" id="pf-region" value="' + esc(p.region) + '" placeholder="e.g. California">' +
-    '<p class="p-q" style="margin-top:12px">City</p><input class="p-text" id="pf-city" value="' + esc(p.city) + '" placeholder="City">' +
-    '</div>' +
-    '<button class="p-cta" data-save-profile>Save profile</button>' +
-    '<p class="p-hint">Stored only in this browser. Task resources update immediately.</p>';
   for (const [id, key] of [['pf-name', 'name'], ['pf-region', 'region'], ['pf-city', 'city']]) {
     document.getElementById(id).addEventListener('input', (ev) => { profileDraft[key] = ev.target.value; });
   }
@@ -5885,7 +5965,7 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   if (el.hasAttribute('data-back')) { goBack(); return; }
   if (el.hasAttribute('data-go')) { goToBest(); return; }
   if (el.dataset.tab) {
-    if (el.dataset.tab === 'profile') profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+    if (el.dataset.tab === 'settings') profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
     route = { name: el.dataset.tab }; backStack = []; renderAll(); return;
   }
   if (el.dataset.country) {

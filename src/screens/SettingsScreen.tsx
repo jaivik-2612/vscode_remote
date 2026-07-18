@@ -1,5 +1,14 @@
-import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import {
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { COUNTRIES, UserProfile } from '../core/resources';
 import { EVENT_CATALOG } from '../core/templates';
 import { useStore } from '../state/store';
 import { ThemeSetting, useTheme } from '../state/theme';
@@ -12,10 +21,31 @@ const THEME_OPTIONS: { value: ThemeSetting; label: string }[] = [
   { value: 'system', label: '⚙️ System' },
 ];
 
-/** App settings: appearance, data, and about. */
+/** App settings: profile, appearance, data, and about. */
 export default function SettingsScreen() {
   const { state, dispatch } = useStore();
   const { colors, setting, setSetting } = useTheme();
+
+  const existing = state.profile;
+  const [name, setName] = useState(existing?.name ?? '');
+  const [country, setCountry] = useState(existing?.country ?? '');
+  const [region, setRegion] = useState(existing?.region ?? '');
+  const [city, setCity] = useState(existing?.city ?? '');
+  const [saved, setSaved] = useState(false);
+
+  const regionLabel = COUNTRIES.find((c) => c.code === country)?.regionLabel ?? 'State / region';
+
+  const saveProfile = () => {
+    const profile: UserProfile = { name: name.trim(), country, region: region.trim(), city: city.trim() };
+    dispatch({ type: 'setProfile', profile });
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const inputStyle = [
+    styles.input,
+    { backgroundColor: colors.bg, borderColor: colors.line, color: colors.ink },
+  ];
 
   const stats = EVENT_CATALOG.reduce(
     (a, e) => ({
@@ -40,6 +70,38 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
       <Text style={[styles.heading, { color: colors.ink }]}>Settings</Text>
+
+      <SectionTitle>Profile</SectionTitle>
+      <Card>
+        <Text style={[styles.label, { color: colors.muted }]}>Name</Text>
+        <TextInput style={inputStyle} value={name} onChangeText={setName} placeholder="Your name"
+          placeholderTextColor={colors.muted} />
+
+        <Text style={[styles.label, { color: colors.muted }]}>Country</Text>
+        <View style={styles.chipRow}>
+          {COUNTRIES.map((c) => (
+            <Chip key={c.code} label={c.name} selected={country === c.code} onPress={() => setCountry(c.code)} />
+          ))}
+        </View>
+
+        <Text style={[styles.label, { color: colors.muted }]}>{regionLabel}</Text>
+        <TextInput style={inputStyle} value={region} onChangeText={setRegion}
+          placeholder={`e.g. ${country === 'CA' ? 'Ontario' : country === 'GB' ? 'Greater London' : 'California'}`}
+          placeholderTextColor={colors.muted} />
+
+        <Text style={[styles.label, { color: colors.muted }]}>City</Text>
+        <TextInput style={inputStyle} value={city} onChangeText={setCity} placeholder="City"
+          placeholderTextColor={colors.muted} />
+
+        <TouchableOpacity style={[styles.cta, { backgroundColor: colors.accent }]} onPress={saveProfile}>
+          <Text style={[styles.ctaText, { color: colors.onAccent }]}>
+            {saved ? 'Saved ✓' : 'Save profile'}
+          </Text>
+        </TouchableOpacity>
+        <Text style={[styles.hint, { color: colors.muted }]}>
+          Powers country-specific task links and product storefronts. Stored only on this device.
+        </Text>
+      </Card>
 
       <SectionTitle>Appearance</SectionTitle>
       <Card>
@@ -80,7 +142,18 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: spacing.md },
   heading: { fontSize: 28, fontWeight: '800', marginTop: spacing.md, marginBottom: spacing.sm },
-  label: { fontSize: 15, fontWeight: '600', marginBottom: spacing.sm },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  input: { borderWidth: 1, borderRadius: 12, padding: spacing.sm, fontSize: 15 },
+  cta: { borderRadius: 24, padding: spacing.md, alignItems: 'center', marginTop: spacing.md },
+  ctaText: { fontSize: 16, fontWeight: '700' },
+  themeLabel: { fontSize: 15, fontWeight: '600', marginBottom: spacing.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
   dangerText: { fontSize: 15, fontWeight: '600', paddingVertical: 4 },
   hint: { fontSize: 12, marginTop: 2 },
