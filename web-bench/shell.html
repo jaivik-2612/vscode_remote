@@ -172,8 +172,8 @@
   .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
   .p-planrow .nm { font-size: 15px; font-weight: 600; }
   .p-planrow .ct { font-size: 12px; color: #6B6B6B; }
-  .p-progress { height: 8px; border-radius: 4px; background: #E6E4E0; overflow: hidden; }
-  .p-progress i { display: block; height: 100%; background: #2F6FED; border-radius: 4px; }
+  .p-progress { display: block; height: 8px; border-radius: 4px; background: #E6E4E0; overflow: hidden; }
+  .p-progress i { display: block; height: 8px; background: #2F6FED; border-radius: 4px; }
   .p-overdue { color: #C62828; font-size: 12px; font-weight: 600; margin-top: 8px; }
   .p-empty { color: #6B6B6B; font-size: 13px; }
   .p-task { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left;
@@ -270,6 +270,141 @@
   @media (prefers-reduced-motion: no-preference) {
     .p-body { scroll-behavior: smooth; }
   }
+</style>
+<style id="design-css">
+  /* ===== Design studies: token sets per design × mode ===== */
+  .screen[data-design] { background: var(--p-bg); color: var(--p-ink); }
+
+  /* A. Paper — warm ground, serif voice, deep green */
+  .screen[data-design="paper"] {
+    --p-radius: 14px; --p-head: Georgia, 'Times New Roman', serif; --p-headweight: 400;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line);
+  }
+  .screen[data-design="paper"][data-mode="light"] {
+    --p-bg:#F6F4EF; --p-card:#FFFFFF; --p-ink:#1F1D1A; --p-muted:#8A8578;
+    --p-line:#E5E1D8; --p-accent:#3E6B4F; --p-soft:#E4EDE6; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="paper"][data-mode="dark"] {
+    --p-bg:#191713; --p-card:#23201B; --p-ink:#EDE9E0; --p-muted:#97917F;
+    --p-line:#322E26; --p-accent:#8FBC9E; --p-soft:#2A3A30; --p-onaccent:#14201A;
+  }
+
+  /* B. Sky — cool white, floating cards, vivid blue */
+  .screen[data-design="sky"] {
+    --p-radius: 20px; --p-head: inherit; --p-headweight: 800;
+    --p-shadow: 0 10px 30px rgba(22,35,59,.08); --p-cardborder: 1px solid transparent;
+  }
+  .screen[data-design="sky"][data-mode="light"] {
+    --p-bg:#F3F6FB; --p-card:#FFFFFF; --p-ink:#16233B; --p-muted:#6B7A94;
+    --p-line:#E3E9F2; --p-accent:#3564E2; --p-soft:#E7EEFD; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="sky"][data-mode="dark"] {
+    --p-bg:#0F1420; --p-card:#1A2130; --p-ink:#E8EDF7; --p-muted:#8B97AC;
+    --p-line:#262F42; --p-accent:#7C9BFF; --p-soft:#24304D; --p-onaccent:#0F1420;
+    --p-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  /* C. Noir — premium dark-first, amber signal */
+  .screen[data-design="noir"] {
+    --p-radius: 14px; --p-head: inherit; --p-headweight: 700;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line); letter-spacing: .01em;
+  }
+  .screen[data-design="noir"][data-mode="dark"] {
+    --p-bg:#0C0C0E; --p-card:#17171B; --p-ink:#F2F2F0; --p-muted:#8E8E93;
+    --p-line:#26262B; --p-accent:#E8B84B; --p-soft:#2E2818; --p-onaccent:#141310;
+  }
+  .screen[data-design="noir"][data-mode="light"] {
+    --p-bg:#F4F4F2; --p-card:#FFFFFF; --p-ink:#17171A; --p-muted:#77777D;
+    --p-line:#E6E6E3; --p-accent:#A87A10; --p-soft:#F4EAD3; --p-onaccent:#FFFFFF;
+  }
+
+  /* D. Studio — monochrome + signal red, sharp */
+  .screen[data-design="studio"] {
+    --p-radius: 8px; --p-head: inherit; --p-headweight: 700;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line);
+  }
+  .screen[data-design="studio"][data-mode="light"] {
+    --p-bg:#FAFAFA; --p-card:#FFFFFF; --p-ink:#111111; --p-muted:#6E6E6E;
+    --p-line:#E4E4E4; --p-accent:#E5484D; --p-soft:#FDE8E8; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="studio"][data-mode="dark"] {
+    --p-bg:#121212; --p-card:#1C1C1C; --p-ink:#EEEEEE; --p-muted:#9A9A9A;
+    --p-line:#2A2A2A; --p-accent:#FF6B6E; --p-soft:#3A1F20; --p-onaccent:#1A0E0E;
+  }
+
+  /* ===== component skin (applies to any design) ===== */
+  .screen[data-design] .statusbar { color: var(--p-ink); }
+  .screen[data-design] .p-header .back { color: var(--p-accent); }
+  .screen[data-design] .p-header .p-htitle { color: var(--p-ink); }
+  .screen[data-design] .p-h1 { color: var(--p-ink); font-family: var(--p-head); font-weight: var(--p-headweight); }
+  .screen[data-design] .p-sub, .screen[data-design] .p-empty, .screen[data-design] .p-hint,
+  .screen[data-design] .p-meta, .screen[data-design] .p-reshint, .screen[data-design] .p-cataloghint { color: var(--p-muted); }
+  .screen[data-design] .p-section { color: var(--p-muted); }
+  .screen[data-design="studio"] .p-section { letter-spacing: .12em; }
+  .screen[data-design="noir"] .p-section { letter-spacing: .1em; }
+  .screen[data-design] .p-card, .screen[data-design] .p-planrow {
+    background: var(--p-card); border: var(--p-cardborder); border-radius: var(--p-radius); box-shadow: var(--p-shadow);
+  }
+  .screen[data-design] .p-desc, .screen[data-design] .p-q, .screen[data-design] .p-block { color: var(--p-ink); }
+  .screen[data-design] .p-planrow .nm { color: var(--p-ink); }
+  .screen[data-design] .p-planrow .ct { color: var(--p-muted); }
+  .screen[data-design] .p-chip {
+    background: var(--p-card); border: 1px solid var(--p-line); color: var(--p-ink);
+    border-radius: calc(var(--p-radius) * 2);
+  }
+  .screen[data-design="studio"] .p-chip { border-radius: var(--p-radius); }
+  .screen[data-design] .p-chip.sel { background: var(--p-soft); border-color: var(--p-accent); color: var(--p-accent); }
+  .screen[data-design] .p-inputrow { gap: 10px; }
+  .screen[data-design] .p-input {
+    background: var(--p-card); border: 1px solid var(--p-line); color: var(--p-ink);
+    border-radius: calc(var(--p-radius) + 8px); box-shadow: var(--p-shadow);
+  }
+  .screen[data-design] .p-input::placeholder { color: var(--p-muted); }
+  .screen[data-design] .p-go {
+    background: var(--p-accent); color: var(--p-onaccent); border-radius: calc(var(--p-radius) + 8px);
+  }
+  .screen[data-design="sky"] .p-input, .screen[data-design="sky"] .p-go { border-radius: 999px; }
+  .screen[data-design] .p-suggest {
+    background: var(--p-card); border: 1px solid var(--p-line); border-radius: var(--p-radius);
+    box-shadow: 0 16px 40px rgba(0,0,0,.22);
+  }
+  .screen[data-design] .p-match { border-bottom: 1px solid var(--p-line); }
+  .screen[data-design] .p-match:last-child { border-bottom: none; }
+  .screen[data-design] .p-match:hover { background: var(--p-bg); }
+  .screen[data-design] .p-match .mn { color: var(--p-ink); }
+  .screen[data-design] .p-progress { background: var(--p-line); }
+  .screen[data-design] .p-progress i { background: var(--p-accent); }
+  .screen[data-design] .p-task { border-bottom: 1px solid var(--p-line); }
+  .screen[data-design] .p-task:last-child { border-bottom: none; }
+  .screen[data-design] .p-task .tt { color: var(--p-ink); }
+  .screen[data-design] .p-task.done .tt, .screen[data-design] .p-task .ts { color: var(--p-muted); }
+  .screen[data-design] .p-ghead .gl { color: var(--p-ink); }
+  .screen[data-design] .p-ghead .gc { color: var(--p-muted); }
+  .screen[data-design] .p-cta {
+    background: var(--p-accent); color: var(--p-onaccent); border-radius: calc(var(--p-radius) + 4px);
+  }
+  .screen[data-design] .p-text {
+    background: var(--p-bg); border: 1px solid var(--p-line); color: var(--p-ink); border-radius: calc(var(--p-radius) - 4px);
+  }
+  .screen[data-design] .p-doc .cb, .screen[data-design] .p-resource { color: var(--p-accent); }
+  .screen[data-design] .p-doc .dn { color: var(--p-ink); }
+  .screen[data-design] .p-doc.on .dn { color: var(--p-muted); }
+  .screen[data-design] .p-nudge { background: var(--p-soft); color: var(--p-accent); border-radius: var(--p-radius); }
+  .screen[data-design] .tabbar { background: var(--p-card); border-top: 1px solid var(--p-line); }
+  .screen[data-design] .tabbar button { color: var(--p-muted); }
+  .screen[data-design] .tabbar button.active { color: var(--p-accent); }
+  .screen[data-design] .tabbar button.active .ticon-pill {
+    background: var(--p-soft); border-radius: 999px; padding: 2px 14px;
+  }
+  .screen[data-design] .p-greet { margin: 14px 0 16px; }
+  .screen[data-design] .p-hello {
+    font-family: var(--p-head); font-weight: var(--p-headweight); font-size: 30px;
+    color: var(--p-ink); letter-spacing: -0.01em; line-height: 1.15; text-wrap: balance;
+  }
+  .screen[data-design="paper"] .p-hello { font-size: 32px; }
+  .screen[data-design] .p-tag { font-size: 14px; color: var(--p-muted); margin-top: 6px; }
+  .screen[data-design] .p-seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  .screen[data-design] .p-about { font-size: 12px; color: var(--p-muted); line-height: 1.7; }
 </style>
 
 <header class="topbar">
@@ -386,6 +521,7 @@ const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'�
 
 /* ===== state ===== */
 const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1', K_PROFILE = 'lifeos.web.profile.v1';
+const K_THEME = 'lifeos.web.theme.v1', K_DESIGN = 'lifeos.web.design.v1';
 function realToday() { return new Date().toISOString().slice(0, 10); }
 /* Backfill fields added since a stored plan was created. */
 function migratePlan(p) {
@@ -400,6 +536,24 @@ try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]').map(migratePlan)
 let simToday = localStorage.getItem(K_TODAY) || realToday();
 let profile = null;
 try { profile = JSON.parse(localStorage.getItem(K_PROFILE) || 'null'); } catch (e) { profile = null; }
+let themeSetting = localStorage.getItem(K_THEME) || 'system';   // 'light' | 'dark' | 'system'
+let designId = localStorage.getItem(K_DESIGN) || 'sky';         // 'paper' | 'sky' | 'noir' | 'studio'
+const DESIGNS = [
+  { id: 'paper', name: 'Paper' },
+  { id: 'sky', name: 'Sky' },
+  { id: 'noir', name: 'Noir' },
+  { id: 'studio', name: 'Studio' },
+];
+function applyTheme() {
+  const screen = document.querySelector('.screen');
+  const dark = themeSetting === 'dark' ||
+    (themeSetting === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  screen.dataset.mode = dark ? 'dark' : 'light';
+  screen.dataset.design = designId;
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (themeSetting === 'system') applyTheme();
+});
 let route = { name: 'home' };
 let backStack = [];
 let homeInput = '';
@@ -503,8 +657,12 @@ function matchesHtml() {
 
 function renderHome() {
   headerEl.innerHTML = '';
-  let html = '<h1 class="p-h1">What happened?</h1>' +
-    '<p class="p-sub">Tell LifeOS about a life event and it maps out everything affected — every institution, deadline and document.</p>' +
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const firstName = profile && profile.name ? profile.name.trim().split(' ')[0] : '';
+  let html =
+    '<div class="p-greet"><div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div>' +
+    '<div class="p-tag">What’s happening in your life? LifeOS handles the paperwork.</div></div>' +
     (!(profile && profile.country)
       ? '<button class="p-nudge" data-tab="profile">👤 Set up your profile — country-specific links and guidance on every task →</button>'
       : '') +
@@ -512,7 +670,22 @@ function renderHome() {
     '<textarea class="p-input" id="p-freetext" rows="2" enterkeyhint="go" placeholder=\'Try "I moved" or "I started a business"…\'>' + esc(homeInput) + '</textarea>' +
     '<button class="p-go" id="p-go" data-go' + (Intent.matchIntent(homeInput).length ? '' : ' disabled') + '>Go</button>' +
     '</div>' +
-    '<div id="p-matches">' + matchesHtml() + '</div>' +
+    '<div id="p-matches">' + matchesHtml() + '</div>';
+  // Returning users see their plans first; the catalog browser follows.
+  if (plans.length) {
+    html += '<div class="p-section">Active plans</div>';
+    for (const plan of plans) {
+      const pr = Progress.planProgress(plan, simToday);
+      html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) +
+        (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
+        '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
+        '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+        (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
+        '</button>';
+    }
+  }
+  html +=
     Catalog.featuredByCategory().map((g) =>
       '<div class="p-section">' + esc(Types.CATEGORY_LABELS[g.category]) + '</div><div class="p-chiprow">' +
       g.events.map((e) =>
@@ -520,19 +693,7 @@ function renderHome() {
       '</div>').join('') +
     '<div class="p-cataloghint">…and ' +
     (Catalog.EVENT_CATALOG.length - Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0)) +
-    ' more events in the catalog — just describe what happened above.</div>' +
-    '<div class="p-section">Active plans</div>';
-  if (!plans.length) html += '<p class="p-empty">No plans yet. Start by telling LifeOS what happened.</p>';
-  for (const plan of plans) {
-    const pr = Progress.planProgress(plan, simToday);
-    html += '<button class="p-planrow" data-nav-plan="' + esc(plan.id) + '">' +
-      '<span class="top"><span class="nm">' + plan.emoji + ' ' + esc(plan.eventName) +
-      (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
-      '<span class="ct">' + pr.done + '/' + pr.total + '</span></span>' +
-      '<span class="p-progress"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
-      (pr.overdue ? '<div class="p-overdue">' + pr.overdue + ' task' + (pr.overdue > 1 ? 's' : '') + ' overdue</div>' : '') +
-      '</button>';
-  }
+    ' more events in the catalog — just describe what happened above.</div>';
   bodyEl.innerHTML = html;
   const ta = document.getElementById('p-freetext');
   ta.addEventListener('input', () => {
@@ -677,13 +838,13 @@ function renderTimeline() {
 }
 
 function renderTabbar() {
-  const onTabs = route.name === 'home' || route.name === 'timeline' || route.name === 'profile';
+  const tabs = [['home', '🏠', 'Home'], ['timeline', '📅', 'Timeline'], ['profile', '👤', 'Profile'], ['settings', '⚙️', 'Settings']];
+  const onTabs = tabs.some(([id]) => id === route.name);
   tabbarEl.style.display = onTabs ? 'flex' : 'none';
   if (!onTabs) return;
-  tabbarEl.innerHTML =
-    '<button class="' + (route.name === 'home' ? 'active' : '') + '" data-tab="home"><span class="ticon">🏠</span>Home</button>' +
-    '<button class="' + (route.name === 'timeline' ? 'active' : '') + '" data-tab="timeline"><span class="ticon">📅</span>Timeline</button>' +
-    '<button class="' + (route.name === 'profile' ? 'active' : '') + '" data-tab="profile"><span class="ticon">👤</span>Profile</button>';
+  tabbarEl.innerHTML = tabs.map(([id, icon, label]) =>
+    '<button class="' + (route.name === id ? 'active' : '') + '" data-tab="' + id + '">' +
+    '<span class="ticon-pill"><span class="ticon">' + icon + '</span></span>' + label + '</button>').join('');
 }
 
 function renderPhone() {
@@ -693,7 +854,37 @@ function renderPhone() {
   else if (route.name === 'task') renderTask();
   else if (route.name === 'timeline') renderTimeline();
   else if (route.name === 'profile') renderProfile();
+  else if (route.name === 'settings') renderSettings();
   renderTabbar();
+}
+
+function renderSettings() {
+  headerEl.innerHTML = '';
+  const stats = Catalog.EVENT_CATALOG.reduce(
+    (a, e) => ({ tasks: a.tasks + e.tasks.length, steps: a.steps + e.tasks.reduce((n, t) => n + (t.steps || []).length, 0) }),
+    { tasks: 0, steps: 0 }
+  );
+  const themeChip = (v, label) =>
+    '<button class="p-chip' + (themeSetting === v ? ' sel' : '') + '" data-theme-set="' + v + '">' + label + '</button>';
+  bodyEl.innerHTML =
+    '<h1 class="p-h1" style="margin-top:10px">Settings</h1>' +
+    '<div class="p-section">Appearance</div>' +
+    '<div class="p-card"><p class="p-q">Theme</p><div class="p-seg">' +
+    themeChip('light', '☀️ Light') + themeChip('dark', '🌙 Dark') + themeChip('system', '⚙️ System') +
+    '</div>' +
+    '<p class="p-q" style="margin-top:14px">Design study <span style="font-weight:400;opacity:.6">(bench only)</span></p><div class="p-seg">' +
+    DESIGNS.map((d) =>
+      '<button class="p-chip' + (designId === d.id ? ' sel' : '') + '" data-design-set="' + d.id + '">' + d.name + '</button>').join('') +
+    '</div></div>' +
+    '<div class="p-section">Data</div>' +
+    '<div class="p-card">' +
+    '<button class="p-del" style="padding:6px 0;text-align:left" data-clear-plans>Delete all plans</button>' +
+    '<p class="p-hint" style="text-align:left;margin-top:2px">Profile and settings are kept.</p>' +
+    '</div>' +
+    '<div class="p-section">About</div>' +
+    '<div class="p-card"><p class="p-about">LifeOS 0.1.0 — Universal Life Administration Platform.<br>' +
+    Catalog.EVENT_CATALOG.length + ' life events · ' + stats.tasks + ' tasks · ' + stats.steps + ' checkable steps.<br>' +
+    'All data stays on this device.</p></div>';
 }
 
 function renderProfile() {
@@ -789,6 +980,32 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   }
   if (el.dataset.country) {
     profileDraft.country = el.dataset.country; renderPhone(); return;
+  }
+  if (el.dataset.themeSet) {
+    themeSetting = el.dataset.themeSet;
+    localStorage.setItem(K_THEME, themeSetting);
+    log('theme → <b>' + esc(themeSetting) + '</b>');
+    applyTheme(); renderPhone(); return;
+  }
+  if (el.dataset.designSet) {
+    designId = el.dataset.designSet;
+    localStorage.setItem(K_DESIGN, designId);
+    log('design → <b>' + esc(designId) + '</b>');
+    applyTheme(); renderPhone(); return;
+  }
+  if (el.hasAttribute('data-clear-plans')) {
+    if (el.dataset.confirming) {
+      plans = []; save(); delete el.dataset.confirming;
+      log('<b>clearPlans</b> — all plans deleted');
+      renderAll();
+    } else {
+      el.dataset.confirming = '1';
+      el.textContent = 'Tap again to confirm';
+      setTimeout(() => {
+        if (document.body.contains(el)) { delete el.dataset.confirming; el.textContent = 'Delete all plans'; }
+      }, 4000);
+    }
+    return;
   }
   if (el.hasAttribute('data-save-profile')) {
     profile = {
@@ -910,5 +1127,6 @@ resetBtn.addEventListener('click', () => {
   renderAll();
 });
 
+applyTheme();
 renderAll();
 </script>
