@@ -12,6 +12,7 @@ import {
 import { PASSWORD_RULES, validatePassword } from '../core/password';
 import { useAuth } from '../state/auth';
 import { useTheme } from '../state/theme';
+import { LogoMark } from '../components/Logo';
 import { Card } from '../components/ui';
 import { cardShadow, spacing } from '../theme';
 
@@ -83,6 +84,9 @@ export default function AuthScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
         keyboardShouldPersistTaps="handled"
       >
+        <View style={styles.logoWrap}>
+          <LogoMark size={72} />
+        </View>
         <Text style={[styles.logo, { color: colors.ink }]}>LifeOS</Text>
         <Text style={[styles.sub, { color: colors.muted }]}>
           Life’s big moments, minus the paperwork.
@@ -181,7 +185,8 @@ export default function AuthScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: spacing.lg },
   center: { alignItems: 'center', justifyContent: 'center' },
-  logo: { fontSize: 36, fontWeight: '800', textAlign: 'center' },
+  logoWrap: { alignItems: 'center', marginBottom: spacing.sm },
+  logo: { fontSize: 32, fontWeight: '800', textAlign: 'center', letterSpacing: -0.5 },
   sub: { fontSize: 14, textAlign: 'center', marginTop: 6, marginBottom: spacing.lg, lineHeight: 21 },
   toggle: { flexDirection: 'row', borderRadius: 999, padding: 4, marginBottom: spacing.md },
   toggleBtn: { flex: 1, borderRadius: 999, paddingVertical: 10, alignItems: 'center' },

@@ -172,6 +172,10 @@
   .p-prod .pl { font-size: 12px; font-weight: 600; color: var(--p-ink, #1A1A1A); line-height: 1.3; }
   .p-prod .pa { font-size: 10px; color: var(--p-muted, #6B6B6B); }
   .p-disclosure { font-size: 10px; color: var(--p-muted, #6B6B6B); margin: 6px 0 12px; }
+  .p-logo .lg-stroke { stroke: var(--p-accent, #3564E2); fill: none; }
+  .p-logo .lg-dot { fill: var(--p-accent, #3564E2); }
+  .p-brandrow { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .p-brandword { font-size: 19px; font-weight: 800; color: var(--p-ink, #16233B); letter-spacing: -.3px; }
   .p-authfield { display: block; width: 100%; margin-bottom: 10px; padding: 13px 16px;
     border-radius: 16px; font-size: 15px; }
   .p-rule { font-size: 12px; color: var(--p-muted, #6B6B6B); padding: 2px 0; }
@@ -437,7 +441,7 @@
   .screen[data-design] .tabbar button.active .ticon-pill {
     background: var(--p-soft); border-radius: 999px; padding: 2px 14px;
   }
-  .screen[data-design] .p-greet { margin: 14px 0 16px; }
+  .screen[data-design] .p-greet { margin: 14px 0 14px; }
   .screen[data-design] .p-hello {
     font-family: var(--p-head); font-weight: var(--p-headweight); font-size: 30px;
     color: var(--p-ink); letter-spacing: -0.01em; line-height: 1.15; text-wrap: balance;
@@ -494,13 +498,13 @@
   /* ---- SKY: floaty cards, rings, tiles, floating tab pill ---- */
   .screen[data-design] .pr-sky .p-input { border-radius: 999px; padding: 16px 20px; }
   .screen[data-design] .pr-sky .p-go { border-radius: 999px; width: 54px; flex: none; font-size: 22px; padding: 0; }
-  .p-planscroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px; }
+  .p-planscroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 4px; }
   .p-plancard { flex: none; width: 150px; display: flex; flex-direction: column; align-items: flex-start;
-    gap: 8px; background: var(--p-card); border: none; border-radius: 20px; padding: 14px;
+    gap: 6px; background: var(--p-card); border: none; border-radius: 20px; padding: 12px;
     box-shadow: var(--p-shadow); text-align: left; }
-  .p-ring { width: 52px; height: 52px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-  .p-ring span { width: 40px; height: 40px; border-radius: 50%; background: var(--p-card);
-    display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; color: var(--p-ink); }
+  .p-ring { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .p-ring span { width: 35px; height: 35px; border-radius: 50%; background: var(--p-card);
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: var(--p-ink); }
   .p-plancard-name { font-size: 13px; font-weight: 700; color: var(--p-ink); line-height: 1.3; }
   .p-plancard-ov { font-size: 11px; font-weight: 700; color: #C62828; }
   .p-plancard-ov.ok { color: var(--p-muted); font-weight: 500; }
@@ -990,7 +994,9 @@ function renderHome() {
   const longTail = Catalog.EVENT_CATALOG.length -
     Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0);
   let sectionNo = 1;
-  let html = greetingHtml() +
+  let html =
+    '<div class="p-brandrow">' + logoSvg(26) + '<span class="p-brandword">LifeOS</span></div>' +
+    greetingHtml() +
     (!(profile && profile.country)
       ? '<button class="p-nudge" data-tab="settings">👤 Set up your profile — country-specific links and guidance on every task →</button>'
       : '') +
@@ -1010,6 +1016,15 @@ function renderHome() {
   ta.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); goToBest(); }
   });
+}
+
+/** The LifeOS mark: progress ring + dot (life in progress) around a check (handled). */
+function logoSvg(size) {
+  return '<svg class="p-logo" width="' + size + '" height="' + size + '" viewBox="0 0 64 64" fill="none" aria-label="LifeOS logo">' +
+    '<path class="lg-stroke" d="M48.97 15.03 A24 24 0 1 1 15.03 15.03" stroke-width="6" stroke-linecap="round"/>' +
+    '<circle class="lg-dot" cx="32" cy="8" r="3.5"/>' +
+    '<path class="lg-stroke" d="M22 33 L29.5 40.5 L43 25" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
 }
 
 /** Congratulatory popup for freshly added milestone plans. */
@@ -1223,8 +1238,9 @@ function renderAuth() {
     }).join('');
   };
   bodyEl.innerHTML =
-    '<div style="padding-top:60px">' +
-    '<h1 class="p-h1" style="text-align:center;font-size:34px">LifeOS</h1>' +
+    '<div style="padding-top:44px">' +
+    '<div style="display:flex;justify-content:center;margin-bottom:10px">' + logoSvg(72) + '</div>' +
+    '<h1 class="p-h1" style="text-align:center;font-size:30px;letter-spacing:-.5px">LifeOS</h1>' +
     '<p class="p-sub" style="text-align:center">Life’s big moments, minus the paperwork.</p>' +
     '<div class="p-chiprow" style="justify-content:center;margin-bottom:12px">' +
     '<button class="p-chip' + (!isSignup ? ' sel' : '') + '" data-auth-mode="signin">Sign in</button>' +

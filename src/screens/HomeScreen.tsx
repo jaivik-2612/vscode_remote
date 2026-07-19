@@ -18,6 +18,7 @@ import { CATEGORY_LABELS } from '../core/types';
 import { RootStackParamList } from '../navigation';
 import { todayIso, useStore } from '../state/store';
 import { useTheme } from '../state/theme';
+import { LogoLockup } from '../components/Logo';
 import { Card, SectionTitle } from '../components/ui';
 import { cardShadow, radius, spacing } from '../theme';
 
@@ -89,6 +90,9 @@ export default function HomeScreen() {
         style={[styles.screen, { backgroundColor: colors.bg }]}
         keyboardShouldPersistTaps="handled"
       >
+        <View style={styles.brandRow}>
+          <LogoLockup markSize={26} fontSize={19} />
+        </View>
         <Text style={[styles.hello, { color: colors.ink }]}>
           {daypart}
           {firstName ? `,\n${firstName}` : ''}.
@@ -235,8 +239,9 @@ function categoryColor(category: string, colors: { gold: string; accent: string;
 
 const styles = StyleSheet.create({
   screen: { flex: 1, padding: spacing.md },
-  hello: { fontSize: 30, fontWeight: '800', marginTop: spacing.md, lineHeight: 36 },
-  tag: { fontSize: 14, marginTop: 6, marginBottom: spacing.md },
+  brandRow: { marginTop: spacing.sm },
+  hello: { fontSize: 30, fontWeight: '800', marginTop: spacing.lg, lineHeight: 36 },
+  tag: { fontSize: 14, marginTop: 6, marginBottom: spacing.lg },
   nudge: { borderRadius: radius.small, padding: spacing.sm, marginBottom: spacing.md },
   nudgeText: { fontSize: 13, fontWeight: '600' },
   inputRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
