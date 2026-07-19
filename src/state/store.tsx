@@ -10,6 +10,8 @@ import React, {
 import { reconcileBlocked } from '../core/planner';
 import { UserProfile } from '../core/resources';
 import { Plan, TaskStatus } from '../core/types';
+import { useAuth } from './auth';
+import { fetchBackup, queueBackup } from './backup';
 
 /**
  * App state: the user's active plans, persisted to device storage.
@@ -125,6 +127,8 @@ const StoreContext = createContext<StoreValue | undefined>(undefined);
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(reducer, { plans: [], profile: null, hydrated: false });
   const hydratedRef = useRef(false);
+  const { session } = useAuth();
+  const restoredForUser = useRef<string | null>(null);
 
   useEffect(() => {
     Promise.all([AsyncStorage.getItem(STORAGE_KEY), AsyncStorage.getItem(PROFILE_KEY)])
@@ -149,7 +153,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (state.profile) {
       AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(state.profile)).catch(() => {});
     }
-  }, [state.plans, state.profile, state.hydrated]);
+    if (session?.user) {
+      queueBackup(session.user.id, { version: 1, profile: state.profile, plans: state.plans });
+    }
+  }, [state.plans, state.profile, state.hydrated, session?.user?.id]);
+
+  // On sign-in with an empty device, restore the cloud backup once.
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId || !state.hydrated || restoredForUser.current === userId) return;
+    restoredForUser.current = userId;
+    if (state.plans.length > 0) return;
+    fetchBackup(userId)
+      .then((backup) => {
+        if (backup && backup.plans.length > 0) {
+          dispatch({ type: 'hydrate', plans: backup.plans, profile: backup.profile ?? state.profile });
+        }
+      })
+      .catch(() => {});
+  }, [session?.user?.id, state.hydrated]);
 
   const value = useMemo(() => ({ state, dispatch }), [state]);
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

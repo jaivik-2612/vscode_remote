@@ -5,8 +5,11 @@ import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import { Text } from 'react-native';
 import { RootStackParamList, TabParamList } from './src/navigation';
+import { AuthProvider, useAuth } from './src/state/auth';
 import { StoreProvider } from './src/state/store';
 import { ThemeProvider, useTheme } from './src/state/theme';
+import AuthScreen from './src/screens/AuthScreen';
+import TermsScreen from './src/screens/TermsScreen';
 import HomeScreen from './src/screens/HomeScreen';
 import IntakeScreen from './src/screens/IntakeScreen';
 import PlanScreen from './src/screens/PlanScreen';
@@ -73,12 +76,52 @@ function AppNavigation() {
   );
 }
 
+/** Auth gate: sign in → confirm email → accept terms → app. */
+function Root() {
+  const { status } = useAuth();
+  const { colors, mode } = useTheme();
+  if (status === 'loading') {
+    return (
+      <Text
+        style={{
+          flex: 1,
+          textAlign: 'center',
+          textAlignVertical: 'center',
+          backgroundColor: colors.bg,
+          color: colors.muted,
+        }}
+      >
+        LifeOS…
+      </Text>
+    );
+  }
+  if (status === 'signed-out') {
+    return (
+      <>
+        <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+        <AuthScreen />
+      </>
+    );
+  }
+  if (status === 'needs-terms') {
+    return (
+      <>
+        <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />
+        <TermsScreen />
+      </>
+    );
+  }
+  return <AppNavigation />;
+}
+
 export default function App() {
   return (
     <ThemeProvider>
-      <StoreProvider>
-        <AppNavigation />
-      </StoreProvider>
+      <AuthProvider>
+        <StoreProvider>
+          <Root />
+        </StoreProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

@@ -72,6 +72,27 @@ Key engine behaviors:
 
 Everything runs on-device and offline; plans persist in AsyncStorage.
 
+## Accounts & cloud backup (Supabase)
+
+Sign-up/sign-in gates the app: email + password (8+ chars with letters,
+numbers and a special character), a confirmation email before first sign-in,
+and a Terms & Disclaimer page accepted once per account. Plans and profile
+auto-back up to a row-level-secured `user_backups` table and restore on
+sign-in to an empty device.
+
+Setup (one time):
+
+1. Create a project at [supabase.com](https://supabase.com) (free tier is fine).
+2. SQL Editor → run `supabase/schema.sql`.
+3. Follow the dashboard checklist in that file (email confirmation is on by
+   default; set the Site URL; optionally set min password length to 8).
+4. Copy `.env.example` to `.env` and fill in the Project URL and anon key
+   from Project Settings → API.
+
+Without credentials the app runs in **local-only mode** — no gate, no
+backups, everything else works. The web bench simulates the full auth flow
+(including the confirmation link) so the UX is testable without a backend.
+
 ## Monetization: affiliate product suggestions
 
 No charges, no ads. Life events come with shopping lists as well as paperwork,

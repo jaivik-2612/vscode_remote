@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { COUNTRIES, UserProfile } from '../core/resources';
 import { EVENT_CATALOG } from '../core/templates';
+import { useAuth } from '../state/auth';
 import { useStore } from '../state/store';
 import { ThemeSetting, useTheme } from '../state/theme';
 import { Card, Chip, SectionTitle } from '../components/ui';
@@ -25,6 +26,7 @@ const THEME_OPTIONS: { value: ThemeSetting; label: string }[] = [
 export default function SettingsScreen() {
   const { state, dispatch } = useStore();
   const { colors, setting, setSetting } = useTheme();
+  const { status: authStatus, session, signOut } = useAuth();
 
   const existing = state.profile;
   const [name, setName] = useState(existing?.name ?? '');
@@ -70,6 +72,28 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>
       <Text style={[styles.heading, { color: colors.ink }]}>Settings</Text>
+
+      <SectionTitle>Account</SectionTitle>
+      <Card>
+        {authStatus === 'local-only' ? (
+          <Text style={[styles.hint, { color: colors.muted, marginTop: 0 }]}>
+            Running in local-only mode — plans stay on this device. Cloud accounts and backup
+            activate once the backend is configured.
+          </Text>
+        ) : (
+          <>
+            <Text style={[styles.accountEmail, { color: colors.ink }]}>
+              {session?.user?.email ?? '—'}
+            </Text>
+            <Text style={[styles.hint, { color: colors.muted }]}>
+              Plans back up to your account automatically.
+            </Text>
+            <TouchableOpacity onPress={signOut}>
+              <Text style={[styles.dangerText, { color: colors.danger }]}>Sign out</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </Card>
 
       <SectionTitle>Profile</SectionTitle>
       <Card>
@@ -156,6 +180,7 @@ const styles = StyleSheet.create({
   themeLabel: { fontSize: 15, fontWeight: '600', marginBottom: spacing.sm },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap' },
   dangerText: { fontSize: 15, fontWeight: '600', paddingVertical: 4 },
+  accountEmail: { fontSize: 15, fontWeight: '700' },
   hint: { fontSize: 12, marginTop: 2 },
   about: { fontSize: 13, lineHeight: 22 },
 });

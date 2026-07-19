@@ -172,6 +172,10 @@
   .p-prod .pl { font-size: 12px; font-weight: 600; color: var(--p-ink, #1A1A1A); line-height: 1.3; }
   .p-prod .pa { font-size: 10px; color: var(--p-muted, #6B6B6B); }
   .p-disclosure { font-size: 10px; color: var(--p-muted, #6B6B6B); margin: 6px 0 12px; }
+  .p-authfield { display: block; width: 100%; margin-bottom: 10px; padding: 13px 16px;
+    border-radius: 16px; font-size: 15px; }
+  .p-rule { font-size: 12px; color: var(--p-muted, #6B6B6B); padding: 2px 0; }
+  .p-rule.met { color: #2E7D32; }
   .p-quick { padding: 14px; }
   .p-qcols { display: flex; gap: 10px; }
   .p-qcol { flex: 1; min-width: 0; }
@@ -681,6 +685,8 @@ const Types = __require('types');
 const Resources = __require('resources');
 const Products = __require('products');
 const Celebrate = __require('celebration');
+const Password = __require('password');
+const Terms = __require('terms');
 
 /* mirrors src/theme.ts */
 const DOMAIN_COLORS = {
@@ -695,7 +701,7 @@ const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'�
 
 /* ===== state ===== */
 const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1', K_PROFILE = 'lifeos.web.profile.v1';
-const K_THEME = 'lifeos.web.theme.v1', K_DESIGN = 'lifeos.web.design.v1';
+const K_THEME = 'lifeos.web.theme.v1', K_DESIGN = 'lifeos.web.design.v1', K_AUTH = 'lifeos.web.auth.v1';
 function realToday() { return new Date().toISOString().slice(0, 10); }
 /* Backfill fields added since a stored plan was created. */
 function migratePlan(p) {
@@ -728,6 +734,18 @@ let homeInput = '';
 let intakeAnswers = {};
 let pendingDeletePlan = null;
 let profileDraft = null;
+
+/* Simulated auth (the real app uses Supabase; the bench mimics the exact flow). */
+let auth = null;
+try { auth = JSON.parse(localStorage.getItem(K_AUTH) || 'null'); } catch (e) { auth = null; }
+let authView = 'signin';       // 'signin' | 'signup' | 'confirm'
+let authDraft = { name: '', email: '', password: '' };
+function saveAuth() { localStorage.setItem(K_AUTH, JSON.stringify(auth)); }
+function authGate() {
+  if (!auth || !auth.signedIn) return 'auth';
+  if (!auth.tos) return 'terms';
+  return 'ready';
+}
 
 function save() { localStorage.setItem(K_PLANS, JSON.stringify(plans)); }
 function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -1184,7 +1202,71 @@ function renderTabbar() {
   }).join('');
 }
 
+function renderAuth() {
+  headerEl.innerHTML = '';
+  tabbarEl.style.display = 'none';
+  if (authView === 'confirm') {
+    bodyEl.innerHTML =
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:90%;text-align:center;padding:0 10px">' +
+      '<div style="font-size:46px">📬</div>' +
+      '<h1 class="p-h1">Check your email</h1>' +
+      '<p class="p-sub">We sent a confirmation link to<br><b>' + esc(auth.email) + '</b><br><br>Tap the link to activate your account, then sign in.</p>' +
+      '<button class="p-cta" style="width:100%" data-auth-mode="signin">I’ve confirmed — sign in</button></div>';
+    return;
+  }
+  const isSignup = authView === 'signup';
+  const rulesHtml = () => {
+    const check = Password.validatePassword(authDraft.password);
+    return Password.PASSWORD_RULES.map((rule) => {
+      const met = authDraft.password.length > 0 && !check.problems.includes(rule);
+      return '<div class="p-rule' + (met ? ' met' : '') + '">' + (met ? '✓' : '○') + ' ' + esc(rule) + '</div>';
+    }).join('');
+  };
+  bodyEl.innerHTML =
+    '<div style="padding-top:60px">' +
+    '<h1 class="p-h1" style="text-align:center;font-size:34px">LifeOS</h1>' +
+    '<p class="p-sub" style="text-align:center">Life’s big moments, minus the paperwork.</p>' +
+    '<div class="p-chiprow" style="justify-content:center;margin-bottom:12px">' +
+    '<button class="p-chip' + (!isSignup ? ' sel' : '') + '" data-auth-mode="signin">Sign in</button>' +
+    '<button class="p-chip' + (isSignup ? ' sel' : '') + '" data-auth-mode="signup">Create account</button></div>' +
+    (isSignup ? '<input class="p-text p-authfield" id="af-name" placeholder="Your name" value="' + esc(authDraft.name) + '">' : '') +
+    '<input class="p-text p-authfield" id="af-email" placeholder="Email" value="' + esc(authDraft.email) + '">' +
+    '<input class="p-text p-authfield" id="af-pass" type="password" placeholder="Password" value="' + esc(authDraft.password) + '">' +
+    (isSignup ? '<div class="p-card" id="pw-rules" style="padding:10px 14px">' + rulesHtml() + '</div>' : '') +
+    '<p id="auth-error" class="p-overdue" style="text-align:center;min-height:16px"></p>' +
+    '<button class="p-cta" data-auth-submit>' + (isSignup ? 'Create account' : 'Sign in') + '</button>' +
+    (!isSignup && auth && !auth.confirmed
+      ? '<button class="p-hint" style="background:none;border:none;width:100%;cursor:pointer" data-auth-confirm-link>📧 (Bench) simulate opening the confirmation link</button>'
+      : '') +
+    '<p class="p-hint">' + (isSignup
+      ? 'We’ll email you a confirmation link before your first sign-in.'
+      : 'Your plans sync securely to your account for backup.') + '</p></div>';
+  for (const [id, key] of [['af-name', 'name'], ['af-email', 'email'], ['af-pass', 'password']]) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', () => {
+      authDraft[key] = el.value;
+      const rules = document.getElementById('pw-rules');
+      if (rules && key === 'password') rules.innerHTML = rulesHtml();
+    });
+  }
+}
+
+function renderTerms() {
+  headerEl.innerHTML = '';
+  tabbarEl.style.display = 'none';
+  bodyEl.innerHTML =
+    '<h1 class="p-h1" style="margin-top:14px">Terms &amp; Disclaimer</h1>' +
+    '<p class="p-sub">Version ' + esc(Terms.TERMS_VERSION) + ' — please read before using LifeOS.</p>' +
+    Terms.TERMS_SECTIONS.map((s) =>
+      '<div class="p-card"><p class="p-q">' + esc(s.title) + '</p><p class="p-sub" style="margin:0;font-size:13px">' + esc(s.body) + '</p></div>').join('') +
+    '<button class="p-cta" data-tos-accept>I agree — continue</button>' +
+    '<button class="p-hint" style="background:none;border:none;width:100%;cursor:pointer;margin-bottom:16px" data-tos-decline>Decline and sign out</button>';
+}
+
 function renderPhone() {
+  const gate = authGate();
+  if (gate === 'auth') { renderAuth(); return; }
+  if (gate === 'terms') { renderTerms(); return; }
   if (route.name === 'home') renderHome();
   else if (route.name === 'intake') renderIntake();
   else if (route.name === 'plan') renderPlan();
@@ -1258,6 +1340,12 @@ function renderSettings() {
   const regionLabel = (Resources.COUNTRIES.find((c) => c.code === pd.country) || {}).regionLabel || 'State / region';
   bodyEl.innerHTML =
     '<h1 class="p-h1" style="margin-top:10px">Settings</h1>' +
+    '<div class="p-section">Account</div>' +
+    '<div class="p-card">' +
+    '<p class="p-q" style="margin-bottom:2px">' + esc(auth ? auth.email : '—') + '</p>' +
+    '<p class="p-hint" style="text-align:left;margin:0 0 8px">Plans back up to your account automatically.</p>' +
+    '<button class="p-del" style="padding:2px 0;text-align:left" data-sign-out>Sign out</button>' +
+    '</div>' +
     '<div class="p-section">Profile</div>' +
     '<div class="p-card">' +
     '<p class="p-q">Name</p><input class="p-text" id="pf-name" value="' + esc(pd.name) + '" placeholder="Your name">' +
@@ -1418,6 +1506,46 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
     renderAll();
     if (Celebrate.shouldCelebrate(plan)) showCelebration(plan);
     return;
+  }
+  if (el.dataset.authMode) { authView = el.dataset.authMode; renderPhone(); return; }
+  if (el.hasAttribute('data-auth-submit')) {
+    const errEl = () => document.getElementById('auth-error');
+    if (authView === 'signup') {
+      if (!Password.isValidEmail(authDraft.email)) { errEl().textContent = 'Enter a valid email address.'; return; }
+      const check = Password.validatePassword(authDraft.password);
+      if (!check.ok) { errEl().textContent = check.problems.join(' · '); return; }
+      auth = { name: authDraft.name.trim(), email: authDraft.email.trim(), password: authDraft.password,
+        confirmed: false, tos: false, signedIn: false };
+      saveAuth();
+      log('<b>signUp</b> ' + esc(auth.email) + ' — confirmation email sent (simulated)');
+      authView = 'confirm'; renderPhone();
+    } else {
+      if (!auth || auth.email !== authDraft.email.trim() || auth.password !== authDraft.password) {
+        errEl().textContent = 'Invalid email or password.'; return;
+      }
+      if (!auth.confirmed) { errEl().textContent = 'Please confirm your email first — check your inbox.'; return; }
+      auth.signedIn = true; saveAuth();
+      log('<b>signIn</b> ' + esc(auth.email));
+      renderAll();
+    }
+    return;
+  }
+  if (el.hasAttribute('data-auth-confirm-link')) {
+    if (auth) { auth.confirmed = true; saveAuth(); log('📧 <b>email confirmed</b> (simulated link click)'); }
+    renderPhone(); return;
+  }
+  if (el.hasAttribute('data-tos-accept')) {
+    auth.tos = true; saveAuth();
+    log('<b>termsAccepted</b> v' + Terms.TERMS_VERSION);
+    renderAll(); return;
+  }
+  if (el.hasAttribute('data-tos-decline')) {
+    auth.signedIn = false; saveAuth(); authView = 'signin'; renderPhone(); return;
+  }
+  if (el.hasAttribute('data-sign-out')) {
+    auth.signedIn = false; saveAuth(); authView = 'signin';
+    log('<b>signOut</b>');
+    route = { name: 'home' }; backStack = []; renderPhone(); return;
   }
   if (el.hasAttribute('data-celebrate-close')) {
     const overlay = el.closest('.p-celebrate');
