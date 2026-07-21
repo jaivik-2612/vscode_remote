@@ -71,7 +71,9 @@ export default function HomeScreen() {
 
   const hour = new Date().getHours();
   const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const firstName = state.profile?.name ? state.profile.name.trim().split(' ')[0] : '';
+  const firstName =
+    state.profile?.firstName?.trim() ||
+    (state.profile?.name ? state.profile.name.trim().split(' ')[0] : '');
 
   const goToBest = () => {
     const top = matches[0];

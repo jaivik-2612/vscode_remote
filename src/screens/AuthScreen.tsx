@@ -10,35 +10,80 @@ import {
   View,
 } from 'react-native';
 import { PASSWORD_RULES, validatePassword } from '../core/password';
+import { COUNTRIES, regionLabelFor, regionOptions } from '../core/resources';
 import { useAuth } from '../state/auth';
+import { useStore } from '../state/store';
 import { useTheme } from '../state/theme';
 import { LogoMark } from '../components/Logo';
+import { SelectField } from '../components/pickers';
 import { Card } from '../components/ui';
 import { cardShadow, spacing } from '../theme';
+
+const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ value: c.code, label: c.name }));
 
 /** Sign in / sign up gate shown before the app. */
 export default function AuthScreen() {
   const { signIn, signUp, pendingEmail } = useAuth();
+  const { dispatch } = useStore();
   const { colors } = useTheme();
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [country, setCountry] = useState('');
+  const [region, setRegion] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
 
   const passwordCheck = validatePassword(password);
+  const stateOptions = regionOptions(country);
 
   const submit = async () => {
-    setBusy(true);
     setError(null);
+    if (mode === 'signup') {
+      if (password !== confirm) {
+        setError('Passwords do not match.');
+        return;
+      }
+      if (!firstName.trim()) {
+        setError('Enter your first name.');
+        return;
+      }
+      if (!country) {
+        setError('Select your country.');
+        return;
+      }
+    }
+    setBusy(true);
     const err =
-      mode === 'signup' ? await signUp(name, email, password) : await signIn(email, password);
+      mode === 'signup'
+        ? await signUp(email, password, {
+            firstName,
+            lastName,
+            country,
+            region,
+          })
+        : await signIn(email, password);
     setBusy(false);
     if (err) {
       setError(err);
     } else if (mode === 'signup') {
+      // Seed the local profile so localized links and product storefronts
+      // work from the very first session.
+      dispatch({
+        type: 'setProfile',
+        profile: {
+          name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          country,
+          region: region.trim(),
+          city: '',
+        },
+      });
       setAwaitingConfirm(true);
     }
   };
@@ -81,7 +126,7 @@ export default function AuthScreen() {
     >
       <ScrollView
         style={[styles.screen, { backgroundColor: colors.bg }]}
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center' }}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', paddingVertical: spacing.lg }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoWrap}>
@@ -114,15 +159,6 @@ export default function AuthScreen() {
           ))}
         </View>
 
-        {mode === 'signup' && (
-          <TextInput
-            style={inputStyle}
-            placeholder="Your name"
-            placeholderTextColor={colors.muted}
-            value={name}
-            onChangeText={setName}
-          />
-        )}
         <TextInput
           style={inputStyle}
           placeholder="Email"
@@ -140,21 +176,97 @@ export default function AuthScreen() {
           onChangeText={setPassword}
           secureTextEntry
         />
-
         {mode === 'signup' && (
-          <Card style={{ paddingVertical: 10 }}>
-            {PASSWORD_RULES.map((rule) => {
-              const met = !passwordCheck.problems.includes(rule) && password.length > 0;
-              return (
-                <Text
-                  key={rule}
-                  style={[styles.rule, { color: met ? colors.success : colors.muted }]}
-                >
-                  {met ? '✓' : '○'} {rule}
-                </Text>
-              );
-            })}
-          </Card>
+          <>
+            <TextInput
+              style={inputStyle}
+              placeholder="Confirm password"
+              placeholderTextColor={colors.muted}
+              value={confirm}
+              onChangeText={setConfirm}
+              secureTextEntry
+            />
+
+            <Card style={{ paddingVertical: 10 }}>
+              {PASSWORD_RULES.map((rule) => {
+                const met = !passwordCheck.problems.includes(rule) && password.length > 0;
+                return (
+                  <Text
+                    key={rule}
+                    style={[styles.rule, { color: met ? colors.success : colors.muted }]}
+                  >
+                    {met ? '✓' : '○'} {rule}
+                  </Text>
+                );
+              })}
+              <Text
+                style={[
+                  styles.rule,
+                  {
+                    color:
+                      confirm.length > 0
+                        ? confirm === password
+                          ? colors.success
+                          : colors.danger
+                        : colors.muted,
+                  },
+                ]}
+              >
+                {confirm.length > 0 && confirm === password ? '✓' : '○'} Passwords match
+              </Text>
+            </Card>
+
+            <Text style={[styles.sectionLabel, { color: colors.muted }]}>About you</Text>
+            <View style={styles.nameRow}>
+              <TextInput
+                style={[...inputStyle, styles.nameField]}
+                placeholder="First name"
+                placeholderTextColor={colors.muted}
+                value={firstName}
+                onChangeText={setFirstName}
+              />
+              <TextInput
+                style={[...inputStyle, styles.nameField]}
+                placeholder="Last name"
+                placeholderTextColor={colors.muted}
+                value={lastName}
+                onChangeText={setLastName}
+              />
+            </View>
+            <SelectField
+              placeholder="Country"
+              title="Select your country"
+              value={country}
+              options={COUNTRY_OPTIONS}
+              onSelect={(code) => {
+                setCountry(code);
+                setRegion('');
+              }}
+              style={inputStyle}
+            />
+            {country !== '' &&
+              (stateOptions ? (
+                <SelectField
+                  placeholder={regionLabelFor(country)}
+                  title={`Select your ${regionLabelFor(country).toLowerCase()}`}
+                  value={region}
+                  options={stateOptions.map((s) => ({ value: s, label: s }))}
+                  onSelect={setRegion}
+                  style={inputStyle}
+                />
+              ) : (
+                <TextInput
+                  style={inputStyle}
+                  placeholder={regionLabelFor(country)}
+                  placeholderTextColor={colors.muted}
+                  value={region}
+                  onChangeText={setRegion}
+                />
+              ))}
+            <Text style={[styles.hint, { color: colors.muted, marginTop: 0, marginBottom: spacing.sm }]}>
+              Your country and state localize task guidance and product links.
+            </Text>
+          </>
         )}
 
         {error && <Text style={[styles.error, { color: colors.danger }]}>{error}</Text>}
@@ -198,6 +310,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     marginBottom: spacing.sm,
   },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  nameRow: { flexDirection: 'row', gap: spacing.sm },
+  nameField: { flex: 1 },
   rule: { fontSize: 12, paddingVertical: 2 },
   error: { fontSize: 13, fontWeight: '600', marginBottom: spacing.sm, textAlign: 'center' },
   title: { fontSize: 24, fontWeight: '800', marginTop: spacing.sm },

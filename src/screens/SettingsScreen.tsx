@@ -8,13 +8,16 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { COUNTRIES, UserProfile } from '../core/resources';
+import { COUNTRIES, regionLabelFor, regionOptions, UserProfile } from '../core/resources';
 import { EVENT_CATALOG } from '../core/templates';
 import { useAuth } from '../state/auth';
 import { useStore } from '../state/store';
 import { ThemeSetting, useTheme } from '../state/theme';
+import { SelectField } from '../components/pickers';
 import { Card, Chip, SectionTitle } from '../components/ui';
 import { spacing } from '../theme';
+
+const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ value: c.code, label: c.name }));
 
 const THEME_OPTIONS: { value: ThemeSetting; label: string }[] = [
   { value: 'light', label: '☀️ Light' },
@@ -29,16 +32,29 @@ export default function SettingsScreen() {
   const { status: authStatus, session, signOut } = useAuth();
 
   const existing = state.profile;
-  const [name, setName] = useState(existing?.name ?? '');
+  const [firstName, setFirstName] = useState(
+    existing?.firstName ?? existing?.name?.trim().split(' ')[0] ?? ''
+  );
+  const [lastName, setLastName] = useState(
+    existing?.lastName ?? existing?.name?.trim().split(' ').slice(1).join(' ') ?? ''
+  );
   const [country, setCountry] = useState(existing?.country ?? '');
   const [region, setRegion] = useState(existing?.region ?? '');
   const [city, setCity] = useState(existing?.city ?? '');
   const [saved, setSaved] = useState(false);
 
-  const regionLabel = COUNTRIES.find((c) => c.code === country)?.regionLabel ?? 'State / region';
+  const regionLabel = regionLabelFor(country);
+  const stateOptions = regionOptions(country);
 
   const saveProfile = () => {
-    const profile: UserProfile = { name: name.trim(), country, region: region.trim(), city: city.trim() };
+    const profile: UserProfile = {
+      name: `${firstName.trim()} ${lastName.trim()}`.trim(),
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      country,
+      region: region.trim(),
+      city: city.trim(),
+    };
     dispatch({ type: 'setProfile', profile });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -97,21 +113,42 @@ export default function SettingsScreen() {
 
       <SectionTitle>Profile</SectionTitle>
       <Card>
-        <Text style={[styles.label, { color: colors.muted }]}>Name</Text>
-        <TextInput style={inputStyle} value={name} onChangeText={setName} placeholder="Your name"
-          placeholderTextColor={colors.muted} />
+        <Text style={[styles.label, { color: colors.muted }]}>First name</Text>
+        <TextInput style={inputStyle} value={firstName} onChangeText={setFirstName}
+          placeholder="First name" placeholderTextColor={colors.muted} />
+
+        <Text style={[styles.label, { color: colors.muted }]}>Last name</Text>
+        <TextInput style={inputStyle} value={lastName} onChangeText={setLastName}
+          placeholder="Last name" placeholderTextColor={colors.muted} />
 
         <Text style={[styles.label, { color: colors.muted }]}>Country</Text>
-        <View style={styles.chipRow}>
-          {COUNTRIES.map((c) => (
-            <Chip key={c.code} label={c.name} selected={country === c.code} onPress={() => setCountry(c.code)} />
-          ))}
-        </View>
+        <SelectField
+          placeholder="Select country"
+          title="Select your country"
+          value={country}
+          options={COUNTRY_OPTIONS}
+          onSelect={(code) => {
+            setCountry(code);
+            setRegion('');
+          }}
+          style={inputStyle}
+        />
 
         <Text style={[styles.label, { color: colors.muted }]}>{regionLabel}</Text>
-        <TextInput style={inputStyle} value={region} onChangeText={setRegion}
-          placeholder={`e.g. ${country === 'CA' ? 'Ontario' : country === 'GB' ? 'Greater London' : 'California'}`}
-          placeholderTextColor={colors.muted} />
+        {stateOptions ? (
+          <SelectField
+            placeholder={`Select ${regionLabel.toLowerCase()}`}
+            title={`Select your ${regionLabel.toLowerCase()}`}
+            value={region}
+            options={stateOptions.map((s) => ({ value: s, label: s }))}
+            onSelect={setRegion}
+            style={inputStyle}
+          />
+        ) : (
+          <TextInput style={inputStyle} value={region} onChangeText={setRegion}
+            placeholder={`e.g. ${country === 'GB' ? 'Greater London' : 'Bavaria'}`}
+            placeholderTextColor={colors.muted} />
+        )}
 
         <Text style={[styles.label, { color: colors.muted }]}>City</Text>
         <TextInput style={inputStyle} value={city} onChangeText={setCity} placeholder="City"

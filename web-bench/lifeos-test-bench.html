@@ -180,6 +180,12 @@
     border-radius: 16px; font-size: 15px; }
   .p-rule { font-size: 12px; color: var(--p-muted, #6B6B6B); padding: 2px 0; }
   .p-rule.met { color: #2E7D32; }
+  .p-rule.bad { color: #C62828; }
+  select.p-text { cursor: pointer; }
+  .p-namerow { display: flex; gap: 8px; }
+  .p-namerow input { min-width: 0; }
+  .p-authlabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--p-muted, #6B6B6B); margin: 4px 0 8px; }
   .p-quick { padding: 14px; }
   .p-qcols { display: flex; gap: 10px; }
   .p-qcol { flex: 1; min-width: 0; }
@@ -1248,19 +1254,113 @@ exports.buildTimeline = buildTimeline;
 __define("resources", function (exports, require, module) {
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveResources = exports.countryName = exports.COUNTRIES = void 0;
+exports.resolveResources = exports.regionOptions = exports.CA_PROVINCES = exports.US_STATES = exports.regionLabelFor = exports.countryName = exports.COUNTRIES = void 0;
+/** All countries (ISO 3166-1 alpha-2), alphabetical, plus an 'Other' catch-all. */
 exports.COUNTRIES = [
-    { code: 'US', name: 'United States', regionLabel: 'State' },
-    { code: 'CA', name: 'Canada', regionLabel: 'Province' },
-    { code: 'GB', name: 'United Kingdom', regionLabel: 'Region' },
-    { code: 'AU', name: 'Australia', regionLabel: 'State' },
-    { code: 'IN', name: 'India', regionLabel: 'State' },
-    { code: 'OTHER', name: 'Other', regionLabel: 'State / region' },
+    { code: 'AF', name: 'Afghanistan' }, { code: 'AL', name: 'Albania' }, { code: 'DZ', name: 'Algeria' },
+    { code: 'AD', name: 'Andorra' }, { code: 'AO', name: 'Angola' }, { code: 'AG', name: 'Antigua and Barbuda' },
+    { code: 'AR', name: 'Argentina' }, { code: 'AM', name: 'Armenia' }, { code: 'AU', name: 'Australia' },
+    { code: 'AT', name: 'Austria' }, { code: 'AZ', name: 'Azerbaijan' }, { code: 'BS', name: 'Bahamas' },
+    { code: 'BH', name: 'Bahrain' }, { code: 'BD', name: 'Bangladesh' }, { code: 'BB', name: 'Barbados' },
+    { code: 'BY', name: 'Belarus' }, { code: 'BE', name: 'Belgium' }, { code: 'BZ', name: 'Belize' },
+    { code: 'BJ', name: 'Benin' }, { code: 'BT', name: 'Bhutan' }, { code: 'BO', name: 'Bolivia' },
+    { code: 'BA', name: 'Bosnia and Herzegovina' }, { code: 'BW', name: 'Botswana' }, { code: 'BR', name: 'Brazil' },
+    { code: 'BN', name: 'Brunei' }, { code: 'BG', name: 'Bulgaria' }, { code: 'BF', name: 'Burkina Faso' },
+    { code: 'BI', name: 'Burundi' }, { code: 'CV', name: 'Cabo Verde' }, { code: 'KH', name: 'Cambodia' },
+    { code: 'CM', name: 'Cameroon' }, { code: 'CA', name: 'Canada' }, { code: 'CF', name: 'Central African Republic' },
+    { code: 'TD', name: 'Chad' }, { code: 'CL', name: 'Chile' }, { code: 'CN', name: 'China' },
+    { code: 'CO', name: 'Colombia' }, { code: 'KM', name: 'Comoros' }, { code: 'CG', name: 'Congo' },
+    { code: 'CD', name: 'Congo (DRC)' }, { code: 'CR', name: 'Costa Rica' }, { code: 'CI', name: "Côte d'Ivoire" },
+    { code: 'HR', name: 'Croatia' }, { code: 'CU', name: 'Cuba' }, { code: 'CY', name: 'Cyprus' },
+    { code: 'CZ', name: 'Czechia' }, { code: 'DK', name: 'Denmark' }, { code: 'DJ', name: 'Djibouti' },
+    { code: 'DM', name: 'Dominica' }, { code: 'DO', name: 'Dominican Republic' }, { code: 'EC', name: 'Ecuador' },
+    { code: 'EG', name: 'Egypt' }, { code: 'SV', name: 'El Salvador' }, { code: 'GQ', name: 'Equatorial Guinea' },
+    { code: 'ER', name: 'Eritrea' }, { code: 'EE', name: 'Estonia' }, { code: 'SZ', name: 'Eswatini' },
+    { code: 'ET', name: 'Ethiopia' }, { code: 'FJ', name: 'Fiji' }, { code: 'FI', name: 'Finland' },
+    { code: 'FR', name: 'France' }, { code: 'GA', name: 'Gabon' }, { code: 'GM', name: 'Gambia' },
+    { code: 'GE', name: 'Georgia' }, { code: 'DE', name: 'Germany' }, { code: 'GH', name: 'Ghana' },
+    { code: 'GR', name: 'Greece' }, { code: 'GD', name: 'Grenada' }, { code: 'GT', name: 'Guatemala' },
+    { code: 'GN', name: 'Guinea' }, { code: 'GW', name: 'Guinea-Bissau' }, { code: 'GY', name: 'Guyana' },
+    { code: 'HT', name: 'Haiti' }, { code: 'HN', name: 'Honduras' }, { code: 'HU', name: 'Hungary' },
+    { code: 'IS', name: 'Iceland' }, { code: 'IN', name: 'India' }, { code: 'ID', name: 'Indonesia' },
+    { code: 'IR', name: 'Iran' }, { code: 'IQ', name: 'Iraq' }, { code: 'IE', name: 'Ireland' },
+    { code: 'IL', name: 'Israel' }, { code: 'IT', name: 'Italy' }, { code: 'JM', name: 'Jamaica' },
+    { code: 'JP', name: 'Japan' }, { code: 'JO', name: 'Jordan' }, { code: 'KZ', name: 'Kazakhstan' },
+    { code: 'KE', name: 'Kenya' }, { code: 'KI', name: 'Kiribati' }, { code: 'KW', name: 'Kuwait' },
+    { code: 'KG', name: 'Kyrgyzstan' }, { code: 'LA', name: 'Laos' }, { code: 'LV', name: 'Latvia' },
+    { code: 'LB', name: 'Lebanon' }, { code: 'LS', name: 'Lesotho' }, { code: 'LR', name: 'Liberia' },
+    { code: 'LY', name: 'Libya' }, { code: 'LI', name: 'Liechtenstein' }, { code: 'LT', name: 'Lithuania' },
+    { code: 'LU', name: 'Luxembourg' }, { code: 'MG', name: 'Madagascar' }, { code: 'MW', name: 'Malawi' },
+    { code: 'MY', name: 'Malaysia' }, { code: 'MV', name: 'Maldives' }, { code: 'ML', name: 'Mali' },
+    { code: 'MT', name: 'Malta' }, { code: 'MH', name: 'Marshall Islands' }, { code: 'MR', name: 'Mauritania' },
+    { code: 'MU', name: 'Mauritius' }, { code: 'MX', name: 'Mexico' }, { code: 'FM', name: 'Micronesia' },
+    { code: 'MD', name: 'Moldova' }, { code: 'MC', name: 'Monaco' }, { code: 'MN', name: 'Mongolia' },
+    { code: 'ME', name: 'Montenegro' }, { code: 'MA', name: 'Morocco' }, { code: 'MZ', name: 'Mozambique' },
+    { code: 'MM', name: 'Myanmar' }, { code: 'NA', name: 'Namibia' }, { code: 'NR', name: 'Nauru' },
+    { code: 'NP', name: 'Nepal' }, { code: 'NL', name: 'Netherlands' }, { code: 'NZ', name: 'New Zealand' },
+    { code: 'NI', name: 'Nicaragua' }, { code: 'NE', name: 'Niger' }, { code: 'NG', name: 'Nigeria' },
+    { code: 'KP', name: 'North Korea' }, { code: 'MK', name: 'North Macedonia' }, { code: 'NO', name: 'Norway' },
+    { code: 'OM', name: 'Oman' }, { code: 'PK', name: 'Pakistan' }, { code: 'PW', name: 'Palau' },
+    { code: 'PS', name: 'Palestine' }, { code: 'PA', name: 'Panama' }, { code: 'PG', name: 'Papua New Guinea' },
+    { code: 'PY', name: 'Paraguay' }, { code: 'PE', name: 'Peru' }, { code: 'PH', name: 'Philippines' },
+    { code: 'PL', name: 'Poland' }, { code: 'PT', name: 'Portugal' }, { code: 'QA', name: 'Qatar' },
+    { code: 'RO', name: 'Romania' }, { code: 'RU', name: 'Russia' }, { code: 'RW', name: 'Rwanda' },
+    { code: 'KN', name: 'Saint Kitts and Nevis' }, { code: 'LC', name: 'Saint Lucia' },
+    { code: 'VC', name: 'Saint Vincent and the Grenadines' }, { code: 'WS', name: 'Samoa' },
+    { code: 'SM', name: 'San Marino' }, { code: 'ST', name: 'São Tomé and Príncipe' },
+    { code: 'SA', name: 'Saudi Arabia' }, { code: 'SN', name: 'Senegal' }, { code: 'RS', name: 'Serbia' },
+    { code: 'SC', name: 'Seychelles' }, { code: 'SL', name: 'Sierra Leone' }, { code: 'SG', name: 'Singapore' },
+    { code: 'SK', name: 'Slovakia' }, { code: 'SI', name: 'Slovenia' }, { code: 'SB', name: 'Solomon Islands' },
+    { code: 'SO', name: 'Somalia' }, { code: 'ZA', name: 'South Africa' }, { code: 'KR', name: 'South Korea' },
+    { code: 'SS', name: 'South Sudan' }, { code: 'ES', name: 'Spain' }, { code: 'LK', name: 'Sri Lanka' },
+    { code: 'SD', name: 'Sudan' }, { code: 'SR', name: 'Suriname' }, { code: 'SE', name: 'Sweden' },
+    { code: 'CH', name: 'Switzerland' }, { code: 'SY', name: 'Syria' }, { code: 'TW', name: 'Taiwan' },
+    { code: 'TJ', name: 'Tajikistan' }, { code: 'TZ', name: 'Tanzania' }, { code: 'TH', name: 'Thailand' },
+    { code: 'TL', name: 'Timor-Leste' }, { code: 'TG', name: 'Togo' }, { code: 'TO', name: 'Tonga' },
+    { code: 'TT', name: 'Trinidad and Tobago' }, { code: 'TN', name: 'Tunisia' }, { code: 'TR', name: 'Türkiye' },
+    { code: 'TM', name: 'Turkmenistan' }, { code: 'TV', name: 'Tuvalu' }, { code: 'UG', name: 'Uganda' },
+    { code: 'UA', name: 'Ukraine' }, { code: 'AE', name: 'United Arab Emirates' },
+    { code: 'GB', name: 'United Kingdom' }, { code: 'US', name: 'United States' },
+    { code: 'UY', name: 'Uruguay' }, { code: 'UZ', name: 'Uzbekistan' }, { code: 'VU', name: 'Vanuatu' },
+    { code: 'VA', name: 'Vatican City' }, { code: 'VE', name: 'Venezuela' }, { code: 'VN', name: 'Vietnam' },
+    { code: 'YE', name: 'Yemen' }, { code: 'ZM', name: 'Zambia' }, { code: 'ZW', name: 'Zimbabwe' },
+    { code: 'OTHER', name: 'Other' },
 ];
 function countryName(code) {
     return exports.COUNTRIES.find((c) => c.code === code)?.name ?? '';
 }
 exports.countryName = countryName;
+function regionLabelFor(code) {
+    if (code === 'US')
+        return 'State';
+    if (code === 'CA')
+        return 'Province';
+    return 'State / region';
+}
+exports.regionLabelFor = regionLabelFor;
+exports.US_STATES = [
+    'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut', 'Delaware',
+    'District of Columbia', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+    'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+    'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey',
+    'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+    'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota', 'Tennessee', 'Texas', 'Utah',
+    'Vermont', 'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+];
+exports.CA_PROVINCES = [
+    'Alberta', 'British Columbia', 'Manitoba', 'New Brunswick', 'Newfoundland and Labrador',
+    'Northwest Territories', 'Nova Scotia', 'Nunavut', 'Ontario', 'Prince Edward Island',
+    'Quebec', 'Saskatchewan', 'Yukon',
+];
+/** Region options for the picker, or null when the region is free text. */
+function regionOptions(code) {
+    if (code === 'US')
+        return exports.US_STATES;
+    if (code === 'CA')
+        return exports.CA_PROVINCES;
+    return null;
+}
+exports.regionOptions = regionOptions;
 /** Task-template-id → country → official links. */
 const TASK_RESOURCES = {
     'loss.unemployment_claim': {
@@ -5493,7 +5593,7 @@ let profileDraft = null;
 let auth = null;
 try { auth = JSON.parse(localStorage.getItem(K_AUTH) || 'null'); } catch (e) { auth = null; }
 let authView = 'signin';       // 'signin' | 'signup' | 'confirm'
-let authDraft = { name: '', email: '', password: '' };
+let authDraft = { email: '', password: '', confirm: '', firstName: '', lastName: '', country: '', region: '' };
 function saveAuth() { localStorage.setItem(K_AUTH, JSON.stringify(auth)); }
 function authGate() {
   if (!auth || !auth.signedIn) return 'auth';
@@ -5600,7 +5700,7 @@ function matchesHtml() {
 function greetingHtml() {
   const hour = new Date().getHours();
   const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-  const firstName = profile && profile.name ? profile.name.trim().split(' ')[0] : '';
+  const firstName = profile ? (profile.firstName || (profile.name || '').trim().split(' ')[0] || '') : '';
   const tag = '<div class="p-tag">What’s happening in your life? LifeOS handles the paperwork.</div>';
   if (designId === 'paper') {
     const dateLine = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
@@ -5779,7 +5879,7 @@ function logoSvg(size) {
 
 /** Congratulatory popup for freshly added milestone plans. */
 function showCelebration(plan) {
-  const firstName = profile && profile.name ? profile.name.trim().split(' ')[0] : '';
+  const firstName = profile ? (profile.firstName || (profile.name || '').trim().split(' ')[0] || '') : '';
   const emojis = ['🎉', '🎊', '✨', '💛', '🎈'];
   let confetti = '';
   for (let i = 0; i < 18; i++) {
@@ -5982,11 +6082,25 @@ function renderAuth() {
   const isSignup = authView === 'signup';
   const rulesHtml = () => {
     const check = Password.validatePassword(authDraft.password);
-    return Password.PASSWORD_RULES.map((rule) => {
+    const rows = Password.PASSWORD_RULES.map((rule) => {
       const met = authDraft.password.length > 0 && !check.problems.includes(rule);
       return '<div class="p-rule' + (met ? ' met' : '') + '">' + (met ? '✓' : '○') + ' ' + esc(rule) + '</div>';
-    }).join('');
+    });
+    const match = authDraft.confirm.length > 0 && authDraft.confirm === authDraft.password;
+    const bad = authDraft.confirm.length > 0 && !match;
+    rows.push('<div class="p-rule' + (match ? ' met' : bad ? ' bad' : '') + '">' +
+      (match ? '✓' : '○') + ' Passwords match</div>');
+    return rows.join('');
   };
+  const signupDetailsHtml = () =>
+    '<div class="p-authlabel">About you</div>' +
+    '<div class="p-namerow">' +
+    '<input class="p-text p-authfield" id="af-first" placeholder="First name" value="' + esc(authDraft.firstName) + '">' +
+    '<input class="p-text p-authfield" id="af-last" placeholder="Last name" value="' + esc(authDraft.lastName) + '">' +
+    '</div>' +
+    countrySelectHtml('af-country', authDraft.country) +
+    (authDraft.country ? regionFieldHtml('af-region', authDraft.country, authDraft.region) : '') +
+    '<p class="p-hint" style="margin:0 0 8px">Your country and state localize task guidance and product links.</p>';
   bodyEl.innerHTML =
     '<div style="padding-top:44px">' +
     '<div style="display:flex;justify-content:center;margin-bottom:10px">' + logoSvg(72) + '</div>' +
@@ -5995,10 +6109,11 @@ function renderAuth() {
     '<div class="p-chiprow" style="justify-content:center;margin-bottom:12px">' +
     '<button class="p-chip' + (!isSignup ? ' sel' : '') + '" data-auth-mode="signin">Sign in</button>' +
     '<button class="p-chip' + (isSignup ? ' sel' : '') + '" data-auth-mode="signup">Create account</button></div>' +
-    (isSignup ? '<input class="p-text p-authfield" id="af-name" placeholder="Your name" value="' + esc(authDraft.name) + '">' : '') +
     '<input class="p-text p-authfield" id="af-email" placeholder="Email" value="' + esc(authDraft.email) + '">' +
     '<input class="p-text p-authfield" id="af-pass" type="password" placeholder="Password" value="' + esc(authDraft.password) + '">' +
+    (isSignup ? '<input class="p-text p-authfield" id="af-pass2" type="password" placeholder="Confirm password" value="' + esc(authDraft.confirm) + '">' : '') +
     (isSignup ? '<div class="p-card" id="pw-rules" style="padding:10px 14px">' + rulesHtml() + '</div>' : '') +
+    (isSignup ? signupDetailsHtml() : '') +
     '<p id="auth-error" class="p-overdue" style="text-align:center;min-height:16px"></p>' +
     '<button class="p-cta" data-auth-submit>' + (isSignup ? 'Create account' : 'Sign in') + '</button>' +
     (!isSignup && auth && !auth.confirmed
@@ -6007,14 +6122,47 @@ function renderAuth() {
     '<p class="p-hint">' + (isSignup
       ? 'We’ll email you a confirmation link before your first sign-in.'
       : 'Your plans sync securely to your account for backup.') + '</p></div>';
-  for (const [id, key] of [['af-name', 'name'], ['af-email', 'email'], ['af-pass', 'password']]) {
+  for (const [id, key] of [['af-email', 'email'], ['af-pass', 'password'], ['af-pass2', 'confirm'],
+    ['af-first', 'firstName'], ['af-last', 'lastName'], ['af-region', 'region']]) {
     const el = document.getElementById(id);
-    if (el) el.addEventListener('input', () => {
-      authDraft[key] = el.value;
-      const rules = document.getElementById('pw-rules');
-      if (rules && key === 'password') rules.innerHTML = rulesHtml();
-    });
+    if (!el) continue;
+    if (el.tagName === 'SELECT') {
+      el.addEventListener('change', () => { authDraft[key] = el.value; });
+    } else {
+      el.addEventListener('input', () => {
+        authDraft[key] = el.value;
+        const rules = document.getElementById('pw-rules');
+        if (rules && (key === 'password' || key === 'confirm')) rules.innerHTML = rulesHtml();
+      });
+    }
   }
+  const countryEl = document.getElementById('af-country');
+  if (countryEl) countryEl.addEventListener('change', () => {
+    authDraft.country = countryEl.value;
+    authDraft.region = '';
+    renderAuth();  // swap the state field between dropdown and free text
+  });
+}
+
+/* Country / state field builders shared by the auth and settings screens. */
+function countrySelectHtml(id, selected) {
+  return '<select class="p-text p-authfield" id="' + id + '">' +
+    '<option value=""' + (selected ? '' : ' selected') + ' disabled>Country</option>' +
+    Resources.COUNTRIES.map((c) =>
+      '<option value="' + c.code + '"' + (selected === c.code ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') +
+    '</select>';
+}
+function regionFieldHtml(id, country, value) {
+  const label = Resources.regionLabelFor(country);
+  const opts = Resources.regionOptions(country);
+  if (opts) {
+    return '<select class="p-text p-authfield" id="' + id + '">' +
+      '<option value=""' + (value ? '' : ' selected') + ' disabled>' + esc(label) + '</option>' +
+      opts.map((s) =>
+        '<option value="' + esc(s) + '"' + (value === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') +
+      '</select>';
+  }
+  return '<input class="p-text p-authfield" id="' + id + '" placeholder="' + esc(label) + '" value="' + esc(value || '') + '">';
 }
 
 function renderTerms() {
@@ -6101,9 +6249,16 @@ function renderSettings() {
   );
   const themeChip = (v, label) =>
     '<button class="p-chip' + (themeSetting === v ? ' sel' : '') + '" data-theme-set="' + v + '">' + label + '</button>';
-  if (!profileDraft) profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+  if (!profileDraft) {
+    const p = profile || {};
+    profileDraft = {
+      firstName: p.firstName || (p.name || '').trim().split(' ')[0] || '',
+      lastName: p.lastName || (p.name || '').trim().split(' ').slice(1).join(' ') || '',
+      country: p.country || '', region: p.region || '', city: p.city || '',
+    };
+  }
   const pd = profileDraft;
-  const regionLabel = (Resources.COUNTRIES.find((c) => c.code === pd.country) || {}).regionLabel || 'State / region';
+  const regionLabel = Resources.regionLabelFor(pd.country);
   bodyEl.innerHTML =
     '<h1 class="p-h1" style="margin-top:10px">Settings</h1>' +
     '<div class="p-section">Account</div>' +
@@ -6114,12 +6269,10 @@ function renderSettings() {
     '</div>' +
     '<div class="p-section">Profile</div>' +
     '<div class="p-card">' +
-    '<p class="p-q">Name</p><input class="p-text" id="pf-name" value="' + esc(pd.name) + '" placeholder="Your name">' +
-    '<p class="p-q" style="margin-top:12px">Country</p><div class="p-chiprow">' +
-    Resources.COUNTRIES.map((c) =>
-      '<button class="p-chip' + (pd.country === c.code ? ' sel' : '') + '" data-country="' + c.code + '">' + esc(c.name) + '</button>').join('') +
-    '</div>' +
-    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p><input class="p-text" id="pf-region" value="' + esc(pd.region) + '" placeholder="e.g. California">' +
+    '<p class="p-q">First name</p><input class="p-text" id="pf-first" value="' + esc(pd.firstName) + '" placeholder="First name">' +
+    '<p class="p-q" style="margin-top:12px">Last name</p><input class="p-text" id="pf-last" value="' + esc(pd.lastName) + '" placeholder="Last name">' +
+    '<p class="p-q" style="margin-top:12px">Country</p>' + countrySelectHtml('pf-country', pd.country) +
+    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p>' + regionFieldHtml('pf-region', pd.country, pd.region) +
     '<p class="p-q" style="margin-top:12px">City</p><input class="p-text" id="pf-city" value="' + esc(pd.city) + '" placeholder="City">' +
     '<button class="p-cta" style="margin-top:14px" data-save-profile>Save profile</button>' +
     '<p class="p-hint">Powers country-specific task links and product storefronts.</p>' +
@@ -6137,9 +6290,18 @@ function renderSettings() {
     '<div class="p-card"><p class="p-about">LifeOS 0.1.0 — Universal Life Administration Platform.<br>' +
     Catalog.EVENT_CATALOG.length + ' life events · ' + stats.tasks + ' tasks · ' + stats.steps + ' checkable steps.<br>' +
     'All data stays on this device.</p></div>';
-  for (const [id, key] of [['pf-name', 'name'], ['pf-region', 'region'], ['pf-city', 'city']]) {
-    document.getElementById(id).addEventListener('input', (ev) => { profileDraft[key] = ev.target.value; });
+  for (const [id, key] of [['pf-first', 'firstName'], ['pf-last', 'lastName'], ['pf-region', 'region'], ['pf-city', 'city']]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const evt = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(evt, () => { profileDraft[key] = el.value; });
   }
+  const pfCountry = document.getElementById('pf-country');
+  if (pfCountry) pfCountry.addEventListener('change', () => {
+    profileDraft.country = pfCountry.value;
+    profileDraft.region = '';
+    renderSettings();  // swap the state field between dropdown and free text
+  });
 }
 
 /* ===== inspector rendering ===== */
@@ -6208,11 +6370,8 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
   if (el.hasAttribute('data-back')) { goBack(); return; }
   if (el.hasAttribute('data-go')) { goToBest(); return; }
   if (el.dataset.tab) {
-    if (el.dataset.tab === 'settings') profileDraft = { ...(profile || { name: '', country: '', region: '', city: '' }) };
+    if (el.dataset.tab === 'settings') profileDraft = null;  // rebuilt from saved profile on render
     route = { name: el.dataset.tab }; backStack = []; renderAll(); return;
-  }
-  if (el.dataset.country) {
-    profileDraft.country = el.dataset.country; renderPhone(); return;
   }
   if (el.dataset.themeSet) {
     themeSetting = el.dataset.themeSet;
@@ -6235,8 +6394,11 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
     return;
   }
   if (el.hasAttribute('data-save-profile')) {
+    const first = (profileDraft.firstName || '').trim(), last = (profileDraft.lastName || '').trim();
     profile = {
-      name: (profileDraft.name || '').trim(),
+      name: (first + ' ' + last).trim(),
+      firstName: first,
+      lastName: last,
       country: profileDraft.country || '',
       region: (profileDraft.region || '').trim(),
       city: (profileDraft.city || '').trim(),
@@ -6280,10 +6442,21 @@ document.querySelector('.screen').addEventListener('click', (ev) => {
       if (!Password.isValidEmail(authDraft.email)) { errEl().textContent = 'Enter a valid email address.'; return; }
       const check = Password.validatePassword(authDraft.password);
       if (!check.ok) { errEl().textContent = check.problems.join(' · '); return; }
-      auth = { name: authDraft.name.trim(), email: authDraft.email.trim(), password: authDraft.password,
+      if (authDraft.password !== authDraft.confirm) { errEl().textContent = 'Passwords do not match.'; return; }
+      if (!authDraft.firstName.trim()) { errEl().textContent = 'Enter your first name.'; return; }
+      if (!authDraft.country) { errEl().textContent = 'Select your country.'; return; }
+      const first = authDraft.firstName.trim(), last = authDraft.lastName.trim();
+      auth = { name: (first + ' ' + last).trim(), firstName: first, lastName: last,
+        email: authDraft.email.trim(), password: authDraft.password,
+        country: authDraft.country, region: authDraft.region.trim(),
         confirmed: false, tos: false, signedIn: false };
       saveAuth();
-      log('<b>signUp</b> ' + esc(auth.email) + ' — confirmation email sent (simulated)');
+      // Seed the local profile so localized links work from the first session.
+      profile = { name: auth.name, firstName: first, lastName: last,
+        country: auth.country, region: auth.region, city: '' };
+      profileDraft = null;
+      localStorage.setItem(K_PROFILE, JSON.stringify(profile));
+      log('<b>signUp</b> ' + esc(auth.email) + ' (' + esc(auth.country) + (auth.region ? '/' + esc(auth.region) : '') + ') — confirmation email sent (simulated)');
       authView = 'confirm'; renderPhone();
     } else {
       if (!auth || auth.email !== authDraft.email.trim() || auth.password !== authDraft.password) {

@@ -58,7 +58,9 @@ export default function PlanScreen() {
       },
     ]);
 
-  const firstName = state.profile?.name ? state.profile.name.trim().split(' ')[0] : '';
+  const firstName =
+    state.profile?.firstName?.trim() ||
+    (state.profile?.name ? state.profile.name.trim().split(' ')[0] : '');
 
   return (
     <ScrollView style={[styles.screen, { backgroundColor: colors.bg }]}>

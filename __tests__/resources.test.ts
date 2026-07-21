@@ -1,4 +1,13 @@
-import { COUNTRIES, countryName, resolveResources, UserProfile } from '../src/core/resources';
+import {
+  CA_PROVINCES,
+  COUNTRIES,
+  countryName,
+  regionLabelFor,
+  regionOptions,
+  resolveResources,
+  US_STATES,
+  UserProfile,
+} from '../src/core/resources';
 import { generatePlan } from '../src/core/planner';
 import { getEventTemplate } from '../src/core/templates';
 
@@ -73,6 +82,24 @@ describe('resolveResources', () => {
 
   test('country helpers', () => {
     expect(countryName('US')).toBe('United States');
+    expect(countryName('DE')).toBe('Germany');
     expect(COUNTRIES.some((c) => c.code === 'OTHER')).toBe(true);
+    // Full ISO list, alphabetical by name, 'Other' last.
+    expect(COUNTRIES.length).toBeGreaterThan(190);
+    expect(COUNTRIES[COUNTRIES.length - 1].code).toBe('OTHER');
+    expect(new Set(COUNTRIES.map((c) => c.code)).size).toBe(COUNTRIES.length);
+  });
+
+  test('region pickers: dropdown lists for US and Canada, free text elsewhere', () => {
+    expect(regionLabelFor('US')).toBe('State');
+    expect(regionLabelFor('CA')).toBe('Province');
+    expect(regionLabelFor('DE')).toBe('State / region');
+    expect(regionOptions('US')).toBe(US_STATES);
+    expect(regionOptions('CA')).toBe(CA_PROVINCES);
+    expect(regionOptions('GB')).toBeNull();
+    expect(US_STATES).toHaveLength(51); // 50 states + DC
+    expect(US_STATES).toContain('California');
+    expect(CA_PROVINCES).toHaveLength(13); // 10 provinces + 3 territories
+    expect(CA_PROVINCES).toContain('Ontario');
   });
 });

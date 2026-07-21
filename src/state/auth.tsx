@@ -23,12 +23,20 @@ export type AuthStatus =
   | 'needs-terms'
   | 'ready';
 
+/** Profile details collected at sign-up, stored in the auth user's metadata. */
+export interface SignUpDetails {
+  firstName: string;
+  lastName: string;
+  country: string;
+  region: string;
+}
+
 interface AuthValue {
   status: AuthStatus;
   session: Session | null;
   /** Set after a successful sign-up, so the UI can show "check your email". */
   pendingEmail: string | null;
-  signUp: (name: string, email: string, password: string) => Promise<string | null>;
+  signUp: (email: string, password: string, details: SignUpDetails) => Promise<string | null>;
   signIn: (email: string, password: string) => Promise<string | null>;
   signOut: () => Promise<void>;
   acceptTerms: () => Promise<void>;
@@ -65,15 +73,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .catch(() => setTosAccepted(false));
   }, [session?.user?.id]);
 
-  const signUp = async (name: string, email: string, password: string): Promise<string | null> => {
+  const signUp = async (
+    email: string,
+    password: string,
+    details: SignUpDetails
+  ): Promise<string | null> => {
     if (!supabase) return 'Backend not configured.';
     if (!isValidEmail(email)) return 'Enter a valid email address.';
     const check = validatePassword(password);
     if (!check.ok) return check.problems.join(' · ');
+    const firstName = details.firstName.trim();
+    const lastName = details.lastName.trim();
     const { error } = await supabase.auth.signUp({
       email: email.trim(),
       password,
-      options: { data: { name: name.trim() } },
+      options: {
+        data: {
+          name: `${firstName} ${lastName}`.trim(),
+          first_name: firstName,
+          last_name: lastName,
+          country: details.country,
+          region: details.region.trim(),
+        },
+      },
     });
     if (error) return error.message;
     setPendingEmail(email.trim());
