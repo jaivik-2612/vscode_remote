@@ -1,0 +1,1735 @@
+<title>LifeOS — Test Bench</title>
+<style>
+  :root {
+    --bg: #EDEEF1;
+    --panel: #FFFFFF;
+    --ink: #1B1D22;
+    --muted: #667085;
+    --line: #E0E2E8;
+    --accent: #2F6FED;
+    --accent-soft: #E8F0FE;
+    --good: #2E7D32;
+    --bad: #C62828;
+    --warn: #B26A00;
+    --bezel: #23262D;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+      --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+      --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #EDEEF1; --panel: #FFFFFF; --ink: #1B1D22; --muted: #667085;
+    --line: #E0E2E8; --accent: #2F6FED; --accent-soft: #E8F0FE;
+    --good: #2E7D32; --bad: #C62828; --warn: #B26A00; --bezel: #23262D;
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161B; --panel: #1D2026; --ink: #E7E9EC; --muted: #98A2B3;
+    --line: #2A2E36; --accent: #6B96F2; --accent-soft: #23304A;
+    --good: #6BBF6E; --bad: #E57373; --warn: #E0A23F; --bezel: #05060A;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 14px; line-height: 1.45;
+  }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+
+  .topbar {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 24px; border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  .topbar h1 { font-size: 15px; margin: 0; font-weight: 700; letter-spacing: .01em; }
+  .topbar h1 .tag {
+    font-family: var(--mono); font-size: 10px; font-weight: 500;
+    color: var(--accent); border: 1px solid var(--accent);
+    border-radius: 4px; padding: 2px 6px; margin-left: 8px; vertical-align: 2px;
+    text-transform: uppercase; letter-spacing: .08em;
+  }
+  .topbar .spacer { flex: 1; }
+  .field { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .field input[type="date"] {
+    font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px;
+  }
+  .btn-ghost {
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    background: none; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px;
+  }
+  .btn-ghost:hover { color: var(--bad); border-color: var(--bad); }
+
+  .bench {
+    display: flex; gap: 32px; justify-content: center; align-items: flex-start;
+    padding: 32px 24px 64px; flex-wrap: wrap;
+  }
+
+  /* ---------- Phone ---------- */
+  .phone {
+    width: 396px; flex: none;
+    background: var(--bezel); border-radius: 48px; padding: 12px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.18);
+  }
+  .screen {
+    position: relative;
+    width: 372px; height: 760px; border-radius: 38px; overflow: hidden;
+    background: #F7F7F5; color: #1A1A1A;
+    display: flex; flex-direction: column;
+  }
+  .statusbar {
+    flex: none; height: 34px; display: flex; align-items: center;
+    justify-content: space-between; padding: 0 22px;
+    font-size: 12px; font-weight: 600; color: #1A1A1A;
+  }
+  .p-header {
+    flex: none; display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 8px;
+  }
+  .p-header .back {
+    background: none; border: none; color: #2F6FED; font-size: 15px;
+    font-weight: 600; padding: 6px 8px; border-radius: 8px;
+  }
+  .p-header .p-htitle { font-size: 15px; font-weight: 600; color: #1A1A1A; }
+  .p-body { flex: 1; overflow-y: auto; padding: 4px 16px 24px; }
+  .tabbar {
+    flex: none; display: flex; border-top: 1px solid #E6E4E0; background: #FFFFFF;
+    padding: 6px 0 14px;
+  }
+  .tabbar button {
+    flex: 1; background: none; border: none; padding: 6px 0 2px;
+    font-size: 11px; color: #6B6B6B; display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+  }
+  .tabbar button .ticon { font-size: 20px; }
+  .tabbar button.active { color: #2F6FED; font-weight: 700; }
+
+  /* app interior — mirrors the RN styles */
+  .p-h1 { font-size: 26px; font-weight: 700; margin: 10px 0 2px; }
+  .p-sub { font-size: 14px; color: #6B6B6B; margin: 0 0 14px; }
+  .p-inputrow { display: flex; align-items: stretch; gap: 8px; margin-bottom: 8px; }
+  .p-input {
+    flex: 1; min-width: 0; background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; font-size: 15px; font-family: var(--sans); color: #1A1A1A;
+    min-height: 56px; resize: none;
+  }
+  .p-go {
+    flex: none; background: #2F6FED; color: #FFF; border: none; border-radius: 14px;
+    padding: 0 18px; font-size: 15px; font-weight: 700;
+  }
+  .p-go:disabled { opacity: .4; cursor: default; }
+  .p-section {
+    font-size: 11px; font-weight: 700; color: #6B6B6B; text-transform: uppercase;
+    letter-spacing: .05em; margin: 14px 0 8px;
+  }
+  .p-card {
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .p-card.danger { border-color: #C62828; }
+  .p-chiprow { display: flex; flex-wrap: wrap; }
+  .p-chip {
+    border-radius: 999px; border: 1px solid #E6E4E0; background: #FFF;
+    padding: 7px 13px; margin: 0 8px 8px 0; font-size: 13px; color: #1A1A1A;
+  }
+  .p-chip.sel { background: #E8F0FE; border-color: #2F6FED; color: #2F6FED; font-weight: 600; }
+  #p-matches { position: relative; height: 0; z-index: 30; }
+  .p-suggest {
+    position: absolute; top: 2px; left: 0; right: 0;
+    background: #FFF; border: 1px solid #E6E4E0; border-radius: 14px;
+    box-shadow: 0 14px 34px rgba(0,0,0,.16); overflow: hidden;
+  }
+  .p-match { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 10px 14px; border-bottom: 1px solid #F0EFEC; }
+  .p-match:last-child { border-bottom: none; }
+  .p-match:hover { background: #F7F7F5; }
+  .p-match .me { font-size: 18px; }
+  .p-match .mn { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: #1A1A1A;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .p-match .mc { flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .05em; }
+  .mc-milestone { color: #B8860B; }
+  .mc-important { color: #2F6FED; }
+  .mc-leisure { color: #2E7D32; }
+  .p-star { color: #B8860B; font-size: 12px; font-weight: 700; }
+  .p-resource { display: flex; gap: 10px; align-items: center; padding: 7px 0;
+    color: #2F6FED; font-size: 13px; font-weight: 600; text-decoration: none; }
+  .p-resource:hover { text-decoration: underline; }
+  .p-reshint { font-size: 11px; color: #6B6B6B; margin: 6px 0 0; }
+  .p-prods { display: flex; gap: 10px; overflow-x: auto; padding: 2px 2px 6px; }
+  .p-prod { flex: none; width: 118px; display: flex; flex-direction: column; gap: 5px;
+    background: var(--p-card, #FFF); border: 1px solid var(--p-line, #E6E4E0); border-radius: 16px;
+    padding: 12px; box-shadow: var(--p-shadow, none); text-decoration: none; }
+  .p-prod:hover { border-color: var(--p-accent, #2F6FED); }
+  .p-prod .pe { font-size: 19px; }
+  .p-prod .pl { font-size: 12px; font-weight: 600; color: var(--p-ink, #1A1A1A); line-height: 1.3; }
+  .p-prod .pa { font-size: 10px; color: var(--p-muted, #6B6B6B); }
+  .p-disclosure { font-size: 10px; color: var(--p-muted, #6B6B6B); margin: 6px 0 12px; }
+  .p-logo .lg-stroke { stroke: var(--p-accent, #3564E2); fill: none; }
+  .p-logo .lg-dot { fill: var(--p-accent, #3564E2); }
+  .p-brandrow { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+  .p-brandword { font-size: 19px; font-weight: 800; color: var(--p-ink, #16233B); letter-spacing: -.3px; }
+  .p-authfield { display: block; width: 100%; margin-bottom: 10px; padding: 13px 16px;
+    border-radius: 16px; font-size: 15px; }
+  .p-rule { font-size: 12px; color: var(--p-muted, #6B6B6B); padding: 2px 0; }
+  .p-rule.met { color: #2E7D32; }
+  .p-rule.bad { color: #C62828; }
+  select.p-text { cursor: pointer; }
+  .p-namerow { display: flex; gap: 8px; }
+  .p-namerow input { min-width: 0; }
+  .p-authlabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--p-muted, #6B6B6B); margin: 4px 0 8px; }
+  .p-quick { padding: 14px; }
+  .p-qcols { display: flex; gap: 10px; }
+  .p-qcol { flex: 1; min-width: 0; }
+  .p-qhead { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+  .p-qbtn { display: flex; align-items: center; gap: 6px; width: 100%; background: var(--p-bg, #F3F6FB);
+    border: none; border-radius: 12px; padding: 7px 8px; margin-bottom: 5px; font-size: 12px; font-weight: 600;
+    color: var(--p-ink, #1A1A1A); text-align: left; white-space: nowrap; overflow: hidden; }
+  .p-qbtn:hover { background: var(--p-soft, #E8F0FE); }
+  .p-qemoji { font-size: 15px; }
+  .p-qfoot { font-size: 10px; color: var(--p-muted, #6B6B6B); margin-top: 6px; }
+  .p-celebrate { position: absolute; inset: 0; z-index: 60; display: flex; align-items: center;
+    justify-content: center; background: rgba(10, 15, 30, .5); border-radius: 38px; overflow: hidden; }
+  .p-celebrate-card { width: 80%; background: var(--p-card, #FFF); border-radius: 24px;
+    padding: 26px 20px 22px; text-align: center; box-shadow: 0 24px 60px rgba(0,0,0,.35); }
+  .p-cel-title { margin: 10px 0 6px; font-size: 22px; font-weight: 800; color: var(--p-ink, #1A1A1A); }
+  .p-cel-msg { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--p-ink, #1A1A1A); line-height: 1.45; }
+  .p-cel-sub { margin: 0 0 16px; font-size: 12px; color: var(--p-muted, #6B6B6B); line-height: 1.45; }
+  .p-confetti span { position: absolute; top: -30px; font-size: 15px; animation: p-fall 2.8s linear infinite; }
+  @keyframes p-fall { to { transform: translateY(830px) rotate(320deg); } }
+  @media (prefers-reduced-motion: reduce) { .p-confetti { display: none; } }
+  .p-statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+  .p-stattile { background: var(--p-card, #FFF); border-radius: 16px; padding: 14px;
+    box-shadow: var(--p-shadow, none); border: 1px solid transparent; }
+  .p-stattile b { display: block; font-size: 24px; font-weight: 800; color: var(--p-accent, #2F6FED);
+    font-variant-numeric: tabular-nums; }
+  .p-stattile.bad b { color: #C62828; }
+  .p-stattile span { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--p-muted, #6B6B6B); }
+  .p-nudge { display: block; width: 100%; text-align: left; background: #E8F0FE; border: none;
+    border-radius: 12px; padding: 10px 12px; color: #2F6FED; font-size: 13px; font-weight: 600;
+    margin-bottom: 14px; }
+  .p-cataloghint { font-size: 11px; color: #6B6B6B; margin: 2px 0 10px; }
+  .p-planrow { width: 100%; text-align: left; background: #FFF; border: 1px solid #E6E4E0;
+    border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .p-planrow .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .p-planrow .nm { font-size: 15px; font-weight: 600; }
+  .p-planrow .ct { font-size: 12px; color: #6B6B6B; }
+  .p-progress { display: block; height: 8px; border-radius: 4px; background: #E6E4E0; overflow: hidden; }
+  .p-progress i { display: block; height: 8px; background: #2F6FED; border-radius: 4px; }
+  .p-overdue { color: #C62828; font-size: 12px; font-weight: 600; margin-top: 8px; }
+  .p-empty { color: #6B6B6B; font-size: 13px; }
+  .p-task { display: flex; gap: 8px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 9px 0; border-bottom: 1px solid #F0EFEC; }
+  .p-task:last-child { border-bottom: none; }
+  .p-task .dot { flex: none; width: 10px; height: 10px; border-radius: 5px; }
+  .p-task .tt { font-size: 14px; color: #1A1A1A; }
+  .p-task.done .tt { color: #6B6B6B; text-decoration: line-through; }
+  .p-task .ts { font-size: 11px; color: #6B6B6B; margin-top: 1px; }
+  .p-task .pr { flex: none; font-size: 10px; font-weight: 700; margin-left: 6px; }
+  .p-ghead { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .p-ghead .gdot { width: 12px; height: 12px; border-radius: 6px; }
+  .p-ghead .gl { flex: 1; font-size: 15px; font-weight: 700; }
+  .p-ghead .gc { font-size: 12px; color: #6B6B6B; }
+  .p-cta { display: block; width: 100%; background: #2F6FED; color: #FFF; border: none;
+    border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 700; margin-top: 6px; }
+  .p-hint { font-size: 11px; color: #6B6B6B; text-align: center; margin-top: 8px; }
+  .p-del { display: block; width: 100%; background: none; border: none; color: #C62828;
+    font-weight: 600; padding: 14px; }
+  .p-q { font-size: 14px; font-weight: 600; margin: 0 0 8px; }
+  .p-text { width: 100%; background: #F7F7F5; border: 1px solid #E6E4E0; border-radius: 10px;
+    padding: 9px; font-size: 14px; font-family: var(--sans); color: #1A1A1A; }
+  .p-desc { font-size: 14px; line-height: 1.55; margin: 0; }
+  .p-meta { font-size: 12px; color: #6B6B6B; margin-top: 8px; }
+  .p-meta.strong { font-weight: 600; }
+  .p-doc { display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+    background: none; border: none; padding: 6px 0; font-size: 14px; color: #1A1A1A; }
+  .p-doc .cb { font-size: 17px; color: #2F6FED; }
+  .p-doc.on .dn { color: #6B6B6B; text-decoration: line-through; }
+  .p-block { font-size: 13px; padding: 3px 0; }
+
+  /* ---------- Inspector ---------- */
+  .inspector { width: 400px; flex: none; display: flex; flex-direction: column; gap: 16px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    margin: 0 0 10px; font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--muted); text-transform: uppercase; letter-spacing: .09em;
+  }
+  .panel p.note { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+  .scenarios { display: flex; flex-wrap: wrap; gap: 8px; }
+  .scenarios button {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 999px; padding: 6px 12px; font-size: 12px;
+  }
+  .scenarios button:hover { border-color: var(--accent); color: var(--accent); }
+  .imatch { border-top: 1px solid var(--line); padding: 8px 0; }
+  .imatch:first-of-type { border-top: none; }
+  .imatch .row { display: flex; justify-content: space-between; align-items: baseline; }
+  .imatch .id { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .imatch .score { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .imatch .ev { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .imatch .ev span {
+    font-family: var(--mono); font-size: 10px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px;
+  }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 3px 12px;
+    font-family: var(--mono); font-size: 12px; }
+  .kv dt { color: var(--muted); margin: 0; }
+  .kv dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+  .kv dd.bad { color: var(--bad); font-weight: 600; }
+  .kv dd.good { color: var(--good); }
+  .actions-row { display: flex; gap: 8px; margin-top: 10px; }
+  .actions-row button {
+    flex: 1; background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    border-radius: 8px; padding: 7px; font-family: var(--mono); font-size: 11px;
+  }
+  .actions-row button:hover { border-color: var(--accent); color: var(--accent); }
+  .log { font-family: var(--mono); font-size: 11px; max-height: 190px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 3px; }
+  .log div { color: var(--muted); }
+  .log div b { color: var(--ink); font-weight: 600; }
+  .log .t { color: var(--accent); }
+  .checklist { margin: 0; padding: 0 0 0 2px; list-style: none; font-size: 13px; }
+  .checklist li { padding: 3px 0; color: var(--muted); }
+  .checklist li::before { content: "→ "; color: var(--accent); font-family: var(--mono); }
+  dialog#jsonbox { max-width: 560px; width: 90vw; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--panel); color: var(--ink); padding: 16px; }
+  dialog#jsonbox::backdrop { background: rgba(0,0,0,.45); }
+  dialog#jsonbox pre { max-height: 60vh; overflow: auto; background: var(--bg);
+    border-radius: 8px; padding: 12px; font-size: 11px; margin: 10px 0 0; }
+
+  @media (max-width: 900px) {
+    .bench { padding: 16px 8px 48px; gap: 20px; }
+    .inspector { width: min(400px, 96vw); }
+    .phone { transform-origin: top center; }
+  }
+  @media (max-width: 420px) {
+    .phone { width: 100%; border-radius: 32px; padding: 8px; }
+    .screen { width: 100%; height: 78vh; border-radius: 26px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .p-body { scroll-behavior: smooth; }
+  }
+</style>
+<style id="design-css">
+  /* ===== Design studies: token sets per design × mode ===== */
+  .screen[data-design] { background: var(--p-bg); color: var(--p-ink); }
+
+  /* A. Paper — warm ground, serif voice, deep green */
+  .screen[data-design="paper"] {
+    --p-radius: 14px; --p-head: Georgia, 'Times New Roman', serif; --p-headweight: 400;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line);
+  }
+  .screen[data-design="paper"][data-mode="light"] {
+    --p-bg:#F6F4EF; --p-card:#FFFFFF; --p-ink:#1F1D1A; --p-muted:#8A8578;
+    --p-line:#E5E1D8; --p-accent:#3E6B4F; --p-soft:#E4EDE6; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="paper"][data-mode="dark"] {
+    --p-bg:#191713; --p-card:#23201B; --p-ink:#EDE9E0; --p-muted:#97917F;
+    --p-line:#322E26; --p-accent:#8FBC9E; --p-soft:#2A3A30; --p-onaccent:#14201A;
+  }
+
+  /* B. Sky — cool white, floating cards, vivid blue */
+  .screen[data-design="sky"] {
+    --p-radius: 20px; --p-head: inherit; --p-headweight: 800;
+    --p-shadow: 0 10px 30px rgba(22,35,59,.08); --p-cardborder: 1px solid transparent;
+  }
+  .screen[data-design="sky"][data-mode="light"] {
+    --p-bg:#F3F6FB; --p-card:#FFFFFF; --p-ink:#16233B; --p-muted:#6B7A94;
+    --p-line:#E3E9F2; --p-accent:#3564E2; --p-soft:#E7EEFD; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="sky"][data-mode="dark"] {
+    --p-bg:#0F1420; --p-card:#1A2130; --p-ink:#E8EDF7; --p-muted:#8B97AC;
+    --p-line:#262F42; --p-accent:#7C9BFF; --p-soft:#24304D; --p-onaccent:#0F1420;
+    --p-shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+
+  /* C. Noir — premium dark-first, amber signal */
+  .screen[data-design="noir"] {
+    --p-radius: 14px; --p-head: inherit; --p-headweight: 700;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line); letter-spacing: .01em;
+  }
+  .screen[data-design="noir"][data-mode="dark"] {
+    --p-bg:#0C0C0E; --p-card:#17171B; --p-ink:#F2F2F0; --p-muted:#8E8E93;
+    --p-line:#26262B; --p-accent:#E8B84B; --p-soft:#2E2818; --p-onaccent:#141310;
+  }
+  .screen[data-design="noir"][data-mode="light"] {
+    --p-bg:#F4F4F2; --p-card:#FFFFFF; --p-ink:#17171A; --p-muted:#77777D;
+    --p-line:#E6E6E3; --p-accent:#A87A10; --p-soft:#F4EAD3; --p-onaccent:#FFFFFF;
+  }
+
+  /* D. Studio — monochrome + signal red, sharp */
+  .screen[data-design="studio"] {
+    --p-radius: 8px; --p-head: inherit; --p-headweight: 700;
+    --p-shadow: none; --p-cardborder: 1px solid var(--p-line);
+  }
+  .screen[data-design="studio"][data-mode="light"] {
+    --p-bg:#FAFAFA; --p-card:#FFFFFF; --p-ink:#111111; --p-muted:#6E6E6E;
+    --p-line:#E4E4E4; --p-accent:#E5484D; --p-soft:#FDE8E8; --p-onaccent:#FFFFFF;
+  }
+  .screen[data-design="studio"][data-mode="dark"] {
+    --p-bg:#121212; --p-card:#1C1C1C; --p-ink:#EEEEEE; --p-muted:#9A9A9A;
+    --p-line:#2A2A2A; --p-accent:#FF6B6E; --p-soft:#3A1F20; --p-onaccent:#1A0E0E;
+  }
+
+  /* ===== component skin (applies to any design) ===== */
+  .screen[data-design] .statusbar { color: var(--p-ink); }
+  .screen[data-design] .p-header .back { color: var(--p-accent); }
+  .screen[data-design] .p-header .p-htitle { color: var(--p-ink); }
+  .screen[data-design] .p-h1 { color: var(--p-ink); font-family: var(--p-head); font-weight: var(--p-headweight); }
+  .screen[data-design] .p-sub, .screen[data-design] .p-empty, .screen[data-design] .p-hint,
+  .screen[data-design] .p-meta, .screen[data-design] .p-reshint, .screen[data-design] .p-cataloghint { color: var(--p-muted); }
+  .screen[data-design] .p-section { color: var(--p-muted); }
+  .screen[data-design="studio"] .p-section { letter-spacing: .12em; }
+  .screen[data-design="noir"] .p-section { letter-spacing: .1em; }
+  .screen[data-design] .p-card, .screen[data-design] .p-planrow {
+    background: var(--p-card); border: var(--p-cardborder); border-radius: var(--p-radius); box-shadow: var(--p-shadow);
+  }
+  .screen[data-design] .p-desc, .screen[data-design] .p-q, .screen[data-design] .p-block { color: var(--p-ink); }
+  .screen[data-design] .p-planrow .nm { color: var(--p-ink); }
+  .screen[data-design] .p-planrow .ct { color: var(--p-muted); }
+  .screen[data-design] .p-chip {
+    background: var(--p-card); border: 1px solid var(--p-line); color: var(--p-ink);
+    border-radius: calc(var(--p-radius) * 2);
+  }
+  .screen[data-design="studio"] .p-chip { border-radius: var(--p-radius); }
+  .screen[data-design] .p-chip.sel { background: var(--p-soft); border-color: var(--p-accent); color: var(--p-accent); }
+  .screen[data-design] .p-inputrow { gap: 10px; }
+  .screen[data-design] .p-input {
+    background: var(--p-card); border: 1px solid var(--p-line); color: var(--p-ink);
+    border-radius: calc(var(--p-radius) + 8px); box-shadow: var(--p-shadow);
+  }
+  .screen[data-design] .p-input::placeholder { color: var(--p-muted); }
+  .screen[data-design] .p-go {
+    background: var(--p-accent); color: var(--p-onaccent); border-radius: calc(var(--p-radius) + 8px);
+  }
+  .screen[data-design="sky"] .p-input, .screen[data-design="sky"] .p-go { border-radius: 999px; }
+  .screen[data-design] .p-suggest {
+    background: var(--p-card); border: 1px solid var(--p-line); border-radius: var(--p-radius);
+    box-shadow: 0 16px 40px rgba(0,0,0,.22);
+  }
+  .screen[data-design] .p-match { border-bottom: 1px solid var(--p-line); }
+  .screen[data-design] .p-match:last-child { border-bottom: none; }
+  .screen[data-design] .p-match:hover { background: var(--p-bg); }
+  .screen[data-design] .p-match .mn { color: var(--p-ink); }
+  .screen[data-design] .p-progress { background: var(--p-line); }
+  .screen[data-design] .p-progress i { background: var(--p-accent); }
+  .screen[data-design] .p-task { border-bottom: 1px solid var(--p-line); }
+  .screen[data-design] .p-task:last-child { border-bottom: none; }
+  .screen[data-design] .p-task .tt { color: var(--p-ink); }
+  .screen[data-design] .p-task.done .tt, .screen[data-design] .p-task .ts { color: var(--p-muted); }
+  .screen[data-design] .p-ghead .gl { color: var(--p-ink); }
+  .screen[data-design] .p-ghead .gc { color: var(--p-muted); }
+  .screen[data-design] .p-cta {
+    background: var(--p-accent); color: var(--p-onaccent); border-radius: calc(var(--p-radius) + 4px);
+  }
+  .screen[data-design] .p-text {
+    background: var(--p-bg); border: 1px solid var(--p-line); color: var(--p-ink); border-radius: calc(var(--p-radius) - 4px);
+  }
+  .screen[data-design] .p-doc .cb, .screen[data-design] .p-resource { color: var(--p-accent); }
+  .screen[data-design] .p-doc .dn { color: var(--p-ink); }
+  .screen[data-design] .p-doc.on .dn { color: var(--p-muted); }
+  .screen[data-design] .p-nudge { background: var(--p-soft); color: var(--p-accent); border-radius: var(--p-radius); }
+  .screen[data-design] .tabbar { background: var(--p-card); border-top: 1px solid var(--p-line); }
+  .screen[data-design] .tabbar button { color: var(--p-muted); }
+  .screen[data-design] .tabbar button.active { color: var(--p-accent); }
+  .screen[data-design] .tabbar button.active .ticon-pill {
+    background: var(--p-soft); border-radius: 999px; padding: 2px 14px;
+  }
+  .screen[data-design] .p-greet { margin: 14px 0 14px; }
+  .screen[data-design] .p-hello {
+    font-family: var(--p-head); font-weight: var(--p-headweight); font-size: 30px;
+    color: var(--p-ink); letter-spacing: -0.01em; line-height: 1.15; text-wrap: balance;
+  }
+  .screen[data-design="paper"] .p-hello { font-size: 32px; }
+  .screen[data-design] .p-tag { font-size: 14px; color: var(--p-muted); margin-top: 6px; }
+  .screen[data-design] .p-seg { display: flex; gap: 8px; flex-wrap: wrap; }
+  .screen[data-design] .p-about { font-size: 12px; color: var(--p-muted); line-height: 1.7; }
+
+  /* ================= structural identities ================= */
+
+  /* ---- PAPER: editorial, no cards, hairlines, serif ---- */
+  .screen[data-design="paper"] .p-dateline {
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--p-muted); margin-bottom: 8px;
+  }
+  .pr-paper { align-items: baseline; gap: 12px !important; }
+  .screen[data-design] .pr-paper .p-input {
+    background: transparent; border: none; border-bottom: 1px solid var(--p-ink); border-radius: 0;
+    box-shadow: none; padding: 8px 2px; min-height: 40px; font-family: var(--p-head); font-size: 17px;
+  }
+  .screen[data-design] .pr-paper .p-go {
+    background: none; color: var(--p-accent); border-radius: 0; padding: 0 2px;
+    font-family: var(--p-head); font-size: 16px;
+  }
+  .p-planline { display: block; width: 100%; background: none; border: none; text-align: left;
+    padding: 12px 0 14px; border-bottom: 1px solid var(--p-line); }
+  .p-planline:first-of-type { border-top: 1px solid var(--p-line); }
+  .pl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .pl-name { font-family: var(--p-head); font-size: 17px; color: var(--p-ink); }
+  .pl-count { font-size: 12px; color: var(--p-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .pl-count b { color: #C62828; font-weight: 700; }
+  .pl-bar { display: block; height: 2px; background: var(--p-line); margin-top: 10px; }
+  .pl-bar i { display: block; height: 2px; background: var(--p-accent); }
+  .p-idx { margin-bottom: 16px; line-height: 2; }
+  .p-evlink { background: none; border: none; padding: 0; color: var(--p-ink);
+    font-family: var(--p-head); font-size: 15px; }
+  .p-evlink:hover { color: var(--p-accent); text-decoration: underline; }
+  .p-dot { color: var(--p-muted); margin: 0 8px; }
+  .screen[data-design="paper"] .p-card {
+    background: transparent; border: none; border-top: 1px solid var(--p-line);
+    border-radius: 0; box-shadow: none; padding: 14px 2px;
+  }
+  .screen[data-design="paper"] .p-cta {
+    background: none; color: var(--p-accent); border: 1px solid var(--p-accent); border-radius: 0;
+    font-family: var(--p-head);
+  }
+  .screen[data-design="paper"] .p-chip { border-radius: 4px; background: transparent; }
+  .screen[data-design="paper"] .p-suggest { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 4px; }
+  .tabbar.tb-paper { padding: 12px 0 16px; }
+  .tb-paper button .lbl { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; padding-bottom: 3px; }
+  .tb-paper button.active .lbl { border-bottom: 1px solid var(--p-ink); color: var(--p-ink); }
+  .screen[data-design="paper"] .tabbar button.active { color: var(--p-ink); }
+
+  /* ---- SKY: floaty cards, rings, tiles, floating tab pill ---- */
+  .screen[data-design] .pr-sky .p-input { border-radius: 999px; padding: 16px 20px; }
+  .screen[data-design] .pr-sky .p-go { border-radius: 999px; width: 54px; flex: none; font-size: 22px; padding: 0; }
+  .p-planscroll { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 4px; }
+  .p-plancard { flex: none; width: 150px; display: flex; flex-direction: column; align-items: flex-start;
+    gap: 6px; background: var(--p-card); border: none; border-radius: 20px; padding: 12px;
+    box-shadow: var(--p-shadow); text-align: left; }
+  .p-ring { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+  .p-ring span { width: 35px; height: 35px; border-radius: 50%; background: var(--p-card);
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800; color: var(--p-ink); }
+  .p-plancard-name { font-size: 13px; font-weight: 700; color: var(--p-ink); line-height: 1.3; }
+  .p-plancard-ov { font-size: 11px; font-weight: 700; color: #C62828; }
+  .p-plancard-ov.ok { color: var(--p-muted); font-weight: 500; }
+  .p-tilegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+  .p-tile { display: flex; align-items: center; gap: 10px; background: var(--p-card); border: none;
+    border-radius: 16px; padding: 10px 12px; box-shadow: var(--p-shadow); text-align: left; }
+  .p-tileemoji { flex: none; width: 38px; height: 38px; border-radius: 12px; background: var(--p-soft);
+    display: flex; align-items: center; justify-content: center; font-size: 19px; }
+  .p-tilename { font-size: 12px; font-weight: 600; color: var(--p-ink); line-height: 1.25; }
+  .screen[data-design="sky"] .p-body { padding-bottom: 86px; }
+  .tabbar.tb-sky { position: absolute; left: 14px; right: 14px; bottom: 12px; border-radius: 999px;
+    border: 1px solid var(--p-line); box-shadow: 0 12px 30px rgba(0,0,0,.18); padding: 8px 6px 10px; }
+  .tb-sky button .lbl { font-size: 10px; }
+
+  /* ---- NOIR: dashboard, command bar, dense rows, icon dock ---- */
+  .p-stats { display: flex; gap: 10px; margin: 2px 0 14px; }
+  .p-stat { flex: 1; background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 10px 12px; }
+  .p-stat b { display: block; font-size: 24px; line-height: 1.1; color: var(--p-accent);
+    font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .p-stat.bad b { color: #E57373; }
+  .p-stat span { font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--p-muted); }
+  .pr-noir { align-items: center; background: var(--p-card); border: 1px solid var(--p-line);
+    border-radius: 12px; padding: 4px 6px 4px 14px; gap: 6px !important; }
+  .pr-noir .p-prompt { color: var(--p-accent); font-weight: 800; font-size: 18px; font-family: var(--mono); }
+  .screen[data-design] .pr-noir .p-input { background: none; border: none; box-shadow: none; border-radius: 0;
+    padding: 12px 4px; min-height: 40px; font-family: var(--mono); font-size: 14px; }
+  .screen[data-design] .pr-noir .p-go { background: none; border: 1px solid var(--p-accent); color: var(--p-accent);
+    border-radius: 9px; padding: 9px 14px; font-size: 11px; letter-spacing: .12em; font-family: var(--mono); }
+  .screen[data-design] .pr-noir .p-go:disabled { border-color: var(--p-line); color: var(--p-muted); }
+  .p-plansbox { padding: 4px 14px; }
+  .p-planrow2 { display: flex; align-items: center; gap: 10px; width: 100%; background: none; border: none;
+    border-bottom: 1px solid var(--p-line); padding: 12px 0; text-align: left; }
+  .p-planrow2:last-child { border-bottom: none; }
+  .pr2-name { flex: 1; min-width: 0; font-size: 13px; font-weight: 600; color: var(--p-ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pr2-bar { flex: none; width: 64px; height: 4px; border-radius: 2px; background: var(--p-line); overflow: hidden; }
+  .pr2-bar i { display: block; height: 4px; background: var(--p-accent); }
+  .pr2-count { flex: none; font-family: var(--mono); font-size: 11px; color: var(--p-muted); font-variant-numeric: tabular-nums; }
+  .p-hscroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 10px; }
+  .p-hscroll .p-chip { flex: none; margin: 0; white-space: nowrap; }
+  .tabbar.tb-noir { padding: 10px 0 16px; }
+  .tb-noir button { flex-direction: column; }
+  .tb-noir button .ticon { font-size: 21px; filter: grayscale(1) opacity(.55); }
+  .tb-noir button.active .ticon { filter: none; }
+  .tb-noir button.active::after { content: ''; width: 4px; height: 4px; border-radius: 2px;
+    background: var(--p-accent); margin-top: 4px; }
+
+  /* ---- STUDIO: brutalist grid, hard borders, segments ---- */
+  .screen[data-design="studio"] .p-hello { text-transform: uppercase; font-size: 27px; font-weight: 900; letter-spacing: -.01em; }
+  .p-reddot { color: var(--p-accent); }
+  .p-num { color: var(--p-accent); margin-right: 8px; font-weight: 800; }
+  .pr-studio { gap: 0 !important; }
+  .screen[data-design] .pr-studio .p-input { border: 2px solid var(--p-ink); border-radius: 0; box-shadow: none; background: var(--p-card); }
+  .screen[data-design] .pr-studio .p-go { border: 2px solid var(--p-ink); border-left: none; border-radius: 0;
+    padding: 0 18px; letter-spacing: .1em; }
+  .screen[data-design] .pr-studio .p-go:disabled { background: var(--p-card); color: var(--p-muted); opacity: 1; }
+  .p-planblock { display: block; width: 100%; background: var(--p-card); border: 2px solid var(--p-line);
+    border-radius: 0; padding: 12px 14px; margin-bottom: 10px; text-align: left; }
+  .p-planblock:hover { border-color: var(--p-ink); }
+  .p-planblock .top { display: flex; justify-content: space-between; gap: 10px; font-weight: 700; color: var(--p-ink); font-size: 14px; }
+  .p-planblock .mono { font-family: var(--mono); color: var(--p-muted); font-variant-numeric: tabular-nums; }
+  .p-segs { display: flex; gap: 3px; margin-top: 12px; }
+  .p-segs i { flex: 1; height: 8px; background: var(--p-line); }
+  .p-segs i.on { background: var(--p-accent); }
+  .p-cellgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+  .p-cell { display: flex; align-items: center; gap: 8px; background: var(--p-card);
+    border: 2px solid var(--p-line); border-radius: 0; padding: 11px 10px; text-align: left; }
+  .p-cell:hover { border-color: var(--p-ink); }
+  .p-cell .ce { font-size: 17px; }
+  .p-cell .cn { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--p-ink); line-height: 1.35; }
+  .screen[data-design="studio"] .p-card { border-width: 2px; border-radius: 0; }
+  .screen[data-design="studio"] .p-chip { border-width: 2px; border-radius: 0; }
+  .screen[data-design="studio"] .p-cta { border-radius: 0; letter-spacing: .08em; text-transform: uppercase; }
+  .screen[data-design="studio"] .p-suggest { border-width: 2px; border-radius: 0; }
+  .tabbar.tb-studio { padding: 0; border-top: 2px solid var(--p-ink); }
+  .tb-studio button { padding: 13px 0 15px; border-right: 2px solid var(--p-ink); border-radius: 0; }
+  .tb-studio button:last-child { border-right: none; }
+  .tb-studio button .lbl { font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .screen[data-design="studio"] .tabbar button.active { background: var(--p-ink); color: var(--p-bg); }
+</style>
+
+<header class="topbar">
+  <h1>LifeOS<span class="tag">test bench</span></h1>
+  <span class="field" title="The engine computes overdue/urgency against this date — move it forward to test overdue states.">
+    simulated today
+    <input type="date" id="sim-today" />
+  </span>
+  <span class="spacer"></span>
+  <button class="btn-ghost" id="reset-btn" title="Clears all plans from browser storage">reset data</button>
+</header>
+
+<main class="bench">
+  <div class="phone" aria-label="Phone simulator running LifeOS">
+    <div class="screen">
+      <div class="statusbar"><span>9:41</span><span>LifeOS</span></div>
+      <div class="p-header" id="p-header"></div>
+      <div class="p-body" id="p-body"></div>
+      <div class="tabbar" id="p-tabbar"></div>
+    </div>
+  </div>
+
+  <aside class="inspector">
+    <section class="panel">
+      <h2>What this is</h2>
+      <p class="note">A browser build of the LifeOS mobile app (Android/iOS, React&nbsp;Native).
+      The phone runs the <em>exact engine code</em> from <code>src/core/</code> — intent matcher,
+      planner, dependency graph — transpiled from the repo's TypeScript. Plans persist in this
+      browser. Things worth testing:</p>
+      <ul class="checklist">
+        <li>Type anything — 200+ events match as you type, with scores below</li>
+        <li>Answer intake questions (max 5) — Yes/No answers add/remove tasks</li>
+        <li>Open any task — every task has a checkable step list</li>
+        <li>Try the anniversary with year 10 — the plan gets a ⭐ milestone badge</li>
+        <li>Complete "Check the business name" — watch registration unblock</li>
+        <li>Move the simulated date forward — Timeline turns overdue red</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>Scenarios</h2>
+      <div class="scenarios" id="scenarios"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Intent matcher</h2>
+      <div id="intent-out"><p class="note">Type into the phone's input to see live match scoring.</p></div>
+    </section>
+
+    <section class="panel" id="plan-panel" hidden>
+      <h2>Current plan</h2>
+      <dl class="kv" id="plan-stats"></dl>
+      <div class="actions-row">
+        <button id="json-btn">view JSON</button>
+        <button id="copy-btn">copy JSON</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Action log</h2>
+      <div class="log" id="log"><div>— session start —</div></div>
+    </section>
+  </aside>
+</main>
+
+<dialog id="jsonbox">
+  <h2 style="margin:0;font-size:13px;font-family:var(--mono)">plan JSON</h2>
+  <pre id="jsonpre"></pre>
+  <div class="actions-row"><button onclick="document.getElementById('jsonbox').close()">close</button></div>
+</dialog>
+
+<script>
+/* ===== module shim for the transpiled engine (CommonJS) ===== */
+const __modules = {}, __cache = {};
+function __define(name, fn) { __modules[name] = fn; }
+function __resolve(from, dep) {
+  if (!dep.startsWith('.')) return dep;
+  const parts = from.split('/').slice(0, -1).concat(dep.split('/'));
+  const out = [];
+  for (const p of parts) {
+    if (p === '.' || p === '') continue;
+    else if (p === '..') out.pop();
+    else out.push(p);
+  }
+  let name = out.join('/');
+  if (__modules[name + '/index']) name = name + '/index';
+  return name;
+}
+function __require(name) {
+  if (__cache[name]) return __cache[name].exports;
+  const mod = (__cache[name] = { exports: {} });
+  __modules[name](mod.exports, (d) => __require(__resolve(name, d)), mod);
+  return mod.exports;
+}
+/*__MODULES__*/
+/* ===== engine handles ===== */
+const Intent = __require('intent');
+const Planner = __require('planner');
+const Progress = __require('progress');
+const Catalog = __require('templates/index');
+const Types = __require('types');
+const Resources = __require('resources');
+const Products = __require('products');
+const Celebrate = __require('celebration');
+const Password = __require('password');
+const Terms = __require('terms');
+
+/* mirrors src/theme.ts */
+const DOMAIN_COLORS = {
+  government:'#5C6BC0', finance:'#00897B', insurance:'#8E24AA', tax:'#6D4C41',
+  employment:'#039BE5', utilities:'#F4511E', housing:'#7CB342', health:'#E53935',
+  legal:'#546E7A', immigration:'#D81B60', business:'#FB8C00', education:'#3949AB',
+  travel:'#00ACC1', social:'#EC407A',
+};
+const PRIORITY_COLORS = { critical:'#C62828', high:'#B26A00', medium:'#2F6FED', low:'#6B6B6B' };
+const PRIORITY_LABELS = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
+const STATUS_GLYPH = { done:'✓', skipped:'–', in_progress:'◐', blocked:'🔒', pending:'○' };
+
+/* ===== state ===== */
+const K_PLANS = 'lifeos.web.plans.v1', K_TODAY = 'lifeos.web.today.v1', K_PROFILE = 'lifeos.web.profile.v1';
+const K_THEME = 'lifeos.web.theme.v1', K_DESIGN = 'lifeos.web.design.v1', K_AUTH = 'lifeos.web.auth.v1';
+function realToday() { return new Date().toISOString().slice(0, 10); }
+/* Backfill fields added since a stored plan was created. */
+function migratePlan(p) {
+  return {
+    ...p,
+    milestone: p.milestone === undefined ? false : p.milestone,
+    tasks: p.tasks.map((t) => ({ ...t, documents: t.documents || [], steps: t.steps || [] })),
+  };
+}
+let plans = [];
+try { plans = JSON.parse(localStorage.getItem(K_PLANS) || '[]').map(migratePlan); } catch (e) { plans = []; }
+let simToday = localStorage.getItem(K_TODAY) || realToday();
+let profile = null;
+try { profile = JSON.parse(localStorage.getItem(K_PROFILE) || 'null'); } catch (e) { profile = null; }
+let themeSetting = localStorage.getItem(K_THEME) || 'system';   // 'light' | 'dark' | 'system'
+const designId = 'sky';   // finalized design
+function applyTheme() {
+  const screen = document.querySelector('.screen');
+  const dark = themeSetting === 'dark' ||
+    (themeSetting === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  screen.dataset.mode = dark ? 'dark' : 'light';
+  screen.dataset.design = designId;
+}
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (themeSetting === 'system') applyTheme();
+});
+let route = { name: 'home' };
+let backStack = [];
+let homeInput = '';
+let intakeAnswers = {};
+let pendingDeletePlan = null;
+let profileDraft = null;
+
+/* Simulated auth (the real app uses Supabase; the bench mimics the exact flow). */
+let auth = null;
+try { auth = JSON.parse(localStorage.getItem(K_AUTH) || 'null'); } catch (e) { auth = null; }
+let authView = 'signin';       // 'signin' | 'signup' | 'confirm'
+let authDraft = { email: '', password: '', confirm: '', firstName: '', lastName: '', country: '', region: '' };
+function saveAuth() { localStorage.setItem(K_AUTH, JSON.stringify(auth)); }
+function authGate() {
+  if (!auth || !auth.signedIn) return 'auth';
+  if (!auth.tos) return 'terms';
+  return 'ready';
+}
+
+function save() { localStorage.setItem(K_PLANS, JSON.stringify(plans)); }
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===== action log ===== */
+const logEl = document.getElementById('log');
+function log(msg) {
+  const d = document.createElement('div');
+  const t = new Date().toTimeString().slice(0, 8);
+  d.innerHTML = '<span class="t">' + t + '</span> ' + msg;
+  logEl.prepend(d);
+  while (logEl.children.length > 60) logEl.lastChild.remove();
+}
+
+/* ===== navigation ===== */
+function navigate(next, replace) {
+  if (!replace) backStack.push(route);
+  route = next;
+  renderAll();
+}
+function goBack() {
+  route = backStack.pop() || { name: 'home' };
+  renderAll();
+}
+
+/* ===== store ops ===== */
+function addPlan(plan) {
+  plans = [plan, ...plans]; save();
+  log('<b>generatePlan</b> ' + esc(plan.eventId) + ' → ' + plan.tasks.length + ' tasks');
+}
+function removePlan(planId) {
+  const p = plans.find((x) => x.id === planId);
+  plans = plans.filter((x) => x.id !== planId); save();
+  log('<b>removePlan</b> ' + esc(p ? p.eventId : planId));
+}
+function setTaskStatus(planId, taskId, status) {
+  plans = plans.map((p) => {
+    if (p.id !== planId) return p;
+    const updated = { ...p, tasks: p.tasks.map((t) => t.id === taskId ? { ...t, status } : t) };
+    return Planner.reconcileBlocked(updated);
+  });
+  save();
+  log('<b>setTaskStatus</b> ' + esc(taskId.split('.').pop()) + ' → ' + esc(status));
+}
+function toggleDocument(planId, taskId, name) {
+  plans = plans.map((p) => p.id !== planId ? p : ({
+    ...p,
+    tasks: p.tasks.map((t) => t.id !== taskId ? t : ({
+      ...t, documents: t.documents.map((d) => d.name === name ? { ...d, collected: !d.collected } : d),
+    })),
+  }));
+  save();
+  log('<b>toggleDocument</b> ' + esc(name));
+}
+function toggleStep(planId, taskId, name) {
+  plans = plans.map((p) => p.id !== planId ? p : ({
+    ...p,
+    tasks: p.tasks.map((t) => t.id !== taskId ? t : ({
+      ...t, steps: t.steps.map((s) => s.name === name ? { ...s, done: !s.done } : s),
+    })),
+  }));
+  save();
+  log('<b>toggleStep</b> ' + esc(name));
+}
+
+/* ===== phone rendering ===== */
+const headerEl = document.getElementById('p-header');
+const bodyEl = document.getElementById('p-body');
+const tabbarEl = document.getElementById('p-tabbar');
+
+function taskRowHtml(task, planId, subtitle) {
+  const resolved = task.status === 'done' || task.status === 'skipped';
+  const stepsNote = task.steps.length && !resolved
+    ? ' · ' + task.steps.filter((s) => s.done).length + '/' + task.steps.length + ' steps'
+    : '';
+  return '<button class="p-task' + (resolved ? ' done' : '') + '" data-nav-task="' + esc(planId) + '|' + esc(task.id) + '">' +
+    '<span class="dot" style="background:' + DOMAIN_COLORS[task.domain] + '"></span>' +
+    '<span style="flex:1;min-width:0"><span class="tt">' + STATUS_GLYPH[task.status] + ' ' + esc(task.title) + '</span>' +
+    '<div class="ts">' + esc((subtitle || ('Due ' + task.dueDate + (task.authority ? ' · ' + task.authority : ''))) + stepsNote) + '</div></span>' +
+    '<span class="pr" style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</span></button>';
+}
+
+function matchesHtml() {
+  const matches = Intent.matchIntent(homeInput).slice(0, 6);
+  if (!matches.length) return '';
+  return '<div class="p-suggest">' +
+    matches.map((m) =>
+      '<button class="p-match" data-nav-intake="' + esc(m.event.id) + '">' +
+      '<span class="me">' + m.event.emoji + '</span>' +
+      '<span class="mn">' + esc(m.event.name) + '</span>' +
+      '<span class="mc mc-' + m.event.category + '">' + esc(Types.CATEGORY_LABELS[m.event.category].split(' ')[0]) + '</span>' +
+      '</button>'
+    ).join('') + '</div>';
+}
+
+/* ===== home building blocks — structurally different per design ===== */
+
+function greetingHtml() {
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+  const firstName = profile ? (profile.firstName || (profile.name || '').trim().split(' ')[0] || '') : '';
+  const tag = '<div class="p-tag">What’s happening in your life? LifeOS handles the paperwork.</div>';
+  if (designId === 'paper') {
+    const dateLine = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+    return '<div class="p-greet"><div class="p-dateline">' + esc(dateLine) + '</div>' +
+      '<div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div></div>';
+  }
+  if (designId === 'studio') {
+    return '<div class="p-greet"><div class="p-hello">' + daypart.toUpperCase() +
+      (firstName ? ',<br>' + esc(firstName.toUpperCase()) : '') + '<span class="p-reddot">.</span></div>' + tag + '</div>';
+  }
+  return '<div class="p-greet"><div class="p-hello">' + daypart + (firstName ? ',<br>' + esc(firstName) : '') + '.</div>' + tag + '</div>';
+}
+
+function inputHtml() {
+  const dis = Intent.matchIntent(homeInput).length ? '' : ' disabled';
+  const ph = (designId === 'paper' || designId === 'noir')
+    ? 'Tell me what happened…'
+    : 'Try "I moved" or "I started a business"…';
+  const area = (rows) => '<textarea class="p-input" id="p-freetext" rows="' + rows + '" enterkeyhint="go" placeholder=\'' + ph + '\'>' + esc(homeInput) + '</textarea>';
+  if (designId === 'paper') {
+    return '<div class="p-inputrow pr-paper">' + area(1) + '<button class="p-go" id="p-go" data-go' + dis + '>Go →</button></div>';
+  }
+  if (designId === 'noir') {
+    return '<div class="p-inputrow pr-noir"><span class="p-prompt">›</span>' + area(1) + '<button class="p-go" id="p-go" data-go' + dis + '>GO</button></div>';
+  }
+  if (designId === 'studio') {
+    return '<div class="p-inputrow pr-studio">' + area(2) + '<button class="p-go" id="p-go" data-go' + dis + '>GO</button></div>';
+  }
+  return '<div class="p-inputrow pr-sky">' + area(2) + '<button class="p-go" id="p-go" data-go' + dis + ' aria-label="Go">→</button></div>';
+}
+
+function statsHtml() {
+  const tl = Progress.buildTimeline(plans, simToday);
+  const due7 = tl.filter((e) => e.daysUntilDue >= 0 && e.daysUntilDue <= 7).length;
+  const overdue = tl.filter((e) => e.daysUntilDue < 0).length;
+  return '<div class="p-stats">' +
+    '<div class="p-stat"><b>' + plans.length + '</b><span>plans</span></div>' +
+    '<div class="p-stat"><b>' + due7 + '</b><span>due 7d</span></div>' +
+    '<div class="p-stat' + (overdue ? ' bad' : '') + '"><b>' + overdue + '</b><span>overdue</span></div></div>';
+}
+
+function sectionHead(label, n) {
+  return '<div class="p-section">' + (designId === 'studio' ? '<span class="p-num">' + String(n).padStart(2, '0') + '</span>' : '') + esc(label) + '</div>';
+}
+
+function plansHtml(sectionNo) {
+  if (!plans.length) return '';
+  let out = sectionHead('Active plans', sectionNo);
+  if (designId === 'sky') {
+    out += '<div class="p-planscroll">' + plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      const pct = Math.round(pr.fraction * 100);
+      return '<button class="p-plancard" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="p-ring" style="background:conic-gradient(var(--p-accent) ' + pct + '%, var(--p-line) 0)"><span>' + pct + '%</span></span>' +
+        '<span class="p-plancard-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        (pr.overdue
+          ? '<span class="p-plancard-ov">' + pr.overdue + ' overdue</span>'
+          : '<span class="p-plancard-ov ok">' + pr.done + '/' + pr.total + ' done</span>') +
+        '</button>';
+    }).join('') + '</div>';
+  } else if (designId === 'paper') {
+    out += plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      return '<button class="p-planline" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="pl-top"><span class="pl-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' <span class="p-star">⭐</span>' : '') + '</span>' +
+        '<span class="pl-count">' + pr.done + ' / ' + pr.total + (pr.overdue ? ' · <b>' + pr.overdue + ' late</b>' : '') + '</span></span>' +
+        '<span class="pl-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span></button>';
+    }).join('');
+  } else if (designId === 'noir') {
+    out += '<div class="p-card p-plansbox">' + plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      return '<button class="p-planrow2" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="pr2-name">' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="pr2-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+        '<span class="pr2-count">' + pr.done + '/' + pr.total + '</span></button>';
+    }).join('') + '</div>';
+  } else {
+    out += plans.map((plan) => {
+      const pr = Progress.planProgress(plan, simToday);
+      const segs = Array.from({ length: 10 }, (_, i) =>
+        '<i class="' + (i < Math.round(pr.fraction * 10) ? 'on' : '') + '"></i>').join('');
+      return '<button class="p-planblock" data-nav-plan="' + esc(plan.id) + '">' +
+        '<span class="top"><span>' + plan.emoji + ' ' + esc(plan.eventName) + (plan.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="mono">' + pr.done + '/' + pr.total + '</span></span>' +
+        '<span class="p-segs">' + segs + '</span>' +
+        (pr.overdue ? '<span class="p-overdue">' + pr.overdue + ' overdue</span>' : '') +
+        '</button>';
+    }).join('');
+  }
+  return out;
+}
+
+function eventsHtml(startNo) {
+  const groups = Catalog.featuredByCategory();
+  let n = startNo;
+  let out = '';
+  for (const g of groups) {
+    out += sectionHead(Types.CATEGORY_LABELS[g.category], n++);
+    if (designId === 'paper') {
+      out += '<div class="p-idx">' + g.events.map((e) =>
+        '<button class="p-evlink" data-nav-intake="' + esc(e.id) + '">' + esc(e.name) + '</button>'
+      ).join('<span class="p-dot">·</span>') + '</div>';
+    } else if (designId === 'sky') {
+      out += '<div class="p-tilegrid">' + g.events.map((e) =>
+        '<button class="p-tile" data-nav-intake="' + esc(e.id) + '">' +
+        '<span class="p-tileemoji">' + e.emoji + '</span><span class="p-tilename">' + esc(e.name) + '</span></button>'
+      ).join('') + '</div>';
+    } else if (designId === 'noir') {
+      out += '<div class="p-hscroll">' + g.events.map((e) =>
+        '<button class="p-chip" data-nav-intake="' + esc(e.id) + '">' + e.emoji + ' ' + esc(e.name) + '</button>'
+      ).join('') + '</div>';
+    } else {
+      out += '<div class="p-cellgrid">' + g.events.map((e) =>
+        '<button class="p-cell" data-nav-intake="' + esc(e.id) + '">' +
+        '<span class="ce">' + e.emoji + '</span><span class="cn">' + esc(e.name) + '</span></button>'
+      ).join('') + '</div>';
+    }
+  }
+  return out;
+}
+
+/** The three most common events per category — the home Quick Add card. */
+const QUICK_ADD = [
+  { label: 'Milestones', cls: 'mc-milestone', items: [['got-married', '💍', 'Married'], ['new-child', '👶', 'Baby'], ['bought-house', '🏠', 'House']] },
+  { label: 'Important', cls: 'mc-important', items: [['moved', '📦', 'Moved'], ['new-job', '💼', 'New job'], ['bought-car', '🚗', 'Car']] },
+  { label: 'Leisure', cls: 'mc-leisure', items: [['trip-abroad', '✈️', 'Trip'], ['new-pet', '🐶', 'Pet'], ['kids-birthday-party', '🎈', 'Party']] },
+];
+
+function quickAddHtml(longTail) {
+  return '<div class="p-section">Quick add</div><div class="p-card p-quick"><div class="p-qcols">' +
+    QUICK_ADD.map((col) =>
+      '<div class="p-qcol"><div class="p-qhead ' + col.cls + '">' + esc(col.label) + '</div>' +
+      col.items.map(([id, emoji, short]) =>
+        '<button class="p-qbtn" data-nav-intake="' + esc(id) + '"><span class="p-qemoji">' + emoji + '</span><span>' + esc(short) + '</span></button>').join('') +
+      '</div>').join('') +
+    '</div><div class="p-qfoot">…and ' + longTail + '+ more events — just describe what happened above.</div></div>';
+}
+
+function renderHome() {
+  headerEl.innerHTML = '';
+  const longTail = Catalog.EVENT_CATALOG.length -
+    Catalog.featuredByCategory().reduce((n, g) => n + g.events.length, 0);
+  let sectionNo = 1;
+  let html =
+    '<div class="p-brandrow">' + logoSvg(26) + '<span class="p-brandword">LifeOS</span></div>' +
+    greetingHtml() +
+    (!(profile && profile.country)
+      ? '<button class="p-nudge" data-tab="settings">👤 Set up your profile — country-specific links and guidance on every task →</button>'
+      : '') +
+    inputHtml() +
+    '<div id="p-matches">' + matchesHtml() + '</div>' +
+    (designId === 'noir' && plans.length ? statsHtml() : '') +
+    plansHtml(sectionNo++) +
+    quickAddHtml(longTail);
+  bodyEl.innerHTML = html;
+  const ta = document.getElementById('p-freetext');
+  ta.addEventListener('input', () => {
+    homeInput = ta.value;
+    document.getElementById('p-matches').innerHTML = matchesHtml();
+    document.getElementById('p-go').disabled = !Intent.matchIntent(homeInput).length;
+    renderIntentPanel();
+  });
+  ta.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); goToBest(); }
+  });
+}
+
+/** The LifeOS mark: progress ring + dot (life in progress) around a check (handled). */
+function logoSvg(size) {
+  return '<svg class="p-logo" width="' + size + '" height="' + size + '" viewBox="0 0 64 64" fill="none" aria-label="LifeOS logo">' +
+    '<path class="lg-stroke" d="M48.97 15.03 A24 24 0 1 1 15.03 15.03" stroke-width="6" stroke-linecap="round"/>' +
+    '<circle class="lg-dot" cx="32" cy="8" r="3.5"/>' +
+    '<path class="lg-stroke" d="M22 33 L29.5 40.5 L43 25" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>';
+}
+
+/** Congratulatory popup for freshly added milestone plans. */
+function showCelebration(plan) {
+  const firstName = profile ? (profile.firstName || (profile.name || '').trim().split(' ')[0] || '') : '';
+  const emojis = ['🎉', '🎊', '✨', '💛', '🎈'];
+  let confetti = '';
+  for (let i = 0; i < 18; i++) {
+    confetti += '<span style="left:' + Math.round(Math.random() * 95) + '%;animation-delay:' +
+      (Math.random() * 2).toFixed(2) + 's">' + emojis[i % emojis.length] + '</span>';
+  }
+  const wrap = document.createElement('div');
+  wrap.className = 'p-celebrate';
+  wrap.innerHTML =
+    '<div class="p-confetti" aria-hidden="true">' + confetti + '</div>' +
+    '<div class="p-celebrate-card">' +
+    '<div style="font-size:46px">' + plan.emoji + '</div>' +
+    '<h2 class="p-cel-title">Congratulations' + (firstName ? ', ' + esc(firstName) : '') + '!</h2>' +
+    '<p class="p-cel-msg">' + esc(Celebrate.celebrationMessage(plan.eventId)) + '</p>' +
+    '<p class="p-cel-sub">Your plan is ready — LifeOS handles the paperwork while you enjoy the moment.</p>' +
+    '<button class="p-cta" data-celebrate-close>See my plan 🎉</button></div>';
+  document.querySelector('.screen').appendChild(wrap);
+  log('🎉 milestone celebration shown for <b>' + esc(plan.eventId) + '</b>');
+}
+
+/* Enter / Go: open intake for the top-scored match. */
+function goToBest() {
+  const top = Intent.matchIntent(homeInput)[0];
+  if (!top) return;
+  log('go → <b>' + esc(top.event.id) + '</b> (top match)');
+  intakeAnswers = {};
+  navigate({ name: 'intake', eventId: top.event.id });
+}
+
+function renderIntake() {
+  const template = Catalog.getEventTemplate(route.eventId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">New plan</span>';
+  if (!template) { bodyEl.innerHTML = '<p class="p-empty">Unknown event.</p>'; return; }
+  let html = '<h1 class="p-h1" style="font-size:22px">' + template.emoji + ' ' + esc(template.name) + '</h1>' +
+    '<p class="p-sub">' + esc(template.summary) + '</p>';
+  for (const q of template.questions) {
+    html += '<div class="p-card"><p class="p-q">' + esc(q.prompt) + '</p>';
+    if (q.kind === 'boolean') {
+      html += '<div class="p-chiprow">' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === true ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|1">Yes</button>' +
+        '<button class="p-chip' + (intakeAnswers[q.id] === false ? ' sel' : '') + '" data-ans-bool="' + esc(q.id) + '|0">No</button></div>';
+    } else if (q.kind === 'choice') {
+      html += '<div class="p-chiprow">' + (q.choices || []).map((c) =>
+        '<button class="p-chip' + (intakeAnswers[q.id] === c ? ' sel' : '') + '" data-ans-choice="' + esc(q.id) + '|' + esc(c) + '">' + esc(c) + '</button>').join('') + '</div>';
+    } else if (q.kind === 'date') {
+      html += '<input class="p-text" type="date" value="' + esc(intakeAnswers[q.id] || simToday) + '" data-ans-text="' + esc(q.id) + '">';
+    } else {
+      html += '<input class="p-text" type="text" placeholder="Type here…" value="' + esc(intakeAnswers[q.id] || '') + '" data-ans-text="' + esc(q.id) + '">';
+    }
+    html += '</div>';
+  }
+  html += '<button class="p-cta" data-build="' + esc(template.id) + '">Build my plan</button>' +
+    '<p class="p-hint">Unanswered yes/no questions are treated as "No" — you can always regenerate the plan.</p>';
+  bodyEl.innerHTML = html;
+  bodyEl.querySelectorAll('[data-ans-text]').forEach((el) => {
+    el.addEventListener('input', () => { intakeAnswers[el.dataset.ansText] = el.value; });
+  });
+}
+
+function renderPlan() {
+  const plan = plans.find((p) => p.id === route.planId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Plan</span>';
+  if (!plan) { bodyEl.innerHTML = '<p class="p-empty">Plan not found.</p>'; return; }
+  const pr = Progress.planProgress(plan, simToday);
+  const groups = Progress.groupByDomain(plan);
+  let html = '<h1 class="p-h1" style="font-size:22px">' + plan.emoji + ' ' + esc(plan.eventName) + '</h1>' +
+    (plan.milestone ? '<div class="p-star" style="margin-top:2px">⭐ Milestone</div>' : '') +
+    '<p class="p-sub" style="font-size:12px">Event date ' + plan.eventDate + ' · ' + pr.done + '/' + pr.total + ' done' +
+    (pr.overdue ? ' · <b style="color:#C62828">' + pr.overdue + ' overdue</b>' : '') + '</p>' +
+    '<div class="p-progress" style="margin-bottom:16px"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></div>';
+  for (const g of groups) {
+    const resolved = g.tasks.filter((t) => t.status === 'done' || t.status === 'skipped').length;
+    html += '<div class="p-card"><div class="p-ghead">' +
+      '<span class="gdot" style="background:' + DOMAIN_COLORS[g.domain] + '"></span>' +
+      '<span class="gl">' + esc(g.label) + '</span><span class="gc">' + resolved + '/' + g.tasks.length + '</span></div>' +
+      g.tasks.map((t) => taskRowHtml(t, plan.id)).join('') + '</div>';
+  }
+  const planProducts = Products.productsForPlan(plan.eventId);
+  if (planProducts.length) {
+    html += '<div class="p-section">🛍️ Things you might need</div>' +
+      '<div class="p-prods">' + planProducts.map((p) =>
+        '<a class="p-prod" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<span class="pe">🛍️</span><span class="pl">' + esc(p.label) + '</span><span class="pa">Amazon ↗</span></a>').join('') +
+      '</div><p class="p-disclosure">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p>';
+  }
+  html += '<button class="p-del" data-del-plan="' + esc(plan.id) + '">Delete this plan</button>';
+  bodyEl.innerHTML = html;
+}
+
+function renderTask() {
+  const plan = plans.find((p) => p.id === route.planId);
+  const task = plan && plan.tasks.find((t) => t.id === route.taskId);
+  headerEl.innerHTML = '<button class="back" data-back>‹ Back</button><span class="p-htitle">Task</span>';
+  if (!task) { bodyEl.innerHTML = '<p class="p-empty">Task not found.</p>'; return; }
+  const blockers = task.dependsOn
+    .map((id) => plan.tasks.find((t) => t.id === id))
+    .filter((t) => t && t.status !== 'done' && t.status !== 'skipped');
+  let html = '<h1 class="p-h1" style="font-size:20px">' + esc(task.title) + '</h1>' +
+    '<p class="p-sub" style="font-size:12px">' + esc(Types.DOMAIN_LABELS[task.domain]) +
+    ' · <b style="color:' + PRIORITY_COLORS[task.priority] + '">' + PRIORITY_LABELS[task.priority] + '</b></p>' +
+    '<div class="p-card"><p class="p-desc">' + esc(task.description) + '</p>' +
+    (task.authority ? '<p class="p-meta">Handled by: ' + esc(task.authority) + '</p>' : '') +
+    '<p class="p-meta strong">Start ' + task.startDate + ' · Due ' + task.dueDate + '</p></div>';
+  const resources = Resources.resolveResources(task, profile);
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">ⓘ How &amp; where to do this</div>' +
+    resources.map((r) =>
+      '<a class="p-resource" href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' +
+      '<span>' + (r.kind === 'search' ? '🔎' : '🔗') + '</span><span>' + esc(r.label) + '</span></a>').join('') +
+    '<p class="p-reshint">' +
+    (profile && profile.country
+      ? 'Localized for ' + esc([profile.region, Resources.countryName(profile.country)].filter(Boolean).join(', ')) + ' — change in Profile.'
+      : 'Set your country in the Profile tab for official local links.') +
+    '</p></div>';
+  const taskProducts = Products.productsForTask(plan.eventId, task.templateId);
+  if (taskProducts.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">🛍️ Helpful products</div>' +
+      taskProducts.map((p) =>
+        '<a class="p-resource" href="' + esc(Products.productUrl(p, profile)) + '" target="_blank" rel="noopener noreferrer sponsored" data-prod="' + esc(p.label) + '">' +
+        '<span>🛍️</span><span>' + esc(p.label) + '</span></a>').join('') +
+      '<p class="p-disclosure" style="margin:6px 0 0">' + esc(Products.AFFILIATE_DISCLOSURE) + '</p></div>';
+  }
+  if (task.status === 'blocked' && blockers.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Waiting on</div>' +
+      blockers.map((b) => '<div class="p-block">🔒 ' + esc(b.title) + '</div>').join('') + '</div>';
+  }
+  const opts = [['pending', 'To do'], ['in_progress', 'In progress'], ['done', 'Done'], ['skipped', 'Not applicable']];
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Status</div><div class="p-chiprow">' +
+    opts.map(([s, l]) => '<button class="p-chip' + (task.status === s ? ' sel' : '') + '" data-status="' + s + '">' + l + '</button>').join('') +
+    '</div></div>';
+  if (task.steps.length) {
+    const doneCount = task.steps.filter((s) => s.done).length;
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Steps (' + doneCount + '/' + task.steps.length + ')</div>' +
+      task.steps.map((s) =>
+        '<button class="p-doc' + (s.done ? ' on' : '') + '" data-step="' + esc(s.name) + '">' +
+        '<span class="cb">' + (s.done ? '☑' : '☐') + '</span><span class="dn">' + esc(s.name) + '</span></button>').join('') +
+      '</div>';
+  }
+  if (task.documents.length) {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">Documents needed</div>' +
+      task.documents.map((d) =>
+        '<button class="p-doc' + (d.collected ? ' on' : '') + '" data-doc="' + esc(d.name) + '">' +
+        '<span class="cb">' + (d.collected ? '☑' : '☐') + '</span><span class="dn">' + esc(d.name) + '</span></button>').join('') +
+      '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTimeline() {
+  headerEl.innerHTML = '';
+  const timeline = Progress.buildTimeline(plans, simToday);
+  const label = (d) => d < 0 ? (-d) + 'd overdue' : d === 0 ? 'due today' : 'in ' + d + 'd';
+  const row = (e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · ' + label(e.daysUntilDue));
+  const SEVERITY = { critical: 0, high: 1, medium: 2, low: 3 };
+  const bySeverity = [...timeline].sort(
+    (a, b) => SEVERITY[a.task.priority] - SEVERITY[b.task.priority] || a.daysUntilDue - b.daysUntilDue
+  );
+  let html = '<h1 class="p-h1">Timeline</h1><p class="p-sub">Every deadline from every plan, in one place.</p>';
+  if (!timeline.length) {
+    html += '<p class="p-empty">Nothing due — create a plan from the Home tab.</p>';
+  } else {
+    html += '<div class="p-card"><div class="p-section" style="margin-top:0">By severity</div>' +
+      bySeverity.map(row).join('') + '</div>' +
+      '<div class="p-card"><div class="p-section" style="margin-top:0">By due date</div>' +
+      timeline.map(row).join('') + '</div>';
+  }
+  bodyEl.innerHTML = html;
+}
+
+function renderTabbar() {
+  const tabs = [['home', '🏠', 'Home'], ['dashboard', '📊', 'Dashboard'], ['timeline', '📅', 'Timeline'], ['settings', '⚙️', 'Settings']];
+  const onTabs = tabs.some(([id]) => id === route.name);
+  tabbarEl.className = 'tabbar tb-' + designId;
+  tabbarEl.style.display = onTabs ? 'flex' : 'none';
+  if (!onTabs) return;
+  tabbarEl.innerHTML = tabs.map(([id, icon, label]) => {
+    const active = route.name === id ? ' active' : '';
+    if (designId === 'paper' || designId === 'studio') {
+      return '<button class="' + active + '" data-tab="' + id + '"><span class="lbl">' + label + '</span></button>';
+    }
+    if (designId === 'noir') {
+      return '<button class="' + active + '" data-tab="' + id + '" aria-label="' + label + '"><span class="ticon">' + icon + '</span></button>';
+    }
+    return '<button class="' + active + '" data-tab="' + id + '">' +
+      '<span class="ticon-pill"><span class="ticon">' + icon + '</span></span><span class="lbl">' + label + '</span></button>';
+  }).join('');
+}
+
+function renderAuth() {
+  headerEl.innerHTML = '';
+  tabbarEl.style.display = 'none';
+  if (authView === 'confirm') {
+    bodyEl.innerHTML =
+      '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:90%;text-align:center;padding:0 10px">' +
+      '<div style="font-size:46px">📬</div>' +
+      '<h1 class="p-h1">Check your email</h1>' +
+      '<p class="p-sub">We sent a confirmation link to<br><b>' + esc(auth.email) + '</b><br><br>Tap the link to activate your account, then sign in.</p>' +
+      '<button class="p-cta" style="width:100%" data-auth-mode="signin">I’ve confirmed — sign in</button></div>';
+    return;
+  }
+  const isSignup = authView === 'signup';
+  const rulesHtml = () => {
+    const check = Password.validatePassword(authDraft.password);
+    const rows = Password.PASSWORD_RULES.map((rule) => {
+      const met = authDraft.password.length > 0 && !check.problems.includes(rule);
+      return '<div class="p-rule' + (met ? ' met' : '') + '">' + (met ? '✓' : '○') + ' ' + esc(rule) + '</div>';
+    });
+    const match = authDraft.confirm.length > 0 && authDraft.confirm === authDraft.password;
+    const bad = authDraft.confirm.length > 0 && !match;
+    rows.push('<div class="p-rule' + (match ? ' met' : bad ? ' bad' : '') + '">' +
+      (match ? '✓' : '○') + ' Passwords match</div>');
+    return rows.join('');
+  };
+  const signupDetailsHtml = () =>
+    '<div class="p-authlabel">About you</div>' +
+    '<div class="p-namerow">' +
+    '<input class="p-text p-authfield" id="af-first" placeholder="First name" value="' + esc(authDraft.firstName) + '">' +
+    '<input class="p-text p-authfield" id="af-last" placeholder="Last name" value="' + esc(authDraft.lastName) + '">' +
+    '</div>' +
+    countrySelectHtml('af-country', authDraft.country) +
+    (authDraft.country ? regionFieldHtml('af-region', authDraft.country, authDraft.region) : '') +
+    '<p class="p-hint" style="margin:0 0 8px">Your country and state localize task guidance and product links.</p>';
+  bodyEl.innerHTML =
+    '<div style="padding-top:44px">' +
+    '<div style="display:flex;justify-content:center;margin-bottom:10px">' + logoSvg(72) + '</div>' +
+    '<h1 class="p-h1" style="text-align:center;font-size:30px;letter-spacing:-.5px">LifeOS</h1>' +
+    '<p class="p-sub" style="text-align:center">Life’s big moments, minus the paperwork.</p>' +
+    '<div class="p-chiprow" style="justify-content:center;margin-bottom:12px">' +
+    '<button class="p-chip' + (!isSignup ? ' sel' : '') + '" data-auth-mode="signin">Sign in</button>' +
+    '<button class="p-chip' + (isSignup ? ' sel' : '') + '" data-auth-mode="signup">Create account</button></div>' +
+    '<input class="p-text p-authfield" id="af-email" placeholder="Email" value="' + esc(authDraft.email) + '">' +
+    '<input class="p-text p-authfield" id="af-pass" type="password" placeholder="Password" value="' + esc(authDraft.password) + '">' +
+    (isSignup ? '<input class="p-text p-authfield" id="af-pass2" type="password" placeholder="Confirm password" value="' + esc(authDraft.confirm) + '">' : '') +
+    (isSignup ? '<div class="p-card" id="pw-rules" style="padding:10px 14px">' + rulesHtml() + '</div>' : '') +
+    (isSignup ? signupDetailsHtml() : '') +
+    '<p id="auth-error" class="p-overdue" style="text-align:center;min-height:16px"></p>' +
+    '<button class="p-cta" data-auth-submit>' + (isSignup ? 'Create account' : 'Sign in') + '</button>' +
+    (!isSignup && auth && !auth.confirmed
+      ? '<button class="p-hint" style="background:none;border:none;width:100%;cursor:pointer" data-auth-confirm-link>📧 (Bench) simulate opening the confirmation link</button>'
+      : '') +
+    '<p class="p-hint">' + (isSignup
+      ? 'We’ll email you a confirmation link before your first sign-in.'
+      : 'Your plans sync securely to your account for backup.') + '</p></div>';
+  for (const [id, key] of [['af-email', 'email'], ['af-pass', 'password'], ['af-pass2', 'confirm'],
+    ['af-first', 'firstName'], ['af-last', 'lastName'], ['af-region', 'region']]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.tagName === 'SELECT') {
+      el.addEventListener('change', () => { authDraft[key] = el.value; });
+    } else {
+      el.addEventListener('input', () => {
+        authDraft[key] = el.value;
+        const rules = document.getElementById('pw-rules');
+        if (rules && (key === 'password' || key === 'confirm')) rules.innerHTML = rulesHtml();
+      });
+    }
+  }
+  const countryEl = document.getElementById('af-country');
+  if (countryEl) countryEl.addEventListener('change', () => {
+    authDraft.country = countryEl.value;
+    authDraft.region = '';
+    renderAuth();  // swap the state field between dropdown and free text
+  });
+}
+
+/* Country / state field builders shared by the auth and settings screens. */
+function countrySelectHtml(id, selected) {
+  return '<select class="p-text p-authfield" id="' + id + '">' +
+    '<option value=""' + (selected ? '' : ' selected') + ' disabled>Country</option>' +
+    Resources.COUNTRIES.map((c) =>
+      '<option value="' + c.code + '"' + (selected === c.code ? ' selected' : '') + '>' + esc(c.name) + '</option>').join('') +
+    '</select>';
+}
+function regionFieldHtml(id, country, value) {
+  const label = Resources.regionLabelFor(country);
+  const opts = Resources.regionOptions(country);
+  if (opts) {
+    return '<select class="p-text p-authfield" id="' + id + '">' +
+      '<option value=""' + (value ? '' : ' selected') + ' disabled>' + esc(label) + '</option>' +
+      opts.map((s) =>
+        '<option value="' + esc(s) + '"' + (value === s ? ' selected' : '') + '>' + esc(s) + '</option>').join('') +
+      '</select>';
+  }
+  return '<input class="p-text p-authfield" id="' + id + '" placeholder="' + esc(label) + '" value="' + esc(value || '') + '">';
+}
+
+function renderTerms() {
+  headerEl.innerHTML = '';
+  tabbarEl.style.display = 'none';
+  bodyEl.innerHTML =
+    '<h1 class="p-h1" style="margin-top:14px">Terms &amp; Disclaimer</h1>' +
+    '<p class="p-sub">Version ' + esc(Terms.TERMS_VERSION) + ' — please read before using LifeOS.</p>' +
+    Terms.TERMS_SECTIONS.map((s) =>
+      '<div class="p-card"><p class="p-q">' + esc(s.title) + '</p><p class="p-sub" style="margin:0;font-size:13px">' + esc(s.body) + '</p></div>').join('') +
+    '<button class="p-cta" data-tos-accept>I agree — continue</button>' +
+    '<button class="p-hint" style="background:none;border:none;width:100%;cursor:pointer;margin-bottom:16px" data-tos-decline>Decline and sign out</button>';
+}
+
+function renderPhone() {
+  const gate = authGate();
+  if (gate === 'auth') { renderAuth(); return; }
+  if (gate === 'terms') { renderTerms(); return; }
+  if (route.name === 'home') renderHome();
+  else if (route.name === 'intake') renderIntake();
+  else if (route.name === 'plan') renderPlan();
+  else if (route.name === 'task') renderTask();
+  else if (route.name === 'timeline') renderTimeline();
+  else if (route.name === 'dashboard') renderDashboard();
+  else if (route.name === 'settings') renderSettings();
+  renderTabbar();
+}
+
+function renderDashboard() {
+  headerEl.innerHTML = '';
+  let html = '<h1 class="p-h1" style="margin-top:10px">My dashboard</h1>' +
+    '<p class="p-sub">Your life admin at a glance.</p>';
+  if (!plans.length) {
+    html += '<p class="p-empty">No plans yet — add an event from the Home tab and your progress will show up here.</p>';
+    bodyEl.innerHTML = html;
+    return;
+  }
+  const tl = Progress.buildTimeline(plans, simToday);
+  let done = 0, total = 0;
+  const inProgress = [];
+  for (const p of plans) {
+    for (const t of p.tasks) {
+      total++;
+      if (t.status === 'done' || t.status === 'skipped') done++;
+      if (t.status === 'in_progress') inProgress.push({ plan: p, task: t });
+    }
+  }
+  const due7 = tl.filter((e) => e.daysUntilDue >= 0 && e.daysUntilDue <= 7).length;
+  const overdue = tl.filter((e) => e.daysUntilDue < 0).length;
+
+  html += '<div class="p-statgrid">' +
+    '<div class="p-stattile"><b>' + plans.length + '</b><span>Active plans</span></div>' +
+    '<div class="p-stattile"><b>' + done + '/' + total + '</b><span>Tasks done</span></div>' +
+    '<div class="p-stattile"><b>' + due7 + '</b><span>Due in 7 days</span></div>' +
+    '<div class="p-stattile' + (overdue ? ' bad' : '') + '"><b>' + overdue + '</b><span>Overdue</span></div></div>';
+
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Plans</div>' +
+    plans.map((p) => {
+      const pr = Progress.planProgress(p, simToday);
+      return '<button class="p-planrow2" data-nav-plan="' + esc(p.id) + '">' +
+        '<span class="pr2-name">' + p.emoji + ' ' + esc(p.eventName) + (p.milestone ? ' ⭐' : '') + '</span>' +
+        '<span class="pr2-bar"><i style="width:' + Math.round(pr.fraction * 100) + '%"></i></span>' +
+        '<span class="pr2-count">' + pr.done + '/' + pr.total + '</span></button>';
+    }).join('') + '</div>';
+
+  html += '<div class="p-card"><div class="p-section" style="margin-top:0">Ongoing tasks</div>';
+  if (inProgress.length) {
+    html += inProgress.map(({ plan, task }) =>
+      taskRowHtml(task, plan.id, plan.emoji + ' ' + plan.eventName + ' · due ' + task.dueDate)).join('');
+  } else {
+    const next = tl.slice(0, 3);
+    html += '<p class="p-empty" style="margin-bottom:6px">Nothing marked in progress — here’s what’s next:</p>' +
+      next.map((e) => taskRowHtml(e.task, e.planId, e.emoji + ' ' + e.planName + ' · due ' + e.task.dueDate)).join('');
+  }
+  html += '</div>';
+  bodyEl.innerHTML = html;
+}
+
+function renderSettings() {
+  headerEl.innerHTML = '';
+  const stats = Catalog.EVENT_CATALOG.reduce(
+    (a, e) => ({ tasks: a.tasks + e.tasks.length, steps: a.steps + e.tasks.reduce((n, t) => n + (t.steps || []).length, 0) }),
+    { tasks: 0, steps: 0 }
+  );
+  const themeChip = (v, label) =>
+    '<button class="p-chip' + (themeSetting === v ? ' sel' : '') + '" data-theme-set="' + v + '">' + label + '</button>';
+  if (!profileDraft) {
+    const p = profile || {};
+    profileDraft = {
+      firstName: p.firstName || (p.name || '').trim().split(' ')[0] || '',
+      lastName: p.lastName || (p.name || '').trim().split(' ').slice(1).join(' ') || '',
+      country: p.country || '', region: p.region || '', city: p.city || '',
+    };
+  }
+  const pd = profileDraft;
+  const regionLabel = Resources.regionLabelFor(pd.country);
+  bodyEl.innerHTML =
+    '<h1 class="p-h1" style="margin-top:10px">Settings</h1>' +
+    '<div class="p-section">Account</div>' +
+    '<div class="p-card">' +
+    '<p class="p-q" style="margin-bottom:2px">' + esc(auth ? auth.email : '—') + '</p>' +
+    '<p class="p-hint" style="text-align:left;margin:0 0 8px">Plans back up to your account automatically.</p>' +
+    '<button class="p-del" style="padding:2px 0;text-align:left" data-sign-out>Sign out</button>' +
+    '</div>' +
+    '<div class="p-section">Profile</div>' +
+    '<div class="p-card">' +
+    '<p class="p-q">First name</p><input class="p-text" id="pf-first" value="' + esc(pd.firstName) + '" placeholder="First name">' +
+    '<p class="p-q" style="margin-top:12px">Last name</p><input class="p-text" id="pf-last" value="' + esc(pd.lastName) + '" placeholder="Last name">' +
+    '<p class="p-q" style="margin-top:12px">Country</p>' + countrySelectHtml('pf-country', pd.country) +
+    '<p class="p-q" style="margin-top:8px">' + esc(regionLabel) + '</p>' + regionFieldHtml('pf-region', pd.country, pd.region) +
+    '<p class="p-q" style="margin-top:12px">City</p><input class="p-text" id="pf-city" value="' + esc(pd.city) + '" placeholder="City">' +
+    '<button class="p-cta" style="margin-top:14px" data-save-profile>Save profile</button>' +
+    '<p class="p-hint">Powers country-specific task links and product storefronts.</p>' +
+    '</div>' +
+    '<div class="p-section">Appearance</div>' +
+    '<div class="p-card"><p class="p-q">Theme</p><div class="p-seg">' +
+    themeChip('light', '☀️ Light') + themeChip('dark', '🌙 Dark') + themeChip('system', '⚙️ System') +
+    '</div></div>' +
+    '<div class="p-section">Data</div>' +
+    '<div class="p-card">' +
+    '<button class="p-del" style="padding:6px 0;text-align:left" data-clear-plans>Delete all plans</button>' +
+    '<p class="p-hint" style="text-align:left;margin-top:2px">Profile and settings are kept.</p>' +
+    '</div>' +
+    '<div class="p-section">About</div>' +
+    '<div class="p-card"><p class="p-about">LifeOS 0.1.0 — Universal Life Administration Platform.<br>' +
+    Catalog.EVENT_CATALOG.length + ' life events · ' + stats.tasks + ' tasks · ' + stats.steps + ' checkable steps.<br>' +
+    'All data stays on this device.</p></div>';
+  for (const [id, key] of [['pf-first', 'firstName'], ['pf-last', 'lastName'], ['pf-region', 'region'], ['pf-city', 'city']]) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const evt = el.tagName === 'SELECT' ? 'change' : 'input';
+    el.addEventListener(evt, () => { profileDraft[key] = el.value; });
+  }
+  const pfCountry = document.getElementById('pf-country');
+  if (pfCountry) pfCountry.addEventListener('change', () => {
+    profileDraft.country = pfCountry.value;
+    profileDraft.region = '';
+    renderSettings();  // swap the state field between dropdown and free text
+  });
+}
+
+/* ===== inspector rendering ===== */
+function renderIntentPanel() {
+  const out = document.getElementById('intent-out');
+  if (!homeInput.trim()) {
+    out.innerHTML = '<p class="note">Type into the phone’s input to see live match scoring.</p>';
+    return;
+  }
+  const matches = Intent.matchIntent(homeInput);
+  if (!matches.length) {
+    out.innerHTML = '<p class="note">No catalog event matches <code>' + esc(homeInput) + '</code>.</p>';
+    return;
+  }
+  out.innerHTML = matches.map((m) =>
+    '<div class="imatch"><div class="row"><span class="id">' + esc(m.event.id) + '</span>' +
+    '<span class="score">score ' + m.score + '</span></div>' +
+    '<div class="ev">' + m.matchedOn.map((e) => '<span>' + esc(e) + '</span>').join('') + '</div></div>'
+  ).join('');
+}
+
+function renderPlanPanel() {
+  const panel = document.getElementById('plan-panel');
+  const planId = route.name === 'plan' ? route.planId : route.name === 'task' ? route.planId : null;
+  const plan = planId && plans.find((p) => p.id === planId);
+  if (!plan) { panel.hidden = true; return; }
+  panel.hidden = false;
+  const pr = Progress.planProgress(plan, simToday);
+  const blocked = plan.tasks.filter((t) => t.status === 'blocked').length;
+  const domains = new Set(plan.tasks.map((t) => t.domain)).size;
+  const docs = plan.tasks.reduce((n, t) => n + t.documents.length, 0);
+  const docsDone = plan.tasks.reduce((n, t) => n + t.documents.filter((d) => d.collected).length, 0);
+  const steps = plan.tasks.reduce((n, t) => n + t.steps.length, 0);
+  const stepsDone = plan.tasks.reduce((n, t) => n + t.steps.filter((s) => s.done).length, 0);
+  const gated = Catalog.getEventTemplate(plan.eventId).tasks.length - plan.tasks.length;
+  document.getElementById('plan-stats').innerHTML =
+    '<dt>plan id</dt><dd>' + esc(plan.id.slice(0, 22)) + '…</dd>' +
+    '<dt>tasks (after gating)</dt><dd>' + pr.total + (gated ? ' <span style="color:var(--muted)">(-' + gated + ' gated out)</span>' : '') + '</dd>' +
+    '<dt>domains touched</dt><dd>' + domains + '</dd>' +
+    '<dt>resolved</dt><dd class="good">' + pr.done + '</dd>' +
+    '<dt>blocked by deps</dt><dd>' + blocked + '</dd>' +
+    '<dt>overdue @ sim date</dt><dd class="' + (pr.overdue ? 'bad' : '') + '">' + pr.overdue + '</dd>' +
+    '<dt>steps checked</dt><dd>' + stepsDone + '/' + steps + '</dd>' +
+    '<dt>documents collected</dt><dd>' + docsDone + '/' + docs + '</dd>';
+  document.getElementById('json-btn').onclick = () => {
+    document.getElementById('jsonpre').textContent = JSON.stringify(plan, null, 2);
+    document.getElementById('jsonbox').showModal();
+  };
+  document.getElementById('copy-btn').onclick = () => {
+    navigator.clipboard.writeText(JSON.stringify(plan, null, 2)).then(() => log('plan JSON copied'));
+  };
+}
+
+function renderAll() {
+  renderPhone();
+  renderIntentPanel();
+  renderPlanPanel();
+}
+
+/* ===== phone event delegation ===== */
+document.querySelector('.screen').addEventListener('click', (ev) => {
+  const prodLink = ev.target.closest('a[data-prod]');
+  if (prodLink) { log('🛍️ product click: <b>' + esc(prodLink.dataset.prod) + '</b>'); return; }
+  const el = ev.target.closest('button, [data-back]');
+  if (!el) return;
+  if (el.hasAttribute('data-back')) { goBack(); return; }
+  if (el.hasAttribute('data-go')) { goToBest(); return; }
+  if (el.dataset.tab) {
+    if (el.dataset.tab === 'settings') profileDraft = null;  // rebuilt from saved profile on render
+    route = { name: el.dataset.tab }; backStack = []; renderAll(); return;
+  }
+  if (el.dataset.themeSet) {
+    themeSetting = el.dataset.themeSet;
+    localStorage.setItem(K_THEME, themeSetting);
+    log('theme → <b>' + esc(themeSetting) + '</b>');
+    applyTheme(); renderPhone(); return;
+  }
+  if (el.hasAttribute('data-clear-plans')) {
+    if (el.dataset.confirming) {
+      plans = []; save(); delete el.dataset.confirming;
+      log('<b>clearPlans</b> — all plans deleted');
+      renderAll();
+    } else {
+      el.dataset.confirming = '1';
+      el.textContent = 'Tap again to confirm';
+      setTimeout(() => {
+        if (document.body.contains(el)) { delete el.dataset.confirming; el.textContent = 'Delete all plans'; }
+      }, 4000);
+    }
+    return;
+  }
+  if (el.hasAttribute('data-save-profile')) {
+    const first = (profileDraft.firstName || '').trim(), last = (profileDraft.lastName || '').trim();
+    profile = {
+      name: (first + ' ' + last).trim(),
+      firstName: first,
+      lastName: last,
+      country: profileDraft.country || '',
+      region: (profileDraft.region || '').trim(),
+      city: (profileDraft.city || '').trim(),
+    };
+    localStorage.setItem(K_PROFILE, JSON.stringify(profile));
+    log('<b>setProfile</b> ' + esc(profile.country || '—') + (profile.region ? ' / ' + esc(profile.region) : ''));
+    el.textContent = 'Saved ✓';
+    setTimeout(() => { if (document.body.contains(el)) el.textContent = 'Save profile'; }, 1500);
+    return;
+  }
+  if (el.dataset.navIntake) { intakeAnswers = {}; navigate({ name: 'intake', eventId: el.dataset.navIntake }); return; }
+  if (el.dataset.navPlan) { navigate({ name: 'plan', planId: el.dataset.navPlan }); return; }
+  if (el.dataset.navTask) {
+    const [planId, taskId] = el.dataset.navTask.split('|');
+    navigate({ name: 'task', planId, taskId }); return;
+  }
+  if (el.dataset.ansBool) {
+    const [id, v] = el.dataset.ansBool.split('|');
+    intakeAnswers[id] = v === '1'; renderPhone(); return;
+  }
+  if (el.dataset.ansChoice) {
+    const [id, v] = el.dataset.ansChoice.split('|');
+    intakeAnswers[id] = v; renderPhone(); return;
+  }
+  if (el.dataset.build) {
+    const template = Catalog.getEventTemplate(el.dataset.build);
+    const dateQ = template.questions.find((q) => q.kind === 'date');
+    const eventDate = (dateQ && intakeAnswers[dateQ.id]) || simToday;
+    const plan = Planner.generatePlan({ template, eventDate, answers: intakeAnswers });
+    addPlan(plan);
+    backStack = [{ name: 'home' }];
+    route = { name: 'plan', planId: plan.id };
+    renderAll();
+    if (Celebrate.shouldCelebrate(plan)) showCelebration(plan);
+    return;
+  }
+  if (el.dataset.authMode) { authView = el.dataset.authMode; renderPhone(); return; }
+  if (el.hasAttribute('data-auth-submit')) {
+    const errEl = () => document.getElementById('auth-error');
+    if (authView === 'signup') {
+      if (!Password.isValidEmail(authDraft.email)) { errEl().textContent = 'Enter a valid email address.'; return; }
+      const check = Password.validatePassword(authDraft.password);
+      if (!check.ok) { errEl().textContent = check.problems.join(' · '); return; }
+      if (authDraft.password !== authDraft.confirm) { errEl().textContent = 'Passwords do not match.'; return; }
+      if (!authDraft.firstName.trim()) { errEl().textContent = 'Enter your first name.'; return; }
+      if (!authDraft.country) { errEl().textContent = 'Select your country.'; return; }
+      const first = authDraft.firstName.trim(), last = authDraft.lastName.trim();
+      auth = { name: (first + ' ' + last).trim(), firstName: first, lastName: last,
+        email: authDraft.email.trim(), password: authDraft.password,
+        country: authDraft.country, region: authDraft.region.trim(),
+        confirmed: false, tos: false, signedIn: false };
+      saveAuth();
+      // Seed the local profile so localized links work from the first session.
+      profile = { name: auth.name, firstName: first, lastName: last,
+        country: auth.country, region: auth.region, city: '' };
+      profileDraft = null;
+      localStorage.setItem(K_PROFILE, JSON.stringify(profile));
+      log('<b>signUp</b> ' + esc(auth.email) + ' (' + esc(auth.country) + (auth.region ? '/' + esc(auth.region) : '') + ') — confirmation email sent (simulated)');
+      authView = 'confirm'; renderPhone();
+    } else {
+      if (!auth || auth.email !== authDraft.email.trim() || auth.password !== authDraft.password) {
+        errEl().textContent = 'Invalid email or password.'; return;
+      }
+      if (!auth.confirmed) { errEl().textContent = 'Please confirm your email first — check your inbox.'; return; }
+      auth.signedIn = true; saveAuth();
+      log('<b>signIn</b> ' + esc(auth.email));
+      renderAll();
+    }
+    return;
+  }
+  if (el.hasAttribute('data-auth-confirm-link')) {
+    if (auth) { auth.confirmed = true; saveAuth(); log('📧 <b>email confirmed</b> (simulated link click)'); }
+    renderPhone(); return;
+  }
+  if (el.hasAttribute('data-tos-accept')) {
+    auth.tos = true; saveAuth();
+    log('<b>termsAccepted</b> v' + Terms.TERMS_VERSION);
+    renderAll(); return;
+  }
+  if (el.hasAttribute('data-tos-decline')) {
+    auth.signedIn = false; saveAuth(); authView = 'signin'; renderPhone(); return;
+  }
+  if (el.hasAttribute('data-sign-out')) {
+    auth.signedIn = false; saveAuth(); authView = 'signin';
+    log('<b>signOut</b>');
+    route = { name: 'home' }; backStack = []; renderPhone(); return;
+  }
+  if (el.hasAttribute('data-celebrate-close')) {
+    const overlay = el.closest('.p-celebrate');
+    if (overlay) overlay.remove();
+    return;
+  }
+  if (el.dataset.delPlan) {
+    // confirm() is blocked in sandboxed iframes — use an inline two-tap confirm.
+    if (pendingDeletePlan === el.dataset.delPlan) {
+      pendingDeletePlan = null;
+      removePlan(el.dataset.delPlan); route = { name: 'home' }; backStack = []; renderAll();
+    } else {
+      pendingDeletePlan = el.dataset.delPlan;
+      el.textContent = 'Tap again to confirm delete';
+      setTimeout(() => {
+        if (pendingDeletePlan === el.dataset.delPlan) {
+          pendingDeletePlan = null;
+          if (document.body.contains(el)) el.textContent = 'Delete this plan';
+        }
+      }, 4000);
+    }
+    return;
+  }
+  if (el.dataset.status) {
+    setTaskStatus(route.planId, route.taskId, el.dataset.status); renderAll(); return;
+  }
+  if (el.dataset.step !== undefined && el.dataset.step !== '') {
+    toggleStep(route.planId, route.taskId, el.dataset.step); renderAll(); return;
+  }
+  if (el.dataset.doc !== undefined && el.dataset.doc !== '') {
+    toggleDocument(route.planId, route.taskId, el.dataset.doc); renderAll(); return;
+  }
+});
+
+/* ===== bench controls ===== */
+const SCENARIOS = [
+  'I moved',
+  'I started a business',
+  'I want to immigrate to Canada',
+  'i graduated college',
+  "i planned my son's 5th birthday party",
+  'planned my marriage anniversary',
+  'I got a new job',
+  'I was laid off',
+  'I bought a house',
+  'I retired',
+  'I planned a family trip to Europe',
+  'we adopted a puppy',
+  'my identity was stolen',
+  'training for a triathlon',
+];
+const scEl = document.getElementById('scenarios');
+for (const s of SCENARIOS) {
+  const b = document.createElement('button');
+  b.textContent = '“' + s + '”';
+  b.addEventListener('click', () => {
+    homeInput = s; route = { name: 'home' }; backStack = [];
+    renderAll();
+    log('scenario: <b>' + esc(s) + '</b>');
+  });
+  scEl.appendChild(b);
+}
+
+const todayInput = document.getElementById('sim-today');
+todayInput.value = simToday;
+todayInput.addEventListener('change', () => {
+  simToday = todayInput.value || realToday();
+  localStorage.setItem(K_TODAY, simToday);
+  log('simulated today → <b>' + simToday + '</b>');
+  renderAll();
+});
+
+const resetBtn = document.getElementById('reset-btn');
+let confirmingReset = false;
+resetBtn.addEventListener('click', () => {
+  if (!confirmingReset) {
+    confirmingReset = true;
+    resetBtn.textContent = 'tap again to confirm';
+    setTimeout(() => { confirmingReset = false; resetBtn.textContent = 'reset data'; }, 4000);
+    return;
+  }
+  confirmingReset = false; resetBtn.textContent = 'reset data';
+  localStorage.removeItem(K_PLANS); localStorage.removeItem(K_TODAY); localStorage.removeItem(K_PROFILE);
+  plans = []; profile = null; simToday = realToday(); todayInput.value = simToday;
+  homeInput = ''; route = { name: 'home' }; backStack = [];
+  log('<b>reset</b> — storage cleared');
+  renderAll();
+});
+
+applyTheme();
+renderAll();
+</script>
