@@ -17,24 +17,24 @@ class WaypointApp extends ConsumerWidget {
       title: 'Waypoint',
       debugShowCheckedModeBanner: false,
       themeMode: themeMode,
-      theme: _buildTheme(Brightness.light),
-      darkTheme: _buildTheme(Brightness.dark),
+      theme: waypointTheme(Brightness.light),
+      darkTheme: waypointTheme(Brightness.dark),
       home: const AppShell(),
     );
   }
+}
 
-  ThemeData _buildTheme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF6750A4),
-      brightness: brightness,
-    );
-    return ThemeData(
-      colorScheme: scheme,
-      useMaterial3: true,
-      visualDensity: VisualDensity.adaptivePlatformDensity,
-      cardTheme: const CardThemeData(clipBehavior: Clip.antiAlias),
-    );
-  }
+ThemeData waypointTheme(Brightness brightness) {
+  final scheme = ColorScheme.fromSeed(
+    seedColor: const Color(0xFF6750A4),
+    brightness: brightness,
+  );
+  return ThemeData(
+    colorScheme: scheme,
+    useMaterial3: true,
+    visualDensity: VisualDensity.adaptivePlatformDensity,
+    cardTheme: const CardThemeData(clipBehavior: Clip.antiAlias),
+  );
 }
 
 class _Destination {

@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import 'enums.dart';
@@ -100,7 +101,12 @@ class AppDatabase extends _$AppDatabase {
   static QueryExecutor _openConnection() {
     return driftDatabase(
       name: 'waypoint',
-      native: const DriftNativeOptions(shareAcrossIsolates: true),
+      native: DriftNativeOptions(
+        shareAcrossIsolates: true,
+        // App-support dir, not Documents: keeps the database out of the
+        // user's visible files on desktop and works without xdg-user-dirs.
+        databaseDirectory: getApplicationSupportDirectory,
+      ),
     );
   }
 

@@ -20,6 +20,19 @@ You never *need* the paid tier. Backups are plain JSON, the sync interface is
 small and documented (`lib/sync/sync_service.dart`), and self-hosting your own
 sync target is an explicit design goal.
 
+## Screenshots
+
+| Linux (native capture) | Windows form factor — board |
+|---|---|
+| ![Linux](docs/screenshots/linux_native.png) | ![Windows](docs/screenshots/windows_board.png) |
+
+| Android — My work | iOS — board | macOS — projects |
+|---|---|---|
+| ![Android](docs/screenshots/android_my_work.png) | ![iOS](docs/screenshots/ios_board.png) | ![macOS](docs/screenshots/macos_projects.png) |
+
+<sub>How each image was produced (and how to regenerate them) is documented in
+[`docs/screenshots/README.md`](docs/screenshots/README.md).</sub>
+
 ## Features (v0.1)
 
 - **Projects** — color-coded, with descriptions, live progress bars, archiving

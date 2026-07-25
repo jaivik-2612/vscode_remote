@@ -196,6 +196,7 @@ class _DropSlot extends StatelessWidget {
       onAcceptWithDetails: (details) => onAccept(details.data),
       builder: (context, candidates, rejected) => Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 120),
