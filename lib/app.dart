@@ -5,6 +5,7 @@ import 'features/home/home_page.dart';
 import 'features/projects/projects_page.dart';
 import 'features/search/search_page.dart';
 import 'features/settings/settings_page.dart';
+import 'features/team/team_page.dart';
 import 'providers.dart';
 
 class WaypointApp extends ConsumerWidget {
@@ -48,6 +49,7 @@ class _Destination {
 const _destinations = [
   _Destination('My work', Icons.today_outlined, Icons.today),
   _Destination('Projects', Icons.folder_outlined, Icons.folder),
+  _Destination('Team', Icons.groups_outlined, Icons.groups),
   _Destination('Search', Icons.search_outlined, Icons.search),
   _Destination('Settings', Icons.settings_outlined, Icons.settings),
 ];
@@ -67,6 +69,7 @@ class _AppShellState extends State<AppShell> {
   static const _pages = [
     HomePage(),
     ProjectsPage(),
+    TeamPage(),
     SearchPage(),
     SettingsPage(),
   ];

@@ -14,6 +14,7 @@ is locked behind a paywall.
 |---|---|
 | **The app** | Free, forever. Every feature. No seat limits, no "premium views". |
 | **Your data** | Local SQLite database on your device. Export/import as plain JSON anytime. |
+| **Team collaboration** | Free, over your own LAN: one person hosts, teammates join with a code. No account, no cloud. |
 | **Sync & storage** (planned) | Optional paid service: end-to-end-encrypted sync across devices and hosted file storage — for people who want the convenience of not running anything themselves. |
 
 You never *need* the paid tier. Backups are plain JSON, the sync interface is
@@ -25,6 +26,10 @@ sync target is an explicit design goal.
 | Linux (native capture) | Windows form factor — board |
 |---|---|
 | ![Linux](docs/screenshots/linux_native.png) | ![Windows](docs/screenshots/windows_board.png) |
+
+| Team session — hosting (native) | Team session — teammate joined (native) |
+|---|---|
+| ![Hosting](docs/screenshots/linux_team_hosting.png) | ![Joined](docs/screenshots/linux_team_joined.png) |
 
 | Android — My work | iOS — board | macOS — projects |
 |---|---|---|
@@ -42,9 +47,15 @@ sync target is an explicit design goal.
 - **Tasks** — notes, priorities, due dates, subtask checklists, labels
 - **My work** — cross-project dashboard: overdue, today, next 7 days, later
 - **Search** — instant, across titles and notes in every project
+- **Team sessions** — the project manager hosts the workspace from their own
+  device; teammates on the same network join with an address + code and edit
+  live together. Presence shows who's in the session. A teammate's personal
+  workspace stays untouched (sessions use a separate local database), and
+  leaving keeps a local copy of the shared workspace.
 - **Backup** — one-tap JSON export/import of the entire workspace
 - **Dark mode** — light / dark / follow system, remembered across launches
-- Fully **offline** — no account, no network calls, works on a plane
+- Fully **offline** — no account, no network calls unless you host/join a
+  session on your own LAN; works on a plane
 
 ## Tech
 
@@ -53,7 +64,17 @@ sync target is an explicit design goal.
 | UI | [Flutter](https://flutter.dev) | Single codebase for all five platforms |
 | State | [Riverpod](https://riverpod.dev) | Stream-based providers over the reactive DB |
 | Storage | [Drift](https://drift.simonbinder.eu) (SQLite) | Typed, reactive queries; works everywhere incl. mobile |
+| Collaboration | Plain WebSockets (`dart:io`), host-authoritative row-level ops | Zero dependencies, zero infrastructure; every mutation is an idempotent upsert/delete keyed by UUID, so replicas converge without merge logic |
 | Sync seam | `SyncService` interface | App only talks to the interface; local-only impl ships today, cloud impl plugs in later |
+
+How a team session works: every edit in the UI goes through `Workspace`
+(`lib/data/workspace.dart`), which turns it into row-level ops, applies them
+to the local database and hands them to the live session. The host
+(`lib/sync/session.dart`) applies client ops in arrival order and rebroadcasts
+them; new joiners get a full snapshot (same format as backups) before the op
+stream. Trust model v1: anyone on the LAN with the join code can edit — host
+on networks you trust. TLS + per-member auth ride the same roadmap as hosted
+sync.
 
 ```
 lib/
@@ -105,8 +126,10 @@ dart run build_runner build --delete-conflicting-outputs
 - [ ] File-based backup pickers + automatic scheduled backups
 - [ ] Recurring tasks and reminders/notifications
 - [ ] Calendar and timeline views
-- [ ] Multi-user collaboration (comments, assignees) on top of sync
+- [ ] Session hardening: TLS, per-member auth, mDNS discovery, host handoff
+- [ ] Comments and assignees on top of team sessions
 - [ ] **Waypoint Sync** — optional paid, E2E-encrypted, self-hostable protocol
+  (same op stream as LAN sessions, relayed through a server you don't have to run)
 
 ## License
 

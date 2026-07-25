@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart';
 import '../../data/enums.dart';
 import '../../providers.dart';
+import '../../sync/session_controller.dart';
 import '../../widgets/common.dart';
 import '../tasks/task_editor.dart';
 
@@ -81,7 +82,7 @@ class _BoardColumn extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
 
     return Container(
       width: _columnWidth,

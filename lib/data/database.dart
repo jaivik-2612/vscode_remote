@@ -3,6 +3,8 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
+import '../sync/protocol.dart';
+import 'backup.dart';
 import 'enums.dart';
 
 part 'database.g.dart';
@@ -96,11 +98,11 @@ class ProjectProgress {
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
-  AppDatabase.open() : super(_openConnection());
+  AppDatabase.open({String name = 'waypoint'}) : super(_openConnection(name));
 
-  static QueryExecutor _openConnection() {
+  static QueryExecutor _openConnection(String name) {
     return driftDatabase(
-      name: 'waypoint',
+      name: name,
       native: DriftNativeOptions(
         shareAcrossIsolates: true,
         // App-support dir, not Documents: keeps the database out of the
@@ -358,6 +360,66 @@ class AppDatabase extends _$AppDatabase {
       for (final labelId in labelIds) {
         await into(taskLabels)
             .insert(TaskLabel(taskId: taskId, labelId: labelId));
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sync
+  // ---------------------------------------------------------------------------
+
+  /// Applies row-level sync ops from a team session. Idempotent: upserts
+  /// replace whole rows and deletes cascade through foreign keys, so replays
+  /// and echoes of our own ops are harmless.
+  Future<void> applyOps(List<SyncOp> ops) {
+    return transaction(() async {
+      for (final op in ops) {
+        switch (op) {
+          case UpsertOp(:final table, :final row):
+            switch (table) {
+              // toCompanion(false) keeps explicit nulls: a data class insert
+              // would treat null columns as "absent" and an upsert would then
+              // skip clearing them (e.g. un-completing a task).
+              case 'projects':
+                await into(projects).insertOnConflictUpdate(
+                    Project.fromJson(row, serializer: waypointRowSerializer)
+                        .toCompanion(false));
+              case 'tasks':
+                await into(tasks).insertOnConflictUpdate(
+                    Task.fromJson(row, serializer: waypointRowSerializer)
+                        .toCompanion(false));
+              case 'subtasks':
+                await into(subtasks).insertOnConflictUpdate(
+                    Subtask.fromJson(row, serializer: waypointRowSerializer)
+                        .toCompanion(false));
+              case 'labels':
+                await into(labels).insertOnConflictUpdate(
+                    Label.fromJson(row, serializer: waypointRowSerializer)
+                        .toCompanion(false));
+              case 'task_labels':
+                await into(taskLabels).insertOnConflictUpdate(
+                    TaskLabel.fromJson(row, serializer: waypointRowSerializer)
+                        .toCompanion(false));
+              default:
+                throw FormatException('Unknown table in upsert: $table');
+            }
+          case DeleteOp(:final table, :final id):
+            switch (table) {
+              case 'projects':
+                await (delete(projects)..where((p) => p.id.equals(id))).go();
+              case 'tasks':
+                await (delete(tasks)..where((t) => t.id.equals(id))).go();
+              case 'subtasks':
+                await (delete(subtasks)..where((s) => s.id.equals(id))).go();
+              case 'labels':
+                await (delete(labels)..where((l) => l.id.equals(id))).go();
+              default:
+                throw FormatException('Unknown table in delete: $table');
+            }
+          case ClearTaskLabelsOp(:final taskId):
+            await (delete(taskLabels)..where((tl) => tl.taskId.equals(taskId)))
+                .go();
+        }
       }
     });
   }

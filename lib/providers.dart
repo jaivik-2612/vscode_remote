@@ -6,9 +6,25 @@ import 'data/backup.dart';
 import 'data/database.dart';
 import 'sync/sync_service.dart';
 
+/// Which database file the app is working against. Joining a team session
+/// switches to a separate session database so the personal workspace is
+/// never touched; leaving switches back.
+class DatabaseNameNotifier extends Notifier<String> {
+  static const personal = 'waypoint';
+  static const teamSession = 'waypoint_team';
+
+  @override
+  String build() => personal;
+
+  void set(String name) => state = name;
+}
+
+final databaseNameProvider =
+    NotifierProvider<DatabaseNameNotifier, String>(DatabaseNameNotifier.new);
+
 /// Overridden with an in-memory database in tests.
 final appDatabaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase.open();
+  final db = AppDatabase.open(name: ref.watch(databaseNameProvider));
   ref.onDispose(db.close);
   return db;
 });

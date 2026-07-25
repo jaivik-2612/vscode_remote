@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/database.dart';
 import '../../data/enums.dart';
 import '../../providers.dart';
+import '../../sync/session_controller.dart';
 import '../../widgets/common.dart';
 import '../board/board_page.dart';
 import '../tasks/task_editor.dart';
@@ -29,7 +30,7 @@ class _ProjectPageState extends ConsumerState<ProjectPage> {
       // Deleted while open (e.g. from another window): fall back gracefully.
       return const Scaffold(body: SizedBox.shrink());
     }
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -191,7 +192,7 @@ class TaskListTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final scheme = Theme.of(context).colorScheme;
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
     final done = task.status == TaskStatus.done;
 
     return ListTile(

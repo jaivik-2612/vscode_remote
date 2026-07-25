@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers.dart';
+import '../../sync/session_controller.dart';
 import '../../sync/sync_service.dart';
 
 class SettingsPage extends ConsumerWidget {
@@ -73,7 +74,17 @@ class SettingsPage extends ConsumerWidget {
             title: const Text('Import backup'),
             subtitle:
                 const Text('Replaces everything with a pasted backup.'),
-            onTap: () => _importBackup(context, ref),
+            onTap: () {
+              // A restore would bypass the op stream and desync everyone.
+              if (ref.read(sessionControllerProvider).isActive) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                  content:
+                      Text('Leave the team session before importing a backup.'),
+                ));
+                return;
+              }
+              _importBackup(context, ref);
+            },
           ),
           const Divider(),
           const _SectionHeader('About'),

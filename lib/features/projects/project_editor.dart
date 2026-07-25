@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../data/enums.dart';
-import '../../providers.dart';
+import '../../sync/session_controller.dart';
 import '../../widgets/common.dart';
 
 /// Create ([project] == null) or edit a project.
@@ -48,7 +48,7 @@ class _ProjectEditorDialogState extends ConsumerState<_ProjectEditorDialog> {
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) return;
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
     final Project result;
     if (widget.project == null) {
       result = await db.createProject(

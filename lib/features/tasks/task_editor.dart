@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/database.dart';
 import '../../data/enums.dart';
+import '../../data/workspace.dart';
 import '../../providers.dart';
+import '../../sync/session_controller.dart';
 import '../../widgets/common.dart';
 
 /// Opens the task editor. Pass [task] to edit, or just [projectId] to create.
@@ -79,7 +81,7 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
   Future<void> _save() async {
     final title = _title.text.trim();
     if (title.isEmpty) return;
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
     if (_isNew) {
       await db.createTask(
         projectId: widget.projectId,
@@ -161,7 +163,7 @@ class _TaskEditorSheetState extends ConsumerState<TaskEditorSheet> {
                     );
                     if (ok) {
                       await ref
-                          .read(appDatabaseProvider)
+                          .read(workspaceProvider)
                           .deleteTask(widget.task!.id);
                       if (context.mounted) Navigator.pop(context);
                     }
@@ -298,7 +300,7 @@ class _SubtasksSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final subtasks = ref.watch(subtasksProvider(taskId)).value ?? [];
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -356,7 +358,7 @@ class _LabelsSection extends ConsumerWidget {
     final allLabels = ref.watch(labelsProvider).value ?? [];
     final taskLabels = ref.watch(taskLabelsProvider(taskId)).value ?? [];
     final selectedIds = {for (final label in taskLabels) label.id};
-    final db = ref.read(appDatabaseProvider);
+    final db = ref.read(workspaceProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,7 +394,7 @@ class _LabelsSection extends ConsumerWidget {
     );
   }
 
-  Future<void> _createLabel(BuildContext context, AppDatabase db) async {
+  Future<void> _createLabel(BuildContext context, Workspace db) async {
     final controller = TextEditingController();
     var color = projectColors.first.toARGB32();
     await showDialog<void>(

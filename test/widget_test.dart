@@ -75,6 +75,23 @@ void main() {
     await unmount(tester);
   });
 
+  testWidgets('team page offers hosting and joining', (tester) async {
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+
+    await tester.pumpWidget(buildApp(db));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Team').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Host a session'), findsOneWidget);
+    expect(find.text('Join a session'), findsOneWidget);
+    expect(find.text('Start hosting'), findsOneWidget);
+
+    await unmount(tester);
+  });
+
   testWidgets('dashboard shows open tasks with project context',
       (tester) async {
     final db = AppDatabase(NativeDatabase.memory());

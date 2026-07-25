@@ -9,6 +9,11 @@ import 'database.dart';
 /// Export/import is free and always will be: your data is never held hostage.
 /// The same snapshot format is what the (optional, paid) cloud sync service
 /// transports — see `lib/sync/sync_service.dart`.
+/// Shared row serializer: dates as ISO-8601 strings so backups and sync
+/// messages are human-readable and portable.
+const waypointRowSerializer =
+    ValueSerializer.defaults(serializeDateTimeValuesAsString: true);
+
 class BackupCodec {
   BackupCodec(this.db);
 
@@ -17,11 +22,15 @@ class BackupCodec {
   static const format = 'waypoint-backup';
   static const version = 1;
 
-  static const _serializer =
-      ValueSerializer.defaults(serializeDateTimeValuesAsString: true);
+  static const _serializer = waypointRowSerializer;
 
-  Future<String> export() async {
-    final snapshot = await db.transaction(() async {
+  Future<String> export() async =>
+      const JsonEncoder.withIndent('  ').convert(await exportObject());
+
+  /// The snapshot as a JSON object (also used as the join payload when a
+  /// teammate connects to a hosted session).
+  Future<Map<String, Object?>> exportObject() async {
+    return db.transaction(() async {
       return {
         'format': format,
         'version': version,
@@ -48,15 +57,16 @@ class BackupCodec {
         ],
       };
     });
-    return const JsonEncoder.withIndent('  ').convert(snapshot);
   }
 
   /// Replaces the current workspace with the backup's contents.
   ///
   /// Throws [FormatException] if [source] is not a Waypoint backup; the
   /// existing data is left untouched in that case (single transaction).
-  Future<void> import(String source) async {
-    final Object? decoded = jsonDecode(source);
+  Future<void> import(String source) async =>
+      importObject(jsonDecode(source) as Object?);
+
+  Future<void> importObject(Object? decoded) async {
     if (decoded is! Map<String, Object?> ||
         decoded['format'] != format ||
         decoded['version'] is! int) {
