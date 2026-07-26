@@ -1,8 +1,12 @@
 name: Release builds
 
+# Triggered by a v* tag, a release/** pointer branch (the git proxy in the
+# development environment cannot push tags), or manual dispatch.
 on:
   push:
     tags: ["v*"]
+    branches: ["release/**"]
+  create:
   workflow_dispatch:
 
 env:
@@ -11,8 +15,17 @@ env:
 permissions:
   contents: write
 
+# The `create` event has no ref filter, so gate every job instead.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   android:
+    if: >-
+      github.event_name != 'create' ||
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/tags/v')
     name: Android APK
     runs-on: ubuntu-latest
     steps:
@@ -34,6 +47,10 @@ jobs:
           path: waypoint-android.apk
 
   linux:
+    if: >-
+      github.event_name != 'create' ||
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/tags/v')
     name: Linux bundle
     runs-on: ubuntu-latest
     steps:
@@ -52,6 +69,10 @@ jobs:
           path: waypoint-linux-x64.tar.gz
 
   windows:
+    if: >-
+      github.event_name != 'create' ||
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/tags/v')
     name: Windows bundle
     runs-on: windows-latest
     steps:
@@ -69,6 +90,10 @@ jobs:
           path: waypoint-windows-x64.zip
 
   macos:
+    if: >-
+      github.event_name != 'create' ||
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/tags/v')
     name: macOS app
     runs-on: macos-latest
     steps:
@@ -87,6 +112,10 @@ jobs:
           path: waypoint-macos.zip
 
   ios:
+    if: >-
+      github.event_name != 'create' ||
+      startsWith(github.ref, 'refs/heads/release/') ||
+      startsWith(github.ref, 'refs/tags/v')
     name: iOS app (unsigned)
     runs-on: macos-latest
     steps:
@@ -118,10 +147,11 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
         run: |
+          TAG="${GITHUB_REF_NAME#release/}"
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
             --title "Waypoint $TAG" \
             --notes "Test builds for all five platforms. See README for install notes (macOS app and iOS IPA are unsigned)." \
             waypoint-android.apk \
