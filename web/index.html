@@ -1,212 +1,235 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Option Fair Value</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
 <link rel="stylesheet" href="./styles.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
 </head>
 <body>
-<header class="topbar">
-  <h1>Option Fair Value</h1>
-  <div class="topbar-actions">
-    <div class="tabs" role="tablist">
-      <button class="tab is-active" role="tab" data-mode="price">Price</button>
-      <button class="tab" role="tab" data-mode="implied">Implied vol</button>
-      <button class="tab" role="tab" data-mode="grant">Employee grant</button>
-    </div>
-    <button id="theme" class="ghost" type="button" title="Toggle light and dark">◐</button>
+
+<header class="masthead">
+  <div class="wordmark">
+    <span class="wordmark-name">Option Fair Value</span>
+    <span class="wordmark-note">Black&#8209;Scholes &amp; binomial pricing</span>
+  </div>
+  <div class="masthead-tools">
+    <nav class="modes" role="tablist" aria-label="Calculator mode">
+      <button class="mode is-active" role="tab" aria-selected="true" data-mode="price">Price</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="implied">Implied vol</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="grant">Grant</button>
+    </nav>
+    <button id="theme" class="icon-button" type="button" aria-label="Switch between light and dark">
+      <span aria-hidden="true">◐</span>
+    </button>
   </div>
 </header>
 
-<main>
-  <!-- ---------------------------------------------------------------- -->
-  <section class="panel" data-mode-panel="price">
-    <form id="price-form" class="grid">
-      <label>Underlying price
-        <input name="spot" type="number" step="any" value="100" required>
-      </label>
-      <label>Strike
-        <input name="strike" type="number" step="any" value="100" required>
-      </label>
-      <label>Days to expiry
-        <input name="days" type="number" step="any" value="90" required>
-      </label>
-      <label>Volatility <span class="unit">% p.a.</span>
-        <input name="vol" type="number" step="any" value="25" required>
-      </label>
-      <label>Risk-free rate <span class="unit">%</span>
-        <input name="rate" type="number" step="any" value="4.5" required>
-      </label>
-      <label>Dividend yield <span class="unit">%</span>
-        <input name="yield" type="number" step="any" value="0" required>
-      </label>
-      <label>Type
-        <select name="type">
-          <option value="call">Call</option>
-          <option value="put">Put</option>
-        </select>
-      </label>
-      <label>Exercise
-        <select name="style">
-          <option value="european">European</option>
-          <option value="american">American</option>
-        </select>
-      </label>
-      <label>Contract multiplier
-        <input name="multiplier" type="number" step="any" value="100" required>
-      </label>
+<div class="workspace">
+
+  <!-- ============================================================ rail -->
+  <aside class="rail">
+
+    <form id="price-form" data-panel="price" autocomplete="off">
+      <fieldset>
+        <legend>Contract</legend>
+        <div class="fields">
+          <label>Underlying<input name="spot" type="number" step="any" value="100" required></label>
+          <label>Strike<input name="strike" type="number" step="any" value="100" required></label>
+          <label>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
+          <label>Multiplier<input name="multiplier" type="number" step="any" value="100" required></label>
+        </div>
+        <div class="segments" role="group" aria-label="Option type">
+          <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
+          <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
+        </div>
+        <div class="segments" role="group" aria-label="Exercise style">
+          <label class="segment"><input type="radio" name="style" value="european" checked><span>European</span></label>
+          <label class="segment"><input type="radio" name="style" value="american"><span>American</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Market</legend>
+        <div class="fields">
+          <label>Volatility<span class="suffix">% p.a.</span><input name="vol" type="number" step="any" value="25" required></label>
+          <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4.5" required></label>
+          <label>Dividend yield<span class="suffix">%</span><input name="yield" type="number" step="any" value="0" required></label>
+        </div>
+      </fieldset>
     </form>
 
-    <div id="price-error" class="error" hidden></div>
-
-    <div class="headline">
-      <div class="headline-main">
-        <span class="label">Fair value per share</span>
-        <output id="fair-value" class="big">—</output>
-        <span id="per-contract" class="sub">—</span>
-      </div>
-      <dl class="headline-split">
-        <div><dt>Intrinsic</dt><dd id="intrinsic">—</dd></div>
-        <div><dt>Time value</dt><dd id="time-value">—</dd></div>
-        <div><dt>Break-even</dt><dd id="break-even">—</dd></div>
-      </dl>
-    </div>
-
-    <div class="cards" id="greeks"></div>
-
-    <div class="split">
-      <figure class="chart-wrap">
-        <figcaption>Value against underlying price</figcaption>
-        <div id="chart"></div>
-        <p class="legend">
-          <span class="key key-value"></span> Fair value today
-          <span class="key key-payoff"></span> Payoff at expiry
-          <span class="key key-spot"></span> Spot
-        </p>
-      </figure>
-      <div class="notes">
-        <h2>Diagnostics</h2>
-        <dl id="diagnostics"></dl>
-      </div>
-    </div>
-  </section>
-
-  <!-- ---------------------------------------------------------------- -->
-  <section class="panel" data-mode-panel="implied" hidden>
-    <p class="blurb">
-      Work backwards from a traded price to the volatility that justifies it,
-      then compare it against your own volatility estimate.
-    </p>
-    <form id="implied-form" class="grid">
-      <label>Market price
-        <input name="price" type="number" step="any" value="6.20" required>
-      </label>
-      <label>Underlying price
-        <input name="spot" type="number" step="any" value="100" required>
-      </label>
-      <label>Strike
-        <input name="strike" type="number" step="any" value="100" required>
-      </label>
-      <label>Days to expiry
-        <input name="days" type="number" step="any" value="90" required>
-      </label>
-      <label>Risk-free rate <span class="unit">%</span>
-        <input name="rate" type="number" step="any" value="4.5" required>
-      </label>
-      <label>Dividend yield <span class="unit">%</span>
-        <input name="yield" type="number" step="any" value="0" required>
-      </label>
-      <label>Type
-        <select name="type">
-          <option value="call">Call</option>
-          <option value="put">Put</option>
-        </select>
-      </label>
-      <label>Exercise
-        <select name="style">
-          <option value="european">European</option>
-          <option value="american">American</option>
-        </select>
-      </label>
+    <form id="implied-form" data-panel="implied" hidden autocomplete="off">
+      <fieldset>
+        <legend>Quote</legend>
+        <div class="fields">
+          <label>Traded price<input name="price" type="number" step="any" value="6.20" required></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Contract</legend>
+        <div class="fields">
+          <label>Underlying<input name="spot" type="number" step="any" value="100" required></label>
+          <label>Strike<input name="strike" type="number" step="any" value="100" required></label>
+          <label>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
+        </div>
+        <div class="segments" role="group" aria-label="Option type">
+          <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
+          <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
+        </div>
+        <div class="segments" role="group" aria-label="Exercise style">
+          <label class="segment"><input type="radio" name="style" value="european" checked><span>European</span></label>
+          <label class="segment"><input type="radio" name="style" value="american"><span>American</span></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Market</legend>
+        <div class="fields">
+          <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4.5" required></label>
+          <label>Dividend yield<span class="suffix">%</span><input name="yield" type="number" step="any" value="0" required></label>
+        </div>
+      </fieldset>
     </form>
 
-    <div id="implied-error" class="error" hidden></div>
-
-    <div class="headline">
-      <div class="headline-main">
-        <span class="label">Implied volatility</span>
-        <output id="implied-vol" class="big">—</output>
-        <span id="implied-note" class="sub">—</span>
-      </div>
-      <dl class="headline-split">
-        <div><dt>No-arbitrage floor</dt><dd id="iv-floor">—</dd></div>
-        <div><dt>No-arbitrage ceiling</dt><dd id="iv-ceiling">—</dd></div>
-        <div><dt>Solver iterations</dt><dd id="iv-iterations">—</dd></div>
-      </dl>
-    </div>
-    <div class="cards" id="implied-greeks"></div>
-  </section>
-
-  <!-- ---------------------------------------------------------------- -->
-  <section class="panel" data-mode-panel="grant" hidden>
-    <p class="blurb">
-      Grant-date fair value for employee stock options, the ASC 718 way:
-      Black-Scholes over the <em>expected term</em> rather than the contractual
-      term, then reduced by the options expected to be forfeited before vesting.
-    </p>
-    <form id="grant-form" class="grid">
-      <label>Share price at grant
-        <input name="spot" type="number" step="any" value="12" required>
-      </label>
-      <label>Exercise price
-        <input name="strike" type="number" step="any" value="12" required>
-      </label>
-      <label>Expected term <span class="unit">years</span>
-        <input name="expectedTerm" type="number" step="any" value="6" required>
-      </label>
-      <label>Expected volatility <span class="unit">%</span>
-        <input name="vol" type="number" step="any" value="55" required>
-      </label>
-      <label>Risk-free rate <span class="unit">%</span>
-        <input name="rate" type="number" step="any" value="4" required>
-      </label>
-      <label>Dividend yield <span class="unit">%</span>
-        <input name="yield" type="number" step="any" value="0" required>
-      </label>
-      <label>Options granted
-        <input name="quantity" type="number" step="any" value="10000" required>
-      </label>
-      <label>Vesting period <span class="unit">years</span>
-        <input name="vestingYears" type="number" step="any" value="4" required>
-      </label>
-      <label>Annual forfeiture <span class="unit">%</span>
-        <input name="forfeitureRate" type="number" step="any" value="5" required>
-      </label>
+    <form id="grant-form" data-panel="grant" hidden autocomplete="off">
+      <fieldset>
+        <legend>Grant</legend>
+        <div class="fields">
+          <label>Share price<input name="spot" type="number" step="any" value="12" required></label>
+          <label>Exercise price<input name="strike" type="number" step="any" value="12" required></label>
+          <label>Options granted<input name="quantity" type="number" step="any" value="10000" required></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Terms</legend>
+        <div class="fields">
+          <label>Expected term<span class="suffix">years</span><input name="expectedTerm" type="number" step="any" value="6" required></label>
+          <label>Vesting period<span class="suffix">years</span><input name="vestingYears" type="number" step="any" value="4" required></label>
+          <label>Annual forfeiture<span class="suffix">%</span><input name="forfeitureRate" type="number" step="any" value="5" required></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Assumptions</legend>
+        <div class="fields">
+          <label>Expected volatility<span class="suffix">%</span><input name="vol" type="number" step="any" value="55" required></label>
+          <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4" required></label>
+          <label>Dividend yield<span class="suffix">%</span><input name="yield" type="number" step="any" value="0" required></label>
+        </div>
+      </fieldset>
     </form>
 
-    <div id="grant-error" class="error" hidden></div>
+  </aside>
 
-    <div class="headline">
-      <div class="headline-main">
-        <span class="label">Fair value per option</span>
-        <output id="grant-per-option" class="big">—</output>
-        <span id="grant-gross" class="sub">—</span>
+  <!-- ========================================================= readout -->
+  <main class="readout">
+
+    <section data-panel="price">
+      <div id="price-error" class="alert" role="alert" hidden></div>
+
+      <div class="headline">
+        <div class="headline-figure">
+          <span class="eyebrow">Fair value per share</span>
+          <output id="fair-value" class="figure">&mdash;</output>
+          <span id="per-contract" class="figure-note">&mdash;</span>
+        </div>
+        <dl class="headline-facts">
+          <div><dt>Intrinsic</dt><dd id="intrinsic">&mdash;</dd></div>
+          <div><dt>Time value</dt><dd id="time-value">&mdash;</dd></div>
+          <div><dt>Break-even</dt><dd id="break-even">&mdash;</dd></div>
+        </dl>
       </div>
-      <dl class="headline-split">
-        <div><dt>Expected to vest</dt><dd id="grant-vesting">—</dd></div>
-        <div><dt>Total expense</dt><dd id="grant-expense">—</dd></div>
-        <div><dt>Annual expense</dt><dd id="grant-annual">—</dd></div>
-      </dl>
-    </div>
-  </section>
-</main>
 
-<footer>
+      <section class="block">
+        <h2 class="eyebrow">Sensitivities</h2>
+        <div class="greeks" id="greeks"></div>
+      </section>
+
+      <div class="lower">
+        <figure class="block chart-block">
+          <h2 class="eyebrow">Value against underlying</h2>
+          <div id="chart"></div>
+          <figcaption class="legend">
+            <span><i class="swatch swatch-value"></i>Fair value today</span>
+            <span><i class="swatch swatch-payoff"></i>Payoff at expiry</span>
+            <span><i class="swatch swatch-spot"></i>Spot</span>
+          </figcaption>
+        </figure>
+
+        <section class="block">
+          <h2 class="eyebrow">Diagnostics</h2>
+          <dl id="diagnostics" class="facts"></dl>
+        </section>
+      </div>
+    </section>
+
+    <section data-panel="implied" hidden>
+      <div id="implied-error" class="alert" role="alert" hidden></div>
+
+      <div class="headline">
+        <div class="headline-figure">
+          <span class="eyebrow">Implied volatility</span>
+          <output id="implied-vol" class="figure">&mdash;</output>
+          <span id="implied-note" class="figure-note">&mdash;</span>
+        </div>
+        <dl class="headline-facts">
+          <div><dt>Arbitrage floor</dt><dd id="iv-floor">&mdash;</dd></div>
+          <div><dt>Arbitrage ceiling</dt><dd id="iv-ceiling">&mdash;</dd></div>
+          <div><dt>Iterations</dt><dd id="iv-iterations">&mdash;</dd></div>
+        </dl>
+      </div>
+
+      <section class="block">
+        <h2 class="eyebrow">Sensitivities at the implied volatility</h2>
+        <div class="greeks" id="implied-greeks"></div>
+      </section>
+
+      <p class="aside-note">
+        A quoted price and a model disagree only through volatility. Solving
+        backwards gives the number the market is using, which is the one input
+        you cannot look up anywhere.
+      </p>
+    </section>
+
+    <section data-panel="grant" hidden>
+      <div id="grant-error" class="alert" role="alert" hidden></div>
+
+      <div class="headline">
+        <div class="headline-figure">
+          <span class="eyebrow">Fair value per option</span>
+          <output id="grant-per-option" class="figure">&mdash;</output>
+          <span id="grant-gross" class="figure-note">&mdash;</span>
+        </div>
+        <dl class="headline-facts">
+          <div><dt>Expected to vest</dt><dd id="grant-vesting">&mdash;</dd></div>
+          <div><dt>Total expense</dt><dd id="grant-expense">&mdash;</dd></div>
+          <div><dt>Per year</dt><dd id="grant-annual">&mdash;</dd></div>
+        </dl>
+      </div>
+
+      <section class="block">
+        <h2 class="eyebrow">How this is calculated</h2>
+        <dl id="grant-facts" class="facts"></dl>
+      </section>
+
+      <p class="aside-note">
+        Employee options are not tradable and holders exercise early for reasons
+        no model sees, so ASC 718 values them over the <em>expected term</em>
+        rather than the contractual one, then reduces the expense by the options
+        expected to be forfeited before they vest.
+      </p>
+    </section>
+
+  </main>
+</div>
+
+<footer class="colophon">
   <p>
-    Educational tool. Every number is a model output, only as good as the
-    volatility, rate and dividend assumptions you feed it — not investment advice.
+    Every figure here is a model output, only as sound as the volatility, rate
+    and dividend you feed it. Educational tool, not investment advice.
   </p>
 </footer>
 

@@ -8,6 +8,7 @@ No dependencies. `npm start` and `npm test` work on a fresh clone.
 ```
 npm start          # web app at http://127.0.0.1:8080
 npm test           # 30 tests, no install needed
+node build-artifact.mjs   # bundle the app into one standalone HTML file
 node bin/optprice.js --spot 100 --strike 105 --days 90 --vol 25
 ```
 
@@ -80,7 +81,13 @@ src/index.js         valuation(), valueCurve(), employeeGrantValue()
 web/                 browser UI
 bin/optprice.js      command line
 server.js            static server for the web UI
+build-artifact.mjs   bundles web/ + src/ into dist/option-fair-value.html
 ```
+
+`build-artifact.mjs` inlines the stylesheet and rewrites every module into an
+IIFE so the whole app runs from a single file with no imports to resolve. It
+reads the real sources rather than a second copy, so the standalone build
+cannot drift from the served one.
 
 ## Accuracy
 
