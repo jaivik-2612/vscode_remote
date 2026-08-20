@@ -1,0 +1,26 @@
+{
+  "name": "option-fair-value",
+  "version": "1.0.0",
+  "description": "Fair-value calculator for stock options: Black-Scholes, binomial trees, Greeks and implied volatility",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "optprice": "bin/optprice.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./black-scholes": "./src/blackScholes.js",
+    "./binomial": "./src/binomial.js",
+    "./implied-vol": "./src/impliedVol.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "node server.js",
+    "price": "node bin/optprice.js"
+  },
+  "keywords": ["options", "black-scholes", "binomial", "greeks", "implied-volatility", "finance"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

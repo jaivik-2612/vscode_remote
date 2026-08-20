@@ -101,9 +101,14 @@ function singleTree(inputs, steps) {
 /**
  * Binomial price, averaged over `steps` and `steps + 1`.
  *
- * A CRR tree oscillates as the strike drifts between nodes; averaging an
- * odd and an even tree cancels most of that oscillation and roughly squares
- * the convergence rate for the same amount of work.
+ * A CRR tree oscillates as the strike drifts between nodes, so the price
+ * jitters up and down as steps are added. Averaging an odd and an even tree
+ * cancels almost all of that jitter, which is what would otherwise make
+ * Greeks and implied volatility noisy.
+ *
+ * The remaining error is smooth and O(1/steps) — averaging removes the
+ * oscillation, it does not raise the convergence order. At the 400-step
+ * default that is around 3e-4 on a $10 option.
  *
  * @param {import('./blackScholes.js').Inputs & {steps?: number, american?: boolean}} inputs
  */

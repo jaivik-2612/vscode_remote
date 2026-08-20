@@ -57,7 +57,12 @@ export function impliedVol(args) {
   bs.assertInputs({ ...inputs, vol: 0 });
 
   const { lower, upper } = priceBounds({ ...inputs, american });
+  // Two different thresholds. `slack` forgives rounding in a quoted price
+  // when checking the arbitrage bounds. `resolution` is much tighter: it is
+  // the smallest price difference the model can actually represent, and it
+  // decides whether a quote sits at a genuine root or on a flat spot.
   const slack = 1e-10 * Math.max(1, inputs.strike);
+  const resolution = 64 * Number.EPSILON * Math.max(inputs.spot, inputs.strike);
   if (target < lower - slack) {
     throw new RangeError(
       `price ${target} is below the no-arbitrage floor of ${lower.toFixed(6)}`);
@@ -78,18 +83,25 @@ export function impliedVol(args) {
   // volatility below its exercise boundary, so no single number is implied.
   // Report the floor and say so rather than pretending to a root.
   const floorPrice = valueAt(MIN_VOL);
-  if (target <= floorPrice + slack) {
+  if (target <= floorPrice + resolution) {
     return { vol: 0, iterations: 0, priceAtVol: floorPrice, identifiable: false };
   }
   const ceilingPrice = valueAt(MAX_VOL);
-  if (target >= ceilingPrice - slack) {
+  if (target >= ceilingPrice - resolution) {
     return { vol: MAX_VOL, iterations: 0, priceAtVol: ceilingPrice, identifiable: false };
   }
 
   let lo = MIN_VOL;
   let hi = MAX_VOL;
   let vol = initialGuess(inputs, target);
-  const tolerance = 1e-10 * Math.max(1, inputs.spot);
+  // Scale the tolerance to the price being matched: an absolute threshold
+  // that is fine for a $10 option would stop the search several digits early
+  // on a deep out-of-the-money one worth a millionth of a cent. The floor is
+  // the resolution the price itself is computed to.
+  // Prices are combinations of terms of order spot and strike, so this is
+  // about as tightly as one can be matched. Where even that is unreachable
+  // the bracket below still pins the volatility down to 1e-12 and stops.
+  const tolerance = resolution / 16;
 
   for (let i = 1; i <= MAX_ITERATIONS; i++) {
     if (!(vol > lo && vol < hi)) vol = 0.5 * (lo + hi);

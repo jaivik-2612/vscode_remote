@@ -2,9 +2,10 @@
  * Normal distribution helpers.
  *
  * `normCdf` uses Hart's (1968) rational approximation, as popularised by
- * Graeme West. It is accurate to roughly double precision (~1e-15), which
- * matters because implied-volatility solvers differentiate the pricing
- * function and amplify any noise in the CDF.
+ * Graeme West: absolute error stays around 1e-15, and even 10 standard
+ * deviations out it keeps 8 significant digits. That headroom matters
+ * because implied-volatility solvers differentiate the pricing function and
+ * amplify any noise in the CDF.
  */
 
 const SQRT_2PI = 2.5066282746310002;
