@@ -7,7 +7,7 @@ No dependencies. `npm start` and `npm test` work on a fresh clone.
 
 ```
 npm start          # web app at http://127.0.0.1:8080
-npm test           # 30 tests, no install needed
+npm test           # 59 tests, no install needed
 node build-artifact.mjs   # bundle the app into one standalone HTML file
 node bin/optprice.js --spot 100 --strike 105 --days 90 --vol 25
 ```
@@ -77,7 +77,12 @@ src/stats.js         normal CDF and its inverse
 src/blackScholes.js  European pricing, Greeks, probabilities
 src/binomial.js      American pricing, early-exercise boundary
 src/impliedVol.js    volatility solver
-src/index.js         valuation(), valueCurve(), employeeGrantValue()
+src/series.js        parsing a pasted history into returns and volatility
+src/hmm.js           Baum-Welch: fits volatility regimes to the returns
+src/monteCarlo.js    path simulation, Longstaff-Schwartz, distributions
+src/valuation.js     valuation(), valueCurve(), employeeGrantValue()
+src/ensemble.js      runs all three engines and reconciles them
+src/index.js         package entry point
 web/                 browser UI
 bin/optprice.js      command line
 server.js            static server for the web UI
@@ -122,3 +127,54 @@ numbers rest on:
 A fair value is only as good as the volatility, rate and dividend estimates
 you feed in — volatility especially, since it is the one input you cannot look
 up. This is an educational tool, not investment advice.
+
+
+## The three engines
+
+The `Three models` tab starts from a price history rather than a volatility you
+guess, and runs three things in order. They are not peers:
+
+**Baum-Welch** is expectation-maximisation for a hidden Markov model. It does
+not price anything — it cannot. What it does is read the return series and
+recover the volatility *regimes* that generated it: a volatility per regime,
+the probability of switching between them, and which regime today sits in.
+Propagating that chain over the option's life gives the expected variance to
+expiry, and that is the volatility the pricing models are otherwise missing.
+
+**Black-Scholes** then prices the contract in closed form twice — once on plain
+trailing volatility, once on the regime-projected number. The gap between them
+is exactly what the regime model contributed.
+
+**Monte Carlo** simulates paths whose volatility switches regime as they go and
+prices from the discounted payoffs. Unlike the closed form it keeps the
+volatility-of-volatility, so where the two disagree it is measuring what
+collapsing the regimes into a single number costs. American exercise is priced
+by Longstaff-Schwartz least squares on the same paths.
+
+Re-running the simulation under the drift estimated from the history, rather
+than the risk-free rate, gives the projected distribution of the stock itself.
+
+### What the numbers are worth
+
+- The projected price is a **model projection, not a forecast**. It rests on a
+  drift estimated from a few hundred observations, and drift is far noisier
+  than volatility — the 90% band is wide for a reason.
+- Probabilities shown against a price are **risk-neutral**: they describe what
+  the price implies, not what the stock is expected to do.
+- Fitting more regimes always improves the in-sample likelihood, so the app
+  scores 2, 3 and 4 states by BIC and says which the data actually supports. A
+  regime the chain almost never visits is flagged as a fitting artefact.
+- Every simulation is seeded, so the same inputs always give the same price.
+  Change the seed to see how much the answer moves on luck alone.
+
+### Validation
+
+The models are checked against things with known answers, not just against
+themselves: Baum-Welch recovers the parameters of a synthetic HMM it was never
+told about, its log-likelihood is asserted never to decrease, simulated
+European prices land inside their own 95% confidence interval of the
+Black-Scholes closed form, Longstaff-Schwartz matches a 2000-step binomial
+tree, and risk-neutral paths are asserted to keep the discounted stock a
+martingale. The app also runs a live control at every valuation: it reprices
+the contract by simulation under plain GBM, where the closed form is exact, and
+reports the gap.

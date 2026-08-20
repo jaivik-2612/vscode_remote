@@ -139,7 +139,14 @@ body {
   color: var(--ink-muted);
 }
 
-.masthead-tools { display: flex; gap: 10px; align-items: center; }
+.masthead-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  /* Without min-width:0 a flex item refuses to shrink below its content, and
+     four tab labels push the whole masthead past the viewport. */
+  min-width: 0;
+}
 
 .modes {
   display: flex;
@@ -147,7 +154,14 @@ body {
   padding: 3px;
   background: var(--sunk);
   border-radius: 9px;
+  /* The tab strip scrolls within itself on a narrow screen rather than
+     widening the page. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.modes::-webkit-scrollbar { display: none; }
 
 .mode {
   border: 0;
@@ -170,6 +184,7 @@ body {
 }
 
 .icon-button {
+  flex: none;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink-muted);
@@ -545,17 +560,283 @@ legend {
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
+/* ====================================================== ensemble mode ==
+   Regime colour is a sequential ramp, not a categorical one: the states are
+   ordered calm-to-turbulent, so one hue deepening with volatility encodes
+   the order that arbitrary hues would throw away. Identity never rests on
+   colour alone — every regime is named in the table and the legend. */
+
+:root {
+  --regime-1: rgba(150, 85, 15, .07);
+  --regime-2: rgba(150, 85, 15, .17);
+  --regime-3: rgba(150, 85, 15, .30);
+  --regime-1-solid: #e3cdb0;
+  --regime-2-solid: #c08a45;
+  --regime-3-solid: #96550f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --regime-1: rgba(223, 160, 90, .09);
+    --regime-2: rgba(223, 160, 90, .20);
+    --regime-3: rgba(223, 160, 90, .34);
+    --regime-1-solid: #6b5433;
+    --regime-2-solid: #a97c40;
+    --regime-3-solid: #dfa05a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --regime-1: rgba(223, 160, 90, .09);
+  --regime-2: rgba(223, 160, 90, .20);
+  --regime-3: rgba(223, 160, 90, .34);
+  --regime-1-solid: #6b5433;
+  --regime-2-solid: #a97c40;
+  --regime-3-solid: #dfa05a;
+}
+
+.headline-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.headline-pair .headline { border-top-color: var(--accent); }
+.headline-alt { border-top-color: var(--line-strong); }
+.headline-pair .figure { font-size: clamp(32px, 4.6vw, 44px); }
+.headline-pair .headline-facts { gap: 20px; }
+.headline-pair .headline-facts dd { font-size: 17px; }
+
+label.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+textarea {
+  font: 400 12px/1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 9px 10px;
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+}
+
+textarea:hover { border-color: var(--line-strong); }
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+label.inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 11px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+select {
+  font: 500 13px/1 var(--body);
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 9px;
+  cursor: pointer;
+  max-width: 62%;
+}
+
+select:hover { border-color: var(--line-strong); }
+
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.field-note {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.chart-note {
+  margin: 11px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+  max-width: 70ch;
+}
+
+/* Wide content scrolls inside its own box, never the page. */
+.table-scroll { overflow-x: auto; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* Only the wide regime table needs a floor before it starts scrolling; the
+   transition matrix is three columns and fits a narrow card unaided. */
+#ens-regimes { min-width: 560px; }
+
+.data-table th,
+.data-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.data-table thead th {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border-bottom-color: var(--line-strong);
+}
+
+.data-table th:first-child,
+.data-table td:first-child { text-align: left; }
+
+.data-table tbody td {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table tbody th {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.data-table tbody tr:last-child th,
+.data-table tbody tr:last-child td { border-bottom: 0; }
+
+/* The diagonal is the number people actually read off a transition matrix. */
+.data-table td.is-diagonal {
+  background: var(--accent-wash);
+  font-weight: 600;
+}
+
+.regime-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.regime-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+}
+
+#ens-transition th,
+#ens-transition td { padding: 8px 7px; }
+
+#ens-history svg,
+#ens-distribution svg,
+#ens-dotplot svg { display: block; width: 100%; height: auto; }
+
+/* Below these widths the labels stop being readable, so the chart scrolls
+   inside its own card rather than scaling down into illegibility. The page
+   itself never scrolls sideways. */
+#ens-history svg { min-width: 560px; }
+#ens-distribution svg { min-width: 430px; }
+#ens-dotplot svg { min-width: 450px; }
+
+#ens-history, #ens-distribution, #ens-dotplot { overflow-x: auto; }
+
+/* ------------------------------------------------------------ tooltip -- */
+
+.chart-host { position: relative; }
+
+.chart-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  transform: translate(-50%, -115%);
+  opacity: 0;
+  transition: opacity .1s ease;
+}
+
+.chart-tip[data-visible="true"] { opacity: 1; }
+.chart-tip b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.chart-tip .tip-label { color: var(--ink-muted); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Shown while the simulation is running, so a 300ms freeze reads as work. */
+.is-computing .figure { opacity: .45; }
+
+
+@media (max-width: 560px) {
+  .mode { padding: 8px 10px; font-size: 12.5px; }
+  .wordmark-note { display: none; }
+}
+
+/* A finding the reader needs to act on, not a caption. Carries a word as well
+   as a colour, so it does not depend on hue alone. */
+.notice {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-wash);
+  border-radius: 0 7px 7px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  max-width: 70ch;
+}
+
+.notice b { font-weight: 600; }
+
 </style>
 
 
 <header class="masthead">
   <div class="wordmark">
     <span class="wordmark-name">Option Fair Value</span>
-    <span class="wordmark-note">Black&#8209;Scholes &amp; binomial pricing</span>
+    <span class="wordmark-note">Baum&#8209;Welch regimes &rarr; Black&#8209;Scholes &amp; Monte Carlo</span>
   </div>
   <div class="masthead-tools">
     <nav class="modes" role="tablist" aria-label="Calculator mode">
-      <button class="mode is-active" role="tab" aria-selected="true" data-mode="price">Price</button>
+      <button class="mode is-active" role="tab" aria-selected="true" data-mode="ensemble">Three models</button>
+      <button class="mode" role="tab" aria-selected="false" data-mode="price">Quick price</button>
       <button class="mode" role="tab" aria-selected="false" data-mode="implied">Implied vol</button>
       <button class="mode" role="tab" aria-selected="false" data-mode="grant">Grant</button>
     </nav>
@@ -570,7 +851,491 @@ legend {
   <!-- ============================================================ rail -->
   <aside class="rail">
 
-    <form id="price-form" data-panel="price" autocomplete="off">
+    <form id="ensemble-form" data-panel="ensemble" autocomplete="off">
+      <fieldset>
+        <legend>Price history</legend>
+        <label class="stacked" for="prices">
+          Closing prices, oldest first
+          <textarea id="prices" name="prices" rows="7" spellcheck="false">84.20
+84.09
+84.15
+84.59
+84.72
+84.91
+86.77
+86.99
+85.84
+86.98
+87.39
+87.47
+87.83
+86.93
+86.55
+86.47
+86.83
+86.28
+86.05
+85.66
+85.83
+85.21
+84.25
+84.52
+84.31
+84.42
+83.87
+84.42
+83.95
+83.59
+83.68
+83.71
+85.04
+85.57
+85.89
+85.67
+86.53
+82.85
+82.46
+82.74
+83.06
+83.22
+83.10
+82.88
+83.43
+83.58
+84.84
+85.00
+85.57
+86.28
+85.88
+85.77
+86.36
+86.31
+85.59
+86.62
+86.29
+86.49
+88.04
+88.60
+89.90
+90.34
+90.52
+88.76
+89.28
+88.22
+87.71
+88.16
+87.69
+85.49
+91.54
+86.04
+85.69
+83.57
+86.20
+87.40
+87.21
+86.17
+90.58
+90.08
+91.62
+89.97
+87.36
+88.98
+90.41
+89.12
+89.60
+92.21
+87.40
+87.97
+89.21
+83.72
+84.40
+84.51
+85.83
+87.65
+89.86
+93.58
+89.37
+88.74
+89.12
+89.74
+90.71
+91.61
+91.65
+92.79
+92.65
+92.87
+94.69
+93.46
+94.02
+95.24
+94.15
+93.72
+93.07
+94.30
+94.89
+93.55
+94.11
+93.43
+93.50
+93.37
+94.08
+93.77
+92.48
+93.08
+93.84
+94.75
+94.40
+94.92
+95.13
+94.22
+92.70
+92.70
+91.33
+92.42
+91.11
+90.58
+91.77
+94.50
+93.01
+93.34
+95.15
+93.00
+93.57
+93.50
+94.02
+93.69
+92.79
+92.85
+91.89
+91.50
+92.18
+92.94
+92.62
+92.81
+92.45
+93.54
+94.74
+94.25
+94.29
+95.52
+96.81
+97.80
+96.84
+96.94
+96.79
+96.82
+98.97
+100.42
+100.83
+101.26
+101.34
+100.64
+99.98
+93.81
+100.31
+98.21
+95.36
+97.12
+98.39
+99.16
+96.95
+92.87
+89.68
+88.59
+84.82
+86.43
+85.83
+83.52
+84.00
+82.14
+82.68
+83.10
+82.94
+85.92
+87.77
+85.34
+89.87
+88.62
+88.62
+85.35
+87.56
+86.79
+89.36
+85.74
+89.34
+86.91
+83.83
+83.69
+83.59
+81.22
+81.78
+85.62
+83.47
+82.10
+79.77
+83.61
+81.64
+79.40
+79.76
+80.48
+78.62
+81.52
+82.44
+80.05
+78.15
+79.58
+75.97
+74.18
+72.25
+73.42
+76.97
+76.14
+74.13
+69.66
+71.08
+70.23
+71.34
+71.58
+71.65
+72.14
+73.03
+73.70
+74.11
+74.97
+75.50
+76.39
+77.33
+76.85
+76.27
+76.60
+78.18
+79.80
+79.89
+80.35
+79.17
+79.49
+79.68
+80.11
+80.13
+81.19
+80.62
+81.02
+82.15
+82.76
+83.97
+83.05
+83.01
+83.44
+83.39
+84.60
+86.06
+87.36
+87.09
+86.80
+87.09
+88.84
+88.77
+88.31
+88.58
+88.41
+88.03
+86.50
+87.35
+86.91
+87.25
+87.59
+87.39
+90.89
+88.09
+89.96
+89.83
+90.96
+91.64
+91.57
+91.20
+87.18
+87.18
+86.57
+86.40
+85.66
+85.92
+85.46
+85.74
+84.91
+84.53
+83.90
+85.10
+85.16
+84.99
+84.51
+85.33
+84.53
+86.64
+86.89
+85.62
+85.93
+85.95
+85.42
+85.49
+85.96
+85.20
+85.38
+86.38
+87.12
+87.57
+86.11
+86.68
+85.68
+85.34
+85.42
+85.05
+84.53
+84.64
+87.35
+91.47
+90.86
+91.26
+91.32
+90.78
+93.37
+93.86
+95.60
+97.58
+96.69
+97.79
+99.12
+99.40
+97.80
+97.07
+97.90
+97.29
+96.97
+96.48
+96.95
+100.31
+95.63
+95.42
+97.19
+96.13
+98.90
+103.88
+99.18
+100.80
+98.84
+101.09
+98.24
+99.55
+96.48
+94.85
+93.59
+91.75
+90.96
+90.96
+92.17
+90.64
+90.04
+90.53
+90.78
+90.05
+89.98
+89.92
+88.95
+88.98
+88.81
+88.07
+89.64
+90.01
+86.84
+87.85
+88.20
+91.83
+92.55
+89.37
+89.76
+91.47
+89.46
+90.25
+92.18
+92.27
+92.66
+93.36
+92.76
+91.83
+89.36
+87.63
+87.06
+83.73
+84.39
+83.28
+82.06
+82.38
+82.34
+83.23
+84.15
+83.35
+82.88
+83.49
+83.97</textarea>
+        </label>
+        <p class="field-note" id="series-summary">&mdash;</p>
+        <label class="inline">Observed
+          <select name="periodsPerYear">
+            <option value="252" selected>daily</option>
+            <option value="52">weekly</option>
+            <option value="12">monthly</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Contract</legend>
+        <div class="fields">
+          <label>Strike<input name="strike" type="number" step="any" value="90" required></label>
+          <label>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
+        </div>
+        <div class="segments" role="group" aria-label="Option type">
+          <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
+          <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
+        </div>
+        <div class="segments" role="group" aria-label="Exercise style">
+          <label class="segment"><input type="radio" name="style" value="european" checked><span>European</span></label>
+          <label class="segment"><input type="radio" name="style" value="american"><span>American</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Market</legend>
+        <div class="fields">
+          <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4.5" required></label>
+          <label>Dividend yield<span class="suffix">%</span><input name="yield" type="number" step="any" value="0" required></label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Model settings</legend>
+        <label class="inline">Hidden regimes
+          <select name="states">
+            <option value="2" selected>2 &mdash; calm / turbulent</option>
+            <option value="3">3 &mdash; adds a crisis state</option>
+          </select>
+        </label>
+        <label class="inline">Simulated paths
+          <select name="paths">
+            <option value="5000">5,000 &mdash; fastest</option>
+            <option value="12000" selected>12,000</option>
+            <option value="25000">25,000</option>
+            <option value="50000">50,000 &mdash; tightest</option>
+          </select>
+        </label>
+        <div class="fields">
+          <label>Random seed<input name="seed" type="number" step="1" value="12345" required></label>
+        </div>
+        <p class="field-note">The seed fixes the simulation, so the same inputs always
+          give the same price. Change it to see how much the answer moves on luck alone.</p>
+      </fieldset>
+    </form>
+
+    <form id="price-form" data-panel="price" hidden autocomplete="off">
       <fieldset>
         <legend>Contract</legend>
         <div class="fields">
@@ -663,7 +1428,100 @@ legend {
   <!-- ========================================================= readout -->
   <main class="readout">
 
-    <section data-panel="price">
+    <section data-panel="ensemble">
+      <div id="ensemble-error" class="alert" role="alert" hidden></div>
+
+      <div class="headline-pair">
+        <div class="headline">
+          <div class="headline-figure">
+            <span class="eyebrow">Fair value, three models agreed</span>
+            <output id="ens-value" class="figure">&mdash;</output>
+            <span id="ens-range" class="figure-note">&mdash;</span>
+          </div>
+          <dl class="headline-facts">
+            <div><dt>Spread</dt><dd id="ens-spread">&mdash;</dd></div>
+            <div><dt>Per contract</dt><dd id="ens-contract">&mdash;</dd></div>
+          </dl>
+        </div>
+
+        <div class="headline headline-alt">
+          <div class="headline-figure">
+            <span class="eyebrow" id="ens-outlook-label">Projected price at expiry</span>
+            <output id="ens-projected" class="figure">&mdash;</output>
+            <span id="ens-projected-note" class="figure-note">&mdash;</span>
+          </div>
+          <dl class="headline-facts">
+            <div><dt>90% band</dt><dd id="ens-band">&mdash;</dd></div>
+            <div><dt>Finishes ITM</dt><dd id="ens-itm">&mdash;</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <figure class="block">
+        <h2 class="eyebrow">Where each model lands</h2>
+        <div id="ens-dotplot"></div>
+        <figcaption class="chart-note" id="ens-dotplot-note">&mdash;</figcaption>
+      </figure>
+
+      <section class="block">
+        <h2 class="eyebrow">Volatility regimes found by Baum-Welch</h2>
+        <div class="table-scroll">
+          <table class="data-table" id="ens-regimes">
+            <caption class="visually-hidden">Fitted volatility regimes</caption>
+          </table>
+        </div>
+        <p class="chart-note">
+          Baum-Welch prices nothing by itself. It reads the return history and
+          reports which volatility regimes generated it, how long each one lasts
+          and which is running now &mdash; the volatility the two pricing models
+          then use. Drift is estimated from the same short history and is far
+          noisier than volatility; treat those figures with more suspicion.
+        </p>
+        <p class="notice" id="ens-selection" hidden></p>
+      </section>
+
+      <figure class="block">
+        <h2 class="eyebrow">Price history, shaded by fitted regime</h2>
+        <div id="ens-history"></div>
+        <figcaption class="legend" id="ens-history-legend"></figcaption>
+      </figure>
+
+      <div class="lower">
+        <figure class="block chart-block">
+          <h2 class="eyebrow">Where the price lands at expiry</h2>
+          <div id="ens-distribution"></div>
+          <figcaption class="chart-note">
+            Simulated under the drift estimated from your history, not the
+            risk-free rate &mdash; this is the projection, not the pricing run.
+          </figcaption>
+        </figure>
+
+        <section class="block">
+          <h2 class="eyebrow">Transition matrix</h2>
+          <div class="table-scroll">
+            <table class="data-table" id="ens-transition">
+              <caption class="visually-hidden">Regime transition probabilities</caption>
+            </table>
+          </div>
+          <p class="chart-note">
+            Each row is today&rsquo;s regime, each column tomorrow&rsquo;s. The
+            diagonal is how likely the market is to stay where it is.
+          </p>
+        </section>
+      </div>
+
+      <section class="block">
+        <h2 class="eyebrow">Sensitivities at the regime volatility</h2>
+        <div class="greeks" id="ens-greeks"></div>
+      </section>
+
+      <section class="block">
+        <h2 class="eyebrow">Diagnostics</h2>
+        <dl id="ens-diagnostics" class="facts"></dl>
+      </section>
+    </section>
+
+    <section data-panel="price" hidden>
       <div id="price-error" class="alert" role="alert" hidden></div>
 
       <div class="headline">
@@ -1481,22 +2339,992 @@ function initialGuess({ spot, strike, time, rate, yield: q = 0 }, target) {
 return { priceBounds, impliedVol };
 })();
 
-/* src/index.js */
-const Engine = (() => {
+/* src/series.js */
+const Series = (() => {
 /**
- * Fair-value engine for stock options.
+ * Turning a raw price history into the inputs the models need.
  *
- * `valuation()` is the entry point the UI and the CLI both use: hand it a
- * contract, get back a price, Greeks, probabilities and the diagnostics that
- * say how much to trust the number.
+ * Everything downstream works on log returns, so this is where a pasted
+ * column of numbers becomes a return series with an annualisation factor
+ * attached.
+ */
+
+/** Trading days in a year — the convention for annualising daily returns. */
+const TRADING_DAYS = 252;
+
+/**
+ * Parse a pasted price history.
+ *
+ * The awkward case is the comma, which is both a separator and a thousands
+ * mark: "1,200.50" is one number but "100,101" is two. Nothing in the token
+ * itself resolves that, so the decision is made from the surrounding text.
+ * When the input also uses whitespace or semicolons to separate values, those
+ * are taken as the separators and commas are read as thousands marks; when
+ * commas are all there is, they must be the separators.
+ *
+ * That covers what people actually paste — a column out of a spreadsheet, or
+ * a single comma-separated row — and leaves only genuinely ambiguous input
+ * such as "1,200.50,1,210" undecidable, which it is.
+ *
+ * Anything that is not a positive number is skipped, so a header row, a blank
+ * line or a stray currency symbol does not break the parse.
+ *
+ * @returns {number[]} prices in the order given (oldest first)
+ */
+function parsePrices(text) {
+  if (typeof text !== 'string') return [];
+
+  const trimmed = text.trim();
+  const hasOtherSeparators = /[\s;]/.test(trimmed);
+
+  const normalised = hasOtherSeparators
+    // A thousands mark is a comma between a digit and exactly three digits.
+    ? trimmed.replace(/(?<=\d),(?=\d{3}(?!\d))/g, '')
+    : trimmed;
+
+  return normalised
+    .split(/[\s,;]+/)
+    .map((token) => token.replace(/[$£€¥]/g, '').trim())
+    .filter((token) => token !== '')
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+/**
+ * Log returns of a price series. Log rather than simple returns because the
+ * models below assume returns are additive across time.
+ */
+function logReturns(prices) {
+  const out = [];
+  for (let i = 1; i < prices.length; i++) out.push(Math.log(prices[i] / prices[i - 1]));
+  return out;
+}
+
+/** Sample mean. */
+function mean(values) {
+  if (values.length === 0) return NaN;
+  let total = 0;
+  for (const value of values) total += value;
+  return total / values.length;
+}
+
+/**
+ * Sample standard deviation, with the Bessel correction. Volatility
+ * estimated from a short window is biased low without it.
+ */
+function stdev(values) {
+  if (values.length < 2) return NaN;
+  const m = mean(values);
+  let sum = 0;
+  for (const value of values) sum += (value - m) ** 2;
+  return Math.sqrt(sum / (values.length - 1));
+}
+
+/**
+ * Annualised volatility from a daily return series.
+ *
+ * @param {number[]} returns
+ * @param {number} [periodsPerYear] 252 for daily data, 52 weekly, 12 monthly.
+ */
+function historicalVol(returns, periodsPerYear = TRADING_DAYS) {
+  return stdev(returns) * Math.sqrt(periodsPerYear);
+}
+
+/**
+ * Exponentially weighted volatility (RiskMetrics). Weights recent returns
+ * more heavily, so it reacts to a volatility shift far faster than a plain
+ * trailing window — useful as a sanity check on the regime model.
+ *
+ * @param {number} [lambda] Decay factor; 0.94 is the RiskMetrics default.
+ */
+function ewmaVol(returns, periodsPerYear = TRADING_DAYS, lambda = 0.94) {
+  if (returns.length === 0) return NaN;
+  // Seed with the sample variance so the first observations are not ignored.
+  let variance = returns.length > 1 ? stdev(returns) ** 2 : returns[0] ** 2;
+  for (const r of returns) variance = lambda * variance + (1 - lambda) * r * r;
+  return Math.sqrt(variance * periodsPerYear);
+}
+
+/**
+ * Annualised drift implied by the realised return series.
+ *
+ * Returns both the log drift (mu, what the simulation needs) and the
+ * arithmetic expected return (mu + sigma^2/2, what a person means by
+ * "expected return"). Conflating the two is a classic source of
+ * over-optimistic projections.
+ */
+function historicalDrift(returns, periodsPerYear = TRADING_DAYS) {
+  const logDrift = mean(returns) * periodsPerYear;
+  const variance = stdev(returns) ** 2 * periodsPerYear;
+  return { logDrift, expectedReturn: logDrift + variance / 2 };
+}
+
+/**
+ * Summary statistics for the return distribution. Skew and excess kurtosis
+ * are the quickest way to see how badly the normality assumption behind
+ * Black-Scholes is being violated.
+ */
+function describe(returns, periodsPerYear = TRADING_DAYS) {
+  const n = returns.length;
+  if (n < 2) {
+    return { count: n, vol: NaN, skew: NaN, excessKurtosis: NaN, min: NaN, max: NaN };
+  }
+  const m = mean(returns);
+  const sd = stdev(returns);
+  let third = 0;
+  let fourth = 0;
+  for (const r of returns) {
+    third += ((r - m) / sd) ** 3;
+    fourth += ((r - m) / sd) ** 4;
+  }
+  return {
+    count: n,
+    vol: sd * Math.sqrt(periodsPerYear),
+    skew: third / n,
+    excessKurtosis: fourth / n - 3,
+    min: Math.min(...returns),
+    max: Math.max(...returns),
+  };
+}
+
+return { parsePrices, logReturns, mean, stdev, historicalVol, ewmaVol, historicalDrift, describe, TRADING_DAYS };
+})();
+
+/* src/hmm.js */
+const Hmm = (() => {
+/**
+ * Gaussian hidden Markov model fitted by Baum-Welch.
+ *
+ * Baum-Welch does not price anything — it is expectation-maximisation for an
+ * HMM. What it gives us here is the piece the pricing models cannot supply
+ * for themselves: the market moves between calm and turbulent regimes, and a
+ * single volatility number averages them into something that describes
+ * neither. Fitting a two- or three-state model to the return series recovers
+ * a volatility per regime, the odds of switching between them, and which one
+ * we are in now. Propagating that chain over the option's life gives the
+ * expected variance to expiry, which is what Black-Scholes and the Monte
+ * Carlo simulation then consume.
+ *
+ * Everything runs on scaled forward-backward recursions, so likelihoods stay
+ * in range on long series instead of underflowing to zero.
+ */
+
+const { TRADING_DAYS } = Series;
+
+/** Volatility is floored during EM: a state that collapses onto a single
+ *  observation drives its variance to zero and the likelihood to infinity. */
+const MIN_SIGMA = 1e-6;
+
+/** Gaussian emission density for observation `x` in a state. */
+function emission(x, mean, sigma) {
+  const z = (x - mean) / sigma;
+  return Math.exp(-0.5 * z * z) / (sigma * Math.sqrt(2 * Math.PI));
+}
+
+/**
+ * Starting parameters, chosen deterministically so the same series always
+ * produces the same fit.
+ *
+ * Sorting by absolute return and splitting into equal groups seeds the states
+ * as quiet-through-violent from the outset. Random starts routinely converge
+ * to a local optimum that mixes the regimes together.
+ */
+function seedParameters(returns, states) {
+  const byMagnitude = [...returns].sort((a, b) => Math.abs(a) - Math.abs(b));
+  const size = Math.floor(byMagnitude.length / states);
+  const means = [];
+  const sigmas = [];
+
+  for (let s = 0; s < states; s++) {
+    const from = s * size;
+    const to = s === states - 1 ? byMagnitude.length : from + size;
+    const group = byMagnitude.slice(from, to);
+    const m = group.reduce((sum, r) => sum + r, 0) / group.length;
+    const variance = group.reduce((sum, r) => sum + (r - m) ** 2, 0) / Math.max(1, group.length - 1);
+    means.push(m);
+    sigmas.push(Math.max(Math.sqrt(variance), MIN_SIGMA));
+  }
+
+  // Persistent chain: regimes last, so most of the mass sits on the diagonal.
+  const stay = 0.95;
+  const A = Array.from({ length: states }, (unusedRow, i) =>
+    Array.from({ length: states }, (unusedCol, j) =>
+      (i === j ? stay : (1 - stay) / (states - 1))));
+
+  return { pi: Array(states).fill(1 / states), A, means, sigmas };
+}
+
+/**
+ * Scaled forward pass.
+ * @returns {{alpha: number[][], scale: number[], logLikelihood: number}}
+ */
+function forward(returns, { pi, A, means, sigmas }) {
+  const T = returns.length;
+  const n = pi.length;
+  const alpha = Array.from({ length: T }, () => new Array(n).fill(0));
+  const scale = new Array(T).fill(0);
+  let logLikelihood = 0;
+
+  for (let i = 0; i < n; i++) alpha[0][i] = pi[i] * emission(returns[0], means[i], sigmas[i]);
+  let total = alpha[0].reduce((sum, v) => sum + v, 0);
+  // A zero total means every state calls this observation impossible; fall
+  // back to a flat posterior rather than propagating NaN through the fit.
+  scale[0] = total > 0 ? 1 / total : 1;
+  for (let i = 0; i < n; i++) alpha[0][i] = total > 0 ? alpha[0][i] * scale[0] : 1 / n;
+  logLikelihood += Math.log(total > 0 ? total : Number.MIN_VALUE);
+
+  for (let t = 1; t < T; t++) {
+    for (let j = 0; j < n; j++) {
+      let carried = 0;
+      for (let i = 0; i < n; i++) carried += alpha[t - 1][i] * A[i][j];
+      alpha[t][j] = carried * emission(returns[t], means[j], sigmas[j]);
+    }
+    total = alpha[t].reduce((sum, v) => sum + v, 0);
+    scale[t] = total > 0 ? 1 / total : 1;
+    for (let j = 0; j < n; j++) alpha[t][j] = total > 0 ? alpha[t][j] * scale[t] : 1 / n;
+    logLikelihood += Math.log(total > 0 ? total : Number.MIN_VALUE);
+  }
+
+  return { alpha, scale, logLikelihood };
+}
+
+/** Backward pass, reusing the forward pass's scaling factors. */
+function backward(returns, { A, means, sigmas }, scale) {
+  const T = returns.length;
+  const n = A.length;
+  const beta = Array.from({ length: T }, () => new Array(n).fill(0));
+
+  for (let i = 0; i < n; i++) beta[T - 1][i] = scale[T - 1];
+
+  for (let t = T - 2; t >= 0; t--) {
+    for (let i = 0; i < n; i++) {
+      let carried = 0;
+      for (let j = 0; j < n; j++) {
+        carried += A[i][j] * emission(returns[t + 1], means[j], sigmas[j]) * beta[t + 1][j];
+      }
+      beta[t][i] = carried * scale[t];
+    }
+  }
+  return beta;
+}
+
+/**
+ * Fit a Gaussian HMM to a return series by Baum-Welch.
+ *
+ * @param {number[]} returns Log returns, oldest first.
+ * @param {object} [options]
+ *   @param {number} [options.states] Hidden regimes to fit. 2 is the usual
+ *     calm/turbulent split; 3 separates a crisis state.
+ *   @param {number} [options.maxIterations]
+ *   @param {number} [options.tolerance] Stop when the log-likelihood gain
+ *     per observation falls below this.
+ *   @param {number} [options.periodsPerYear]
+ * @returns {object} fitted model, posteriors and convergence history
+ */
+function fitHmm(returns, options = {}) {
+  const {
+    states = 2,
+    maxIterations = 200,
+    tolerance = 1e-7,
+    periodsPerYear = TRADING_DAYS,
+  } = options;
+
+  if (!Array.isArray(returns) || returns.length < states * 10) {
+    throw new RangeError(
+      `need at least ${states * 10} returns to fit ${states} states, got ${returns?.length ?? 0}`);
+  }
+
+  const T = returns.length;
+  let model = seedParameters(returns, states);
+  let previous = -Infinity;
+  const history = [];
+  let iterations = 0;
+  let converged = false;
+  let gamma = [];
+
+  for (; iterations < maxIterations; iterations++) {
+    /* ---- E step: posteriors over states and transitions ---- */
+    const { alpha, scale, logLikelihood } = forward(returns, model);
+    const beta = backward(returns, model, scale);
+    history.push(logLikelihood);
+
+    gamma = Array.from({ length: T }, () => new Array(states).fill(0));
+    for (let t = 0; t < T; t++) {
+      let total = 0;
+      for (let i = 0; i < states; i++) {
+        gamma[t][i] = alpha[t][i] * beta[t][i];
+        total += gamma[t][i];
+      }
+      for (let i = 0; i < states; i++) gamma[t][i] = total > 0 ? gamma[t][i] / total : 1 / states;
+    }
+
+    // Expected transition counts, accumulated rather than stored per step.
+    const xi = Array.from({ length: states }, () => new Array(states).fill(0));
+    for (let t = 0; t < T - 1; t++) {
+      let total = 0;
+      const step = Array.from({ length: states }, () => new Array(states).fill(0));
+      for (let i = 0; i < states; i++) {
+        for (let j = 0; j < states; j++) {
+          step[i][j] = alpha[t][i] * model.A[i][j] *
+            emission(returns[t + 1], model.means[j], model.sigmas[j]) * beta[t + 1][j];
+          total += step[i][j];
+        }
+      }
+      for (let i = 0; i < states; i++) {
+        for (let j = 0; j < states; j++) {
+          xi[i][j] += total > 0 ? step[i][j] / total : 1 / (states * states);
+        }
+      }
+    }
+
+    /* ---- M step: re-estimate the parameters ---- */
+    const pi = gamma[0].slice();
+
+    const A = Array.from({ length: states }, () => new Array(states).fill(0));
+    for (let i = 0; i < states; i++) {
+      let rowTotal = 0;
+      for (let j = 0; j < states; j++) rowTotal += xi[i][j];
+      for (let j = 0; j < states; j++) {
+        A[i][j] = rowTotal > 0 ? xi[i][j] / rowTotal : 1 / states;
+      }
+    }
+
+    const means = new Array(states).fill(0);
+    const sigmas = new Array(states).fill(0);
+    for (let i = 0; i < states; i++) {
+      let weight = 0;
+      let weighted = 0;
+      for (let t = 0; t < T; t++) {
+        weight += gamma[t][i];
+        weighted += gamma[t][i] * returns[t];
+      }
+      means[i] = weight > 0 ? weighted / weight : 0;
+
+      let variance = 0;
+      for (let t = 0; t < T; t++) variance += gamma[t][i] * (returns[t] - means[i]) ** 2;
+      sigmas[i] = Math.max(Math.sqrt(weight > 0 ? variance / weight : 0), MIN_SIGMA);
+    }
+
+    model = { pi, A, means, sigmas };
+
+    // Converged once the likelihood stops improving materially per point.
+    if (logLikelihood - previous < tolerance * T && iterations > 0) {
+      converged = true;
+      iterations += 1;
+      break;
+    }
+    previous = logLikelihood;
+  }
+
+  // Report the fit of the parameters actually returned, not the ones that
+  // produced the last E step.
+  const final = forward(returns, model);
+  const finalBeta = backward(returns, model, final.scale);
+  gamma = Array.from({ length: T }, (unused, t) => {
+    const row = new Array(states).fill(0);
+    let total = 0;
+    for (let i = 0; i < states; i++) {
+      row[i] = final.alpha[t][i] * finalBeta[t][i];
+      total += row[i];
+    }
+    for (let i = 0; i < states; i++) row[i] = total > 0 ? row[i] / total : 1 / states;
+    return row;
+  });
+
+  // Order states quiet-to-turbulent so state 0 always means "calm",
+  // whichever way EM happened to label them.
+  const order = model.sigmas
+    .map((sigma, index) => ({ sigma, index }))
+    .sort((a, b) => a.sigma - b.sigma)
+    .map((entry) => entry.index);
+
+  const reordered = {
+    pi: order.map((i) => model.pi[i]),
+    A: order.map((i) => order.map((j) => model.A[i][j])),
+    means: order.map((i) => model.means[i]),
+    sigmas: order.map((i) => model.sigmas[i]),
+  };
+  const posteriors = gamma.map((row) => order.map((i) => row[i]));
+
+  const parameterCount = states * states - 1 + 2 * states;
+  return {
+    ...reordered,
+    states,
+    periodsPerYear,
+    posteriors,
+    current: posteriors[T - 1],
+    stationary: stationaryDistribution(reordered.A),
+    viterbi: viterbiPath(returns, reordered),
+    logLikelihood: final.logLikelihood,
+    // Lower is better on both; they penalise the extra states a richer
+    // model buys, which is how you tell 2 states from 3.
+    aic: 2 * parameterCount - 2 * final.logLikelihood,
+    bic: parameterCount * Math.log(T) - 2 * final.logLikelihood,
+    iterations,
+    converged,
+    history,
+    /** Annualised volatility of each regime. */
+    annualisedVols: reordered.sigmas.map((s) => s * Math.sqrt(periodsPerYear)),
+    /** Annualised log drift of each regime. */
+    annualisedDrifts: reordered.means.map((m) => m * periodsPerYear),
+    /** Expected duration of a regime, in periods, before it switches. */
+    expectedDurations: reordered.A.map((row, i) => 1 / Math.max(1 - row[i], 1e-12)),
+  };
+}
+
+/**
+ * Long-run distribution over regimes, by power iteration on the transition
+ * matrix. This is where the chain settles regardless of today's state.
+ */
+function stationaryDistribution(A, iterations = 500) {
+  const n = A.length;
+  let p = new Array(n).fill(1 / n);
+  for (let step = 0; step < iterations; step++) {
+    const next = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) next[j] += p[i] * A[i][j];
+    }
+    let delta = 0;
+    for (let i = 0; i < n; i++) delta += Math.abs(next[i] - p[i]);
+    p = next;
+    if (delta < 1e-14) break;
+  }
+  return p;
+}
+
+/**
+ * Viterbi decoding: the single most likely regime sequence, as opposed to
+ * the most likely regime at each point taken separately. Runs in log space,
+ * which is what keeps it stable over thousands of observations.
+ */
+function viterbiPath(returns, { pi, A, means, sigmas }) {
+  const T = returns.length;
+  const n = pi.length;
+  const logA = A.map((row) => row.map((p) => Math.log(Math.max(p, Number.MIN_VALUE))));
+  const delta = Array.from({ length: T }, () => new Array(n).fill(-Infinity));
+  const psi = Array.from({ length: T }, () => new Array(n).fill(0));
+
+  for (let i = 0; i < n; i++) {
+    delta[0][i] = Math.log(Math.max(pi[i], Number.MIN_VALUE)) +
+      Math.log(Math.max(emission(returns[0], means[i], sigmas[i]), Number.MIN_VALUE));
+  }
+
+  for (let t = 1; t < T; t++) {
+    for (let j = 0; j < n; j++) {
+      let best = -Infinity;
+      let argBest = 0;
+      for (let i = 0; i < n; i++) {
+        const score = delta[t - 1][i] + logA[i][j];
+        if (score > best) { best = score; argBest = i; }
+      }
+      delta[t][j] = best +
+        Math.log(Math.max(emission(returns[t], means[j], sigmas[j]), Number.MIN_VALUE));
+      psi[t][j] = argBest;
+    }
+  }
+
+  const path = new Array(T).fill(0);
+  let best = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (delta[T - 1][i] > best) { best = delta[T - 1][i]; path[T - 1] = i; }
+  }
+  for (let t = T - 2; t >= 0; t--) path[t] = psi[t + 1][path[t + 1]];
+  return path;
+}
+
+/**
+ * Project the fitted chain forward over an option's life.
+ *
+ * This is the bridge from Baum-Welch to the pricing models. Starting from
+ * today's regime posterior, step the chain forward and accumulate the
+ * variance each step contributes. The result is the expected variance to
+ * expiry, which as an annualised number is the volatility to hand to
+ * Black-Scholes.
+ *
+ * Note this averages variance across regime paths — it is the right input
+ * for a European price, but it discards the volatility-of-volatility that
+ * makes the terminal distribution fat-tailed. The Monte Carlo engine keeps
+ * that, which is why the two prices differ.
+ *
+ * @param {object} model Result of `fitHmm`.
+ * @param {number} years Horizon in years.
+ */
+function projectRegimes(model, years) {
+  const { A, sigmas, means, current, periodsPerYear } = model;
+  const steps = Math.max(1, Math.round(years * periodsPerYear));
+  const n = sigmas.length;
+
+  let distribution = current.slice();
+  const path = [distribution.slice()];
+  let variance = 0;
+  let drift = 0;
+
+  for (let step = 0; step < steps; step++) {
+    for (let i = 0; i < n; i++) {
+      variance += distribution[i] * sigmas[i] ** 2;
+      drift += distribution[i] * means[i];
+    }
+    const next = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) next[j] += distribution[i] * A[i][j];
+    }
+    distribution = next;
+    path.push(distribution.slice());
+  }
+
+  // Rescale to the exact horizon: `steps` is rounded to whole periods.
+  const scale = (years * periodsPerYear) / steps;
+  return {
+    steps,
+    totalVariance: variance * scale,
+    vol: Math.sqrt((variance * scale) / years),
+    drift: (drift * scale) / years,
+    terminalDistribution: distribution,
+    path,
+  };
+}
+
+return { fitHmm, stationaryDistribution, viterbiPath, projectRegimes };
+})();
+
+/* src/monteCarlo.js */
+const MonteCarlo = (() => {
+/**
+ * Monte Carlo valuation and price projection.
+ *
+ * Two dynamics are available. Plain geometric Brownian motion is the process
+ * Black-Scholes assumes, so running it is mostly a check that the simulation
+ * agrees with the closed form. The regime-switching dynamics draw each step's
+ * volatility from the HMM fitted by Baum-Welch and let the chain move between
+ * regimes as the path evolves — that keeps the volatility-of-volatility that
+ * a single averaged number throws away, which is what fattens the tails and
+ * makes the simulated price differ from the analytic one.
+ *
+ * The same path set answers both questions the tool asks: discounted payoffs
+ * give the option's fair value, and the terminal prices give the projected
+ * distribution of the stock itself.
+ */
+
+const bs = BlackScholes;
+
+/**
+ * mulberry32 — small, fast, and good enough for pricing. Seeded explicitly so
+ * a given set of inputs always produces the same number; a valuation that
+ * changes every time you look at it is not much use.
+ */
+function makeRng(seed = 1) {
+  let state = seed >>> 0;
+  return function next() {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Box-Muller, returning both normals so neither draw is wasted. */
+function makeNormalPairs(rng) {
+  return function pair() {
+    let u = rng();
+    const v = rng();
+    if (u < 1e-12) u = 1e-12;
+    const radius = Math.sqrt(-2 * Math.log(u));
+    const angle = 2 * Math.PI * v;
+    return [radius * Math.cos(angle), radius * Math.sin(angle)];
+  };
+}
+
+/** Draw a state index from a discrete distribution. */
+function sampleState(distribution, u) {
+  let cumulative = 0;
+  for (let i = 0; i < distribution.length; i++) {
+    cumulative += distribution[i];
+    if (u < cumulative) return i;
+  }
+  return distribution.length - 1;
+}
+
+/**
+ * Simulate price paths.
+ *
+ * Paths are generated in antithetic pairs: every path drawn with shocks Z is
+ * matched by one drawn with -Z. The pair straddles the mean, so the average
+ * of the two is far more stable than two independent draws would be.
+ *
+ * @param {object} options
+ *   @param {number} options.spot
+ *   @param {number} options.years        Horizon.
+ *   @param {number} options.steps        Time steps along each path.
+ *   @param {number} options.paths        Total paths; rounded up to an even number.
+ *   @param {number} options.rate         Risk-free rate.
+ *   @param {number} [options.yield]
+ *   @param {number} [options.vol]        Required for 'gbm' dynamics.
+ *   @param {object} [options.regimes]    Fitted HMM, for 'regime' dynamics.
+ *   @param {'gbm'|'regime'} [options.dynamics]
+ *   @param {'risk-neutral'|'real-world'} [options.measure]
+ *     Risk-neutral drifts every path at the risk-free rate, which is the only
+ *     measure under which a discounted payoff is a fair price. Real-world uses
+ *     the drift actually estimated from the history, which is what a
+ *     projection of where the stock lands needs.
+ *   @param {number} [options.drift]      Real-world log drift, annualised.
+ *   @param {number} [options.seed]
+ * @returns {{paths: Float64Array, count: number, steps: number, dt: number}}
+ *   Paths are stored flat, row-major: path `p` at step `s` is at
+ *   `paths[p * (steps + 1) + s]`.
+ */
+function simulatePaths(options) {
+  const {
+    spot, years, steps, paths: requested, rate, yield: q = 0,
+    vol, regimes, dynamics = 'gbm', measure = 'risk-neutral', drift = 0, seed = 1,
+  } = options;
+
+  const count = Math.max(2, Math.ceil(requested / 2) * 2);
+  const dt = years / steps;
+  const sqrtDt = Math.sqrt(dt);
+  const width = steps + 1;
+  const out = new Float64Array(count * width);
+
+  const rng = makeRng(seed);
+  const normals = makeNormalPairs(rng);
+
+  const usingRegimes = dynamics === 'regime' && regimes;
+  const sigmas = usingRegimes ? regimes.sigmas.map((s) => s * Math.sqrt(regimes.periodsPerYear)) : null;
+  const regimeDrifts = usingRegimes
+    ? regimes.means.map((m) => m * regimes.periodsPerYear)
+    : null;
+
+  // Antithetic pairs advance together, sharing shocks up to a sign.
+  for (let pair = 0; pair < count / 2; pair++) {
+    const a = pair * 2;
+    const b = a + 1;
+    let logA = Math.log(spot);
+    let logB = Math.log(spot);
+    out[a * width] = spot;
+    out[b * width] = spot;
+
+    // Both members of a pair start in the same regime, so the only thing
+    // that differs between them is the sign of the shocks.
+    let stateA = usingRegimes ? sampleState(regimes.current, rng()) : 0;
+    let stateB = stateA;
+
+    for (let step = 1; step <= steps; step++) {
+      const [z] = normals();
+
+      const sigA = usingRegimes ? sigmas[stateA] : vol;
+      const sigB = usingRegimes ? sigmas[stateB] : vol;
+      const muA = measure === 'real-world'
+        ? (usingRegimes ? regimeDrifts[stateA] : drift)
+        : rate - q - 0.5 * sigA * sigA;
+      const muB = measure === 'real-world'
+        ? (usingRegimes ? regimeDrifts[stateB] : drift)
+        : rate - q - 0.5 * sigB * sigB;
+
+      logA += muA * dt + sigA * sqrtDt * z;
+      logB += muB * dt - sigB * sqrtDt * z;
+      out[a * width + step] = Math.exp(logA);
+      out[b * width + step] = Math.exp(logB);
+
+      if (usingRegimes) {
+        stateA = sampleState(regimes.A[stateA], rng());
+        stateB = sampleState(regimes.A[stateB], rng());
+      }
+    }
+  }
+
+  return { paths: out, count, steps, dt, width };
+}
+
+const payoffOf = (type, spot, strike) =>
+  (type === 'put' ? Math.max(strike - spot, 0) : Math.max(spot - strike, 0));
+
+/**
+ * European price from a simulated path set.
+ *
+ * Uses the discounted terminal stock price as a control variate. Its
+ * expectation is known exactly (spot x e^-qT), so the error the simulation
+ * makes on the control tells us which way it erred on the payoff, and the
+ * estimate can be corrected by that much. The regression coefficient is
+ * estimated from the sample, which is what makes this reduce variance
+ * whether the option is deep in or out of the money.
+ */
+function europeanFromPaths(simulation, { strike, type, rate, yield: q = 0, spot, years }) {
+  const { paths, count, width } = simulation;
+  const discount = Math.exp(-rate * years);
+
+  const payoffs = new Float64Array(count);
+  const controls = new Float64Array(count);
+  let payoffMean = 0;
+  let controlMean = 0;
+
+  for (let p = 0; p < count; p++) {
+    const terminal = paths[p * width + width - 1];
+    payoffs[p] = discount * payoffOf(type, terminal, strike);
+    controls[p] = discount * terminal;
+    payoffMean += payoffs[p];
+    controlMean += controls[p];
+  }
+  payoffMean /= count;
+  controlMean /= count;
+
+  let covariance = 0;
+  let controlVariance = 0;
+  for (let p = 0; p < count; p++) {
+    covariance += (payoffs[p] - payoffMean) * (controls[p] - controlMean);
+    controlVariance += (controls[p] - controlMean) ** 2;
+  }
+  const beta = controlVariance > 0 ? covariance / controlVariance : 0;
+  const controlTruth = spot * Math.exp(-q * years);
+
+  let adjustedMean = 0;
+  const adjusted = new Float64Array(count);
+  for (let p = 0; p < count; p++) {
+    adjusted[p] = payoffs[p] - beta * (controls[p] - controlTruth);
+    adjustedMean += adjusted[p];
+  }
+  adjustedMean /= count;
+
+  let variance = 0;
+  for (let p = 0; p < count; p++) variance += (adjusted[p] - adjustedMean) ** 2;
+  variance /= count - 1;
+
+  // Antithetic paths come in correlated pairs, so the effective sample size
+  // is the number of pairs. Treating each path as independent would report a
+  // standard error roughly a factor of root-two too small.
+  const standardError = Math.sqrt(variance / (count / 2));
+
+  let rawVariance = 0;
+  for (let p = 0; p < count; p++) rawVariance += (payoffs[p] - payoffMean) ** 2;
+  rawVariance /= count - 1;
+
+  return {
+    price: adjustedMean,
+    standardError,
+    confidence95: [adjustedMean - 1.96 * standardError, adjustedMean + 1.96 * standardError],
+    uncontrolledPrice: payoffMean,
+    varianceReduction: rawVariance > 0 ? 1 - variance / rawVariance : 0,
+  };
+}
+
+/**
+ * American price by Longstaff-Schwartz least squares.
+ *
+ * Working backwards from expiry, the value of waiting is unknown along any
+ * single path, so it is estimated by regressing the discounted continuation
+ * value on the current price across all paths that are in the money. Compare
+ * that fitted continuation against exercising now, and the better of the two
+ * becomes the cash flow carried back another step.
+ *
+ * Only in-the-money paths enter the regression — out-of-the-money paths carry
+ * no exercise decision and would drag the fit toward a region that never
+ * matters.
+ */
+function americanFromPaths(simulation, { strike, type, rate, years }) {
+  const { paths, count, steps, width } = simulation;
+  const dt = years / steps;
+  const stepDiscount = Math.exp(-rate * dt);
+
+  // Cash flow currently scheduled on each path, and when it lands.
+  const cashflow = new Float64Array(count);
+  const timing = new Int32Array(count);
+  for (let p = 0; p < count; p++) {
+    cashflow[p] = payoffOf(type, paths[p * width + steps], strike);
+    timing[p] = steps;
+  }
+
+  const inMoney = new Int32Array(count);
+
+  for (let step = steps - 1; step >= 1; step--) {
+    let liveCount = 0;
+    for (let p = 0; p < count; p++) {
+      if (payoffOf(type, paths[p * width + step], strike) > 0) inMoney[liveCount++] = p;
+    }
+    if (liveCount < 4) continue; // too few points to fit anything meaningful
+
+    // Normal equations for a quadratic basis {1, x, x^2}, x scaled by the
+    // strike so the matrix stays well conditioned.
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0;
+    let b0 = 0, b1 = 0, b2 = 0;
+    for (let k = 0; k < liveCount; k++) {
+      const p = inMoney[k];
+      const x = paths[p * width + step] / strike;
+      const y = cashflow[p] * Math.exp(-rate * dt * (timing[p] - step));
+      const x2 = x * x;
+      s0 += 1; s1 += x; s2 += x2; s3 += x2 * x; s4 += x2 * x2;
+      b0 += y; b1 += y * x; b2 += y * x2;
+    }
+
+    const coefficients = solve3x3(
+      [[s0, s1, s2], [s1, s2, s3], [s2, s3, s4]],
+      [b0, b1, b2],
+    );
+    if (coefficients === null) continue; // singular: keep holding this step
+
+    const [c0, c1, c2] = coefficients;
+    for (let k = 0; k < liveCount; k++) {
+      const p = inMoney[k];
+      const price = paths[p * width + step];
+      const exercise = payoffOf(type, price, strike);
+      const x = price / strike;
+      const continuation = c0 + c1 * x + c2 * x * x;
+      if (exercise > continuation) {
+        cashflow[p] = exercise;
+        timing[p] = step;
+      }
+    }
+  }
+
+  let total = 0;
+  const discounted = new Float64Array(count);
+  for (let p = 0; p < count; p++) {
+    discounted[p] = cashflow[p] * Math.exp(-rate * dt * timing[p]);
+    total += discounted[p];
+  }
+  const mean = total / count;
+
+  let variance = 0;
+  for (let p = 0; p < count; p++) variance += (discounted[p] - mean) ** 2;
+  variance /= count - 1;
+  const standardError = Math.sqrt(variance / (count / 2));
+
+  // Exercising immediately is always available, so it is a hard floor on the
+  // price; the regression is an approximation and can land just below it.
+  const immediate = payoffOf(type, paths[0], strike);
+  return {
+    price: Math.max(mean, immediate),
+    standardError,
+    confidence95: [mean - 1.96 * standardError, mean + 1.96 * standardError],
+    exercisedEarly: countEarly(timing, steps) / count,
+  };
+}
+
+function countEarly(timing, steps) {
+  let early = 0;
+  for (let i = 0; i < timing.length; i++) if (timing[i] < steps) early++;
+  return early;
+}
+
+/** Gaussian elimination with partial pivoting on a 3x3 system. */
+function solve3x3(matrix, rhs) {
+  const m = matrix.map((row, i) => [...row, rhs[i]]);
+  for (let col = 0; col < 3; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < 3; row++) {
+      if (Math.abs(m[row][col]) > Math.abs(m[pivot][col])) pivot = row;
+    }
+    if (Math.abs(m[pivot][col]) < 1e-12) return null;
+    [m[col], m[pivot]] = [m[pivot], m[col]];
+    for (let row = col + 1; row < 3; row++) {
+      const factor = m[row][col] / m[col][col];
+      for (let k = col; k < 4; k++) m[row][k] -= factor * m[col][k];
+    }
+  }
+  const x = [0, 0, 0];
+  for (let row = 2; row >= 0; row--) {
+    let sum = m[row][3];
+    for (let col = row + 1; col < 3; col++) sum -= m[row][col] * x[col];
+    x[row] = sum / m[row][row];
+  }
+  return x;
+}
+
+/**
+ * Distribution of the terminal price across a path set: the projection of
+ * where the stock itself lands, as opposed to what an option on it is worth.
+ */
+function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
+  const { paths, count, width } = simulation;
+  const terminal = new Float64Array(count);
+  for (let p = 0; p < count; p++) terminal[p] = paths[p * width + width - 1];
+
+  const sorted = Float64Array.from(terminal).sort();
+  const quantile = (q) => {
+    const position = (sorted.length - 1) * q;
+    const low = Math.floor(position);
+    const high = Math.ceil(position);
+    return sorted[low] + (sorted[high] - sorted[low]) * (position - low);
+  };
+
+  let sum = 0;
+  for (let p = 0; p < count; p++) sum += terminal[p];
+  const mean = sum / count;
+
+  let above = 0;
+  if (Number.isFinite(strike)) {
+    for (let p = 0; p < count; p++) if (terminal[p] > strike) above++;
+  }
+
+  const low = sorted[0];
+  const high = sorted[sorted.length - 1];
+  const span = high - low || 1;
+  const histogram = new Array(bins).fill(0);
+  for (let p = 0; p < count; p++) {
+    const index = Math.min(bins - 1, Math.floor(((terminal[p] - low) / span) * bins));
+    histogram[index] += 1;
+  }
+
+  return {
+    mean,
+    median: quantile(0.5),
+    p5: quantile(0.05),
+    p25: quantile(0.25),
+    p75: quantile(0.75),
+    p95: quantile(0.95),
+    min: low,
+    max: high,
+    probAboveStrike: Number.isFinite(strike) ? above / count : null,
+    histogram: histogram.map((frequency, index) => ({
+      from: low + (span * index) / bins,
+      to: low + (span * (index + 1)) / bins,
+      frequency: frequency / count,
+    })),
+  };
+}
+
+/**
+ * Convergence trace: the running price estimate as paths accumulate. Shows
+ * whether the simulation has settled or is still wandering, which a single
+ * final number cannot.
+ */
+function convergenceTrace(simulation, contract, samples = 40) {
+  const { count } = simulation;
+  const trace = [];
+  for (let i = 1; i <= samples; i++) {
+    const subset = Math.max(2, Math.round((count * i) / samples / 2) * 2);
+    const partial = {
+      ...simulation,
+      count: subset,
+    };
+    const { price, standardError } = europeanFromPaths(partial, contract);
+    trace.push({ paths: subset, price, standardError });
+  }
+  return trace;
+}
+
+/**
+ * Black-Scholes price of the same contract, for reference. Kept here so the
+ * simulation's output can always be shown next to the closed form it is
+ * meant to agree with under plain GBM.
+ */
+function analyticReference(contract) {
+  return bs.price(contract);
+}
+
+return { makeRng, makeNormalPairs, simulatePaths, europeanFromPaths, americanFromPaths, terminalDistribution, convergenceTrace, analyticReference };
+})();
+
+/* src/valuation.js */
+const Valuation = (() => {
+/**
+ * Contract valuation: price, Greeks and the diagnostics that say how much to
+ * trust the number.
+ *
+ * Split out from index.js so the ensemble can call it without importing the
+ * package entry point back into itself.
  */
 
 const bs = BlackScholes;
 const binomial = Binomial;
-
-const stats = Stats;
-const { impliedVol, priceBounds } = ImpliedVol;
-const blackScholes = bs;
 
 const DAYS_PER_YEAR = 365;
 
@@ -1639,7 +3467,283 @@ function employeeGrantValue(grant) {
   };
 }
 
-return { yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, DAYS_PER_YEAR, impliedVol, priceBounds, blackScholes, binomial, stats };
+return { yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, DAYS_PER_YEAR };
+})();
+
+/* src/ensemble.js */
+const Ensemble = (() => {
+/**
+ * Runs the three engines over one set of inputs and lays their answers side
+ * by side.
+ *
+ * The pipeline is deliberately ordered, because the models are not peers:
+ *
+ *   1. Baum-Welch fits a hidden Markov model to the return history and
+ *      recovers a volatility per regime, the odds of switching, and which
+ *      regime today sits in. It produces no price of its own — it produces
+ *      the volatility the other two are missing.
+ *   2. Black-Scholes prices the contract in closed form, once on plain
+ *      trailing volatility and once on the regime-projected number, so the
+ *      difference between them is exactly what the regime model contributed.
+ *   3. Monte Carlo simulates paths whose volatility switches regime as they
+ *      go, and prices from the discounted payoffs. Unlike step 2 it keeps
+ *      the volatility-of-volatility, so where it disagrees with Black-Scholes
+ *      it is quantifying what the closed form's single-number assumption costs.
+ *
+ * The same simulation, re-run under real-world drift instead of risk-neutral,
+ * gives the projected distribution of the stock itself.
+ */
+
+const bs = BlackScholes;
+const binomial = Binomial;
+const { fitHmm, projectRegimes } = Hmm;
+const {
+  simulatePaths, europeanFromPaths, americanFromPaths, terminalDistribution,
+} = MonteCarlo;
+const {
+  logReturns, historicalVol, ewmaVol, historicalDrift, describe, TRADING_DAYS,
+} = Series;
+const { valuation } = Valuation;
+
+/**
+ * @param {object} input
+ *   @param {number[]} input.prices       Price history, oldest first.
+ *   @param {number} [input.spot]         Defaults to the last price.
+ *   @param {number} input.strike
+ *   @param {number} input.days           Calendar days to expiry.
+ *   @param {number} input.rate           Risk-free rate as a decimal.
+ *   @param {number} [input.yield]
+ *   @param {'call'|'put'} input.type
+ *   @param {'european'|'american'} [input.style]
+ *   @param {number} [input.states]       Hidden regimes to fit (2 or 3).
+ *   @param {number} [input.paths]        Monte Carlo paths.
+ *   @param {number} [input.seed]
+ *   @param {number} [input.periodsPerYear] 252 daily, 52 weekly, 12 monthly.
+ */
+function ensembleValuation(input) {
+  const {
+    prices, strike, days, rate, yield: q = 0, type, style = 'european',
+    states = 2, paths = 20000, seed = 12345, periodsPerYear = TRADING_DAYS,
+  } = input;
+
+  if (!Array.isArray(prices) || prices.length < 30) {
+    throw new RangeError(`need at least 30 prices to estimate anything, got ${prices?.length ?? 0}`);
+  }
+  if (!(days > 0)) throw new RangeError('days to expiry must be > 0');
+  if (!(strike > 0)) throw new RangeError('strike must be > 0');
+
+  const spot = input.spot ?? prices[prices.length - 1];
+  const years = days / 365;
+  const returns = logReturns(prices);
+
+  /* ---------------- 1. the history, before any model ---------------- */
+
+  const stats = describe(returns, periodsPerYear);
+  const trailingVol = historicalVol(returns, periodsPerYear);
+  const smoothedVol = ewmaVol(returns, periodsPerYear);
+  const drift = historicalDrift(returns, periodsPerYear);
+
+  /* ---------------- 2. Baum-Welch: what regime are we in? ---------------- */
+
+  const hmm = fitHmm(returns, { states, periodsPerYear });
+  const projection = projectRegimes(hmm, years);
+  const regimeVol = projection.vol;
+
+  // Fitting more states always improves the in-sample likelihood, so the
+  // likelihood cannot tell you how many regimes the data supports. BIC can:
+  // it charges for each extra parameter. Scoring the alternatives here is
+  // what stops a spurious third regime — one that holds a fraction of a
+  // percent of the time — from being read as a real market state.
+  const candidates = [2, 3, 4]
+    .filter((n) => n !== states && returns.length >= n * 10)
+    .map((n) => {
+      try {
+        return { states: n, bic: fitHmm(returns, { states: n, periodsPerYear }).bic };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const scores = [...candidates, { states, bic: hmm.bic }].sort((a, b) => a.states - b.states);
+  const preferred = scores.reduce((best, entry) => (entry.bic < best.bic ? entry : best), scores[0]);
+
+  // A regime the chain spends almost no time in is a fitting artefact, not a
+  // market state, however plausible its volatility looks.
+  const negligible = hmm.stationary
+    .map((share, index) => ({ share, index }))
+    .filter((entry) => entry.share < 0.02)
+    .map((entry) => entry.index);
+
+  /* ---------------- 3. Black-Scholes on each volatility ---------------- */
+
+  const contract = { spot, strike, time: years, rate, yield: q, type, style, steps: 400 };
+  const onTrailing = valuation({ ...contract, vol: trailingVol });
+  const onRegime = valuation({ ...contract, vol: regimeVol });
+
+  /* ---------------- 4. Monte Carlo ---------------- */
+
+  // One step per trading day, bounded so a long-dated option stays responsive
+  // and a very short one still gets enough steps to decide early exercise.
+  const steps = Math.min(252, Math.max(20, Math.round(years * periodsPerYear)));
+  const shared = {
+    spot, years, steps, paths, rate, yield: q,
+    regimes: hmm, dynamics: 'regime', measure: 'risk-neutral', seed,
+  };
+  const payoff = { strike, type, rate, yield: q, spot, years };
+
+  const regimePaths = simulatePaths(shared);
+  const mcRegime = europeanFromPaths(regimePaths, payoff);
+
+  // Plain GBM at the same volatility, as a control: this one has a closed
+  // form, so any disagreement is simulation error rather than model
+  // difference, and it calibrates how much to trust the regime number.
+  const gbmPaths = simulatePaths({
+    ...shared, dynamics: 'gbm', vol: regimeVol, regimes: null, seed: seed + 1,
+  });
+  const mcGbm = europeanFromPaths(gbmPaths, payoff);
+  const gbmReference = bs.price({ ...contract, vol: regimeVol });
+
+  const mcAmerican = style === 'american'
+    ? americanFromPaths(regimePaths, { strike, type, rate, years })
+    : null;
+
+  /* ---------------- 5. where does the stock itself land? ---------------- */
+
+  const realWorldPaths = simulatePaths({
+    ...shared, measure: 'real-world', drift: drift.logDrift, seed: seed + 2,
+  });
+  const outlook = terminalDistribution(realWorldPaths, { strike });
+
+  /* ---------------- 6. reconcile ---------------- */
+
+  const monteCarloValue = mcAmerican ? mcAmerican.price : mcRegime.price;
+  const estimates = [
+    { label: 'Black-Scholes, trailing volatility', value: onTrailing.fairValue },
+    { label: 'Black-Scholes, regime volatility', value: onRegime.fairValue },
+    { label: 'Monte Carlo, regime-switching', value: monteCarloValue },
+  ];
+  const values = estimates.map((e) => e.value);
+  const low = Math.min(...values);
+  const high = Math.max(...values);
+  const consensus = values.reduce((sum, v) => sum + v, 0) / values.length;
+
+  return {
+    spot,
+    strike,
+    years,
+    days,
+    type,
+    style,
+
+    series: {
+      observations: prices.length,
+      returns: returns.length,
+      periodsPerYear,
+      trailingVol,
+      smoothedVol,
+      logDrift: drift.logDrift,
+      expectedReturn: drift.expectedReturn,
+      skew: stats.skew,
+      excessKurtosis: stats.excessKurtosis,
+      first: prices[0],
+      last: prices[prices.length - 1],
+    },
+
+    hmm: {
+      states: hmm.states,
+      converged: hmm.converged,
+      iterations: hmm.iterations,
+      logLikelihood: hmm.logLikelihood,
+      aic: hmm.aic,
+      bic: hmm.bic,
+      transition: hmm.A,
+      annualisedVols: hmm.annualisedVols,
+      annualisedDrifts: hmm.annualisedDrifts,
+      stationary: hmm.stationary,
+      current: hmm.current,
+      expectedDurations: hmm.expectedDurations,
+      posteriors: hmm.posteriors,
+      viterbi: hmm.viterbi,
+      history: hmm.history,
+      /** Volatility the chain implies over this option's life. */
+      projectedVol: regimeVol,
+      regimePath: projection.path,
+      /** BIC across candidate state counts, and which it prefers. */
+      selection: { preferred: preferred.states, scores },
+      /** States the chain almost never visits — artefacts, not regimes. */
+      negligible,
+    },
+
+    volatility: {
+      trailing: trailingVol,
+      smoothed: smoothedVol,
+      regime: regimeVol,
+      /** What the regime model adds or removes versus the trailing number. */
+      regimeAdjustment: regimeVol - trailingVol,
+    },
+
+    blackScholes: { onTrailing, onRegime },
+
+    monteCarlo: {
+      paths: regimePaths.count,
+      steps,
+      european: mcRegime,
+      american: mcAmerican,
+      value: monteCarloValue,
+      /** GBM control: simulated vs closed form on identical assumptions. */
+      control: {
+        simulated: mcGbm.price,
+        analytic: gbmReference,
+        error: mcGbm.price - gbmReference,
+        standardError: mcGbm.standardError,
+        withinTolerance: Math.abs(mcGbm.price - gbmReference) < 1.96 * mcGbm.standardError,
+      },
+    },
+
+    outlook,
+
+    consensus: {
+      estimates,
+      value: consensus,
+      low,
+      high,
+      spread: high - low,
+      /** Disagreement as a share of the average price. */
+      dispersion: consensus > 0 ? (high - low) / consensus : 0,
+    },
+  };
+}
+
+return { ensembleValuation };
+})();
+
+/* src/index.js */
+const Engine = (() => {
+/**
+ * Fair-value engine for stock options.
+ *
+ * Three engines sit behind this entry point, and they do different jobs:
+ * `valuation()` prices a contract from assumptions you supply, while
+ * `ensembleValuation()` starts from a price history, fits the volatility
+ * regimes with Baum-Welch, and runs Black-Scholes and Monte Carlo on top of
+ * what it finds.
+ */
+
+const stats = Stats;
+const blackScholes = BlackScholes;
+const binomial = Binomial;
+const series = Series;
+const monteCarlo = MonteCarlo;
+
+const { impliedVol, priceBounds } = ImpliedVol;
+const { fitHmm, projectRegimes, viterbiPath, stationaryDistribution } = Hmm;
+const { ensembleValuation } = Ensemble;
+const {
+  DAYS_PER_YEAR, yearsFromDays, yearsBetween,
+  valuation, valueCurve, employeeGrantValue,
+} = Valuation;
+
+return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationaryDistribution, ensembleValuation, DAYS_PER_YEAR, yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, stats, blackScholes, binomial, series, monteCarlo };
 })();
 
 /* web/app.js */
@@ -1651,6 +3755,7 @@ return { yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue,
 const {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes: bs, binomial,
+  ensembleValuation, series: seriesTools,
 } = Engine;
 
 const $ = (id) => document.getElementById(id);
@@ -2029,17 +4134,625 @@ function renderGrant() {
      'vesting is expensed tranche by tranche and runs a little higher early on.');
 }
 
+
+/* ------------------------------------------------------------ ensemble */
+
+const ensembleForm = $('ensemble-form');
+const REGIME_NAMES = {
+  2: ['Calm', 'Turbulent'],
+  3: ['Calm', 'Unsettled', 'Crisis'],
+};
+
+/** Sequential ramp: deeper means more volatile, matching the state order. */
+const regimeFill = (index, states) =>
+  `var(--regime-${states === 2 ? [1, 3][index] : index + 1})`;
+const regimeSolid = (index, states) =>
+  `var(--regime-${states === 2 ? [1, 3][index] : index + 1}-solid)`;
+
+/** Attaches a tooltip layer to a chart container and returns its controls. */
+function tooltipFor(container) {
+  container.classList.add('chart-host');
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  return {
+    node: tip,
+    show(x, y, html) {
+      tip.innerHTML = html;
+      tip.style.left = `${x}px`;
+      tip.style.top = `${y}px`;
+      tip.dataset.visible = 'true';
+    },
+    hide() { tip.dataset.visible = 'false'; },
+  };
+}
+
+function renderEnsemble() {
+  const panel = document.querySelector('main [data-panel="ensemble"]');
+  const errorBox = $('ensemble-error');
+  errorBox.hidden = true;
+
+  const f = readForm(ensembleForm);
+  const prices = seriesTools.parsePrices(f.prices);
+
+  $('series-summary').textContent = prices.length
+    ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}`
+    : 'no usable prices found';
+
+  let result;
+  try {
+    result = ensembleValuation({
+      prices,
+      strike: f.strike,
+      days: f.days,
+      rate: f.rate / 100,
+      yield: f.yield / 100,
+      type: f.type,
+      style: f.style,
+      states: Number(f.states),
+      paths: Number(f.paths),
+      seed: Number(f.seed),
+      periodsPerYear: Number(f.periodsPerYear),
+    });
+  } catch (error) {
+    panel.classList.remove('is-computing');
+    showError(errorBox, error.message);
+    return;
+  }
+
+  const { consensus, outlook, hmm, monteCarlo, series } = result;
+
+  /* ---- headline: what it is worth, and where the stock goes ---- */
+
+  $('ens-value').textContent = money(consensus.value, 4);
+  $('ens-range').textContent =
+    `${money(consensus.low, 4)} to ${money(consensus.high, 4)} across the three models`;
+  $('ens-spread').textContent = `${money(consensus.spread, 4)} (${percent(consensus.dispersion, 1)})`;
+  $('ens-contract').textContent = money(consensus.value * 100);
+
+  $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
+  $('ens-projected').textContent = money(outlook.median);
+  $('ens-projected-note').textContent =
+    `median of ${count(monteCarlo.paths)} paths, from ${money(result.spot)} today`;
+  $('ens-band').textContent = `${money(outlook.p5)} – ${money(outlook.p95)}`;
+  $('ens-itm').textContent = percent(
+    result.type === 'put' ? 1 - outlook.probAboveStrike : outlook.probAboveStrike, 1);
+
+  /* ---- the three answers, side by side ---- */
+
+  renderDotPlot(result);
+  $('ens-dotplot-note').textContent = consensus.dispersion < 0.05
+    ? 'The three models agree closely, so the price is not resting on any one of them.'
+    : `The models differ by ${percent(consensus.dispersion, 1)} of the average. ` +
+      'The regime-switching simulation keeps the volatility-of-volatility that the ' +
+      'closed form averages away, which is most of the gap.';
+
+  renderRegimeTable(result);
+  renderTransitionMatrix(result);
+  renderModelSelection(result);
+  renderHistoryChart(result, prices);
+  renderDistributionChart(result);
+  renderGreeks($('ens-greeks'), result.blackScholes.onRegime.greeks, 1);
+
+  /* ---- diagnostics ---- */
+
+  const rows = [
+    ['Observations', `${count(series.observations)} prices, ${count(series.returns)} returns`],
+    ['Trailing volatility', percent(series.trailingVol, 2)],
+    ['Exponentially weighted', percent(series.smoothedVol, 2)],
+    ['Regime-projected volatility', percent(hmm.projectedVol, 2)],
+    ['Return skew', signed(series.skew, 3)],
+    ['Excess kurtosis', signed(series.excessKurtosis, 3), true],
+    ['Baum-Welch', hmm.converged
+      ? `converged in ${hmm.iterations} iterations`
+      : `stopped at ${hmm.iterations} iterations without converging`],
+    ['Log-likelihood', hmm.logLikelihood.toFixed(1), true],
+    ['BIC', `${hmm.bic.toFixed(1)} (prefers ${hmm.selection.preferred} regimes)`, true],
+    ['Monte Carlo', `${count(monteCarlo.paths)} paths × ${monteCarlo.steps} steps`],
+    ['Standard error', `± ${money(monteCarlo.european.standardError, 4)}`],
+    ['95% interval', `${money(monteCarlo.european.confidence95[0], 4)} – ` +
+      `${money(monteCarlo.european.confidence95[1], 4)}`],
+    ['Variance reduction', percent(monteCarlo.european.varianceReduction, 0), true],
+    ['GBM control check', monteCarlo.control.withinTolerance
+      ? `passes — simulated ${money(monteCarlo.control.simulated, 4)} against ` +
+        `${money(monteCarlo.control.analytic, 4)} closed form`
+      : `off by ${money(Math.abs(monteCarlo.control.error), 4)} — raise the path count`],
+  ];
+
+  if (monteCarlo.american) {
+    rows.push(['Exercised early', percent(monteCarlo.american.exercisedEarly, 1)]);
+    rows.push(['American method', 'Longstaff-Schwartz least squares', true]);
+  }
+
+  renderFacts($('ens-diagnostics'), rows,
+    'The control check reprices the contract by simulation under plain ' +
+    'geometric Brownian motion, where the closed form is exact. If those two ' +
+    'disagree by more than the standard error, the simulation is at fault ' +
+    'rather than the model.');
+
+  panel.classList.remove('is-computing');
+}
+
+/* ---- chart: where each model lands -------------------------------------
+   Three labelled marks on one shared axis. Identity comes from the labels,
+   so no categorical palette is needed and none is invented. */
+
+function renderDotPlot(result) {
+  const { consensus } = result;
+  const width = 660;
+  const rowHeight = 46;
+  const pad = { top: 10, right: 20, bottom: 30, left: 20 };
+  const height = pad.top + pad.bottom + consensus.estimates.length * rowHeight;
+
+  const span = Math.max(consensus.spread, consensus.value * 0.04, 1e-6);
+  const from = consensus.low - span * 0.35;
+  const to = consensus.high + span * 0.35;
+  const x = (value) => pad.left + ((value - from) / (to - from)) * (width - pad.left - pad.right);
+
+  const container = $('ens-dotplot');
+  const tip = tooltipFor(container);
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Fair value by model: ${consensus.estimates
+      .map((e) => `${e.label}, ${e.value.toFixed(4)}`).join('; ')}.`,
+  });
+
+  // Consensus reference, drawn behind the marks.
+  svg.append(el('line', {
+    x1: x(consensus.value), x2: x(consensus.value), y1: pad.top - 4,
+    y2: height - pad.bottom + 4, stroke: 'var(--line-strong)',
+    'stroke-width': 1, 'stroke-dasharray': '3 3',
+  }));
+
+  consensus.estimates.forEach((estimate, index) => {
+    const y = pad.top + index * rowHeight + rowHeight / 2;
+
+    svg.append(el('line', {
+      x1: pad.left, x2: width - pad.right, y1: y, y2: y,
+      stroke: 'var(--line)', 'stroke-width': 1,
+    }));
+
+    const label = el('text', {
+      x: pad.left, y: y - 9, fill: 'var(--ink-muted)', 'font-size': 11.5,
+    });
+    label.textContent = estimate.label;
+    svg.append(label);
+
+    // A 2px surface ring keeps the mark legible where it overlaps the rule.
+    svg.append(el('circle', {
+      cx: x(estimate.value), cy: y, r: 6,
+      fill: 'var(--accent)', stroke: 'var(--surface)', 'stroke-width': 2,
+    }));
+
+    // Below the mark, while the model name sits above the rule — otherwise a
+    // mark near the left edge puts its value straight through the name.
+    const value = el('text', {
+      x: x(estimate.value), y: y + 19, 'text-anchor': 'middle',
+      fill: 'var(--ink)', 'font-size': 12.5, 'font-family': 'var(--mono)',
+      'font-weight': 600,
+    });
+    value.textContent = estimate.value.toFixed(4);
+    svg.append(value);
+
+    const hit = el('rect', {
+      x: pad.left, y: y - rowHeight / 2, width: width - pad.left - pad.right,
+      height: rowHeight, fill: 'transparent',
+    });
+    hit.addEventListener('pointerenter', () => {
+      const box = container.getBoundingClientRect();
+      tip.show(
+        (x(estimate.value) / width) * box.width,
+        (y / height) * box.height,
+        `<span class="tip-label">${estimate.label}</span><br><b>${money(estimate.value, 4)}</b>` +
+        `<br><span class="tip-label">${signed(estimate.value - consensus.value, 4)} vs consensus</span>`,
+      );
+    });
+    hit.addEventListener('pointerleave', () => tip.hide());
+    svg.append(hit);
+  });
+
+  const caption = el('text', {
+    x: x(consensus.value), y: height - 10, 'text-anchor': 'middle',
+    fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+  });
+  caption.textContent = `consensus ${consensus.value.toFixed(4)}`;
+  svg.append(caption);
+
+  container.replaceChildren(svg, tip.node);
+}
+
+/* ---- table: the regimes Baum-Welch recovered --------------------------- */
+
+function renderRegimeTable(result) {
+  const { hmm } = result;
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const periods = result.series?.periodsPerYear ?? 252;
+
+  const head = ['Regime', 'Volatility', 'Drift p.a.', 'Typical run', 'Probability now', 'Long-run share'];
+  const table = $('ens-regimes');
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const title of head) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = title;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+
+  const tbody = document.createElement('tbody');
+  for (let i = 0; i < hmm.states; i++) {
+    const row = document.createElement('tr');
+
+    const name = document.createElement('th');
+    name.scope = 'row';
+    const chip = document.createElement('span');
+    chip.className = 'regime-chip';
+    const swatch = document.createElement('span');
+    swatch.className = 'regime-swatch';
+    swatch.style.background = regimeSolid(i, hmm.states);
+    chip.append(swatch, document.createTextNode(names[i] ?? `State ${i + 1}`));
+    name.append(chip);
+    row.append(name);
+
+    const periodName = periods === 252 ? 'days' : periods === 52 ? 'weeks' : 'months';
+    for (const cell of [
+      percent(hmm.annualisedVols[i], 1),
+      signed(hmm.annualisedDrifts[i] * 100, 1) + '%',
+      `${hmm.expectedDurations[i].toFixed(0)} ${periodName}`,
+      percent(hmm.current[i], 1),
+      percent(hmm.stationary[i], 1),
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = cell;
+      row.append(td);
+    }
+    tbody.append(row);
+  }
+
+  const caption = table.querySelector('caption');
+  table.replaceChildren(caption, thead, tbody);
+}
+
+function renderTransitionMatrix(result) {
+  const { hmm } = result;
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const table = $('ens-transition');
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.scope = 'col';
+  corner.textContent = 'From ↓ To →';
+  headRow.append(corner);
+  for (let j = 0; j < hmm.states; j++) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = names[j] ?? `State ${j + 1}`;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+
+  const tbody = document.createElement('tbody');
+  for (let i = 0; i < hmm.states; i++) {
+    const row = document.createElement('tr');
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.textContent = names[i] ?? `State ${i + 1}`;
+    row.append(label);
+    for (let j = 0; j < hmm.states; j++) {
+      const td = document.createElement('td');
+      td.textContent = percent(hmm.transition[i][j], 1);
+      if (i === j) td.classList.add('is-diagonal');
+      row.append(td);
+    }
+    tbody.append(row);
+  }
+
+  const caption = table.querySelector('caption');
+  table.replaceChildren(caption, thead, tbody);
+}
+
+/** Warns when the chosen number of regimes is not the number the data supports. */
+function renderModelSelection(result) {
+  const { selection, negligible, states } = result.hmm;
+  const names = REGIME_NAMES[states] ?? REGIME_NAMES[2];
+  const notice = $('ens-selection');
+  const messages = [];
+
+  if (selection.preferred !== states) {
+    messages.push(
+      `<b>BIC prefers ${selection.preferred} regimes</b>, not ${states}. ` +
+      `Scores: ${selection.scores.map((s) => `${s.states} → ${s.bic.toFixed(0)}`).join(', ')} ` +
+      '(lower is better). Extra states always fit the past better; BIC charges ' +
+      'for the parameters they cost.');
+  }
+
+  for (const index of negligible) {
+    messages.push(
+      `The <b>${names[index] ?? `state ${index + 1}`}</b> regime holds only ` +
+      `${percent(result.hmm.stationary[index], 1)} of the time in the long run, ` +
+      'which usually means it is fitting a handful of individual days rather ' +
+      'than a market state.');
+  }
+
+  notice.innerHTML = messages.join('<br><br>');
+  notice.hidden = messages.length === 0;
+}
+
+/* ---- chart: history shaded by regime ----------------------------------- */
+
+function renderHistoryChart(result, prices) {
+  const { hmm } = result;
+  const width = 900;
+  const height = 260;
+  const pad = { top: 12, right: 14, bottom: 26, left: 52 };
+  const container = $('ens-history');
+  const tip = tooltipFor(container);
+
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const padding = (high - low) * 0.08 || 1;
+  const yFrom = low - padding;
+  const yTo = high + padding;
+
+  const x = (i) => pad.left + (i / (prices.length - 1)) * (width - pad.left - pad.right);
+  const y = (p) => height - pad.bottom - ((p - yFrom) / (yTo - yFrom)) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label':
+      `${prices.length} closing prices from ${prices[0].toFixed(2)} to ` +
+      `${prices[prices.length - 1].toFixed(2)}, shaded by the volatility regime ` +
+      'the model assigns to each stretch.',
+  });
+
+  // Regime bands: one rect per contiguous run, not per observation.
+  // The Viterbi path is indexed by return, so state k describes the move
+  // into price k+1.
+  let runStart = 0;
+  for (let i = 1; i <= hmm.viterbi.length; i++) {
+    if (i === hmm.viterbi.length || hmm.viterbi[i] !== hmm.viterbi[runStart]) {
+      const state = hmm.viterbi[runStart];
+      svg.append(el('rect', {
+        x: x(runStart), y: pad.top,
+        width: Math.max(0.8, x(i) - x(runStart)),
+        height: height - pad.top - pad.bottom,
+        fill: regimeFill(state, hmm.states),
+      }));
+      runStart = i;
+    }
+  }
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = yFrom + ((yTo - yFrom) * i) / ticks;
+    const yy = y(value);
+    svg.append(el('line', {
+      x1: pad.left, x2: width - pad.right, y1: yy, y2: yy,
+      stroke: 'var(--line)', 'stroke-width': 1,
+    }));
+    const text = el('text', {
+      x: pad.left - 9, y: yy + 4, 'text-anchor': 'end',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = value.toFixed(0);
+    svg.append(text);
+  }
+
+  // The price line stays neutral ink: colour on this chart means regime.
+  svg.append(el('path', {
+    d: prices.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p).toFixed(2)}`).join(' '),
+    fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6,
+    'stroke-linejoin': 'round',
+  }));
+
+  for (let i = 0; i <= 4; i++) {
+    const index = Math.round(((prices.length - 1) * i) / 4);
+    const text = el('text', {
+      x: x(index), y: height - 9, 'text-anchor': 'middle',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = String(index + 1);
+    svg.append(text);
+  }
+
+  const crosshair = el('line', {
+    y1: pad.top, y2: height - pad.bottom, stroke: 'var(--ink-muted)',
+    'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0,
+  });
+  const marker = el('circle', {
+    r: 4, fill: 'var(--ink)', stroke: 'var(--surface)', 'stroke-width': 2, opacity: 0,
+  });
+  svg.append(crosshair, marker);
+
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const surface = el('rect', {
+    x: pad.left, y: pad.top, width: width - pad.left - pad.right,
+    height: height - pad.top - pad.bottom, fill: 'transparent',
+  });
+  surface.addEventListener('pointermove', (event) => {
+    const box = container.getBoundingClientRect();
+    const ratio = (event.clientX - box.left) / box.width;
+    const index = Math.max(0, Math.min(prices.length - 1, Math.round(ratio * (prices.length - 1))));
+    const posterior = hmm.posteriors[Math.max(0, index - 1)] ?? [];
+    const state = hmm.viterbi[Math.max(0, index - 1)] ?? 0;
+
+    crosshair.setAttribute('x1', x(index));
+    crosshair.setAttribute('x2', x(index));
+    crosshair.setAttribute('opacity', 1);
+    marker.setAttribute('cx', x(index));
+    marker.setAttribute('cy', y(prices[index]));
+    marker.setAttribute('opacity', 1);
+
+    tip.show((x(index) / width) * box.width, (y(prices[index]) / height) * box.height,
+      `<span class="tip-label">observation ${index + 1}</span><br>` +
+      `<b>${money(prices[index])}</b><br>` +
+      `<span class="tip-label">${names[state] ?? `State ${state + 1}`} · ` +
+      `${percent(posterior[state] ?? 0, 0)} confident</span>`);
+  });
+  surface.addEventListener('pointerleave', () => {
+    crosshair.setAttribute('opacity', 0);
+    marker.setAttribute('opacity', 0);
+    tip.hide();
+  });
+  svg.append(surface);
+
+  container.replaceChildren(svg, tip.node);
+
+  const legend = $('ens-history-legend');
+  legend.replaceChildren(...Array.from({ length: hmm.states }, (unused, i) => {
+    const item = document.createElement('span');
+    const swatch = document.createElement('i');
+    swatch.className = 'swatch';
+    swatch.style.background = regimeSolid(i, hmm.states);
+    swatch.style.height = '10px';
+    swatch.style.width = '10px';
+    swatch.style.borderRadius = '3px';
+    item.append(swatch, document.createTextNode(
+      `${names[i] ?? `State ${i + 1}`} · ${percent(hmm.annualisedVols[i], 0)} vol`));
+    return item;
+  }));
+}
+
+/* ---- chart: terminal price distribution -------------------------------- */
+
+function renderDistributionChart(result) {
+  const { outlook, strike, spot } = result;
+  const width = 620;
+  const height = 280;
+  const pad = { top: 54, right: 14, bottom: 34, left: 44 };
+  const container = $('ens-distribution');
+  const tip = tooltipFor(container);
+
+  const bins = outlook.histogram;
+  const from = bins[0].from;
+  const to = bins[bins.length - 1].to;
+  const peak = Math.max(...bins.map((b) => b.frequency)) || 1;
+
+  const x = (price) => pad.left + ((price - from) / (to - from)) * (width - pad.left - pad.right);
+  const y = (freq) => height - pad.bottom - (freq / peak) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label':
+      `Simulated distribution of the price at expiry: median ${outlook.median.toFixed(2)}, ` +
+      `90% of paths between ${outlook.p5.toFixed(2)} and ${outlook.p95.toFixed(2)}.`,
+  });
+
+  const baseline = height - pad.bottom;
+  bins.forEach((bin) => {
+    const left = x(bin.from);
+    const right = x(bin.to);
+    // 2px gap between bars, and 4px rounded tops anchored to the baseline.
+    const barWidth = Math.max(1, right - left - 2);
+    const top = y(bin.frequency);
+    const radius = Math.min(4, barWidth / 2, Math.max(0, baseline - top));
+    const inBand = bin.to > outlook.p5 && bin.from < outlook.p95;
+
+    svg.append(el('path', {
+      d: `M${left + 1},${baseline} L${left + 1},${top + radius} ` +
+         `Q${left + 1},${top} ${left + 1 + radius},${top} ` +
+         `L${left + 1 + barWidth - radius},${top} ` +
+         `Q${left + 1 + barWidth},${top} ${left + 1 + barWidth},${top + radius} ` +
+         `L${left + 1 + barWidth},${baseline} Z`,
+      fill: inBand ? 'var(--accent)' : 'var(--line-strong)',
+    }));
+
+    const hit = el('rect', {
+      x: left, y: pad.top, width: Math.max(1, right - left),
+      height: baseline - pad.top, fill: 'transparent',
+    });
+    hit.addEventListener('pointerenter', () => {
+      const box = container.getBoundingClientRect();
+      tip.show(((left + right) / 2 / width) * box.width, (top / height) * box.height,
+        `<span class="tip-label">${money(bin.from)} – ${money(bin.to)}</span><br>` +
+        `<b>${percent(bin.frequency, 1)}</b> <span class="tip-label">of paths</span>`);
+    });
+    hit.addEventListener('pointerleave', () => tip.hide());
+    svg.append(hit);
+  });
+
+  // Reference lines, directly labelled rather than put in a legend.
+  // Reference lines are neutral ink, distinguished by weight and dash. Red
+  // and green are reserved for good/bad here, and a strike price is neither.
+  const markers = [
+    { at: outlook.median, label: 'median', colour: 'var(--ink-muted)', dash: '4 3', weight: 1.5 },
+    { at: strike, label: 'strike', colour: 'var(--ink)', dash: '6 3', weight: 2 },
+    { at: spot, label: 'today', colour: 'var(--ink-muted)', dash: '2 3', weight: 1.5 },
+  ];
+  // Median, strike and spot are often within a few percent of each other, so
+  // the labels get their own vertical lanes rather than stacking on one line
+  // and overprinting each other into noise.
+  const visible = markers.filter(({ at }) => at >= from && at <= to);
+  // Every line starts below the whole label stack. Starting each one under
+  // its own label only works for the bottom lane; the rest strike through
+  // the labels beneath them.
+  const lineTop = pad.top - 40 + visible.length * 13 + 2;
+  visible.forEach(({ at, label, colour, dash, weight }, lane) => {
+    const labelY = pad.top - 40 + lane * 13;
+    svg.append(el('line', {
+      x1: x(at), x2: x(at), y1: lineTop, y2: baseline,
+      stroke: colour, 'stroke-width': weight, 'stroke-dasharray': dash,
+    }));
+
+    // Keep the text inside the plot when a marker sits against either edge.
+    const anchor = x(at) < pad.left + 34 ? 'start' : x(at) > width - pad.right - 34 ? 'end' : 'middle';
+    const text = el('text', {
+      x: x(at), y: labelY, 'text-anchor': anchor,
+      fill: colour, 'font-size': 10.5, 'font-weight': 600,
+    });
+    text.textContent = `${label} ${at.toFixed(2)}`;
+    svg.append(text);
+  });
+
+  for (let i = 0; i <= 4; i++) {
+    const price = from + ((to - from) * i) / 4;
+    const text = el('text', {
+      x: x(price), y: height - 12, 'text-anchor': 'middle',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = price.toFixed(0);
+    svg.append(text);
+  }
+
+  container.replaceChildren(svg, tip.node);
+}
+
 /* -------------------------------------------------------------- wiring */
 
 const MODES = {
+  ensemble: renderEnsemble,
   price: renderPrice,
   implied: renderImplied,
   grant: renderGrant,
 };
 
+/* Debounced, because a full run fits three models over a few hundred
+   observations and simulates tens of thousands of paths — enough work that
+   firing it on every keystroke would make the inputs feel stuck. */
+function debounce(fn, wait) {
+  let timer = null;
+  return function scheduled(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
 for (const [mode, render] of Object.entries(MODES)) {
   const form = document.querySelector(`form[data-panel="${mode}"]`);
-  form.addEventListener('input', render);
+  const handler = mode === 'ensemble' ? debounce(render, 320) : render;
+  form.addEventListener('input', (event) => {
+    // Dim the figures the moment an input changes, so the pause before the
+    // debounced run lands reads as work rather than as a frozen page.
+    if (mode === 'ensemble') {
+      document.querySelector('main [data-panel="ensemble"]')?.classList.add('is-computing');
+    }
+    handler(event);
+  });
   form.addEventListener('submit', (event) => event.preventDefault());
 }
 
@@ -2067,6 +4780,7 @@ $('theme').addEventListener('click', () => {
   root.dataset.theme = current === 'dark' ? 'light' : 'dark';
 });
 
+renderEnsemble();
 renderPrice();
 renderImplied();
 renderGrant();

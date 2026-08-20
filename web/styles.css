@@ -134,7 +134,14 @@ body {
   color: var(--ink-muted);
 }
 
-.masthead-tools { display: flex; gap: 10px; align-items: center; }
+.masthead-tools {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  /* Without min-width:0 a flex item refuses to shrink below its content, and
+     four tab labels push the whole masthead past the viewport. */
+  min-width: 0;
+}
 
 .modes {
   display: flex;
@@ -142,7 +149,14 @@ body {
   padding: 3px;
   background: var(--sunk);
   border-radius: 9px;
+  /* The tab strip scrolls within itself on a narrow screen rather than
+     widening the page. */
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+
+.modes::-webkit-scrollbar { display: none; }
 
 .mode {
   border: 0;
@@ -165,6 +179,7 @@ body {
 }
 
 .icon-button {
+  flex: none;
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--ink-muted);
@@ -539,3 +554,268 @@ legend {
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+/* ====================================================== ensemble mode ==
+   Regime colour is a sequential ramp, not a categorical one: the states are
+   ordered calm-to-turbulent, so one hue deepening with volatility encodes
+   the order that arbitrary hues would throw away. Identity never rests on
+   colour alone — every regime is named in the table and the legend. */
+
+:root {
+  --regime-1: rgba(150, 85, 15, .07);
+  --regime-2: rgba(150, 85, 15, .17);
+  --regime-3: rgba(150, 85, 15, .30);
+  --regime-1-solid: #e3cdb0;
+  --regime-2-solid: #c08a45;
+  --regime-3-solid: #96550f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --regime-1: rgba(223, 160, 90, .09);
+    --regime-2: rgba(223, 160, 90, .20);
+    --regime-3: rgba(223, 160, 90, .34);
+    --regime-1-solid: #6b5433;
+    --regime-2-solid: #a97c40;
+    --regime-3-solid: #dfa05a;
+  }
+}
+
+:root[data-theme="dark"] {
+  --regime-1: rgba(223, 160, 90, .09);
+  --regime-2: rgba(223, 160, 90, .20);
+  --regime-3: rgba(223, 160, 90, .34);
+  --regime-1-solid: #6b5433;
+  --regime-2-solid: #a97c40;
+  --regime-3-solid: #dfa05a;
+}
+
+.headline-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.headline-pair .headline { border-top-color: var(--accent); }
+.headline-alt { border-top-color: var(--line-strong); }
+.headline-pair .figure { font-size: clamp(32px, 4.6vw, 44px); }
+.headline-pair .headline-facts { gap: 20px; }
+.headline-pair .headline-facts dd { font-size: 17px; }
+
+label.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+textarea {
+  font: 400 12px/1.5 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 9px 10px;
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+}
+
+textarea:hover { border-color: var(--line-strong); }
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+label.inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 11px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+select {
+  font: 500 13px/1 var(--body);
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 8px 9px;
+  cursor: pointer;
+  max-width: 62%;
+}
+
+select:hover { border-color: var(--line-strong); }
+
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.field-note {
+  margin: 9px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.chart-note {
+  margin: 11px 0 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-muted);
+  max-width: 70ch;
+}
+
+/* Wide content scrolls inside its own box, never the page. */
+.table-scroll { overflow-x: auto; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+/* Only the wide regime table needs a floor before it starts scrolling; the
+   transition matrix is three columns and fits a narrow card unaided. */
+#ens-regimes { min-width: 560px; }
+
+.data-table th,
+.data-table td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.data-table thead th {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border-bottom-color: var(--line-strong);
+}
+
+.data-table th:first-child,
+.data-table td:first-child { text-align: left; }
+
+.data-table tbody td {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table tbody th {
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.data-table tbody tr:last-child th,
+.data-table tbody tr:last-child td { border-bottom: 0; }
+
+/* The diagonal is the number people actually read off a transition matrix. */
+.data-table td.is-diagonal {
+  background: var(--accent-wash);
+  font-weight: 600;
+}
+
+.regime-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.regime-swatch {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: none;
+  border: 1px solid var(--line-strong);
+}
+
+#ens-transition th,
+#ens-transition td { padding: 8px 7px; }
+
+#ens-history svg,
+#ens-distribution svg,
+#ens-dotplot svg { display: block; width: 100%; height: auto; }
+
+/* Below these widths the labels stop being readable, so the chart scrolls
+   inside its own card rather than scaling down into illegibility. The page
+   itself never scrolls sideways. */
+#ens-history svg { min-width: 560px; }
+#ens-distribution svg { min-width: 430px; }
+#ens-dotplot svg { min-width: 450px; }
+
+#ens-history, #ens-distribution, #ens-dotplot { overflow-x: auto; }
+
+/* ------------------------------------------------------------ tooltip -- */
+
+.chart-host { position: relative; }
+
+.chart-tip {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: nowrap;
+  transform: translate(-50%, -115%);
+  opacity: 0;
+  transition: opacity .1s ease;
+}
+
+.chart-tip[data-visible="true"] { opacity: 1; }
+.chart-tip b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+.chart-tip .tip-label { color: var(--ink-muted); }
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Shown while the simulation is running, so a 300ms freeze reads as work. */
+.is-computing .figure { opacity: .45; }
+
+
+@media (max-width: 560px) {
+  .mode { padding: 8px 10px; font-size: 12.5px; }
+  .wordmark-note { display: none; }
+}
+
+/* A finding the reader needs to act on, not a caption. Carries a word as well
+   as a colour, so it does not depend on hue alone. */
+.notice {
+  margin: 12px 0 0;
+  padding: 10px 13px;
+  border-left: 3px solid var(--accent);
+  background: var(--accent-wash);
+  border-radius: 0 7px 7px 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink);
+  max-width: 70ch;
+}
+
+.notice b { font-weight: 600; }

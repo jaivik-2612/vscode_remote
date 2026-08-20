@@ -6,6 +6,7 @@
 import {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes as bs, binomial,
+  ensembleValuation, series as seriesTools,
 } from '../src/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -384,17 +385,625 @@ function renderGrant() {
      'vesting is expensed tranche by tranche and runs a little higher early on.');
 }
 
+
+/* ------------------------------------------------------------ ensemble */
+
+const ensembleForm = $('ensemble-form');
+const REGIME_NAMES = {
+  2: ['Calm', 'Turbulent'],
+  3: ['Calm', 'Unsettled', 'Crisis'],
+};
+
+/** Sequential ramp: deeper means more volatile, matching the state order. */
+const regimeFill = (index, states) =>
+  `var(--regime-${states === 2 ? [1, 3][index] : index + 1})`;
+const regimeSolid = (index, states) =>
+  `var(--regime-${states === 2 ? [1, 3][index] : index + 1}-solid)`;
+
+/** Attaches a tooltip layer to a chart container and returns its controls. */
+function tooltipFor(container) {
+  container.classList.add('chart-host');
+  const tip = document.createElement('div');
+  tip.className = 'chart-tip';
+  return {
+    node: tip,
+    show(x, y, html) {
+      tip.innerHTML = html;
+      tip.style.left = `${x}px`;
+      tip.style.top = `${y}px`;
+      tip.dataset.visible = 'true';
+    },
+    hide() { tip.dataset.visible = 'false'; },
+  };
+}
+
+function renderEnsemble() {
+  const panel = document.querySelector('main [data-panel="ensemble"]');
+  const errorBox = $('ensemble-error');
+  errorBox.hidden = true;
+
+  const f = readForm(ensembleForm);
+  const prices = seriesTools.parsePrices(f.prices);
+
+  $('series-summary').textContent = prices.length
+    ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}`
+    : 'no usable prices found';
+
+  let result;
+  try {
+    result = ensembleValuation({
+      prices,
+      strike: f.strike,
+      days: f.days,
+      rate: f.rate / 100,
+      yield: f.yield / 100,
+      type: f.type,
+      style: f.style,
+      states: Number(f.states),
+      paths: Number(f.paths),
+      seed: Number(f.seed),
+      periodsPerYear: Number(f.periodsPerYear),
+    });
+  } catch (error) {
+    panel.classList.remove('is-computing');
+    showError(errorBox, error.message);
+    return;
+  }
+
+  const { consensus, outlook, hmm, monteCarlo, series } = result;
+
+  /* ---- headline: what it is worth, and where the stock goes ---- */
+
+  $('ens-value').textContent = money(consensus.value, 4);
+  $('ens-range').textContent =
+    `${money(consensus.low, 4)} to ${money(consensus.high, 4)} across the three models`;
+  $('ens-spread').textContent = `${money(consensus.spread, 4)} (${percent(consensus.dispersion, 1)})`;
+  $('ens-contract').textContent = money(consensus.value * 100);
+
+  $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
+  $('ens-projected').textContent = money(outlook.median);
+  $('ens-projected-note').textContent =
+    `median of ${count(monteCarlo.paths)} paths, from ${money(result.spot)} today`;
+  $('ens-band').textContent = `${money(outlook.p5)} – ${money(outlook.p95)}`;
+  $('ens-itm').textContent = percent(
+    result.type === 'put' ? 1 - outlook.probAboveStrike : outlook.probAboveStrike, 1);
+
+  /* ---- the three answers, side by side ---- */
+
+  renderDotPlot(result);
+  $('ens-dotplot-note').textContent = consensus.dispersion < 0.05
+    ? 'The three models agree closely, so the price is not resting on any one of them.'
+    : `The models differ by ${percent(consensus.dispersion, 1)} of the average. ` +
+      'The regime-switching simulation keeps the volatility-of-volatility that the ' +
+      'closed form averages away, which is most of the gap.';
+
+  renderRegimeTable(result);
+  renderTransitionMatrix(result);
+  renderModelSelection(result);
+  renderHistoryChart(result, prices);
+  renderDistributionChart(result);
+  renderGreeks($('ens-greeks'), result.blackScholes.onRegime.greeks, 1);
+
+  /* ---- diagnostics ---- */
+
+  const rows = [
+    ['Observations', `${count(series.observations)} prices, ${count(series.returns)} returns`],
+    ['Trailing volatility', percent(series.trailingVol, 2)],
+    ['Exponentially weighted', percent(series.smoothedVol, 2)],
+    ['Regime-projected volatility', percent(hmm.projectedVol, 2)],
+    ['Return skew', signed(series.skew, 3)],
+    ['Excess kurtosis', signed(series.excessKurtosis, 3), true],
+    ['Baum-Welch', hmm.converged
+      ? `converged in ${hmm.iterations} iterations`
+      : `stopped at ${hmm.iterations} iterations without converging`],
+    ['Log-likelihood', hmm.logLikelihood.toFixed(1), true],
+    ['BIC', `${hmm.bic.toFixed(1)} (prefers ${hmm.selection.preferred} regimes)`, true],
+    ['Monte Carlo', `${count(monteCarlo.paths)} paths × ${monteCarlo.steps} steps`],
+    ['Standard error', `± ${money(monteCarlo.european.standardError, 4)}`],
+    ['95% interval', `${money(monteCarlo.european.confidence95[0], 4)} – ` +
+      `${money(monteCarlo.european.confidence95[1], 4)}`],
+    ['Variance reduction', percent(monteCarlo.european.varianceReduction, 0), true],
+    ['GBM control check', monteCarlo.control.withinTolerance
+      ? `passes — simulated ${money(monteCarlo.control.simulated, 4)} against ` +
+        `${money(monteCarlo.control.analytic, 4)} closed form`
+      : `off by ${money(Math.abs(monteCarlo.control.error), 4)} — raise the path count`],
+  ];
+
+  if (monteCarlo.american) {
+    rows.push(['Exercised early', percent(monteCarlo.american.exercisedEarly, 1)]);
+    rows.push(['American method', 'Longstaff-Schwartz least squares', true]);
+  }
+
+  renderFacts($('ens-diagnostics'), rows,
+    'The control check reprices the contract by simulation under plain ' +
+    'geometric Brownian motion, where the closed form is exact. If those two ' +
+    'disagree by more than the standard error, the simulation is at fault ' +
+    'rather than the model.');
+
+  panel.classList.remove('is-computing');
+}
+
+/* ---- chart: where each model lands -------------------------------------
+   Three labelled marks on one shared axis. Identity comes from the labels,
+   so no categorical palette is needed and none is invented. */
+
+function renderDotPlot(result) {
+  const { consensus } = result;
+  const width = 660;
+  const rowHeight = 46;
+  const pad = { top: 10, right: 20, bottom: 30, left: 20 };
+  const height = pad.top + pad.bottom + consensus.estimates.length * rowHeight;
+
+  const span = Math.max(consensus.spread, consensus.value * 0.04, 1e-6);
+  const from = consensus.low - span * 0.35;
+  const to = consensus.high + span * 0.35;
+  const x = (value) => pad.left + ((value - from) / (to - from)) * (width - pad.left - pad.right);
+
+  const container = $('ens-dotplot');
+  const tip = tooltipFor(container);
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Fair value by model: ${consensus.estimates
+      .map((e) => `${e.label}, ${e.value.toFixed(4)}`).join('; ')}.`,
+  });
+
+  // Consensus reference, drawn behind the marks.
+  svg.append(el('line', {
+    x1: x(consensus.value), x2: x(consensus.value), y1: pad.top - 4,
+    y2: height - pad.bottom + 4, stroke: 'var(--line-strong)',
+    'stroke-width': 1, 'stroke-dasharray': '3 3',
+  }));
+
+  consensus.estimates.forEach((estimate, index) => {
+    const y = pad.top + index * rowHeight + rowHeight / 2;
+
+    svg.append(el('line', {
+      x1: pad.left, x2: width - pad.right, y1: y, y2: y,
+      stroke: 'var(--line)', 'stroke-width': 1,
+    }));
+
+    const label = el('text', {
+      x: pad.left, y: y - 9, fill: 'var(--ink-muted)', 'font-size': 11.5,
+    });
+    label.textContent = estimate.label;
+    svg.append(label);
+
+    // A 2px surface ring keeps the mark legible where it overlaps the rule.
+    svg.append(el('circle', {
+      cx: x(estimate.value), cy: y, r: 6,
+      fill: 'var(--accent)', stroke: 'var(--surface)', 'stroke-width': 2,
+    }));
+
+    // Below the mark, while the model name sits above the rule — otherwise a
+    // mark near the left edge puts its value straight through the name.
+    const value = el('text', {
+      x: x(estimate.value), y: y + 19, 'text-anchor': 'middle',
+      fill: 'var(--ink)', 'font-size': 12.5, 'font-family': 'var(--mono)',
+      'font-weight': 600,
+    });
+    value.textContent = estimate.value.toFixed(4);
+    svg.append(value);
+
+    const hit = el('rect', {
+      x: pad.left, y: y - rowHeight / 2, width: width - pad.left - pad.right,
+      height: rowHeight, fill: 'transparent',
+    });
+    hit.addEventListener('pointerenter', () => {
+      const box = container.getBoundingClientRect();
+      tip.show(
+        (x(estimate.value) / width) * box.width,
+        (y / height) * box.height,
+        `<span class="tip-label">${estimate.label}</span><br><b>${money(estimate.value, 4)}</b>` +
+        `<br><span class="tip-label">${signed(estimate.value - consensus.value, 4)} vs consensus</span>`,
+      );
+    });
+    hit.addEventListener('pointerleave', () => tip.hide());
+    svg.append(hit);
+  });
+
+  const caption = el('text', {
+    x: x(consensus.value), y: height - 10, 'text-anchor': 'middle',
+    fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+  });
+  caption.textContent = `consensus ${consensus.value.toFixed(4)}`;
+  svg.append(caption);
+
+  container.replaceChildren(svg, tip.node);
+}
+
+/* ---- table: the regimes Baum-Welch recovered --------------------------- */
+
+function renderRegimeTable(result) {
+  const { hmm } = result;
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const periods = result.series?.periodsPerYear ?? 252;
+
+  const head = ['Regime', 'Volatility', 'Drift p.a.', 'Typical run', 'Probability now', 'Long-run share'];
+  const table = $('ens-regimes');
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const title of head) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = title;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+
+  const tbody = document.createElement('tbody');
+  for (let i = 0; i < hmm.states; i++) {
+    const row = document.createElement('tr');
+
+    const name = document.createElement('th');
+    name.scope = 'row';
+    const chip = document.createElement('span');
+    chip.className = 'regime-chip';
+    const swatch = document.createElement('span');
+    swatch.className = 'regime-swatch';
+    swatch.style.background = regimeSolid(i, hmm.states);
+    chip.append(swatch, document.createTextNode(names[i] ?? `State ${i + 1}`));
+    name.append(chip);
+    row.append(name);
+
+    const periodName = periods === 252 ? 'days' : periods === 52 ? 'weeks' : 'months';
+    for (const cell of [
+      percent(hmm.annualisedVols[i], 1),
+      signed(hmm.annualisedDrifts[i] * 100, 1) + '%',
+      `${hmm.expectedDurations[i].toFixed(0)} ${periodName}`,
+      percent(hmm.current[i], 1),
+      percent(hmm.stationary[i], 1),
+    ]) {
+      const td = document.createElement('td');
+      td.textContent = cell;
+      row.append(td);
+    }
+    tbody.append(row);
+  }
+
+  const caption = table.querySelector('caption');
+  table.replaceChildren(caption, thead, tbody);
+}
+
+function renderTransitionMatrix(result) {
+  const { hmm } = result;
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const table = $('ens-transition');
+
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.scope = 'col';
+  corner.textContent = 'From ↓ To →';
+  headRow.append(corner);
+  for (let j = 0; j < hmm.states; j++) {
+    const th = document.createElement('th');
+    th.scope = 'col';
+    th.textContent = names[j] ?? `State ${j + 1}`;
+    headRow.append(th);
+  }
+  thead.append(headRow);
+
+  const tbody = document.createElement('tbody');
+  for (let i = 0; i < hmm.states; i++) {
+    const row = document.createElement('tr');
+    const label = document.createElement('th');
+    label.scope = 'row';
+    label.textContent = names[i] ?? `State ${i + 1}`;
+    row.append(label);
+    for (let j = 0; j < hmm.states; j++) {
+      const td = document.createElement('td');
+      td.textContent = percent(hmm.transition[i][j], 1);
+      if (i === j) td.classList.add('is-diagonal');
+      row.append(td);
+    }
+    tbody.append(row);
+  }
+
+  const caption = table.querySelector('caption');
+  table.replaceChildren(caption, thead, tbody);
+}
+
+/** Warns when the chosen number of regimes is not the number the data supports. */
+function renderModelSelection(result) {
+  const { selection, negligible, states } = result.hmm;
+  const names = REGIME_NAMES[states] ?? REGIME_NAMES[2];
+  const notice = $('ens-selection');
+  const messages = [];
+
+  if (selection.preferred !== states) {
+    messages.push(
+      `<b>BIC prefers ${selection.preferred} regimes</b>, not ${states}. ` +
+      `Scores: ${selection.scores.map((s) => `${s.states} → ${s.bic.toFixed(0)}`).join(', ')} ` +
+      '(lower is better). Extra states always fit the past better; BIC charges ' +
+      'for the parameters they cost.');
+  }
+
+  for (const index of negligible) {
+    messages.push(
+      `The <b>${names[index] ?? `state ${index + 1}`}</b> regime holds only ` +
+      `${percent(result.hmm.stationary[index], 1)} of the time in the long run, ` +
+      'which usually means it is fitting a handful of individual days rather ' +
+      'than a market state.');
+  }
+
+  notice.innerHTML = messages.join('<br><br>');
+  notice.hidden = messages.length === 0;
+}
+
+/* ---- chart: history shaded by regime ----------------------------------- */
+
+function renderHistoryChart(result, prices) {
+  const { hmm } = result;
+  const width = 900;
+  const height = 260;
+  const pad = { top: 12, right: 14, bottom: 26, left: 52 };
+  const container = $('ens-history');
+  const tip = tooltipFor(container);
+
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const padding = (high - low) * 0.08 || 1;
+  const yFrom = low - padding;
+  const yTo = high + padding;
+
+  const x = (i) => pad.left + (i / (prices.length - 1)) * (width - pad.left - pad.right);
+  const y = (p) => height - pad.bottom - ((p - yFrom) / (yTo - yFrom)) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label':
+      `${prices.length} closing prices from ${prices[0].toFixed(2)} to ` +
+      `${prices[prices.length - 1].toFixed(2)}, shaded by the volatility regime ` +
+      'the model assigns to each stretch.',
+  });
+
+  // Regime bands: one rect per contiguous run, not per observation.
+  // The Viterbi path is indexed by return, so state k describes the move
+  // into price k+1.
+  let runStart = 0;
+  for (let i = 1; i <= hmm.viterbi.length; i++) {
+    if (i === hmm.viterbi.length || hmm.viterbi[i] !== hmm.viterbi[runStart]) {
+      const state = hmm.viterbi[runStart];
+      svg.append(el('rect', {
+        x: x(runStart), y: pad.top,
+        width: Math.max(0.8, x(i) - x(runStart)),
+        height: height - pad.top - pad.bottom,
+        fill: regimeFill(state, hmm.states),
+      }));
+      runStart = i;
+    }
+  }
+
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) {
+    const value = yFrom + ((yTo - yFrom) * i) / ticks;
+    const yy = y(value);
+    svg.append(el('line', {
+      x1: pad.left, x2: width - pad.right, y1: yy, y2: yy,
+      stroke: 'var(--line)', 'stroke-width': 1,
+    }));
+    const text = el('text', {
+      x: pad.left - 9, y: yy + 4, 'text-anchor': 'end',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = value.toFixed(0);
+    svg.append(text);
+  }
+
+  // The price line stays neutral ink: colour on this chart means regime.
+  svg.append(el('path', {
+    d: prices.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p).toFixed(2)}`).join(' '),
+    fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6,
+    'stroke-linejoin': 'round',
+  }));
+
+  for (let i = 0; i <= 4; i++) {
+    const index = Math.round(((prices.length - 1) * i) / 4);
+    const text = el('text', {
+      x: x(index), y: height - 9, 'text-anchor': 'middle',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = String(index + 1);
+    svg.append(text);
+  }
+
+  const crosshair = el('line', {
+    y1: pad.top, y2: height - pad.bottom, stroke: 'var(--ink-muted)',
+    'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0,
+  });
+  const marker = el('circle', {
+    r: 4, fill: 'var(--ink)', stroke: 'var(--surface)', 'stroke-width': 2, opacity: 0,
+  });
+  svg.append(crosshair, marker);
+
+  const names = REGIME_NAMES[hmm.states] ?? REGIME_NAMES[2];
+  const surface = el('rect', {
+    x: pad.left, y: pad.top, width: width - pad.left - pad.right,
+    height: height - pad.top - pad.bottom, fill: 'transparent',
+  });
+  surface.addEventListener('pointermove', (event) => {
+    const box = container.getBoundingClientRect();
+    const ratio = (event.clientX - box.left) / box.width;
+    const index = Math.max(0, Math.min(prices.length - 1, Math.round(ratio * (prices.length - 1))));
+    const posterior = hmm.posteriors[Math.max(0, index - 1)] ?? [];
+    const state = hmm.viterbi[Math.max(0, index - 1)] ?? 0;
+
+    crosshair.setAttribute('x1', x(index));
+    crosshair.setAttribute('x2', x(index));
+    crosshair.setAttribute('opacity', 1);
+    marker.setAttribute('cx', x(index));
+    marker.setAttribute('cy', y(prices[index]));
+    marker.setAttribute('opacity', 1);
+
+    tip.show((x(index) / width) * box.width, (y(prices[index]) / height) * box.height,
+      `<span class="tip-label">observation ${index + 1}</span><br>` +
+      `<b>${money(prices[index])}</b><br>` +
+      `<span class="tip-label">${names[state] ?? `State ${state + 1}`} · ` +
+      `${percent(posterior[state] ?? 0, 0)} confident</span>`);
+  });
+  surface.addEventListener('pointerleave', () => {
+    crosshair.setAttribute('opacity', 0);
+    marker.setAttribute('opacity', 0);
+    tip.hide();
+  });
+  svg.append(surface);
+
+  container.replaceChildren(svg, tip.node);
+
+  const legend = $('ens-history-legend');
+  legend.replaceChildren(...Array.from({ length: hmm.states }, (unused, i) => {
+    const item = document.createElement('span');
+    const swatch = document.createElement('i');
+    swatch.className = 'swatch';
+    swatch.style.background = regimeSolid(i, hmm.states);
+    swatch.style.height = '10px';
+    swatch.style.width = '10px';
+    swatch.style.borderRadius = '3px';
+    item.append(swatch, document.createTextNode(
+      `${names[i] ?? `State ${i + 1}`} · ${percent(hmm.annualisedVols[i], 0)} vol`));
+    return item;
+  }));
+}
+
+/* ---- chart: terminal price distribution -------------------------------- */
+
+function renderDistributionChart(result) {
+  const { outlook, strike, spot } = result;
+  const width = 620;
+  const height = 280;
+  const pad = { top: 54, right: 14, bottom: 34, left: 44 };
+  const container = $('ens-distribution');
+  const tip = tooltipFor(container);
+
+  const bins = outlook.histogram;
+  const from = bins[0].from;
+  const to = bins[bins.length - 1].to;
+  const peak = Math.max(...bins.map((b) => b.frequency)) || 1;
+
+  const x = (price) => pad.left + ((price - from) / (to - from)) * (width - pad.left - pad.right);
+  const y = (freq) => height - pad.bottom - (freq / peak) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label':
+      `Simulated distribution of the price at expiry: median ${outlook.median.toFixed(2)}, ` +
+      `90% of paths between ${outlook.p5.toFixed(2)} and ${outlook.p95.toFixed(2)}.`,
+  });
+
+  const baseline = height - pad.bottom;
+  bins.forEach((bin) => {
+    const left = x(bin.from);
+    const right = x(bin.to);
+    // 2px gap between bars, and 4px rounded tops anchored to the baseline.
+    const barWidth = Math.max(1, right - left - 2);
+    const top = y(bin.frequency);
+    const radius = Math.min(4, barWidth / 2, Math.max(0, baseline - top));
+    const inBand = bin.to > outlook.p5 && bin.from < outlook.p95;
+
+    svg.append(el('path', {
+      d: `M${left + 1},${baseline} L${left + 1},${top + radius} ` +
+         `Q${left + 1},${top} ${left + 1 + radius},${top} ` +
+         `L${left + 1 + barWidth - radius},${top} ` +
+         `Q${left + 1 + barWidth},${top} ${left + 1 + barWidth},${top + radius} ` +
+         `L${left + 1 + barWidth},${baseline} Z`,
+      fill: inBand ? 'var(--accent)' : 'var(--line-strong)',
+    }));
+
+    const hit = el('rect', {
+      x: left, y: pad.top, width: Math.max(1, right - left),
+      height: baseline - pad.top, fill: 'transparent',
+    });
+    hit.addEventListener('pointerenter', () => {
+      const box = container.getBoundingClientRect();
+      tip.show(((left + right) / 2 / width) * box.width, (top / height) * box.height,
+        `<span class="tip-label">${money(bin.from)} – ${money(bin.to)}</span><br>` +
+        `<b>${percent(bin.frequency, 1)}</b> <span class="tip-label">of paths</span>`);
+    });
+    hit.addEventListener('pointerleave', () => tip.hide());
+    svg.append(hit);
+  });
+
+  // Reference lines, directly labelled rather than put in a legend.
+  // Reference lines are neutral ink, distinguished by weight and dash. Red
+  // and green are reserved for good/bad here, and a strike price is neither.
+  const markers = [
+    { at: outlook.median, label: 'median', colour: 'var(--ink-muted)', dash: '4 3', weight: 1.5 },
+    { at: strike, label: 'strike', colour: 'var(--ink)', dash: '6 3', weight: 2 },
+    { at: spot, label: 'today', colour: 'var(--ink-muted)', dash: '2 3', weight: 1.5 },
+  ];
+  // Median, strike and spot are often within a few percent of each other, so
+  // the labels get their own vertical lanes rather than stacking on one line
+  // and overprinting each other into noise.
+  const visible = markers.filter(({ at }) => at >= from && at <= to);
+  // Every line starts below the whole label stack. Starting each one under
+  // its own label only works for the bottom lane; the rest strike through
+  // the labels beneath them.
+  const lineTop = pad.top - 40 + visible.length * 13 + 2;
+  visible.forEach(({ at, label, colour, dash, weight }, lane) => {
+    const labelY = pad.top - 40 + lane * 13;
+    svg.append(el('line', {
+      x1: x(at), x2: x(at), y1: lineTop, y2: baseline,
+      stroke: colour, 'stroke-width': weight, 'stroke-dasharray': dash,
+    }));
+
+    // Keep the text inside the plot when a marker sits against either edge.
+    const anchor = x(at) < pad.left + 34 ? 'start' : x(at) > width - pad.right - 34 ? 'end' : 'middle';
+    const text = el('text', {
+      x: x(at), y: labelY, 'text-anchor': anchor,
+      fill: colour, 'font-size': 10.5, 'font-weight': 600,
+    });
+    text.textContent = `${label} ${at.toFixed(2)}`;
+    svg.append(text);
+  });
+
+  for (let i = 0; i <= 4; i++) {
+    const price = from + ((to - from) * i) / 4;
+    const text = el('text', {
+      x: x(price), y: height - 12, 'text-anchor': 'middle',
+      fill: 'var(--ink-muted)', 'font-size': 11, 'font-family': 'var(--mono)',
+    });
+    text.textContent = price.toFixed(0);
+    svg.append(text);
+  }
+
+  container.replaceChildren(svg, tip.node);
+}
+
 /* -------------------------------------------------------------- wiring */
 
 const MODES = {
+  ensemble: renderEnsemble,
   price: renderPrice,
   implied: renderImplied,
   grant: renderGrant,
 };
 
+/* Debounced, because a full run fits three models over a few hundred
+   observations and simulates tens of thousands of paths — enough work that
+   firing it on every keystroke would make the inputs feel stuck. */
+function debounce(fn, wait) {
+  let timer = null;
+  return function scheduled(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+}
+
 for (const [mode, render] of Object.entries(MODES)) {
   const form = document.querySelector(`form[data-panel="${mode}"]`);
-  form.addEventListener('input', render);
+  const handler = mode === 'ensemble' ? debounce(render, 320) : render;
+  form.addEventListener('input', (event) => {
+    // Dim the figures the moment an input changes, so the pause before the
+    // debounced run lands reads as work rather than as a frozen page.
+    if (mode === 'ensemble') {
+      document.querySelector('main [data-panel="ensemble"]')?.classList.add('is-computing');
+    }
+    handler(event);
+  });
   form.addEventListener('submit', (event) => event.preventDefault());
 }
 
@@ -422,6 +1031,7 @@ $('theme').addEventListener('click', () => {
   root.dataset.theme = current === 'dark' ? 'light' : 'dark';
 });
 
+renderEnsemble();
 renderPrice();
 renderImplied();
 renderGrant();

@@ -11,11 +11,18 @@
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 
+/* Dependency order: every module must appear after everything it imports,
+   because the bundle is a flat sequence of IIFEs with no resolver. */
 const MODULES = [
   { file: 'src/stats.js', global: 'Stats' },
   { file: 'src/blackScholes.js', global: 'BlackScholes' },
   { file: 'src/binomial.js', global: 'Binomial' },
   { file: 'src/impliedVol.js', global: 'ImpliedVol' },
+  { file: 'src/series.js', global: 'Series' },
+  { file: 'src/hmm.js', global: 'Hmm' },
+  { file: 'src/monteCarlo.js', global: 'MonteCarlo' },
+  { file: 'src/valuation.js', global: 'Valuation' },
+  { file: 'src/ensemble.js', global: 'Ensemble' },
   { file: 'src/index.js', global: 'Engine' },
 ];
 
@@ -24,6 +31,11 @@ const BY_PATH = {
   './blackScholes.js': 'BlackScholes',
   './binomial.js': 'Binomial',
   './impliedVol.js': 'ImpliedVol',
+  './series.js': 'Series',
+  './hmm.js': 'Hmm',
+  './monteCarlo.js': 'MonteCarlo',
+  './valuation.js': 'Valuation',
+  './ensemble.js': 'Ensemble',
   './index.js': 'Engine',
   '../src/index.js': 'Engine',
 };
