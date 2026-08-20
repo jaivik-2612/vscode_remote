@@ -54,7 +54,12 @@ function parseOtherListed(text) {
     if (cols[6] === 'Y') continue; // test issue
     const exchange = OTHER_EXCHANGE[cols[2]];
     if (!exchange) continue;
-    out.push([cols[0].trim(), cols[1].trim(), exchange, cols[4] === 'Y' ? 1 : 0]);
+    const symbol = cols[0].trim();
+    // ACT '$' notation marks preferred shares (ABR$D). No listed options
+    // exist on preferreds and no downstream provider accepts the notation,
+    // so carrying them would only produce dead selections.
+    if (symbol.includes('$')) continue;
+    out.push([symbol, cols[1].trim(), exchange, cols[4] === 'Y' ? 1 : 0]);
   }
   return out;
 }

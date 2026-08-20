@@ -509,7 +509,15 @@ const dirty = { rate: false, strike: false };
 ensembleForm.elements.rate.addEventListener('input', () => { dirty.rate = true; });
 ensembleForm.elements.strike.addEventListener('input', () => { dirty.strike = true; });
 
+/**
+ * Selecting a second ticker while the first is still fetching must not let
+ * the slow response win: each selection bumps the generation, and a response
+ * from an older generation is dropped on arrival.
+ */
+let fetchGeneration = 0;
+
 async function chooseTicker(entry) {
+  const generation = ++fetchGeneration;
   selectedTicker = entry;
   tickerInput.value = entry.symbol;
   closeListbox();
@@ -528,6 +536,7 @@ async function chooseTicker(entry) {
     const response = await fetch(
       `/api/history?symbol=${encodeURIComponent(entry.symbol)}&exchange=${entry.exchange}`);
     const payload = await response.json();
+    if (generation !== fetchGeneration) return; // a newer selection superseded this one
     if (!payload.ok) throw new Error(payload.error);
     const parsed = market.parseMarketData(payload.body);
     if (!parsed || parsed.prices.length < 30) throw new Error('provider returned too little data');
@@ -536,6 +545,7 @@ async function chooseTicker(entry) {
       `${count(reference.tickers.tickers.length)} US & Canadian listings · ` +
       `directory as of ${reference.tickers.asOf}`;
   } catch (error) {
+    if (generation !== fetchGeneration) return;
     // The live path failed (offline, provider down): fall back to the same
     // manual panel the artifact uses rather than dead-ending.
     status.textContent = `Live fetch failed: ${error.message}`;
@@ -647,7 +657,8 @@ function renderFetchPanel(entry) {
 }
 
 function ingestDroppedText(text) {
-  const parsed = market.parseMarketData(text);
+  let parsed = null;
+  try { parsed = market.parseMarketData(text); } catch { parsed = null; }
   if (!parsed || parsed.prices.length === 0) {
     showError($('ensemble-error'),
       'Could not read that as price data. Expected a CSV with date and close ' +

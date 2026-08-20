@@ -165,6 +165,64 @@ test('falls back to plain pasted numbers, and refuses unknown JSON', () => {
   assert.equal(parseMarketData(null), null);
 });
 
+test("recognises Nasdaq's own Download Data export (Close/Last header)", () => {
+  // This exact header defeated an earlier version, which fell through to the
+  // bare-number scraper and read volumes as prices.
+  const csv = 'Date,Close/Last,Volume,Open,High,Low\n' +
+    '08/19/2026,$316.83,50505650,$310.10,$318.00,$309.50\n' +
+    '08/18/2026,$310.10,41000000,$305.00,$312.00,$304.90\n';
+  const parsed = parseMarketData(csv);
+  assert.deepEqual(parsed.prices, [310.1, 316.83],
+    'closes only, oldest first — never volumes or opens');
+  assert.deepEqual(parsed.dates, ['2026-08-18', '2026-08-19']);
+});
+
+test('quoted thousands separators survive intact', () => {
+  const csv = 'Date,Close\n2026-01-02,"1,234.56"\n2026-01-03,"1,240.10"\n';
+  const parsed = parseMarketData(csv);
+  assert.deepEqual(parsed.prices, [1234.56, 1240.1],
+    'a comma inside quotes is a thousands mark, not a column break');
+});
+
+test('a tabular file with no recognisable close column is refused', () => {
+  const csv = 'Date,Bid,Ask,Volume\n2026-01-02,10,11,5000\n2026-01-03,10.5,11.5,4000\n';
+  assert.equal(parseMarketData(csv), null,
+    'refusing beats scraping bids, asks and volumes as one price series');
+});
+
+test('truncated JSON is refused, not scraped for numbers', () => {
+  const clipped = JSON.stringify({
+    chart: { result: [{ timestamp: [1755600000, 1755686400] }] },
+  }).slice(0, 40); // cut mid-structure, as a partial copy would be
+  assert.equal(parseMarketData(clipped), null,
+    'a clipped paste is full of unix timestamps that must not become prices');
+});
+
+test('a JSON shape that is known but gutted is refused, not thrown', () => {
+  assert.equal(parseMarketData('{"chart":{"result":[{"timestamp":"oops"}]}}'), null);
+});
+
+test('European day-first dates are recognised when the day gives it away', () => {
+  const csv = 'Date,Close\n31/01/2026,100\n01/02/2026,101\n02/02/2026,102\n';
+  const parsed = parseMarketData(csv);
+  // 31/01 forces day-first; the ambiguous rows then sort consistently.
+  assert.equal(parsed.dates[0], '2026-01-31');
+  assert.deepEqual(parsed.prices, [100, 101, 102]);
+});
+
+test('semicolon-separated CSV still parses', () => {
+  const csv = 'Date;Close\n2026-01-02;10\n2026-01-03;11\n';
+  assert.deepEqual(parseMarketData(csv).prices, [10, 11]);
+});
+
+test('zero and negative Yahoo closes are dropped as data glitches', () => {
+  const json = JSON.stringify({
+    chart: { result: [{ meta: {}, timestamp: [1, 2, 3, 4],
+      indicators: { quote: [{ close: [100, 0, -5, 104] }] } }] },
+  });
+  assert.deepEqual(parseMarketData(json).prices, [100, 104]);
+});
+
 /* ---------------------------------------------------------------- splits */
 
 test('a 10:1 split cliff is repaired and reported', () => {
@@ -229,6 +287,8 @@ test('the bundled ticker directory is present and plausible', () => {
   const db = JSON.parse(readFileSync(new URL('../data/tickers.json', import.meta.url)));
   assert.ok(db.tickers.length > 15000, `only ${db.tickers.length} tickers`);
   assert.ok(db.asOf >= '2026-01-01');
+  assert.ok(!db.tickers.some(([s]) => s.includes('$')),
+    'ACT preferred-share notation must be filtered out — nothing downstream accepts it');
   const aapl = db.tickers.find(([s, , x]) => s === 'AAPL' && x === 'Q');
   const ry = db.tickers.find(([s, , x]) => s === 'RY' && x === 'T');
   assert.ok(aapl && /apple/i.test(aapl[1]));

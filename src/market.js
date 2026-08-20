@@ -155,7 +155,8 @@ function fromYahooChart(json) {
   const prices = [];
   const dates = [];
   for (let i = 0; i < closes.length; i++) {
-    if (closes[i] === null || closes[i] === undefined) continue;
+    // null is a market holiday; 0 or negative is a known Yahoo data glitch.
+    if (!(closes[i] > 0)) continue;
     prices.push(closes[i]);
     dates.push(new Date(result.timestamp[i] * 1000).toISOString().slice(0, 10));
   }
@@ -202,24 +203,71 @@ function fromTmxSeries(json) {
   };
 }
 
+/**
+ * Split one CSV line respecting double-quoted cells, so a value like
+ * "1,234.56" stays one cell instead of becoming two broken ones.
+ */
+function splitCsvLine(line, separator) {
+  const cells = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { cell += '"'; i++; } else quoted = !quoted;
+    } else if (!quoted && separator.test(ch)) {
+      cells.push(cell);
+      cell = '';
+    } else {
+      cell += ch;
+    }
+  }
+  cells.push(cell);
+  return cells;
+}
+
+/** "$1,234.56" (possibly once quote-wrapped) -> 1234.56, or NaN. */
+function parseCellNumber(raw) {
+  const cleaned = String(raw ?? '').replace(/["$\s]/g, '').replace(/,(?=\d{3}(?!\d))/g, '');
+  return cleaned === '' ? NaN : Number(cleaned);
+}
+
 function fromCsv(text) {
   const lines = text.trim().split(/\r?\n/);
-  const header = lines[0].toLowerCase().split(/[,;\t]/).map((cell) => cell.trim());
+  // Sniff the separator from the header: tabs and semicolons only count when
+  // commas are absent, since commas also appear inside quoted numbers.
+  const separator = lines[0].includes('\t') ? /\t/ : lines[0].includes(';') ? /;/ : /,/;
+  const header = splitCsvLine(lines[0].toLowerCase(), separator)
+    .map((cell) => cell.replace(/["\s_]/g, ''));
   const dateCol = header.findIndex((cell) => cell === 'date' || cell === 'data');
-  // Prefer an adjusted-close column when the file has one.
-  let closeCol = header.findIndex((cell) => cell.replace(/[\s_]/g, '') === 'adjclose');
-  let adjusted = closeCol !== -1;
-  if (closeCol === -1) closeCol = header.findIndex((cell) => cell === 'close' || cell === 'zamkniecie');
+  // Prefer an adjusted-close column; otherwise accept any header that starts
+  // with "close" — that covers "Close", "Close/Last" (Nasdaq's own export)
+  // and "close price" without ever matching "open" or "volume".
+  let closeCol = header.findIndex((cell) => cell === 'adjclose' || cell === 'adj.close');
+  const adjusted = closeCol !== -1;
+  if (closeCol === -1) {
+    closeCol = header.findIndex((cell) => cell.startsWith('close') || cell === 'zamkniecie');
+  }
   if (dateCol === -1 || closeCol === -1) return null;
 
   const rows = [];
   for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i].split(/[,;\t]/);
-    const close = Number(String(cells[closeCol] ?? '').replace(/[$"\s]/g, ''));
+    const cells = splitCsvLine(lines[i], separator);
+    const close = parseCellNumber(cells[closeCol]);
     const date = String(cells[dateCol] ?? '').replace(/"/g, '').trim();
     if (!Number.isFinite(close) || close <= 0 || !date) continue;
-    rows.push({ date: normaliseDate(date), close });
+    rows.push({ date, close });
   }
+
+  // Slash dates are ambiguous row by row (03/04 could be March 4 or April
+  // 3), but not file by file: a single unambiguous row — 31/01 — settles
+  // the convention for all of them. Only with no such row anywhere does
+  // month-first apply, the convention of the US providers this targets.
+  const dayFirst = rows.some((row) => {
+    const slash = row.date.match(/^(\d{1,2})\/(\d{1,2})\/\d{4}$/);
+    return slash && Number(slash[1]) > 12;
+  });
+  for (const row of rows) row.date = normaliseDate(row.date, dayFirst);
   rows.sort((a, b) => a.date.localeCompare(b.date));
   return {
     prices: rows.map((row) => row.close),
@@ -228,10 +276,15 @@ function fromCsv(text) {
   };
 }
 
-function normaliseDate(raw) {
-  // MM/DD/YYYY -> YYYY-MM-DD; anything already ISO-ish passes through.
-  const us = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (us) return `${us[3]}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
+function normaliseDate(raw, dayFirst = false) {
+  // The caller decides day-first vs month-first for the whole file; this
+  // just applies it. ISO-ish dates pass through untouched.
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slash) {
+    let [, first, second, year] = slash;
+    if (dayFirst) [first, second] = [second, first];
+    return `${year}-${first.padStart(2, '0')}-${second.padStart(2, '0')}`;
+  }
   return raw;
 }
 
@@ -246,23 +299,26 @@ export function parseMarketData(text) {
   if (typeof text !== 'string' || text.trim() === '') return null;
   const trimmed = text.trim();
 
+  // Structured input that fails to parse is REFUSED, never handed to the
+  // bare-number scraper: a truncated JSON paste is full of unix timestamps,
+  // and an unrecognised CSV is full of volumes and opens — scraping either
+  // "succeeds" with a price series that is silently absurd.
   let base = null;
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     let json;
-    try { json = JSON.parse(trimmed); } catch { json = null; }
-    if (json) {
+    try { json = JSON.parse(trimmed); } catch { return null; } // truncated/garbled
+    try {
       if (isYahooChart(json)) base = fromYahooChart(json);
       else if (isNasdaqHistory(json)) base = fromNasdaqHistory(json);
       else if (isTmxSeries(json)) base = fromTmxSeries(json);
       else return null; // JSON, but not a shape we know — say so, don't guess
-    }
-  }
-
-  if (base === null && /(date|data)\s*[,;\t]/i.test(trimmed.split(/\r?\n/)[0] ?? '')) {
-    base = fromCsv(trimmed);
-  }
-
-  if (base === null) {
+    } catch { return null; } // a known shape with mangled innards
+  } else if (/^[^\n]*\b(date|data)\b/i.test(trimmed.split(/\r?\n/)[0] ?? '') &&
+      /[,;\t]/.test(trimmed.split(/\r?\n/)[0] ?? '')) {
+    // Looks tabular with a date column: it is a CSV or it is nothing.
+    try { base = fromCsv(trimmed); } catch { return null; }
+    if (base === null) return null;
+  } else {
     const prices = parsePrices(trimmed);
     if (prices.length === 0) return null;
     base = { prices, dates: null, source: 'pasted prices', adjusted: false, symbol: null, currency: null };
