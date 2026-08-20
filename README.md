@@ -7,7 +7,8 @@ No dependencies. `npm start` and `npm test` work on a fresh clone.
 
 ```
 npm start          # web app at http://127.0.0.1:8080
-npm test           # 59 tests, no install needed
+npm test           # no install needed
+npm run refresh-data   # update the bundled symbol directory and yield curves
 node build-artifact.mjs   # bundle the app into one standalone HTML file
 node bin/optprice.js --spot 100 --strike 105 --days 90 --vol 25
 ```
@@ -77,6 +78,7 @@ src/stats.js         normal CDF and its inverse
 src/blackScholes.js  European pricing, Greeks, probabilities
 src/binomial.js      American pricing, early-exercise boundary
 src/impliedVol.js    volatility solver
+src/market.js        ticker search, provider-format parsing, yield curves
 src/series.js        parsing a pasted history into returns and volatility
 src/hmm.js           Baum-Welch: fits volatility regimes to the returns
 src/monteCarlo.js    path simulation, Longstaff-Schwartz, distributions
@@ -128,6 +130,48 @@ A fair value is only as good as the volatility, rate and dividend estimates
 you feed in — volatility especially, since it is the one input you cannot look
 up. This is an educational tool, not investment advice.
 
+
+## Ticker lookup and auto-population
+
+Start typing a ticker or company name in the `Three models` tab and pick from
+the popup — it searches 17,000+ listings across NASDAQ, NYSE (incl. American
+and Arca), Cboe BZX, IEX, TSX and TSX Venture. Selecting a ticker fills in:
+
+- **price history** — two years of daily closes,
+- **current price** — the last close (the strike also snaps to the nearest
+  listed increment at the money, unless you have edited it),
+- **risk-free rate** — interpolated from the US Treasury or Bank of Canada
+  curve at your chosen expiry, re-interpolated when you change the days
+  (a hand-edited rate is never overwritten),
+- **volatility and drift** — estimated from the history by the three-model
+  pipeline itself.
+
+### Data sources — all official or first-party
+
+| Data | Source |
+|---|---|
+| US symbol directory | Nasdaq Trader symbol files (`nasdaqlisted`, `otherlisted`) |
+| Canadian directory | TMX Group company directory (tsx.com) |
+| US daily history | Nasdaq's historical quote API (Yahoo Finance chart as fallback) |
+| Canadian daily history | TMX Group's time-series API (Yahoo Finance as fallback) |
+| US risk-free curve | U.S. Treasury daily par yield curve |
+| Canadian risk-free curve | Bank of Canada Valet API |
+
+Par yields are converted to continuously compounded rates (r = 2 ln(1 + y/2))
+before the models see them. Raw close series are scanned for split cliffs and
+repaired, with every repair reported in the UI.
+
+The local app (`npm start`) fetches history live through a small proxy in
+`server.js` — the providers send no CORS headers, so the browser cannot call
+them directly. The published artifact cannot reach the network at all (its
+host blocks every external request), so it embeds the symbol directory and
+yield-curve snapshots at build time, and for the history it hands you a
+download link already pointing at your ticker plus a drop zone that parses
+whatever comes back — Stooq CSV, Yahoo chart JSON, Nasdaq JSON, a generic
+date/close CSV, or a bare list of prices.
+
+`npm run refresh-data` refreshes `data/tickers.json` and `data/rates.json`;
+both carry their as-of dates and the UI displays them.
 
 ## The three engines
 

@@ -13,6 +13,7 @@ export * as blackScholes from './blackScholes.js';
 export * as binomial from './binomial.js';
 export * as series from './series.js';
 export * as monteCarlo from './monteCarlo.js';
+export * as market from './market.js';
 
 export { impliedVol, priceBounds } from './impliedVol.js';
 export { fitHmm, projectRegimes, viterbiPath, stationaryDistribution } from './hmm.js';

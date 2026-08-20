@@ -16,7 +16,8 @@
   "scripts": {
     "test": "node --test test/*.test.js",
     "start": "node server.js",
-    "price": "node bin/optprice.js"
+    "price": "node bin/optprice.js",
+    "refresh-data": "node tools/refresh-data.mjs"
   },
   "keywords": [
     "options",
@@ -29,5 +30,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }

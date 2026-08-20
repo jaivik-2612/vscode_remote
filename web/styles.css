@@ -819,3 +819,139 @@ select:focus {
 }
 
 .notice b { font-weight: 600; }
+
+/* ====================================================== ticker lookup == */
+
+.combobox { position: relative; }
+
+#ticker-search {
+  font: 500 15px/1 var(--mono);
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 10px 11px;
+  width: 100%;
+  text-transform: uppercase;
+}
+
+#ticker-search::placeholder {
+  font-family: var(--body);
+  font-weight: 400;
+  text-transform: none;
+  color: var(--ink-muted);
+}
+
+#ticker-search:hover { border-color: var(--line-strong); }
+
+#ticker-search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+#ticker-listbox {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 5px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  box-shadow: var(--shadow);
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+#ticker-listbox li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 9px;
+  padding: 8px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#ticker-listbox li[aria-selected="true"],
+#ticker-listbox li:hover { background: var(--accent-wash); }
+
+.hit-symbol {
+  font: 600 13.5px/1.2 var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.hit-name {
+  font-size: 12px;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hit-exchange {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  color: var(--ink-muted);
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+
+/* ---- manual fetch panel (artifact build, where the page cannot fetch) -- */
+
+.fetch-panel {
+  margin-top: 11px;
+  padding: 12px 13px;
+  background: var(--sunk);
+  border-radius: 8px;
+}
+
+.fetch-title {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.fetch-steps {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+}
+
+.fetch-steps a { color: var(--accent); font-weight: 500; }
+
+.dropzone {
+  border: 1.5px dashed var(--line-strong);
+  border-radius: 7px;
+  padding: 14px 12px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible,
+.dropzone.is-over {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+  color: var(--ink);
+}
+
+.dropzone-browse {
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}

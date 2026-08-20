@@ -19,6 +19,7 @@ const MODULES = [
   { file: 'src/binomial.js', global: 'Binomial' },
   { file: 'src/impliedVol.js', global: 'ImpliedVol' },
   { file: 'src/series.js', global: 'Series' },
+  { file: 'src/market.js', global: 'Market' },
   { file: 'src/hmm.js', global: 'Hmm' },
   { file: 'src/monteCarlo.js', global: 'MonteCarlo' },
   { file: 'src/valuation.js', global: 'Valuation' },
@@ -32,6 +33,7 @@ const BY_PATH = {
   './binomial.js': 'Binomial',
   './impliedVol.js': 'ImpliedVol',
   './series.js': 'Series',
+  './market.js': 'Market',
   './hmm.js': 'Hmm',
   './monteCarlo.js': 'MonteCarlo',
   './valuation.js': 'Valuation',
@@ -119,6 +121,15 @@ const body = html.match(/<body>([\s\S]*?)<\/body>/)[1]
   .replace(/\s*<script[\s\S]*?<\/script>\s*/g, '\n');
 const fonts = html.match(/<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];
 
+// The reference data rides along inside the page: the artifact host blocks
+// every external request, so anything the page needs must already be there.
+// A plain (non-module) script sets the global before the app bundle runs —
+// its presence is also how the app knows it is the artifact build.
+const marketData = JSON.stringify({
+  tickers: JSON.parse(await readFile('data/tickers.json', 'utf8')),
+  rates: JSON.parse(await readFile('data/rates.json', 'utf8')),
+});
+
 const page = `<title>Option Fair Value</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -127,6 +138,7 @@ ${fonts}
 ${css}
 </style>
 ${body}
+<script>window.__MARKET_DATA__ = ${marketData};</script>
 <script type="module">
 ${bundle.join('\n\n')}
 </script>

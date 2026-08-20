@@ -6,7 +6,7 @@
 import {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes as bs, binomial,
-  ensembleValuation, series as seriesTools,
+  ensembleValuation, series as seriesTools, market,
 } from '../src/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -386,9 +386,315 @@ function renderGrant() {
 }
 
 
+/* ------------------------------------------------- market reference data */
+
+/**
+ * The artifact build embeds the ticker directory and yield curves before
+ * this script runs; the dev build fetches them from the static server. The
+ * presence of the embedded blob is also how the page knows it cannot reach
+ * the network (the artifact host blocks all external requests), which
+ * switches ticker selection from live fetching to the manual data panel.
+ */
+const ensembleForm = $('ensemble-form');
+
+const EMBEDDED = globalThis.__MARKET_DATA__ ?? null;
+const IS_ARTIFACT = EMBEDDED !== null;
+
+const reference = { tickers: null, rates: null };
+
+async function loadReferenceData() {
+  const status = $('ticker-status');
+  try {
+    if (IS_ARTIFACT) {
+      reference.tickers = EMBEDDED.tickers;
+      reference.rates = EMBEDDED.rates;
+    } else {
+      const [tickers, rates] = await Promise.all([
+        fetch('../data/tickers.json').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+        fetch('../data/rates.json').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }),
+      ]);
+      reference.tickers = tickers;
+      reference.rates = rates;
+    }
+    status.textContent =
+      `${count(reference.tickers.tickers.length)} US & Canadian listings · ` +
+      `directory as of ${reference.tickers.asOf}`;
+  } catch (error) {
+    status.textContent = `Symbol directory unavailable (${error.message}) — paste prices below instead.`;
+  }
+}
+
+/* ------------------------------------------------------ ticker combobox */
+
+const tickerInput = $('ticker-search');
+const tickerListbox = $('ticker-listbox');
+let hits = [];
+let activeHit = -1;
+let selectedTicker = null;
+
+function closeListbox() {
+  tickerListbox.hidden = true;
+  tickerInput.setAttribute('aria-expanded', 'false');
+  tickerInput.removeAttribute('aria-activedescendant');
+  activeHit = -1;
+}
+
+function renderListbox() {
+  if (hits.length === 0) { closeListbox(); return; }
+  tickerListbox.replaceChildren(...hits.map((hit, index) => {
+    const item = document.createElement('li');
+    item.id = `ticker-hit-${index}`;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(index === activeHit));
+
+    const symbol = document.createElement('span');
+    symbol.className = 'hit-symbol';
+    symbol.textContent = hit.symbol;
+    const name = document.createElement('span');
+    name.className = 'hit-name';
+    name.textContent = hit.name;
+    const exchange = document.createElement('span');
+    exchange.className = 'hit-exchange';
+    exchange.textContent = hit.isEtf ? `${hit.exchangeName} · ETF` : hit.exchangeName;
+
+    item.append(symbol, name, exchange);
+    // mousedown, not click: the input's blur would close the list first.
+    item.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      chooseTicker(hit);
+    });
+    return item;
+  }));
+  tickerListbox.hidden = false;
+  tickerInput.setAttribute('aria-expanded', 'true');
+  if (activeHit >= 0) tickerInput.setAttribute('aria-activedescendant', `ticker-hit-${activeHit}`);
+  else tickerInput.removeAttribute('aria-activedescendant');
+}
+
+tickerInput.addEventListener('input', () => {
+  if (!reference.tickers) return;
+  hits = market.searchTickers(reference.tickers.tickers, tickerInput.value, 8);
+  activeHit = hits.length ? 0 : -1;
+  renderListbox();
+});
+
+tickerInput.addEventListener('keydown', (event) => {
+  if (tickerListbox.hidden) return;
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    activeHit = (activeHit + 1) % hits.length;
+    renderListbox();
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    activeHit = (activeHit - 1 + hits.length) % hits.length;
+    renderListbox();
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (activeHit >= 0) chooseTicker(hits[activeHit]);
+  } else if (event.key === 'Escape') {
+    closeListbox();
+  }
+});
+
+tickerInput.addEventListener('blur', () => closeListbox());
+
+/* -------------------------------------------- selection & auto-population */
+
+/**
+ * Fields the user has edited by hand stay theirs: auto-population only
+ * writes into a field the user has never touched. Programmatic writes do
+ * not fire input events, so listening for real input is enough.
+ */
+const dirty = { rate: false, strike: false };
+ensembleForm.elements.rate.addEventListener('input', () => { dirty.rate = true; });
+ensembleForm.elements.strike.addEventListener('input', () => { dirty.strike = true; });
+
+async function chooseTicker(entry) {
+  selectedTicker = entry;
+  tickerInput.value = entry.symbol;
+  closeListbox();
+  applyCurveRate();
+
+  if (IS_ARTIFACT) {
+    renderFetchPanel(entry);
+    return;
+  }
+
+  const status = $('ticker-status');
+  status.textContent = `Fetching two years of ${entry.symbol} from ` +
+    `${entry.country === 'CA' ? 'TMX' : 'Nasdaq'}…`;
+  $('fetch-panel').hidden = true;
+  try {
+    const response = await fetch(
+      `/api/history?symbol=${encodeURIComponent(entry.symbol)}&exchange=${entry.exchange}`);
+    const payload = await response.json();
+    if (!payload.ok) throw new Error(payload.error);
+    const parsed = market.parseMarketData(payload.body);
+    if (!parsed || parsed.prices.length < 30) throw new Error('provider returned too little data');
+    applyMarketData(parsed, entry, payload.provider);
+    status.textContent =
+      `${count(reference.tickers.tickers.length)} US & Canadian listings · ` +
+      `directory as of ${reference.tickers.asOf}`;
+  } catch (error) {
+    // The live path failed (offline, provider down): fall back to the same
+    // manual panel the artifact uses rather than dead-ending.
+    status.textContent = `Live fetch failed: ${error.message}`;
+    renderFetchPanel(entry);
+  }
+}
+
+/** Fill the history box and dependent fields from a parsed data set. */
+function applyMarketData(parsed, entry, provider) {
+  const prices = parsed.prices;
+  const spot = prices[prices.length - 1];
+
+  ensembleForm.elements.prices.value =
+    prices.map((p) => (p >= 1000 ? p.toFixed(0) : p.toPrecision(6))).join('\n');
+
+  if (!dirty.strike) {
+    // Snap an untouched strike to at-the-money, on the increments listed
+    // options actually use.
+    const step = spot < 25 ? 0.5 : spot < 100 ? 1 : spot < 250 ? 5 : 10;
+    ensembleForm.elements.strike.value = String(Math.round(spot / step) * step);
+  }
+
+  const bits = [];
+  if (provider) bits.push(provider);
+  else if (parsed.source) bits.push(parsed.source);
+  bits.push(`${count(prices.length)} closes`);
+  if (parsed.dates?.length) bits.push(`${parsed.dates[0]} → ${parsed.dates[parsed.dates.length - 1]}`);
+  const currency = parsed.currency ?? entry?.currency;
+  if (currency) bits.push(currency);
+  if (parsed.splits.length) {
+    bits.push(`adjusted for ${parsed.splits.map((s) =>
+      `a ${s.ratio} split${s.date ? ` on ${s.date}` : ''}`).join(', ')}`);
+  } else if (parsed.adjusted) {
+    bits.push('split- and dividend-adjusted');
+  }
+  // If the file identifies itself and disagrees with the selected ticker,
+  // say so — pricing RY off AAPL's history is a silent disaster otherwise.
+  let warning = '';
+  if (parsed.symbol && entry) {
+    const droppedBase = parsed.symbol.split(/[.\-]/)[0].toUpperCase();
+    const chosenBase = entry.symbol.split(/[.\-]/)[0].toUpperCase();
+    if (droppedBase !== chosenBase) {
+      warning = `<br><b>Careful:</b> this file says it is ${parsed.symbol}, ` +
+        `but ${entry.symbol} is selected. The numbers below price ${parsed.symbol}'s history.`;
+    }
+  }
+
+  const note = $('data-note');
+  note.innerHTML = `<b>${entry ? entry.symbol : 'Data'}</b> · ${bits.join(' · ')}${warning}`;
+  note.hidden = false;
+
+  renderEnsemble();
+}
+
+/** Interpolate the bundled yield curve at the current horizon. */
+function applyCurveRate() {
+  if (dirty.rate || !reference.rates) return;
+  const days = Number(ensembleForm.elements.days.value);
+  if (!(days > 0)) return;
+  const country = selectedTicker?.country === 'CA' ? 'ca' : 'us';
+  const curve = reference.rates[country];
+  const rate = market.rateForHorizon(curve.points, days);
+  if (rate === null) return;
+  ensembleForm.elements.rate.value = (rate * 100).toFixed(2);
+  $('rate-note').textContent =
+    `${(rate * 100).toFixed(2)}% from the ` +
+    `${country === 'ca' ? 'Bank of Canada' : 'U.S. Treasury'} curve ` +
+    `(as of ${curve.asOf}), interpolated at ${days} days. Edit to override.`;
+}
+
+ensembleForm.elements.days.addEventListener('input', applyCurveRate);
+
+/* ------------------------------------------------- manual data (artifact) */
+
+/**
+ * The published page cannot call any data provider — its host blocks all
+ * external requests — so the next best thing is a link that already carries
+ * the right symbol, and a drop zone that understands whatever comes back.
+ */
+function renderFetchPanel(entry) {
+  const panel = $('fetch-panel');
+  $('fetch-title').textContent =
+    `Get ${entry.symbol} data (this page cannot fetch it itself):`;
+
+  const steps = [];
+  const stooq = market.stooqSymbol(entry.symbol, entry.exchange);
+  if (stooq) {
+    steps.push({
+      html: `<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
+        `target="_blank" rel="noopener">Download the daily CSV from Stooq</a> ` +
+        '(free, split-adjusted), or',
+    });
+  }
+  const yahoo = market.yahooSymbol(entry.symbol, entry.exchange);
+  steps.push({
+    html: `<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
+      `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
+      `rel="noopener">open two years of ${entry.symbol} from Yahoo Finance</a>, ` +
+      'then select all (Ctrl/Cmd-A), copy, and paste it below.',
+  });
+  steps.push({ html: 'Drop, paste, or browse to the file — everything else fills in.' });
+
+  $('fetch-steps').replaceChildren(...steps.map((step) => {
+    const item = document.createElement('li');
+    item.innerHTML = step.html;
+    return item;
+  }));
+  panel.hidden = false;
+}
+
+function ingestDroppedText(text) {
+  const parsed = market.parseMarketData(text);
+  if (!parsed || parsed.prices.length === 0) {
+    showError($('ensemble-error'),
+      'Could not read that as price data. Expected a CSV with date and close ' +
+      'columns, Yahoo/Nasdaq JSON, or a plain list of prices.');
+    return;
+  }
+  $('ensemble-error').hidden = true;
+  applyMarketData(parsed, selectedTicker, null);
+}
+
+const dropzone = $('dropzone');
+
+dropzone.addEventListener('dragover', (event) => {
+  event.preventDefault();
+  dropzone.classList.add('is-over');
+});
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('is-over'));
+dropzone.addEventListener('drop', async (event) => {
+  event.preventDefault();
+  dropzone.classList.remove('is-over');
+  const file = event.dataTransfer?.files?.[0];
+  if (file) ingestDroppedText(await file.text());
+  else {
+    const text = event.dataTransfer?.getData('text');
+    if (text) ingestDroppedText(text);
+  }
+});
+dropzone.addEventListener('paste', (event) => {
+  const text = event.clipboardData?.getData('text');
+  if (text) { event.preventDefault(); ingestDroppedText(text); }
+});
+$('drop-file').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (file) ingestDroppedText(await file.text());
+  event.target.value = '';
+});
+// Clicking anywhere on the zone (except the browse label) focuses it so
+// Ctrl+V works; keyboard users can tab to it directly.
+dropzone.addEventListener('click', (event) => {
+  if (!event.target.closest('.dropzone-browse')) dropzone.focus();
+});
+
 /* ------------------------------------------------------------ ensemble */
 
-const ensembleForm = $('ensemble-form');
+
+
+// (declared above, before the market-data wiring)
 const REGIME_NAMES = {
   2: ['Calm', 'Turbulent'],
   3: ['Calm', 'Unsettled', 'Crisis'],
@@ -423,10 +729,14 @@ function renderEnsemble() {
   errorBox.hidden = true;
 
   const f = readForm(ensembleForm);
-  const prices = seriesTools.parsePrices(f.prices);
+  // The multi-format parser accepts a pasted CSV or provider JSON straight
+  // into the history box, not just bare numbers.
+  const parsed = market.parseMarketData(f.prices);
+  const prices = parsed?.prices ?? [];
 
   $('series-summary').textContent = prices.length
-    ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}`
+    ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}` +
+      (parsed.source !== 'pasted prices' ? ` (${parsed.source})` : '')
     : 'no usable prices found';
 
   let result;
@@ -1031,7 +1341,8 @@ $('theme').addEventListener('click', () => {
   root.dataset.theme = current === 'dark' ? 'light' : 'dark';
 });
 
-renderEnsemble();
 renderPrice();
 renderImplied();
 renderGrant();
+renderEnsemble();
+loadReferenceData().then(() => applyCurveRate());

@@ -37,6 +37,29 @@
 
     <form id="ensemble-form" data-panel="ensemble" autocomplete="off">
       <fieldset>
+        <legend>Ticker lookup</legend>
+        <div class="combobox">
+          <input id="ticker-search" type="text" role="combobox" aria-expanded="false"
+            aria-controls="ticker-listbox" aria-autocomplete="list" autocomplete="off"
+            autocapitalize="characters" spellcheck="false"
+            placeholder="Ticker or company name&hellip;">
+          <ul id="ticker-listbox" role="listbox" aria-label="Matching tickers" hidden></ul>
+        </div>
+        <p class="field-note" id="ticker-status">Loading the symbol directory&hellip;</p>
+        <div class="fetch-panel" id="fetch-panel" hidden>
+          <p class="fetch-title" id="fetch-title"></p>
+          <ol class="fetch-steps" id="fetch-steps"></ol>
+          <div class="dropzone" id="dropzone" tabindex="0" role="button"
+            aria-label="Drop or paste the downloaded data file here">
+            Drop the file here, paste its contents, or
+            <label class="dropzone-browse">browse<input type="file" id="drop-file"
+              accept=".csv,.json,.txt" hidden></label>
+          </div>
+        </div>
+        <p class="notice" id="data-note" hidden></p>
+      </fieldset>
+
+      <fieldset>
         <legend>Price history</legend>
         <label class="stacked" for="prices">
           Closing prices, oldest first
@@ -493,6 +516,7 @@
           <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4.5" required></label>
           <label>Dividend yield<span class="suffix">%</span><input name="yield" type="number" step="any" value="0" required></label>
         </div>
+        <p class="field-note" id="rate-note"></p>
       </fieldset>
 
       <fieldset>
