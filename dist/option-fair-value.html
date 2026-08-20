@@ -961,6 +961,39 @@ select:focus {
   text-decoration: underline;
 }
 
+/* ---- GOOGLEFINANCE formula field -------------------------------------- */
+
+.formula-field {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  font: 500 11.5px/1.4 var(--mono);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 7px 9px;
+  cursor: text;
+}
+
+.formula-field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.copy-button {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--accent);
+  font: 600 11.5px/1 var(--body);
+  border-radius: 6px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.copy-button:hover { border-color: var(--accent); background: var(--accent-wash); }
+
 </style>
 
 
@@ -2695,6 +2728,32 @@ function stooqSymbol(symbol, exchangeCode) {
   return `${symbol.replace(/\./g, '-').toLowerCase()}.us`;
 }
 
+/**
+ * The exchange prefix GOOGLEFINANCE uses. Prefixing matters: RY is Royal
+ * Bank on both NYSE and TSX, and only "NYSE:RY" vs "TSE:RY" tells Google
+ * which one is meant. IEX listings get no prefix — Google resolves the few
+ * of them from the bare symbol.
+ */
+const GOOGLE_PREFIX = {
+  Q: 'NASDAQ', N: 'NYSE', A: 'NYSEAMERICAN', P: 'NYSEARCA', Z: 'BATS',
+  V: '', T: 'TSE', X: 'CVE',
+};
+
+function googleFinanceSymbol(symbol, exchangeCode) {
+  const prefix = GOOGLE_PREFIX[exchangeCode] ?? '';
+  return prefix ? `${prefix}:${symbol}` : symbol;
+}
+
+/**
+ * A ready-to-paste GOOGLEFINANCE formula for two years of daily closes.
+ * Paste it into any Google Sheet cell; the sheet fills two columns (Date,
+ * Close) that paste straight back into this app.
+ */
+function googleFinanceFormula(symbol, exchangeCode, days = 730) {
+  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode)}", ` +
+    `"close", TODAY()-${days}, TODAY(), "DAILY")`;
+}
+
 /* ---------------------------------------------------------------- search */
 
 /**
@@ -2887,6 +2946,29 @@ function parseCellNumber(raw) {
   return cleaned === '' ? NaN : Number(cleaned);
 }
 
+/**
+ * European-locale cell: "226,51" or "1.234,56" — dot for thousands, comma
+ * for decimals. Only used as a whole-file second pass, never mixed with the
+ * US reading row by row.
+ */
+function parseEuroCellNumber(raw) {
+  const cleaned = String(raw ?? '').replace(/["$\s]/g, '');
+  if (!/^-?\d{1,3}(?:\.\d{3})*(?:,\d+)?$/.test(cleaned) && !/^-?\d+,\d+$/.test(cleaned)) {
+    return NaN;
+  }
+  return Number(cleaned.replace(/\./g, '').replace(',', '.'));
+}
+
+/**
+ * A GOOGLEFINANCE date cell reads "8/20/2024 16:00:00"; drop the time so
+ * the slash-date handling sees a plain date.
+ */
+function stripTime(raw) {
+  return raw
+    .replace(/\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[APap][Mm]\.?)?$/, '')
+    .replace(/^(\d{4}-\d{2}-\d{2})[T ].*$/, '$1');
+}
+
 function fromCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   // Sniff the separator from the header: tabs and semicolons only count when
@@ -2905,14 +2987,23 @@ function fromCsv(text) {
   }
   if (dateCol === -1 || closeCol === -1) return null;
 
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = splitCsvLine(lines[i], separator);
-    const close = parseCellNumber(cells[closeCol]);
-    const date = String(cells[dateCol] ?? '').replace(/"/g, '').trim();
-    if (!Number.isFinite(close) || close <= 0 || !date) continue;
-    rows.push({ date, close });
-  }
+  const collect = (numberParser) => {
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], separator);
+      const close = numberParser(cells[closeCol]);
+      const date = stripTime(String(cells[dateCol] ?? '').replace(/"/g, '').trim());
+      if (!Number.isFinite(close) || close <= 0 || !date) continue;
+      out.push({ date, close });
+    }
+    return out;
+  };
+
+  // First reading is US-format numbers. If that yields nothing at all, try
+  // the European convention — a whole-file decision, like the date order:
+  // "226,51" everywhere means decimal commas, never a file that mixes both.
+  let rows = collect(parseCellNumber);
+  if (rows.length === 0) rows = collect(parseEuroCellNumber);
 
   // Slash dates are ambiguous row by row (03/04 could be March 4 or April
   // 3), but not file by file: a single unambiguous row — 31/01 — settles
@@ -3012,7 +3103,7 @@ function rateForHorizon(points, days) {
   return last.rate;
 }
 
-return { exchangeInfo, yahooSymbol, stooqSymbol, searchTickers, repairSplits, parseMarketData, rateForHorizon };
+return { exchangeInfo, yahooSymbol, stooqSymbol, googleFinanceSymbol, googleFinanceFormula, searchTickers, repairSplits, parseMarketData, rateForHorizon };
 })();
 
 /* src/hmm.js */
@@ -4896,36 +4987,72 @@ ensembleForm.elements.days.addEventListener('input', applyCurveRate);
 /* ------------------------------------------------- manual data (artifact) */
 
 /**
- * The published page cannot call any data provider — its host blocks all
- * external requests — so the next best thing is a link that already carries
- * the right symbol, and a drop zone that understands whatever comes back.
+ * The published page cannot call any data provider itself — its host blocks
+ * every external request, and a framed Google Sheet could not be read across
+ * origins even if it rendered — so the flow is one copy-paste hop with the
+ * page doing everything else: it writes the GOOGLEFINANCE formula for the
+ * selected ticker, a click opens a fresh sheet, and the drop zone reads the
+ * two columns the sheet fills exactly as Sheets copies them.
  */
 function renderFetchPanel(entry) {
   const panel = $('fetch-panel');
   $('fetch-title').textContent =
-    `Get ${entry.symbol} data (this page cannot fetch it itself):`;
+    `Get ${entry.symbol} closes with Google Sheets (this page cannot fetch data itself):`;
 
+  const formula = market.googleFinanceFormula(entry.symbol, entry.exchange);
   const steps = [];
+
+  steps.push({ build: (item) => {
+    item.append('Copy this formula ');
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.readOnly = true;
+    field.className = 'formula-field';
+    field.value = formula;
+    field.setAttribute('aria-label', `GOOGLEFINANCE formula for ${entry.symbol}`);
+    field.addEventListener('focus', () => field.select());
+    field.addEventListener('click', () => field.select());
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy-button';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', async () => {
+      field.select();
+      let done = false;
+      try { await navigator.clipboard.writeText(formula); done = true; } catch { /* fall through */ }
+      if (!done) { try { done = document.execCommand('copy'); } catch { /* leave selected */ } }
+      copy.textContent = done ? 'Copied ✓' : 'Press Ctrl+C';
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+    });
+    item.append(field, copy);
+  } });
+
+  steps.push({ html:
+    `<a href="https://sheets.new" target="_blank" rel="noopener">Open a new ` +
+    'Google Sheet</a> and paste it into cell A1 — GOOGLEFINANCE fills two ' +
+    `years of daily closes for ${entry.symbol}.` });
+
+  steps.push({ html:
+    'Select the two filled columns (click A1, then Ctrl/Cmd-A), copy, and ' +
+    'paste them below — dates, split adjustment and the rest are handled.' });
+
+  const alternatives = [];
   const stooq = market.stooqSymbol(entry.symbol, entry.exchange);
   if (stooq) {
-    steps.push({
-      html: `<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
-        `target="_blank" rel="noopener">Download the daily CSV from Stooq</a> ` +
-        '(free, split-adjusted), or',
-    });
+    alternatives.push(`<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
+      `target="_blank" rel="noopener">Stooq CSV download</a>`);
   }
   const yahoo = market.yahooSymbol(entry.symbol, entry.exchange);
-  steps.push({
-    html: `<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
-      `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
-      `rel="noopener">open two years of ${entry.symbol} from Yahoo Finance</a>, ` +
-      'then select all (Ctrl/Cmd-A), copy, and paste it below.',
-  });
-  steps.push({ html: 'Drop, paste, or browse to the file — everything else fills in.' });
+  alternatives.push(`<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
+    `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
+    `rel="noopener">Yahoo Finance JSON</a>`);
+  steps.push({ html: `No Google account handy? ${alternatives.join(' or ')} ` +
+    'drop straight in too.' });
 
   $('fetch-steps').replaceChildren(...steps.map((step) => {
     const item = document.createElement('li');
-    item.innerHTML = step.html;
+    if (step.build) step.build(item);
+    else item.innerHTML = step.html;
     return item;
   }));
   panel.hidden = false;

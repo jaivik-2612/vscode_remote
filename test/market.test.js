@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   searchTickers, parseMarketData, repairSplits, rateForHorizon,
   exchangeInfo, yahooSymbol, stooqSymbol,
+  googleFinanceSymbol, googleFinanceFormula,
 } from '../src/market.js';
 
 /* ---------------------------------------------------------------- search */
@@ -221,6 +222,41 @@ test('zero and negative Yahoo closes are dropped as data glitches', () => {
       indicators: { quote: [{ close: [100, 0, -5, 104] }] } }] },
   });
   assert.deepEqual(parseMarketData(json).prices, [100, 104]);
+});
+
+test('GOOGLEFINANCE symbols carry the exchange prefix that disambiguates', () => {
+  assert.equal(googleFinanceSymbol('AAPL', 'Q'), 'NASDAQ:AAPL');
+  assert.equal(googleFinanceSymbol('RY', 'N'), 'NYSE:RY');
+  assert.equal(googleFinanceSymbol('RY', 'T'), 'TSE:RY');
+  assert.equal(googleFinanceSymbol('ABC', 'X'), 'CVE:ABC');
+  assert.equal(googleFinanceSymbol('SPY', 'P'), 'NYSEARCA:SPY');
+  assert.equal(googleFinanceFormula('SHOP', 'T'),
+    '=GOOGLEFINANCE("TSE:SHOP", "close", TODAY()-730, TODAY(), "DAILY")');
+});
+
+test('parses exactly what a GOOGLEFINANCE copy puts on the clipboard', () => {
+  // Google Sheets copies cells as TSV; GOOGLEFINANCE dates carry a time.
+  const tsv = 'Date\tClose\n' +
+    '8/20/2024 16:00:00\t226.51\n' +
+    '8/21/2024 16:00:00\t228.03\n' +
+    '12/2/2024 16:00:00\t241.18\n';
+  const parsed = parseMarketData(tsv);
+  assert.deepEqual(parsed.prices, [226.51, 228.03, 241.18]);
+  // The December row must sort after August — a lexicographic sort on the
+  // raw strings would have put "12/…" before "8/…".
+  assert.deepEqual(parsed.dates, ['2024-08-20', '2024-08-21', '2024-12-02']);
+});
+
+test('a European-locale sheet with decimal commas parses as a whole file', () => {
+  const tsv = 'Date\tClose\n20/08/2024 16:00:00\t226,51\n21/08/2024 16:00:00\t1.228,03\n';
+  const parsed = parseMarketData(tsv);
+  assert.deepEqual(parsed.prices, [226.51, 1228.03]);
+  assert.deepEqual(parsed.dates, ['2024-08-20', '2024-08-21']);
+});
+
+test('GOOGLEFINANCE #N/A rows are skipped, not read as prices', () => {
+  const tsv = 'Date\tClose\n8/20/2024 16:00:00\t226.51\n#N/A\t#N/A\n8/21/2024 16:00:00\t228.03\n';
+  assert.deepEqual(parseMarketData(tsv).prices, [226.51, 228.03]);
 });
 
 /* ---------------------------------------------------------------- splits */

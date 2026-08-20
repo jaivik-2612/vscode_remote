@@ -621,36 +621,72 @@ ensembleForm.elements.days.addEventListener('input', applyCurveRate);
 /* ------------------------------------------------- manual data (artifact) */
 
 /**
- * The published page cannot call any data provider — its host blocks all
- * external requests — so the next best thing is a link that already carries
- * the right symbol, and a drop zone that understands whatever comes back.
+ * The published page cannot call any data provider itself — its host blocks
+ * every external request, and a framed Google Sheet could not be read across
+ * origins even if it rendered — so the flow is one copy-paste hop with the
+ * page doing everything else: it writes the GOOGLEFINANCE formula for the
+ * selected ticker, a click opens a fresh sheet, and the drop zone reads the
+ * two columns the sheet fills exactly as Sheets copies them.
  */
 function renderFetchPanel(entry) {
   const panel = $('fetch-panel');
   $('fetch-title').textContent =
-    `Get ${entry.symbol} data (this page cannot fetch it itself):`;
+    `Get ${entry.symbol} closes with Google Sheets (this page cannot fetch data itself):`;
 
+  const formula = market.googleFinanceFormula(entry.symbol, entry.exchange);
   const steps = [];
+
+  steps.push({ build: (item) => {
+    item.append('Copy this formula ');
+    const field = document.createElement('input');
+    field.type = 'text';
+    field.readOnly = true;
+    field.className = 'formula-field';
+    field.value = formula;
+    field.setAttribute('aria-label', `GOOGLEFINANCE formula for ${entry.symbol}`);
+    field.addEventListener('focus', () => field.select());
+    field.addEventListener('click', () => field.select());
+    const copy = document.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy-button';
+    copy.textContent = 'Copy';
+    copy.addEventListener('click', async () => {
+      field.select();
+      let done = false;
+      try { await navigator.clipboard.writeText(formula); done = true; } catch { /* fall through */ }
+      if (!done) { try { done = document.execCommand('copy'); } catch { /* leave selected */ } }
+      copy.textContent = done ? 'Copied ✓' : 'Press Ctrl+C';
+      setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
+    });
+    item.append(field, copy);
+  } });
+
+  steps.push({ html:
+    `<a href="https://sheets.new" target="_blank" rel="noopener">Open a new ` +
+    'Google Sheet</a> and paste it into cell A1 — GOOGLEFINANCE fills two ' +
+    `years of daily closes for ${entry.symbol}.` });
+
+  steps.push({ html:
+    'Select the two filled columns (click A1, then Ctrl/Cmd-A), copy, and ' +
+    'paste them below — dates, split adjustment and the rest are handled.' });
+
+  const alternatives = [];
   const stooq = market.stooqSymbol(entry.symbol, entry.exchange);
   if (stooq) {
-    steps.push({
-      html: `<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
-        `target="_blank" rel="noopener">Download the daily CSV from Stooq</a> ` +
-        '(free, split-adjusted), or',
-    });
+    alternatives.push(`<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
+      `target="_blank" rel="noopener">Stooq CSV download</a>`);
   }
   const yahoo = market.yahooSymbol(entry.symbol, entry.exchange);
-  steps.push({
-    html: `<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
-      `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
-      `rel="noopener">open two years of ${entry.symbol} from Yahoo Finance</a>, ` +
-      'then select all (Ctrl/Cmd-A), copy, and paste it below.',
-  });
-  steps.push({ html: 'Drop, paste, or browse to the file — everything else fills in.' });
+  alternatives.push(`<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
+    `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
+    `rel="noopener">Yahoo Finance JSON</a>`);
+  steps.push({ html: `No Google account handy? ${alternatives.join(' or ')} ` +
+    'drop straight in too.' });
 
   $('fetch-steps').replaceChildren(...steps.map((step) => {
     const item = document.createElement('li');
-    item.innerHTML = step.html;
+    if (step.build) step.build(item);
+    else item.innerHTML = step.html;
     return item;
   }));
   panel.hidden = false;

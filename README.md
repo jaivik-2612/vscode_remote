@@ -164,11 +164,16 @@ repaired, with every repair reported in the UI.
 The local app (`npm start`) fetches history live through a small proxy in
 `server.js` — the providers send no CORS headers, so the browser cannot call
 them directly. The published artifact cannot reach the network at all (its
-host blocks every external request), so it embeds the symbol directory and
-yield-curve snapshots at build time, and for the history it hands you a
-download link already pointing at your ticker plus a drop zone that parses
-whatever comes back — Stooq CSV, Yahoo chart JSON, Nasdaq JSON, a generic
-date/close CSV, or a bare list of prices.
+host blocks every external request, and a framed Google Sheet could not be
+read across origins even if it rendered), so it embeds the symbol directory
+and yield-curve snapshots at build time and drives the history through
+Google Sheets with one copy-paste hop: selecting a ticker writes the
+GOOGLEFINANCE formula with the right exchange prefix (`NYSE:RY` vs
+`TSE:RY`), a click opens a fresh sheet, and the drop zone reads the two
+columns the sheet fills exactly as Sheets copies them — datetime-suffixed
+dates, US or European number locales, `#N/A` rows and all. Stooq CSV, Yahoo
+chart JSON, Nasdaq JSON, a generic date/close CSV, or a bare list of prices
+drop in just the same.
 
 `npm run refresh-data` refreshes `data/tickers.json` and `data/rates.json`;
 both carry their as-of dates and the UI displays them.

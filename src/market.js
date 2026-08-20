@@ -40,6 +40,32 @@ export function stooqSymbol(symbol, exchangeCode) {
   return `${symbol.replace(/\./g, '-').toLowerCase()}.us`;
 }
 
+/**
+ * The exchange prefix GOOGLEFINANCE uses. Prefixing matters: RY is Royal
+ * Bank on both NYSE and TSX, and only "NYSE:RY" vs "TSE:RY" tells Google
+ * which one is meant. IEX listings get no prefix — Google resolves the few
+ * of them from the bare symbol.
+ */
+const GOOGLE_PREFIX = {
+  Q: 'NASDAQ', N: 'NYSE', A: 'NYSEAMERICAN', P: 'NYSEARCA', Z: 'BATS',
+  V: '', T: 'TSE', X: 'CVE',
+};
+
+export function googleFinanceSymbol(symbol, exchangeCode) {
+  const prefix = GOOGLE_PREFIX[exchangeCode] ?? '';
+  return prefix ? `${prefix}:${symbol}` : symbol;
+}
+
+/**
+ * A ready-to-paste GOOGLEFINANCE formula for two years of daily closes.
+ * Paste it into any Google Sheet cell; the sheet fills two columns (Date,
+ * Close) that paste straight back into this app.
+ */
+export function googleFinanceFormula(symbol, exchangeCode, days = 730) {
+  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode)}", ` +
+    `"close", TODAY()-${days}, TODAY(), "DAILY")`;
+}
+
 /* ---------------------------------------------------------------- search */
 
 /**
@@ -232,6 +258,29 @@ function parseCellNumber(raw) {
   return cleaned === '' ? NaN : Number(cleaned);
 }
 
+/**
+ * European-locale cell: "226,51" or "1.234,56" — dot for thousands, comma
+ * for decimals. Only used as a whole-file second pass, never mixed with the
+ * US reading row by row.
+ */
+function parseEuroCellNumber(raw) {
+  const cleaned = String(raw ?? '').replace(/["$\s]/g, '');
+  if (!/^-?\d{1,3}(?:\.\d{3})*(?:,\d+)?$/.test(cleaned) && !/^-?\d+,\d+$/.test(cleaned)) {
+    return NaN;
+  }
+  return Number(cleaned.replace(/\./g, '').replace(',', '.'));
+}
+
+/**
+ * A GOOGLEFINANCE date cell reads "8/20/2024 16:00:00"; drop the time so
+ * the slash-date handling sees a plain date.
+ */
+function stripTime(raw) {
+  return raw
+    .replace(/\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[APap][Mm]\.?)?$/, '')
+    .replace(/^(\d{4}-\d{2}-\d{2})[T ].*$/, '$1');
+}
+
 function fromCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   // Sniff the separator from the header: tabs and semicolons only count when
@@ -250,14 +299,23 @@ function fromCsv(text) {
   }
   if (dateCol === -1 || closeCol === -1) return null;
 
-  const rows = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = splitCsvLine(lines[i], separator);
-    const close = parseCellNumber(cells[closeCol]);
-    const date = String(cells[dateCol] ?? '').replace(/"/g, '').trim();
-    if (!Number.isFinite(close) || close <= 0 || !date) continue;
-    rows.push({ date, close });
-  }
+  const collect = (numberParser) => {
+    const out = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i], separator);
+      const close = numberParser(cells[closeCol]);
+      const date = stripTime(String(cells[dateCol] ?? '').replace(/"/g, '').trim());
+      if (!Number.isFinite(close) || close <= 0 || !date) continue;
+      out.push({ date, close });
+    }
+    return out;
+  };
+
+  // First reading is US-format numbers. If that yields nothing at all, try
+  // the European convention — a whole-file decision, like the date order:
+  // "226,51" everywhere means decimal commas, never a file that mixes both.
+  let rows = collect(parseCellNumber);
+  if (rows.length === 0) rows = collect(parseEuroCellNumber);
 
   // Slash dates are ambiguous row by row (03/04 could be March 4 or April
   // 3), but not file by file: a single unambiguous row — 31/01 — settles

@@ -955,3 +955,36 @@ select:focus {
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* ---- GOOGLEFINANCE formula field -------------------------------------- */
+
+.formula-field {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  font: 500 11.5px/1.4 var(--mono);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 7px 9px;
+  cursor: text;
+}
+
+.formula-field:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.copy-button {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--accent);
+  font: 600 11.5px/1 var(--body);
+  border-radius: 6px;
+  padding: 6px 11px;
+  cursor: pointer;
+}
+
+.copy-button:hover { border-color: var(--accent); background: var(--accent-wash); }
