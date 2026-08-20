@@ -182,15 +182,32 @@ export function probabilities(inputs) {
   const { d2 } = terms;
   const itm = type === PUT ? normCdf(-d2) : normCdf(d2);
 
-  // Probability of hitting the barrier K at some point before T, for a
-  // driftless-in-log-space GBM with drift mu = r - q - sigma^2/2.
+  // Probability that the spot touches the strike at any point before expiry.
+  // In log space the spot is an arithmetic Brownian motion with drift
+  // mu = r - q - sigma^2/2, and this is its first-passage probability to the
+  // barrier m = log(K / S).
   const mu = rate - q - 0.5 * vol * vol;
   const sqrtT = terms.sqrtT;
-  const logMoneyness = Math.log(strike / spot);
-  const a = (logMoneyness - mu * time) / (vol * sqrtT);
-  const b = (-logMoneyness - mu * time) / (vol * sqrtT);
-  const factor = Math.exp((2 * mu * logMoneyness) / (vol * vol));
-  const touch = Math.min(1, normCdf(-Math.abs(a)) + factor * normCdf(-Math.abs(b)));
+  const m = Math.log(strike / spot);
+
+  // Already there: the strike is touched at time zero.
+  if (m === 0) return { itm, touch: 1 };
+
+  // Reflecting a downward barrier turns it into an upward one with the drift
+  // reversed, which lets both directions share the formula below. Getting
+  // this sign wrong quietly returns a plausible number, not an error.
+  const distance = Math.abs(m);
+  const drift = m > 0 ? mu : -mu;
+  const scale = vol * sqrtT;
+  const reflection = Math.exp((2 * mu * m) / (vol * vol));
+  const direct = normCdf((-distance + drift * time) / scale);
+  const reflected = normCdf((-distance - drift * time) / scale);
+
+  // The reflection factor can overflow while the CDF it multiplies underflows.
+  // Their product is a probability either way, so drop a non-finite term
+  // rather than letting Infinity * 0 poison the result.
+  const second = reflection * reflected;
+  const touch = Math.min(1, Math.max(0, direct + (Number.isFinite(second) ? second : 0)));
 
   return { itm, touch };
 }

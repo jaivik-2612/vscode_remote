@@ -305,6 +305,91 @@ test('an American option quoted at intrinsic has no identifiable volatility', ()
   assert.equal(result.vol, 0);
 });
 
+test('probability of finishing in the money is consistent', () => {
+  for (const contract of sampleContracts()) {
+    const call = bs.probabilities({ ...contract, type: 'call' });
+    const put = bs.probabilities({ ...contract, type: 'put' });
+    // Exactly one of the two finishes in the money.
+    assert.ok(Math.abs(call.itm + put.itm - 1) < 1e-12,
+      `itm probabilities do not sum to 1 at ${JSON.stringify(contract)}`);
+    for (const p of [call.itm, put.itm, call.touch]) {
+      assert.ok(p >= 0 && p <= 1, `probability out of range at ${JSON.stringify(contract)}`);
+    }
+    // Ending up on the far side of the strike means the strike was crossed on
+    // the way. Only the far side, though: a put whose spot is already below
+    // the strike finishes in the money without ever touching it.
+    const mustCross = contract.spot < contract.strike ? call.itm : put.itm;
+    assert.ok(call.touch >= mustCross - 1e-9,
+      `touch ${call.touch} below the crossing probability ${mustCross} ` +
+      `at ${JSON.stringify(contract)}`);
+  }
+});
+
+test('the strike is certain to be touched when the spot is already there', () => {
+  // The barrier formula reflects a downward barrier into an upward one, and a
+  // sign slip there returns a plausible number rather than an error. At the
+  // money is the case that catches it: the answer has to be exactly 1.
+  for (const rate of [0, 0.045, 0.2, -0.01]) {
+    for (const vol of [0.05, 0.25, 0.9]) {
+      const { touch } = bs.probabilities({
+        spot: 100, strike: 100, time: 0.25, vol, rate, yield: 0, type: 'call',
+      });
+      assert.equal(touch, 1, `rate ${rate}, vol ${vol} gave ${touch}`);
+    }
+  }
+});
+
+test('touch probability matches a simulation', () => {
+  // Independent check on the first-passage formula. A discretely monitored
+  // path can cross the barrier and come back between steps, so the simulation
+  // is biased slightly low; the tolerance is one-sided to match.
+  const random = mulberry32(20260820);
+  const gauss = () => {
+    const u = Math.max(random(), Number.MIN_VALUE);
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * random());
+  };
+
+  const cases = [
+    { spot: 90, strike: 100, time: 1, vol: 0.3, rate: 0.05, yield: 0, type: 'call' },
+    { spot: 110, strike: 100, time: 1, vol: 0.3, rate: 0.05, yield: 0, type: 'call' },
+  ];
+
+  for (const contract of cases) {
+    const { spot, strike, time, vol, rate } = contract;
+    const paths = 20000;
+    const steps = 400;
+    const dt = time / steps;
+    const drift = (rate - 0.5 * vol * vol) * dt;
+    const step = vol * Math.sqrt(dt);
+    const barrier = Math.log(strike / spot);
+
+    let touched = 0;
+    for (let i = 0; i < paths; i++) {
+      let x = 0;
+      for (let s = 0; s < steps; s++) {
+        x += drift + step * gauss();
+        if (barrier > 0 ? x >= barrier : x <= barrier) { touched++; break; }
+      }
+    }
+
+    const simulated = touched / paths;
+    const analytic = bs.probabilities(contract).touch;
+    assert.ok(analytic - simulated > -0.02 && analytic - simulated < 0.05,
+      `${JSON.stringify(contract)}: analytic ${analytic.toFixed(4)} vs simulated ${simulated.toFixed(4)}`);
+  }
+});
+
+/** Small seeded generator, so the simulation above is reproducible. */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 test('valuation ties the pieces together', () => {
   const european = valuation({ ...base, type: 'call' });
   assert.ok(Math.abs(european.fairValue - bs.price({ ...base, type: 'call' })) < 1e-12);

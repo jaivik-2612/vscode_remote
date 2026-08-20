@@ -18,7 +18,14 @@
     "start": "node server.js",
     "price": "node bin/optprice.js"
   },
-  "keywords": ["options", "black-scholes", "binomial", "greeks", "implied-volatility", "finance"],
+  "keywords": [
+    "options",
+    "black-scholes",
+    "binomial",
+    "greeks",
+    "implied-volatility",
+    "finance"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"

@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Option Fair Value</title>
+<link rel="stylesheet" href="./styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E">
+</head>
+<body>
+<header class="topbar">
+  <h1>Option Fair Value</h1>
+  <div class="topbar-actions">
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" role="tab" data-mode="price">Price</button>
+      <button class="tab" role="tab" data-mode="implied">Implied vol</button>
+      <button class="tab" role="tab" data-mode="grant">Employee grant</button>
+    </div>
+    <button id="theme" class="ghost" type="button" title="Toggle light and dark">◐</button>
+  </div>
+</header>
+
+<main>
+  <!-- ---------------------------------------------------------------- -->
+  <section class="panel" data-mode-panel="price">
+    <form id="price-form" class="grid">
+      <label>Underlying price
+        <input name="spot" type="number" step="any" value="100" required>
+      </label>
+      <label>Strike
+        <input name="strike" type="number" step="any" value="100" required>
+      </label>
+      <label>Days to expiry
+        <input name="days" type="number" step="any" value="90" required>
+      </label>
+      <label>Volatility <span class="unit">% p.a.</span>
+        <input name="vol" type="number" step="any" value="25" required>
+      </label>
+      <label>Risk-free rate <span class="unit">%</span>
+        <input name="rate" type="number" step="any" value="4.5" required>
+      </label>
+      <label>Dividend yield <span class="unit">%</span>
+        <input name="yield" type="number" step="any" value="0" required>
+      </label>
+      <label>Type
+        <select name="type">
+          <option value="call">Call</option>
+          <option value="put">Put</option>
+        </select>
+      </label>
+      <label>Exercise
+        <select name="style">
+          <option value="european">European</option>
+          <option value="american">American</option>
+        </select>
+      </label>
+      <label>Contract multiplier
+        <input name="multiplier" type="number" step="any" value="100" required>
+      </label>
+    </form>
+
+    <div id="price-error" class="error" hidden></div>
+
+    <div class="headline">
+      <div class="headline-main">
+        <span class="label">Fair value per share</span>
+        <output id="fair-value" class="big">—</output>
+        <span id="per-contract" class="sub">—</span>
+      </div>
+      <dl class="headline-split">
+        <div><dt>Intrinsic</dt><dd id="intrinsic">—</dd></div>
+        <div><dt>Time value</dt><dd id="time-value">—</dd></div>
+        <div><dt>Break-even</dt><dd id="break-even">—</dd></div>
+      </dl>
+    </div>
+
+    <div class="cards" id="greeks"></div>
+
+    <div class="split">
+      <figure class="chart-wrap">
+        <figcaption>Value against underlying price</figcaption>
+        <div id="chart"></div>
+        <p class="legend">
+          <span class="key key-value"></span> Fair value today
+          <span class="key key-payoff"></span> Payoff at expiry
+          <span class="key key-spot"></span> Spot
+        </p>
+      </figure>
+      <div class="notes">
+        <h2>Diagnostics</h2>
+        <dl id="diagnostics"></dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section class="panel" data-mode-panel="implied" hidden>
+    <p class="blurb">
+      Work backwards from a traded price to the volatility that justifies it,
+      then compare it against your own volatility estimate.
+    </p>
+    <form id="implied-form" class="grid">
+      <label>Market price
+        <input name="price" type="number" step="any" value="6.20" required>
+      </label>
+      <label>Underlying price
+        <input name="spot" type="number" step="any" value="100" required>
+      </label>
+      <label>Strike
+        <input name="strike" type="number" step="any" value="100" required>
+      </label>
+      <label>Days to expiry
+        <input name="days" type="number" step="any" value="90" required>
+      </label>
+      <label>Risk-free rate <span class="unit">%</span>
+        <input name="rate" type="number" step="any" value="4.5" required>
+      </label>
+      <label>Dividend yield <span class="unit">%</span>
+        <input name="yield" type="number" step="any" value="0" required>
+      </label>
+      <label>Type
+        <select name="type">
+          <option value="call">Call</option>
+          <option value="put">Put</option>
+        </select>
+      </label>
+      <label>Exercise
+        <select name="style">
+          <option value="european">European</option>
+          <option value="american">American</option>
+        </select>
+      </label>
+    </form>
+
+    <div id="implied-error" class="error" hidden></div>
+
+    <div class="headline">
+      <div class="headline-main">
+        <span class="label">Implied volatility</span>
+        <output id="implied-vol" class="big">—</output>
+        <span id="implied-note" class="sub">—</span>
+      </div>
+      <dl class="headline-split">
+        <div><dt>No-arbitrage floor</dt><dd id="iv-floor">—</dd></div>
+        <div><dt>No-arbitrage ceiling</dt><dd id="iv-ceiling">—</dd></div>
+        <div><dt>Solver iterations</dt><dd id="iv-iterations">—</dd></div>
+      </dl>
+    </div>
+    <div class="cards" id="implied-greeks"></div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- -->
+  <section class="panel" data-mode-panel="grant" hidden>
+    <p class="blurb">
+      Grant-date fair value for employee stock options, the ASC 718 way:
+      Black-Scholes over the <em>expected term</em> rather than the contractual
+      term, then reduced by the options expected to be forfeited before vesting.
+    </p>
+    <form id="grant-form" class="grid">
+      <label>Share price at grant
+        <input name="spot" type="number" step="any" value="12" required>
+      </label>
+      <label>Exercise price
+        <input name="strike" type="number" step="any" value="12" required>
+      </label>
+      <label>Expected term <span class="unit">years</span>
+        <input name="expectedTerm" type="number" step="any" value="6" required>
+      </label>
+      <label>Expected volatility <span class="unit">%</span>
+        <input name="vol" type="number" step="any" value="55" required>
+      </label>
+      <label>Risk-free rate <span class="unit">%</span>
+        <input name="rate" type="number" step="any" value="4" required>
+      </label>
+      <label>Dividend yield <span class="unit">%</span>
+        <input name="yield" type="number" step="any" value="0" required>
+      </label>
+      <label>Options granted
+        <input name="quantity" type="number" step="any" value="10000" required>
+      </label>
+      <label>Vesting period <span class="unit">years</span>
+        <input name="vestingYears" type="number" step="any" value="4" required>
+      </label>
+      <label>Annual forfeiture <span class="unit">%</span>
+        <input name="forfeitureRate" type="number" step="any" value="5" required>
+      </label>
+    </form>
+
+    <div id="grant-error" class="error" hidden></div>
+
+    <div class="headline">
+      <div class="headline-main">
+        <span class="label">Fair value per option</span>
+        <output id="grant-per-option" class="big">—</output>
+        <span id="grant-gross" class="sub">—</span>
+      </div>
+      <dl class="headline-split">
+        <div><dt>Expected to vest</dt><dd id="grant-vesting">—</dd></div>
+        <div><dt>Total expense</dt><dd id="grant-expense">—</dd></div>
+        <div><dt>Annual expense</dt><dd id="grant-annual">—</dd></div>
+      </dl>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <p>
+    Educational tool. Every number is a model output, only as good as the
+    volatility, rate and dividend assumptions you feed it — not investment advice.
+  </p>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
