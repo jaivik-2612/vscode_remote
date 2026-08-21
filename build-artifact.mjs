@@ -130,7 +130,7 @@ const marketData = JSON.stringify({
   rates: JSON.parse(await readFile('data/rates.json', 'utf8')),
 });
 
-const page = `<title>Option Fair Value</title>
+const page = `<title>FairShare</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 ${fonts}

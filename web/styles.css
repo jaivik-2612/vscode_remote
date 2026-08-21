@@ -988,3 +988,104 @@ select:focus {
 }
 
 .copy-button:hover { border-color: var(--accent); background: var(--accent-wash); }
+
+/* ================================================== simple / advanced ==
+   One engine, two windows onto it. The view flag lives on <body>; both
+   selectors are spelled out so neither view depends on a default. */
+
+body[data-view="simple"] [data-advanced] { display: none !important; }
+body[data-view="simple"] .modes { display: none; }
+body[data-view="advanced"] [data-simple] { display: none !important; }
+body[data-view="advanced"] #simple-readout { display: none; }
+
+/* In simple view the distribution chart stands alone at full width
+   (its grid partner, the transition matrix, is advanced-only). */
+body[data-view="simple"] .lower { grid-template-columns: minmax(0, 1fr); }
+
+#simple-readout { display: flex; flex-direction: column; gap: 14px; }
+
+.views {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--sunk);
+  border-radius: 9px;
+}
+
+.view-tab {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: 500 13px/1 var(--body);
+  padding: 8px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.view-tab:hover { color: var(--ink); }
+
+.view-tab.is-active {
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.how-to-read { max-width: none; }
+
+.plain-list {
+  margin: 0;
+  padding-left: 19px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink);
+  max-width: 72ch;
+}
+
+.plain-list b { font-weight: 600; }
+.plain-list em { font-style: italic; }
+
+.disclaimer {
+  margin: 0;
+  padding: 13px 16px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--ink-muted);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-muted);
+  max-width: none;
+}
+
+.disclaimer b { color: var(--ink); font-weight: 600; }
+
+input[type="date"] {
+  grid-column: 1 / -1;
+  font: 500 14px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--sunk);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 9px 10px;
+  width: 100%;
+  color-scheme: inherit;
+}
+
+input[type="date"]:hover { border-color: var(--line-strong); }
+
+input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.field-note b { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 700px) {
+  .views { order: -1; }
+}

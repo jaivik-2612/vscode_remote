@@ -618,6 +618,24 @@ function applyCurveRate() {
 
 ensembleForm.elements.days.addEventListener('input', applyCurveRate);
 
+/* ------------------------------------------------------ expiry date field */
+
+const expiryDateInput = $('expiry-date');
+
+const isoDatePlus = (days) =>
+  new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+/** Simple view thinks in dates; the models think in days. Date is master
+ *  while it is visible: editing it rewrites the hidden days field before
+ *  the form's own input handler reads it (target listeners run first). */
+expiryDateInput.addEventListener('input', () => {
+  const chosen = new Date(`${expiryDateInput.value}T12:00:00`);
+  if (Number.isNaN(chosen.getTime())) return;
+  const days = Math.max(1, Math.round((chosen - Date.now()) / 86400000));
+  ensembleForm.elements.days.value = String(days);
+  applyCurveRate();
+});
+
 /* ------------------------------------------------- manual data (artifact) */
 
 /**
@@ -817,6 +835,8 @@ function renderEnsemble() {
   $('ens-spread').textContent = `${money(consensus.spread, 4)} (${percent(consensus.dispersion, 1)})`;
   $('ens-contract').textContent = money(consensus.value * 100);
 
+  renderSimpleReadout(result, f);
+
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
   $('ens-projected-note').textContent =
@@ -878,6 +898,34 @@ function renderEnsemble() {
     'rather than the model.');
 
   panel.classList.remove('is-computing');
+}
+
+/** The beginner view: the same result, two plain answers. */
+function renderSimpleReadout(result, form) {
+  const { consensus, outlook } = result;
+  const symbol = selectedTicker?.symbol ?? 'the stock';
+
+  $('s-fair').textContent = money(consensus.value, 2);
+  $('s-contract').textContent =
+    `per share · ${money(consensus.value * 100)} per standard contract of 100`;
+  $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
+
+  const expiry = expiryDateInput.value
+    ? new Date(`${expiryDateInput.value}T12:00:00`)
+    : new Date(Date.now() + result.days * 86400000);
+  const dateLabel = expiry.toLocaleDateString('en-US',
+    { month: 'long', day: 'numeric', year: 'numeric' });
+
+  $('s-outlook-label').textContent = `Where ${symbol} might be on ${dateLabel}`;
+  $('s-median').textContent = money(outlook.median);
+  $('s-band').textContent =
+    `9 out of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
+
+  const isPut = form.type === 'put';
+  const chance = isPut ? 1 - outlook.probAboveStrike : outlook.probAboveStrike;
+  $('s-chance-label').textContent =
+    `Chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike)}`;
+  $('s-chance').textContent = percent(chance, 0);
 }
 
 /* ---- chart: where each model lands -------------------------------------
@@ -1387,6 +1435,31 @@ $('theme').addEventListener('click', () => {
     ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
   root.dataset.theme = current === 'dark' ? 'light' : 'dark';
 });
+
+/* ------------------------------------------------------- simple/advanced */
+
+function setView(view) {
+  document.body.dataset.view = view;
+  for (const tab of document.querySelectorAll('.view-tab')) {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-selected', String(active));
+  }
+  if (view === 'simple') {
+    // Simple view is a window onto the ensemble; make sure it is showing,
+    // and keep the date field agreeing with however days was left.
+    document.querySelector('.mode[data-mode="ensemble"]')?.click();
+    const days = Number(ensembleForm.elements.days.value) || 90;
+    expiryDateInput.value = isoDatePlus(days);
+  }
+}
+
+for (const tab of document.querySelectorAll('.view-tab')) {
+  tab.addEventListener('click', () => setView(tab.dataset.view));
+}
+
+expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
+setView('simple');
 
 renderPrice();
 renderImplied();

@@ -219,5 +219,5 @@ const server = createServer(async (request, response) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`Option fair value running at http://${HOST}:${PORT}`);
+  console.log(`FairShare running at http://${HOST}:${PORT}`);
 });

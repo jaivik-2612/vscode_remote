@@ -1,7 +1,7 @@
 {
-  "name": "option-fair-value",
+  "name": "fairshare",
   "version": "1.0.0",
-  "description": "Fair-value calculator for stock options: Black-Scholes, binomial trees, Greeks and implied volatility",
+  "description": "FairShare — an educational fair-price calculator for stock options",
   "type": "module",
   "main": "src/index.js",
   "bin": {

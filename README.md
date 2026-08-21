@@ -1,7 +1,13 @@
-# Option Fair Value
+# FairShare
 
-Works out what a stock option is worth, and what a quoted price implies about
-the market's volatility expectations.
+An educational fair-price calculator for stock options. The **Simple** view
+answers two questions in plain language — what is this option fairly worth,
+and where might the stock be on the day you pick — while the **Advanced**
+view opens up the full machinery: volatility regimes, the three-model
+ensemble, implied volatility and grant valuation.
+
+FairShare is for education only. Nothing it produces is investment advice, a
+recommendation, or a prediction of what will actually happen.
 
 No dependencies. `npm start` and `npm test` work on a fresh clone.
 

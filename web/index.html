@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Option Fair Value</title>
+<title>FairShare</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
@@ -14,10 +14,14 @@
 
 <header class="masthead">
   <div class="wordmark">
-    <span class="wordmark-name">Option Fair Value</span>
-    <span class="wordmark-note">Baum&#8209;Welch regimes &rarr; Black&#8209;Scholes &amp; Monte Carlo</span>
+    <span class="wordmark-name">FairShare</span>
+    <span class="wordmark-note">Fair prices for stock options</span>
   </div>
   <div class="masthead-tools">
+    <nav class="views" role="tablist" aria-label="Calculator level">
+      <button class="view-tab is-active" role="tab" aria-selected="true" data-view="simple">Simple</button>
+      <button class="view-tab" role="tab" aria-selected="false" data-view="advanced">Advanced</button>
+    </nav>
     <nav class="modes" role="tablist" aria-label="Calculator mode">
       <button class="mode is-active" role="tab" aria-selected="true" data-mode="ensemble">Three models</button>
       <button class="mode" role="tab" aria-selected="false" data-mode="price">Quick price</button>
@@ -59,7 +63,7 @@
         <p class="notice" id="data-note" hidden></p>
       </fieldset>
 
-      <fieldset>
+      <fieldset data-advanced>
         <legend>Price history</legend>
         <label class="stacked" for="prices">
           Closing prices, oldest first
@@ -497,20 +501,26 @@
       <fieldset>
         <legend>Contract</legend>
         <div class="fields">
-          <label>Strike<input name="strike" type="number" step="any" value="90" required></label>
-          <label>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
+          <label>Strike price<input name="strike" type="number" step="any" value="90" required></label>
+          <label data-simple>Expiry date<input id="expiry-date" type="date"></label>
+          <label data-advanced>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
         </div>
+        <p class="field-note" data-simple>The strike is the locked-in price the option
+          lets you trade at. It is set to roughly today&rsquo;s price &mdash; change it freely.</p>
         <div class="segments" role="group" aria-label="Option type">
           <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
           <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
         </div>
-        <div class="segments" role="group" aria-label="Exercise style">
-          <label class="segment"><input type="radio" name="style" value="european" checked><span>European</span></label>
-          <label class="segment"><input type="radio" name="style" value="american"><span>American</span></label>
+        <p class="field-note" data-simple>A <b>call</b> is the right to <b>buy</b> at the
+          strike (worth more if the stock rises). A <b>put</b> is the right to
+          <b>sell</b> (worth more if it falls).</p>
+        <div class="segments" data-advanced role="group" aria-label="Exercise style">
+          <label class="segment"><input type="radio" name="style" value="european"><span>European</span></label>
+          <label class="segment"><input type="radio" name="style" value="american" checked><span>American</span></label>
         </div>
       </fieldset>
 
-      <fieldset>
+      <fieldset data-advanced>
         <legend>Market</legend>
         <div class="fields">
           <label>Risk-free rate<span class="suffix">%</span><input name="rate" type="number" step="any" value="4.5" required></label>
@@ -519,7 +529,7 @@
         <p class="field-note" id="rate-note"></p>
       </fieldset>
 
-      <fieldset>
+      <fieldset data-advanced>
         <legend>Model settings</legend>
         <label class="inline">Hidden regimes
           <select name="states">
@@ -639,7 +649,55 @@
     <section data-panel="ensemble">
       <div id="ensemble-error" class="alert" role="alert" hidden></div>
 
-      <div class="headline-pair">
+      <div id="simple-readout">
+        <div class="headline-pair">
+          <div class="headline">
+            <div class="headline-figure">
+              <span class="eyebrow">A fair price for this option</span>
+              <output id="s-fair" class="figure">&mdash;</output>
+              <span id="s-contract" class="figure-note">&mdash;</span>
+            </div>
+            <dl class="headline-facts">
+              <div><dt>Models agree within</dt><dd id="s-agree">&mdash;</dd></div>
+            </dl>
+          </div>
+          <div class="headline headline-alt">
+            <div class="headline-figure">
+              <span class="eyebrow" id="s-outlook-label">Where the stock might be</span>
+              <output id="s-median" class="figure">&mdash;</output>
+              <span id="s-band" class="figure-note">&mdash;</span>
+            </div>
+            <dl class="headline-facts">
+              <div><dt id="s-chance-label">Chance it pays off</dt><dd id="s-chance">&mdash;</dd></div>
+            </dl>
+          </div>
+        </div>
+
+        <section class="block how-to-read">
+          <h2 class="eyebrow">How to read these numbers</h2>
+          <ul class="plain-list">
+            <li><b>Fair price</b> is what the maths says the option is worth today,
+              judged three different ways from how this stock has actually moved over
+              the last two years. If the market quotes much more, the option is
+              expensive; much less, cheap &mdash; <em>by these models&rsquo; lights</em>.</li>
+            <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
+              of simulated futures built from the same two years &mdash; the range around
+              it is where 9 out of 10 of those simulations landed.</li>
+            <li>Everything here assumes the future rhymes with the recent past.
+              Real markets are under no such obligation.</li>
+          </ul>
+        </section>
+
+        <p class="disclaimer" role="note">
+          <b>FairShare is for education only.</b> Nothing on this page is investment
+          advice, a recommendation, or a prediction of what will actually happen.
+          Every figure is a model estimate built from past prices, and past prices
+          do not determine future ones. Options can expire worthless &mdash; never
+          trade money you cannot afford to lose.
+        </p>
+      </div>
+
+      <div class="headline-pair" data-advanced>
         <div class="headline">
           <div class="headline-figure">
             <span class="eyebrow">Fair value, three models agreed</span>
@@ -665,13 +723,13 @@
         </div>
       </div>
 
-      <figure class="block">
+      <figure class="block" data-advanced>
         <h2 class="eyebrow">Where each model lands</h2>
         <div id="ens-dotplot"></div>
         <figcaption class="chart-note" id="ens-dotplot-note">&mdash;</figcaption>
       </figure>
 
-      <section class="block">
+      <section class="block" data-advanced>
         <h2 class="eyebrow">Volatility regimes found by Baum-Welch</h2>
         <div class="table-scroll">
           <table class="data-table" id="ens-regimes">
@@ -688,7 +746,7 @@
         <p class="notice" id="ens-selection" hidden></p>
       </section>
 
-      <figure class="block">
+      <figure class="block" data-advanced>
         <h2 class="eyebrow">Price history, shaded by fitted regime</h2>
         <div id="ens-history"></div>
         <figcaption class="legend" id="ens-history-legend"></figcaption>
@@ -699,12 +757,13 @@
           <h2 class="eyebrow">Where the price lands at expiry</h2>
           <div id="ens-distribution"></div>
           <figcaption class="chart-note">
-            Simulated under the drift estimated from your history, not the
-            risk-free rate &mdash; this is the projection, not the pricing run.
+            Thousands of simulated futures grown from the stock&rsquo;s own two-year
+            drift (not the risk-free rate used to price the option). The strike
+            line marks where the option starts paying off.
           </figcaption>
         </figure>
 
-        <section class="block">
+        <section class="block" data-advanced>
           <h2 class="eyebrow">Transition matrix</h2>
           <div class="table-scroll">
             <table class="data-table" id="ens-transition">
@@ -718,12 +777,12 @@
         </section>
       </div>
 
-      <section class="block">
+      <section class="block" data-advanced>
         <h2 class="eyebrow">Sensitivities at the regime volatility</h2>
         <div class="greeks" id="ens-greeks"></div>
       </section>
 
-      <section class="block">
+      <section class="block" data-advanced>
         <h2 class="eyebrow">Diagnostics</h2>
         <dl id="ens-diagnostics" class="facts"></dl>
       </section>
@@ -830,8 +889,9 @@
 
 <footer class="colophon">
   <p>
-    Every figure here is a model output, only as sound as the volatility, rate
-    and dividend you feed it. Educational tool, not investment advice.
+    <b>FairShare</b> is an educational tool. Every figure is a model output,
+    only as sound as the history and assumptions behind it &mdash; it is not
+    investment advice, and options can expire worthless.
   </p>
 </footer>
 
