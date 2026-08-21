@@ -1,0 +1,93 @@
+name: Android build
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'data/**'
+      - 'android/**'
+      - 'build-artifact.mjs'
+      - 'capacitor.config.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    # Secrets land in env so steps can condition on their presence; a fork or
+    # a repo without signing configured still gets the debug APK.
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install native tooling
+        run: npm ci
+
+      - name: Run the engine test suite
+        run: npm test
+
+      - name: Bundle the web app and sync the Android project
+        run: |
+          node build-artifact.mjs --app
+          npx cap sync android
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fairshare-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      # ---- Release AAB: only when the four ANDROID_* signing secrets exist.
+      # Generate a keystore once (keep it forever — it is the app's identity):
+      #   keytool -genkeypair -v -keystore fairshare.jks -alias fairshare \
+      #     -keyalg RSA -keysize 4096 -validity 10000
+      #   base64 -w0 fairshare.jks   ->  ANDROID_KEYSTORE_BASE64
+      - name: Build release AAB
+        if: env.KEYSTORE_BASE64 != ''
+        working-directory: android
+        run: ./gradlew bundleRelease --no-daemon
+
+      - name: Sign release AAB
+        if: env.KEYSTORE_BASE64 != ''
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
+          jarsigner -keystore /tmp/keystore.jks \
+            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
+            -sigalg SHA256withRSA -digestalg SHA-256 \
+            android/app/build/outputs/bundle/release/app-release.aab \
+            "$KEY_ALIAS"
+          jarsigner -verify android/app/build/outputs/bundle/release/app-release.aab
+          rm -f /tmp/keystore.jks
+
+      - name: Upload release AAB
+        if: env.KEYSTORE_BASE64 != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fairshare-release-aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
+          retention-days: 30

@@ -23,10 +23,25 @@ npm run build:app        # bundle the web app + cap sync into both platforms
 ```
 
 ### Android
-1. `npx cap open android` (Android Studio).
-2. First time: Build > Generate Signed Bundle, create a keystore, KEEP IT
-   SAFE (losing it means losing the app listing).
-3. Build the .aab, upload to Play Console.
+
+CI does the building: `.github/workflows/android.yml` runs the test suite,
+bundles the web app, and builds a debug APK on every relevant push — the
+APK is downloadable from the workflow run's artifacts, installable directly
+on a device for testing.
+
+To get a signed, Play-ready AAB from the same workflow, add four repository
+secrets (Settings > Secrets and variables > Actions):
+
+- `ANDROID_KEYSTORE_BASE64` — your keystore, base64-encoded
+  (`keytool -genkeypair -v -keystore fairshare.jks -alias fairshare
+  -keyalg RSA -keysize 4096 -validity 10000`, then `base64 -w0 fairshare.jks`)
+- `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
+
+KEEP THE KEYSTORE SAFE — losing it means losing the app listing. The signed
+`fairshare-release-aab` artifact uploads straight to the Play Console.
+
+Building locally instead: `npx cap open android` (Android Studio) and
+Build > Generate Signed Bundle.
 4. Complete: Data safety (no data collected), content rating, and the
    Financial features declaration (educational calculator — no trading,
    no loans, no advice).

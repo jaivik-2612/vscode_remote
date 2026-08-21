@@ -1,7 +1,7 @@
 {
   "name": "fairshare",
   "version": "1.0.0",
-  "description": "FairShare \u2014 an educational fair-price calculator for stock options",
+  "description": "FairShare — an educational fair-price calculator for stock options",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -33,8 +33,7 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "@capacitor/assets": "^3.0.5",
-    "playwright": "^1.62.1"
+    "@capacitor/assets": "^3.0.5"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
