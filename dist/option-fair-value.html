@@ -1,7 +1,4 @@
 <title>FairShare</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&display=swap">
 <style>
 /* ============================================================== tokens ==
    Light is the base palette on bare :root. Dark is redefined twice: once
@@ -13,66 +10,73 @@
 :root {
   color-scheme: light;
 
-  /* Warm-biased neutrals, leaning toward the brass accent rather than a
-     flat machine grey. */
-  --ground: #f3f2f0;
-  --surface: #fbfaf9;
-  --sunk: #eae8e4;
-  --line: #dedbd5;
-  --line-strong: #c6c1b8;
-  --ink: #1a1815;
-  --ink-muted: #6b655c;
+  /* iOS system-grouped palette. Cards sit flat on the grouped background —
+     no shadows — separated by hairlines, exactly as UIKit draws them. */
+  --ground: #f2f2f7;          /* systemGroupedBackground */
+  --surface: #ffffff;         /* secondarySystemGroupedBackground */
+  --sunk: rgba(118, 118, 128, .12);   /* tertiary fill — text fields, tracks */
+  --line: rgba(60, 60, 67, .29);      /* separator */
+  --line-strong: rgba(60, 60, 67, .45);
+  --ink: #000000;             /* label */
+  --ink-muted: rgba(60, 60, 67, .6);  /* secondaryLabel */
 
+  /* FairShare's tint. iOS apps carry a tint colour; this one stays brass. */
   --accent: #96550f;
   --accent-bright: #b8690f;
-  --accent-wash: rgba(150, 85, 15, .10);
+  --accent-wash: rgba(150, 85, 15, .12);
 
-  /* Reserved strictly for signed quantities, so they never read as accent. */
-  --positive: #0c6b4c;
-  --negative: #a62d22;
+  /* iOS system green/red, in their darker text-safe cuts. */
+  --positive: #248a3d;
+  --negative: #d70015;
 
-  --shadow: 0 1px 1px rgba(26, 24, 21, .04), 0 8px 24px rgba(26, 24, 21, .06);
-  --radius: 10px;
+  --bar: rgba(246, 246, 248, .82);    /* translucent nav bar */
+  --thumb: #ffffff;                   /* segmented-control thumb */
+  --shadow: none;
+  --radius: 12px;
 
-  --display: "Bricolage Grotesque", "Trebuchet MS", sans-serif;
-  --body: "IBM Plex Sans", -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --ground: #151412;
-    --surface: #1d1b18;
-    --sunk: #262320;
-    --line: #332f2a;
-    --line-strong: #4a453e;
-    --ink: #edeae4;
-    --ink-muted: #9c958a;
+    --ground: #000000;                 /* dark grouped background is true black */
+    --surface: #1c1c1e;
+    --sunk: rgba(118, 118, 128, .24);
+    --line: rgba(84, 84, 88, .6);
+    --line-strong: rgba(84, 84, 88, .85);
+    --ink: #ffffff;
+    --ink-muted: rgba(235, 235, 245, .6);
     --accent: #dfa05a;
     --accent-bright: #eeb673;
-    --accent-wash: rgba(223, 160, 90, .13);
-    --positive: #48c48e;
-    --negative: #ee7568;
-    --shadow: 0 1px 1px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .34);
+    --accent-wash: rgba(223, 160, 90, .16);
+    --positive: #30d158;
+    --negative: #ff453a;
+    --bar: rgba(18, 18, 20, .8);
+    --thumb: #636366;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --ground: #151412;
-  --surface: #1d1b18;
-  --sunk: #262320;
-  --line: #332f2a;
-  --line-strong: #4a453e;
-  --ink: #edeae4;
-  --ink-muted: #9c958a;
+  --ground: #000000;
+  --surface: #1c1c1e;
+  --sunk: rgba(118, 118, 128, .24);
+  --line: rgba(84, 84, 88, .6);
+  --line-strong: rgba(84, 84, 88, .85);
+  --ink: #ffffff;
+  --ink-muted: rgba(235, 235, 245, .6);
   --accent: #dfa05a;
   --accent-bright: #eeb673;
-  --accent-wash: rgba(223, 160, 90, .13);
-  --positive: #48c48e;
-  --negative: #ee7568;
-  --shadow: 0 1px 1px rgba(0, 0, 0, .3), 0 10px 28px rgba(0, 0, 0, .34);
+  --accent-wash: rgba(223, 160, 90, .16);
+  --positive: #30d158;
+  --negative: #ff453a;
+  --bar: rgba(18, 18, 20, .8);
+  --thumb: #636366;
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -88,8 +92,9 @@ body {
      ends up showing one theme's text on the other theme's background. */
   background: var(--ground);
   color: var(--ink);
-  font: 400 15px/1.55 var(--body);
+  font: 400 16px/1.5 var(--body);
   -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
 :focus-visible {
@@ -111,15 +116,18 @@ body {
 
 /* ============================================================ masthead == */
 
+/* An iOS navigation bar: translucent material with a hairline under it. */
 .masthead {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;
+  gap: 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 13px clamp(16px, 3vw, 32px);
-  background: var(--surface);
-  border-bottom: 1px solid var(--line);
+  padding: 10px clamp(16px, 3vw, 32px);
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: .5px solid var(--line);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -129,15 +137,13 @@ body {
 
 .wordmark-name {
   font-family: var(--display);
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: -.015em;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -.01em;
 }
 
-.wordmark-note {
-  font-size: 12.5px;
-  color: var(--ink-muted);
-}
+/* Nav bars don't carry subtitles on iOS. */
+.wordmark-note { display: none; }
 
 .masthead-tools {
   display: flex;
@@ -148,14 +154,13 @@ body {
   min-width: 0;
 }
 
+/* UISegmentedControl: grey track, sliding thumb, 2px inset. */
 .modes {
   display: flex;
   gap: 2px;
-  padding: 3px;
+  padding: 2px;
   background: var(--sunk);
   border-radius: 9px;
-  /* The tab strip scrolls within itself on a narrow screen rather than
-     widening the page. */
   min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -166,37 +171,36 @@ body {
 .mode {
   border: 0;
   background: transparent;
-  color: var(--ink-muted);
-  font: 500 13px/1 var(--body);
-  padding: 8px 14px;
-  border-radius: 6px;
+  color: var(--ink);
+  font: 400 13px/1 var(--body);
+  padding: 7px 13px;
+  border-radius: 7px;
   cursor: pointer;
   white-space: nowrap;
+  min-height: 28px;
 }
 
-.mode:hover { color: var(--ink); }
-
 .mode.is-active {
-  background: var(--surface);
+  background: var(--thumb);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+  box-shadow: 0 1px 2.5px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .04);
 }
 
 .icon-button {
   flex: none;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink-muted);
-  border-radius: 8px;
-  width: 34px;
-  height: 34px;
+  border: 0;
+  background: var(--sunk);
+  color: var(--accent);
+  border-radius: 50%;
+  width: 32px;
+  height: 32px;
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
 }
 
-.icon-button:hover { color: var(--ink); border-color: var(--line-strong); }
+.icon-button:hover { color: var(--accent-bright); }
 
 /* =========================================================== workspace ==
    Controls stay put on the left while the readout updates beside them, so
@@ -222,28 +226,33 @@ body {
   top: 76px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 34px;   /* headroom for each card's floating section header */
+  padding-top: 22px;
 }
 
-.rail form { display: flex; flex-direction: column; gap: 14px; margin: 0; }
+.rail form { display: flex; flex-direction: column; gap: 34px; margin: 0; }
 
 fieldset {
   margin: 0;
-  padding: 14px 15px 16px;
+  padding: 14px 16px 16px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  position: relative;
 }
 
+/* The Settings idiom: the section header floats above its inset card. The
+   rail's gap leaves the headroom the absolute positioning spends. */
 legend {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .1em;
+  position: absolute;
+  top: -22px;
+  left: 16px;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: .04em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  padding: 0 6px;
-  margin-left: -6px;
+  padding: 0;
 }
 
 .fields { display: flex; flex-direction: column; gap: 10px; }
@@ -261,18 +270,17 @@ legend {
 
 .fields input {
   grid-column: 1 / -1;
-  font: 500 15px/1 var(--mono);
+  font: 400 17px/1.2 var(--body);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   background: var(--sunk);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 9px 10px;
+  border-radius: 10px;
+  padding: 10px 12px;
   width: 100%;
   min-width: 0;
+  min-height: 40px;
 }
-
-.fields input:hover { border-color: var(--line-strong); }
 
 .fields input:focus {
   outline: none;
@@ -287,11 +295,11 @@ legend {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  gap: 3px;
+  gap: 2px;
   margin-top: 11px;
-  padding: 3px;
+  padding: 2px;
   background: var(--sunk);
-  border-radius: 8px;
+  border-radius: 9px;
 }
 
 .segment { position: relative; }
@@ -309,19 +317,19 @@ legend {
 .segment span {
   display: block;
   text-align: center;
-  padding: 7px 6px;
-  border-radius: 6px;
-  font-size: 12.5px;
-  font-weight: 500;
-  color: var(--ink-muted);
-  transition: background .12s ease, color .12s ease;
+  padding: 8px 6px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--ink);
+  transition: background .12s ease;
 }
 
 .segment input:checked + span {
-  background: var(--surface);
+  background: var(--thumb);
   color: var(--ink);
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
+  box-shadow: 0 1px 2.5px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .04);
 }
 
 .segment input:focus-visible + span {
@@ -336,11 +344,10 @@ legend {
 
 .block {
   margin: 0;
-  padding: 15px 17px 17px;
+  padding: 16px 18px 18px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
   min-width: 0;
 }
 
@@ -365,20 +372,18 @@ legend {
   justify-content: space-between;
   padding: 20px 22px;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--accent);
+  border: 0;
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
 }
 
 .headline-figure { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 
 .figure {
   font-family: var(--display);
-  font-size: clamp(38px, 6.5vw, 54px);
+  font-size: clamp(38px, 6.5vw, 52px);
   font-weight: 700;
-  letter-spacing: -.03em;
-  line-height: 1.02;
+  letter-spacing: -.02em;
+  line-height: 1.05;
   font-variant-numeric: tabular-nums;
 }
 
@@ -407,21 +412,21 @@ legend {
 .greeks {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 1px;
+  gap: .5px;
   /* Surface, not the line colour: when the row does not divide evenly the
      leftover grid area is empty, and a line-coloured gap there reads as a
      tile that failed to render. The dividers come from the cells instead. */
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border: .5px solid var(--line);
+  border-radius: 10px;
   overflow: hidden;
 }
 
 .greek {
   background: var(--surface);
-  /* Each cell rings itself, so the 1px gap between two cells is filled from
+  /* Each cell rings itself, so the gap between two cells is filled from
      both sides and reads as one crisp divider. */
-  box-shadow: 0 0 0 1px var(--line);
+  box-shadow: 0 0 0 .5px var(--line);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -502,8 +507,8 @@ legend {
   justify-content: space-between;
   align-items: baseline;
   gap: 16px;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--line);
+  padding: 10px 0;
+  border-bottom: .5px solid var(--line);
 }
 
 .fact:last-of-type { border-bottom: 0; padding-bottom: 0; }
@@ -601,8 +606,6 @@ legend {
   gap: 14px;
 }
 
-.headline-pair .headline { border-top-color: var(--accent); }
-.headline-alt { border-top-color: var(--line-strong); }
 .headline-pair .figure { font-size: clamp(32px, 4.6vw, 44px); }
 .headline-pair .headline-facts { gap: 20px; }
 .headline-pair .headline-facts dd { font-size: 17px; }
@@ -616,19 +619,17 @@ label.stacked {
 }
 
 textarea {
-  font: 400 12px/1.5 var(--mono);
+  font: 400 13px/1.5 var(--mono);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   background: var(--sunk);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 9px 10px;
+  border-radius: 10px;
+  padding: 10px 12px;
   width: 100%;
   resize: vertical;
   min-height: 90px;
 }
-
-textarea:hover { border-color: var(--line-strong); }
 
 textarea:focus {
   outline: none;
@@ -647,17 +648,16 @@ label.inline {
 }
 
 select {
-  font: 500 13px/1 var(--body);
+  font: 400 15px/1 var(--body);
   color: var(--ink);
   background: var(--sunk);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 8px 9px;
+  border-radius: 9px;
+  padding: 9px 10px;
   cursor: pointer;
   max-width: 62%;
+  min-height: 36px;
 }
-
-select:hover { border-color: var(--line-strong); }
 
 select:focus {
   outline: none;
@@ -695,9 +695,9 @@ select:focus {
 
 .data-table th,
 .data-table td {
-  padding: 8px 10px;
+  padding: 9px 10px;
   text-align: right;
-  border-bottom: 1px solid var(--line);
+  border-bottom: .5px solid var(--line);
   white-space: nowrap;
 }
 
@@ -830,13 +830,14 @@ select:focus {
 .combobox { position: relative; }
 
 #ticker-search {
-  font: 500 15px/1 var(--mono);
+  font: 400 17px/1.2 var(--body);
   color: var(--ink);
   background: var(--sunk);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 10px 11px;
+  border-radius: 10px;
+  padding: 10px 12px;
   width: 100%;
+  min-height: 40px;
   text-transform: uppercase;
 }
 
@@ -858,16 +859,16 @@ select:focus {
 #ticker-listbox {
   position: absolute;
   z-index: 20;
-  top: calc(100% + 5px);
+  top: calc(100% + 6px);
   left: 0;
   right: 0;
   margin: 0;
-  padding: 4px;
+  padding: 5px;
   list-style: none;
   background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 9px;
-  box-shadow: var(--shadow);
+  border: .5px solid var(--line);
+  border-radius: 13px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, .22), 0 2px 8px rgba(0, 0, 0, .1);
   max-height: 330px;
   overflow-y: auto;
 }
@@ -916,7 +917,7 @@ select:focus {
   margin-top: 11px;
   padding: 12px 13px;
   background: var(--sunk);
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .fetch-title {
@@ -937,7 +938,7 @@ select:focus {
 
 .dropzone {
   border: 1.5px dashed var(--line-strong);
-  border-radius: 7px;
+  border-radius: 10px;
   padding: 14px 12px;
   text-align: center;
   font-size: 12.5px;
@@ -967,12 +968,12 @@ select:focus {
   display: block;
   width: 100%;
   margin: 6px 0;
-  font: 500 11.5px/1.4 var(--mono);
+  font: 500 12px/1.4 var(--mono);
   color: var(--ink);
   background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  padding: 7px 9px;
+  border: .5px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
   cursor: text;
 }
 
@@ -983,16 +984,17 @@ select:focus {
 }
 
 .copy-button {
-  border: 1px solid var(--line-strong);
-  background: var(--surface);
+  border: 0;
+  background: var(--sunk);
   color: var(--accent);
-  font: 600 11.5px/1 var(--body);
-  border-radius: 6px;
-  padding: 6px 11px;
+  font: 600 13px/1 var(--body);
+  border-radius: 999px;
+  padding: 7px 14px;
   cursor: pointer;
+  min-height: 28px;
 }
 
-.copy-button:hover { border-color: var(--accent); background: var(--accent-wash); }
+.copy-button:hover { background: var(--accent-wash); }
 
 /* ================================================== simple / advanced ==
    One engine, two windows onto it. The view flag lives on <body>; both
@@ -1012,7 +1014,7 @@ body[data-view="simple"] .lower { grid-template-columns: minmax(0, 1fr); }
 .views {
   display: flex;
   gap: 2px;
-  padding: 3px;
+  padding: 2px;
   background: var(--sunk);
   border-radius: 9px;
 }
@@ -1020,20 +1022,20 @@ body[data-view="simple"] .lower { grid-template-columns: minmax(0, 1fr); }
 .view-tab {
   border: 0;
   background: transparent;
-  color: var(--ink-muted);
-  font: 500 13px/1 var(--body);
-  padding: 8px 14px;
-  border-radius: 6px;
+  color: var(--ink);
+  font: 400 13px/1 var(--body);
+  padding: 7px 14px;
+  border-radius: 7px;
   cursor: pointer;
   white-space: nowrap;
+  min-height: 28px;
 }
 
-.view-tab:hover { color: var(--ink); }
-
 .view-tab.is-active {
-  background: var(--accent);
-  color: var(--surface);
+  background: var(--thumb);
+  color: var(--ink);
   font-weight: 600;
+  box-shadow: 0 1px 2.5px rgba(0, 0, 0, .18), 0 0 0 .5px rgba(0, 0, 0, .04);
 }
 
 .how-to-read { max-width: none; }
@@ -1056,12 +1058,11 @@ body[data-view="simple"] .lower { grid-template-columns: minmax(0, 1fr); }
 .disclaimer {
   margin: 0;
   padding: 13px 16px;
-  border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--ink-muted);
+  border: 0;
   border-radius: var(--radius);
   background: var(--surface);
-  font-size: 12.5px;
-  line-height: 1.6;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--ink-muted);
   max-width: none;
 }
@@ -1070,18 +1071,17 @@ body[data-view="simple"] .lower { grid-template-columns: minmax(0, 1fr); }
 
 input[type="date"] {
   grid-column: 1 / -1;
-  font: 500 14px/1 var(--mono);
+  font: 400 17px/1.2 var(--body);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
   background: var(--sunk);
   border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 9px 10px;
+  border-radius: 10px;
+  padding: 9px 12px;
   width: 100%;
+  min-height: 40px;
   color-scheme: inherit;
 }
-
-input[type="date"]:hover { border-color: var(--line-strong); }
 
 input[type="date"]:focus {
   outline: none;

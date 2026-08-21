@@ -119,7 +119,6 @@ const css = await readFile('web/styles.css', 'utf8');
 // inside it: the title, the font link, then the body's own markup.
 const body = html.match(/<body>([\s\S]*?)<\/body>/)[1]
   .replace(/\s*<script[\s\S]*?<\/script>\s*/g, '\n');
-const fonts = html.match(/<link rel="stylesheet" href="https:\/\/fonts[^>]*>/)[0];
 
 // The reference data rides along inside the page: the artifact host blocks
 // every external request, so anything the page needs must already be there.
@@ -130,10 +129,9 @@ const marketData = JSON.stringify({
   rates: JSON.parse(await readFile('data/rates.json', 'utf8')),
 });
 
+// No webfonts: the page speaks the platform's own face (SF on Apple
+// hardware), which is most of what makes it read as native.
 const page = `<title>FairShare</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-${fonts}
 <style>
 ${css}
 </style>
