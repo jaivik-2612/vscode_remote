@@ -5320,10 +5320,15 @@ expiryDateInput.addEventListener('input', () => {
  */
 function renderFetchPanel(entry) {
   const panel = $('fetch-panel');
-  $('fetch-title').textContent =
-    `Get ${entry.symbol} closes with Google Sheets (this page cannot fetch data itself):`;
+  $('fetch-title').textContent = entry
+    ? `Get ${entry.symbol} closes with Google Sheets (this page cannot fetch data itself):`
+    : 'Get closing prices with Google Sheets (this page cannot fetch data itself):';
 
-  const formula = market.googleFinanceFormula(entry.symbol, entry.exchange);
+  // With no ticker chosen yet the instructions still teach the flow, using
+  // an example formula; picking a ticker above swaps in the exact one.
+  const formula = entry
+    ? market.googleFinanceFormula(entry.symbol, entry.exchange)
+    : market.googleFinanceFormula('AAPL', 'Q');
   const steps = [];
 
   steps.push({ build: (item) => {
@@ -5333,7 +5338,11 @@ function renderFetchPanel(entry) {
     field.readOnly = true;
     field.className = 'formula-field';
     field.value = formula;
-    field.setAttribute('aria-label', `GOOGLEFINANCE formula for ${entry.symbol}`);
+    field.setAttribute('aria-label',
+      entry ? `GOOGLEFINANCE formula for ${entry.symbol}` : 'Example GOOGLEFINANCE formula');
+    if (!entry) {
+      item.append(document.createTextNode(' '));
+    }
     field.addEventListener('focus', () => field.select());
     field.addEventListener('click', () => field.select());
     const copy = document.createElement('button');
@@ -5354,24 +5363,27 @@ function renderFetchPanel(entry) {
   steps.push({ html:
     `<a href="https://sheets.new" target="_blank" rel="noopener">Open a new ` +
     'Google Sheet</a> and paste it into cell A1 — GOOGLEFINANCE fills two ' +
-    `years of daily closes for ${entry.symbol}.` });
+    `years of daily closes for ${entry ? entry.symbol : 'the stock (swap in ' +
+    'your own symbol, or pick a ticker above for the exact formula)'}.` });
 
   steps.push({ html:
     'Select the two filled columns (click A1, then Ctrl/Cmd-A), copy, and ' +
     'paste them below — dates, split adjustment and the rest are handled.' });
 
   const alternatives = [];
-  const stooq = market.stooqSymbol(entry.symbol, entry.exchange);
+  const stooq = entry ? market.stooqSymbol(entry.symbol, entry.exchange) : null;
   if (stooq) {
     alternatives.push(`<a href="https://stooq.com/q/d/l/?s=${encodeURIComponent(stooq)}&i=d" ` +
       `target="_blank" rel="noopener">Stooq CSV download</a>`);
   }
-  const yahoo = market.yahooSymbol(entry.symbol, entry.exchange);
-  alternatives.push(`<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
-    `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
-    `rel="noopener">Yahoo Finance JSON</a>`);
-  steps.push({ html: `No Google account handy? ${alternatives.join(' or ')} ` +
-    'drop straight in too.' });
+  if (entry) {
+    const yahoo = market.yahooSymbol(entry.symbol, entry.exchange);
+    alternatives.push(`<a href="https://query1.finance.yahoo.com/v8/finance/chart/` +
+      `${encodeURIComponent(yahoo)}?range=2y&interval=1d" target="_blank" ` +
+      `rel="noopener">Yahoo Finance JSON</a>`);
+    steps.push({ html: `No Google account handy? ${alternatives.join(' or ')} ` +
+      'drop straight in too.' });
+  }
 
   $('fetch-steps').replaceChildren(...steps.map((step) => {
     const item = document.createElement('li');
@@ -6589,6 +6601,7 @@ for (const tab of document.querySelectorAll('.view-tab')) {
 
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
 setView('simple');
+if (IS_ARTIFACT) renderFetchPanel(null);
 
 renderPrice();
 renderImplied();
