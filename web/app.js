@@ -597,7 +597,39 @@ function applyMarketData(parsed, entry, provider) {
   note.innerHTML = `<b>${entry ? entry.symbol : 'Data'}</b> · ${bits.join(' · ')}${warning}`;
   note.hidden = false;
 
+  renderSymbolHeader(parsed, entry, spot);
   renderEnsemble();
+}
+
+/** The quote strip: ticker, name, last close and the last day's move. */
+function renderSymbolHeader(parsed, entry, spot) {
+  const prices = parsed.prices;
+  $('sym-ticker').textContent = entry?.symbol ?? parsed.symbol ?? 'Pasted data';
+  const meta = [];
+  if (entry?.name) meta.push(entry.name);
+  if (entry?.exchangeName) meta.push(entry.exchangeName);
+  if (!entry && parsed.source) meta.push(parsed.source);
+  const asOf = parsed.dates?.[parsed.dates.length - 1];
+  if (asOf) meta.push(`as of ${asOf}`);
+  $('sym-meta').textContent = meta.join(' · ');
+
+  const currency = parsed.currency ?? entry?.currency ?? '';
+  $('sym-last').textContent = `${money(spot)}${currency ? ` ${currency}` : ''}`;
+
+  const change = $('sym-change');
+  if (prices.length >= 2) {
+    const previous = prices[prices.length - 2];
+    const move = spot - previous;
+    const pct = previous > 0 ? (move / previous) * 100 : 0;
+    change.textContent = `${move >= 0 ? '+' : '−'}${Math.abs(move).toFixed(2)} ` +
+      `(${move >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%)`;
+    change.classList.toggle('is-up', move >= 0);
+    change.classList.toggle('is-down', move < 0);
+    change.hidden = false;
+  } else {
+    change.hidden = true;
+  }
+  $('symbol-header').hidden = false;
 }
 
 /** Interpolate the bundled yield curve at the current horizon. */
@@ -1198,10 +1230,26 @@ function renderHistoryChart(result, prices) {
     svg.append(text);
   }
 
-  // The price line stays neutral ink: colour on this chart means regime.
+  // Platform-blue price line over a soft gradient fill; the regime washes
+  // behind it carry the risk story in their own hues.
+  const gradient = el('linearGradient', { id: 'price-fade', x1: 0, y1: 0, x2: 0, y2: 1 });
+  gradient.append(
+    el('stop', { offset: '0%', 'stop-color': 'var(--accent)', 'stop-opacity': .16 }),
+    el('stop', { offset: '100%', 'stop-color': 'var(--accent)', 'stop-opacity': 0 }));
+  const defs = el('defs');
+  defs.append(gradient);
+  svg.append(defs);
+
+  const lineD = prices.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p).toFixed(2)}`).join(' ');
   svg.append(el('path', {
-    d: prices.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p).toFixed(2)}`).join(' '),
-    fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.6,
+    d: `${lineD} L${x(prices.length - 1).toFixed(2)},${height - pad.bottom} ` +
+       `L${x(0).toFixed(2)},${height - pad.bottom} Z`,
+    fill: 'url(#price-fade)', stroke: 'none',
+  }));
+  svg.append(el('path', {
+    d: lineD,
+    fill: 'none', stroke: 'var(--accent)', 'stroke-width': 1.8,
     'stroke-linejoin': 'round',
   }));
 
@@ -1220,7 +1268,7 @@ function renderHistoryChart(result, prices) {
     'stroke-width': 1, 'stroke-dasharray': '3 3', opacity: 0,
   });
   const marker = el('circle', {
-    r: 4, fill: 'var(--ink)', stroke: 'var(--surface)', 'stroke-width': 2, opacity: 0,
+    r: 4, fill: 'var(--accent)', stroke: 'var(--surface)', 'stroke-width': 2, opacity: 0,
   });
   svg.append(crosshair, marker);
 
