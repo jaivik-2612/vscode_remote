@@ -38,7 +38,7 @@
 
     <form id="ensemble-form" data-panel="ensemble" autocomplete="off">
       <fieldset>
-        <legend>Ticker lookup</legend>
+        <legend>Signal source &middot; ticker</legend>
         <div class="combobox">
           <input id="ticker-search" type="text" role="combobox" aria-expanded="false"
             aria-controls="ticker-listbox" aria-autocomplete="list" autocomplete="off"
@@ -61,7 +61,7 @@
       </fieldset>
 
       <fieldset>
-        <legend>Price history</legend>
+        <legend>Data feed &middot; closing prices, last two years</legend>
         <label class="stacked" for="prices">
           Closing prices, oldest first
           <textarea id="prices" name="prices" rows="7" spellcheck="false">84.20
@@ -496,9 +496,15 @@
       </fieldset>
 
       <fieldset>
-        <legend>Contract</legend>
+        <legend>Contract controls</legend>
         <div class="fields">
-          <label>Strike price<input name="strike" type="number" step="any" value="90" required></label>
+          <label>Strike price
+            <span class="stepper">
+              <button type="button" class="step-button" id="strike-down" aria-label="Lower the strike">&minus;</button>
+              <input name="strike" type="number" step="any" value="90" required>
+              <button type="button" class="step-button" id="strike-up" aria-label="Raise the strike">+</button>
+            </span>
+          </label>
           <label data-simple>Expiry date<input id="expiry-date" type="date"></label>
           <label data-advanced>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
         </div>
@@ -552,7 +558,7 @@
 
     <form id="price-form" data-panel="price" hidden autocomplete="off">
       <fieldset>
-        <legend>Contract</legend>
+        <legend>Contract controls</legend>
         <div class="fields">
           <label>Underlying<input name="spot" type="number" step="any" value="100" required></label>
           <label>Strike<input name="strike" type="number" step="any" value="100" required></label>
@@ -587,7 +593,7 @@
         </div>
       </fieldset>
       <fieldset>
-        <legend>Contract</legend>
+        <legend>Contract controls</legend>
         <div class="fields">
           <label>Underlying<input name="spot" type="number" step="any" value="100" required></label>
           <label>Strike<input name="strike" type="number" step="any" value="100" required></label>
@@ -658,28 +664,67 @@
       </div>
 
       <div id="simple-readout">
-        <div class="headline-pair">
-          <div class="headline">
-            <div class="headline-figure">
-              <span class="eyebrow">A fair price for this option</span>
+        <section class="block" id="dial-instrument">
+          <div class="panel-title-row">
+            <h2 class="eyebrow" id="s-dial-title">Fair value</h2>
+            <span class="eyebrow" id="s-dial-exp">&mdash;</span>
+          </div>
+          <div class="well"><div id="dial"></div></div>
+          <div class="fair-readout">
+            <div class="fair-main">
               <output id="s-fair" class="figure">&mdash;</output>
-              <span id="s-contract" class="figure-note">&mdash;</span>
+              <span class="fair-unit" id="s-fair-unit">/ share</span>
             </div>
-            <dl class="headline-facts">
-              <div><dt>Models agree within</dt><dd id="s-agree">&mdash;</dd></div>
-            </dl>
-          </div>
-          <div class="headline headline-alt">
-            <div class="headline-figure">
-              <span class="eyebrow" id="s-outlook-label">Where the stock might be</span>
-              <output id="s-median" class="figure">&mdash;</output>
-              <span id="s-band" class="figure-note">&mdash;</span>
+            <div class="fair-side">
+              <dl class="headline-facts">
+                <div><dt>Per contract &times; 100</dt><dd id="s-contract">&mdash;</dd></div>
+              </dl>
             </div>
-            <dl class="headline-facts">
-              <div><dt id="s-chance-label">Chance it pays off</dt><dd id="s-chance">&mdash;</dd></div>
-            </dl>
           </div>
+          <div class="model-lamps">
+            <span class="lamp"><i></i>Black-Scholes</span>
+            <span class="lamp"><i></i>Monte Carlo</span>
+            <span class="lamp"><i></i>Baum-Welch</span>
+            <span class="lamp lamp-agree">agree <span id="s-agree">&mdash;</span></span>
+          </div>
+        </section>
+
+        <div class="instrument-grid">
+          <section class="block">
+            <div class="panel-title-row">
+              <h2 class="eyebrow">Probability</h2>
+              <span class="eyebrow" id="s-prob-date">&mdash;</span>
+            </div>
+            <div class="well"><div id="donut"></div></div>
+            <p class="instrument-caption" id="s-chance-label">&mdash;</p>
+          </section>
+
+          <section class="block">
+            <div class="panel-title-row">
+              <h2 class="eyebrow">Strike ladder</h2>
+              <span class="eyebrow">tap a rung to set</span>
+            </div>
+            <div class="well"><div id="ladder"></div></div>
+            <p class="instrument-caption" id="s-ladder-note">&mdash;</p>
+          </section>
         </div>
+
+        <section class="block">
+          <div class="panel-title-row">
+            <h2 class="eyebrow" id="s-outlook-label">Outlook</h2>
+            <span class="eyebrow">9 of 10 simulations</span>
+          </div>
+          <div class="well"><div id="barbell"></div></div>
+          <p class="instrument-caption" id="s-band">&mdash;</p>
+        </section>
+
+        <section class="block">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Price tape</h2>
+            <span class="eyebrow" id="s-tape-note">&mdash;</span>
+          </div>
+          <div class="well"><div id="tape"></div></div>
+        </section>
 
         <section class="block how-to-read">
           <h2 class="eyebrow">How to read these numbers</h2>
@@ -697,11 +742,11 @@
         </section>
 
         <p class="disclaimer" role="note">
-          <b>FairShare is for education only.</b> Nothing on this page is investment
-          advice, a recommendation, or a prediction of what will actually happen.
-          Every figure is a model estimate built from past prices, and past prices
-          do not determine future ones. Options can expire worthless &mdash; never
-          trade money you cannot afford to lose.
+          <b>Notice</b> &mdash; FairShare is for education only. Nothing on this page is
+          investment advice, a recommendation, or a prediction of what will actually
+          happen. Every figure is a model estimate built from past prices, and past
+          prices do not determine future ones. Options can expire worthless &mdash;
+          never trade money you cannot afford to lose.
         </p>
       </div>
 
@@ -761,7 +806,7 @@
       </figure>
 
       <div class="lower">
-        <figure class="block chart-block">
+        <figure class="block chart-block" data-advanced>
           <h2 class="eyebrow">Where the price lands at expiry</h2>
           <div id="ens-distribution"></div>
           <figcaption class="chart-note">

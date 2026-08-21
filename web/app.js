@@ -509,6 +509,23 @@ const dirty = { rate: false, strike: false };
 ensembleForm.elements.rate.addEventListener('input', () => { dirty.rate = true; });
 ensembleForm.elements.strike.addEventListener('input', () => { dirty.strike = true; });
 
+/* Strike rocker: step by the increment listed options actually use at this
+   price level. Dispatching a real input event routes the change through the
+   same path as typing — dirty-marking and the debounced re-run included. */
+let lastSpot = 90;
+
+function stepStrike(direction) {
+  const input = ensembleForm.elements.strike;
+  const step = lastSpot < 25 ? 0.5 : lastSpot < 100 ? 1 : lastSpot < 250 ? 5 : 10;
+  const current = Number(input.value) || lastSpot;
+  const next = Math.max(step, Math.round((current + direction * step) / step) * step);
+  input.value = String(Math.round(next * 100) / 100);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+$('strike-down').addEventListener('click', () => stepStrike(-1));
+$('strike-up').addEventListener('click', () => stepStrike(1));
+
 /**
  * Selecting a second ticker while the first is still fetching must not let
  * the slow response win: each selection bumps the generation, and a response
@@ -867,7 +884,8 @@ function renderEnsemble() {
   $('ens-spread').textContent = `${money(consensus.spread, 4)} (${percent(consensus.dispersion, 1)})`;
   $('ens-contract').textContent = money(consensus.value * 100);
 
-  renderSimpleReadout(result, f);
+  lastSpot = result.spot;
+  renderSimpleReadout(result, f, prices);
 
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
@@ -932,32 +950,472 @@ function renderEnsemble() {
   panel.classList.remove('is-computing');
 }
 
-/** The beginner view: the same result, two plain answers. */
-function renderSimpleReadout(result, form) {
-  const { consensus, outlook } = result;
-  const symbol = selectedTicker?.symbol ?? 'the stock';
+/* ------------------------------------------------------ instruments -----
+   The simple view is an instrument cluster: every readout is a drawn
+   gauge fed by the live result, never a static illustration. */
 
-  $('s-fair').textContent = money(consensus.value, 2);
-  $('s-contract').textContent =
-    `per share · ${money(consensus.value * 100)} per standard contract of 100`;
-  $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
+const fmtDate = (date) => date.toLocaleDateString('en-US',
+  { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const expiry = expiryDateInput.value
+function currentExpiry(result) {
+  return expiryDateInput.value
     ? new Date(`${expiryDateInput.value}T12:00:00`)
     : new Date(Date.now() + result.days * 86400000);
-  const dateLabel = expiry.toLocaleDateString('en-US',
-    { month: 'long', day: 'numeric', year: 'numeric' });
+}
 
-  $('s-outlook-label').textContent = `Where ${symbol} might be on ${dateLabel}`;
-  $('s-median').textContent = money(outlook.median);
-  $('s-band').textContent =
-    `9 out of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
+/** The beginner view: one instrument per fact. */
+function renderSimpleReadout(result, form, prices) {
+  const { consensus, outlook } = result;
+  const symbol = selectedTicker?.symbol ?? 'the stock';
+  const expiry = currentExpiry(result);
+
+  $('s-dial-title').textContent = selectedTicker
+    ? `Fair value · ${symbol} ${money(form.strike, 0)} ${form.type}`
+    : `Fair value · ${money(form.strike, 0)} ${form.type}`;
+  $('s-dial-exp').textContent = `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
+  $('s-fair').textContent = money(consensus.value, 2);
+  $('s-contract').textContent = money(consensus.value * 100);
+  $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
+  renderDial(consensus);
 
   const isPut = form.type === 'put';
   const chance = isPut ? 1 - outlook.probAboveStrike : outlook.probAboveStrike;
+  $('s-prob-date').textContent = fmtDate(expiry);
   $('s-chance-label').textContent =
-    `Chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike)}`;
-  $('s-chance').textContent = percent(chance, 0);
+    `chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike, 0)} · ` +
+    'from the simulated futures';
+  renderDonut(chance, `${isPut ? 'below' : 'above'} ${money(form.strike, 0)}`);
+
+  renderLadder(outlook, form.strike, result.spot);
+  $('s-ladder-note').textContent = `selected strike ${money(form.strike, 0)}`;
+
+  $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
+  $('s-band').textContent =
+    `9 of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
+  renderBarbell(outlook, result.spot, form.strike);
+
+  $('s-tape-note').textContent =
+    `${count(prices.length)} closes · last ${money(result.spot)}`;
+  renderTape(prices);
+}
+
+/* ---- fair-value dial ----------------------------------------------------
+   Scale spans the three models' range (padded); the shaded wedge is that
+   range, the thin markers are the individual models, the needle is the
+   consensus. Tight agreement reads as a narrow wedge under a steady needle. */
+
+function renderDial(consensus) {
+  const width = 320;
+  const height = 168;
+  const cx = width / 2;
+  const cy = height - 16;
+  const rOuter = 128;
+  const rInner = 100;
+
+  const span = Math.max(consensus.spread, consensus.value * 0.02, 1e-9);
+  const lo = consensus.low - span * 0.8;
+  const hi = consensus.high + span * 0.8;
+  const angle = (v) => Math.PI + ((v - lo) / (hi - lo)) * Math.PI;
+  const pt = (a, r) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Fair value dial: consensus ${consensus.value.toFixed(2)}, ` +
+      `models span ${consensus.low.toFixed(2)} to ${consensus.high.toFixed(2)}.`,
+  });
+
+  // face arc
+  const [ax, ay] = pt(Math.PI, rOuter);
+  const [bx, by] = pt(2 * Math.PI, rOuter);
+  svg.append(el('path', {
+    d: `M${ax},${ay} A${rOuter},${rOuter} 0 0 1 ${bx},${by}`,
+    fill: 'none', stroke: 'var(--line)', 'stroke-width': 2,
+  }));
+
+  // ticks with value labels at ends and centre
+  for (let i = 0; i <= 8; i++) {
+    const a = Math.PI + (i / 8) * Math.PI;
+    const major = i % 4 === 0;
+    const [x1, y1] = pt(a, rOuter);
+    const [x2, y2] = pt(a, rOuter - (major ? 14 : 8));
+    svg.append(el('line', {
+      x1, y1, x2, y2,
+      stroke: major ? 'var(--ink-muted)' : 'var(--line-strong)',
+      'stroke-width': major ? 2 : 1,
+    }));
+    if (major && i === 4) {
+      const value = lo + (i / 8) * (hi - lo);
+      const [tx, ty] = pt(a, rOuter - 26);
+      const text = el('text', {
+        x: tx, y: ty + 4, 'text-anchor': 'middle',
+        fill: 'var(--ink-muted)', 'font-size': 10.5,
+        'font-family': 'var(--mono)', 'font-weight': 600,
+      });
+      text.textContent = value.toFixed(2);
+      svg.append(text);
+    }
+  }
+
+  // wedge: the models' range
+  const a1 = angle(consensus.low);
+  const a2 = angle(consensus.high);
+  const [w1x, w1y] = pt(a1, rOuter - 2);
+  const [w2x, w2y] = pt(a2, rOuter - 2);
+  const [w3x, w3y] = pt(a2, rInner);
+  const [w4x, w4y] = pt(a1, rInner);
+  svg.append(el('path', {
+    d: `M${w1x},${w1y} A${rOuter - 2},${rOuter - 2} 0 0 1 ${w2x},${w2y} ` +
+       `L${w3x},${w3y} A${rInner},${rInner} 0 0 0 ${w4x},${w4y} Z`,
+    fill: 'var(--accent-wash)', stroke: 'var(--accent)', 'stroke-width': 1,
+  }));
+
+  // individual model markers
+  for (const estimate of consensus.estimates) {
+    const a = angle(estimate.value);
+    const [m1x, m1y] = pt(a, rOuter - 2);
+    const [m2x, m2y] = pt(a, rInner + 6);
+    svg.append(el('line', {
+      x1: m1x, y1: m1y, x2: m2x, y2: m2y,
+      stroke: 'var(--accent)', 'stroke-width': 1.5, opacity: .7,
+    }));
+  }
+
+  // needle at the consensus, with hub
+  const aN = angle(consensus.value);
+  const [nx, ny] = pt(aN, rInner - 4);
+  svg.append(el('line', {
+    x1: cx, y1: cy, x2: nx, y2: ny,
+    stroke: 'var(--led)', 'stroke-width': 3, 'stroke-linecap': 'round',
+  }));
+  svg.append(el('circle', { cx, cy, r: 7, fill: 'var(--led)' }));
+  svg.append(el('circle', { cx, cy, r: 3, fill: 'var(--well)' }));
+
+  const low = el('text', {
+    x: cx - rOuter + 4, y: cy + 12, 'text-anchor': 'start',
+    fill: 'var(--ink-muted)', 'font-size': 9.5,
+    'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
+  });
+  low.textContent = 'LOW MODEL';
+  const high = el('text', {
+    x: cx + rOuter - 4, y: cy + 12, 'text-anchor': 'end',
+    fill: 'var(--ink-muted)', 'font-size': 9.5,
+    'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
+  });
+  high.textContent = 'HIGH MODEL';
+  svg.append(low, high);
+
+  $('dial').replaceChildren(svg);
+}
+
+/* ---- probability donut ------------------------------------------------- */
+
+function renderDonut(chance, sublabel) {
+  const size = 190;
+  const c = size / 2;
+  const r = 70;
+  const stroke = 18;
+  const circumference = 2 * Math.PI * r;
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${size} ${size}`,
+    role: 'img',
+    'aria-label': `${Math.round(chance * 100)} percent chance of finishing ${sublabel}.`,
+  });
+
+  svg.append(el('circle', {
+    cx: c, cy: c, r, fill: 'none',
+    stroke: 'var(--sunk)', 'stroke-width': stroke,
+  }));
+  svg.append(el('circle', {
+    cx: c, cy: c, r, fill: 'none',
+    stroke: 'var(--led)', 'stroke-width': stroke, 'stroke-linecap': 'round',
+    'stroke-dasharray': `${circumference * chance} ${circumference}`,
+    transform: `rotate(-90 ${c} ${c})`,
+  }));
+
+  const big = el('text', {
+    x: c, y: c + 2, 'text-anchor': 'middle',
+    fill: 'var(--ink)', 'font-size': 34, 'font-weight': 700,
+    'font-family': 'var(--mono)', id: 's-chance',
+  });
+  big.textContent = `${Math.round(chance * 100)}%`;
+  const small = el('text', {
+    x: c, y: c + 22, 'text-anchor': 'middle',
+    fill: 'var(--ink-muted)', 'font-size': 9.5,
+    'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.2,
+  });
+  small.textContent = `ENDS ${sublabel.toUpperCase()}`;
+  svg.append(big, small);
+
+  $('donut').replaceChildren(svg);
+}
+
+/* ---- strike ladder ------------------------------------------------------
+   A vertical scale spanning the plausible landing zone; each rung is a
+   button that sets the strike, the chosen rung lights up, and a hollow
+   pointer marks today's price. */
+
+function niceStep(rough) {
+  const magnitude = 10 ** Math.floor(Math.log10(rough));
+  for (const m of [1, 2, 2.5, 5, 10]) {
+    if (rough <= m * magnitude) return m * magnitude;
+  }
+  return 10 * magnitude;
+}
+
+function renderLadder(outlook, strike, spot) {
+  const width = 220;
+  const height = 250;
+  const pad = { top: 16, bottom: 16 };
+
+  const lo = Math.min(outlook.p5, strike, spot);
+  const hi = Math.max(outlook.p95, strike, spot);
+  const step = niceStep((hi - lo) / 7);
+  const bottom = Math.floor(lo / step) * step;
+  const top = Math.ceil(hi / step) * step;
+  const y = (v) => pad.top + ((top - v) / (top - bottom)) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Strike ladder from ${bottom} to ${top}; strike ${strike}, today ${spot.toFixed(2)}.`,
+  });
+
+  svg.append(el('line', {
+    x1: 92, x2: 92, y1: pad.top, y2: height - pad.bottom,
+    stroke: 'var(--line-strong)', 'stroke-width': 2,
+  }));
+
+  for (let v = bottom; v <= top + 1e-9; v += step) {
+    const yy = y(v);
+    const isStrike = Math.abs(v - strike) < step / 2 &&
+      Math.abs(v - strike) <= Math.abs(Math.round(strike / step) * step - strike) + 1e-9 &&
+      Math.round(v / step) === Math.round(strike / step);
+
+    const group = el('g', { class: 'ladder-rung', role: 'button', tabindex: 0,
+      'aria-label': `Set strike to ${v}` });
+
+    if (isStrike) {
+      svg.append(el('rect', {
+        x: 66, y: yy - 11, width: 118, height: 22, rx: 5,
+        fill: 'var(--accent-wash)', stroke: 'var(--accent)', 'stroke-width': 1,
+      }));
+    }
+    group.append(el('line', {
+      x1: 74, x2: 110, y1: yy, y2: yy,
+      stroke: isStrike ? 'var(--led)' : 'var(--line-strong)',
+      'stroke-width': isStrike ? 3 : 1.5,
+    }));
+    const label = el('text', {
+      x: 120, y: yy + 4, fill: isStrike ? 'var(--accent)' : 'var(--ink-muted)',
+      'font-size': 12, 'font-family': 'var(--mono)',
+      'font-weight': isStrike ? 700 : 500,
+    });
+    label.textContent = String(Math.round(v * 100) / 100);
+    group.append(label);
+    if (isStrike) {
+      const tag = el('text', {
+        x: 214, y: yy + 3.5, 'text-anchor': 'end', fill: 'var(--accent)',
+        'font-size': 8.5, 'font-family': 'var(--mono)', 'font-weight': 700,
+        'letter-spacing': 1,
+      });
+      tag.textContent = 'STRIKE';
+      group.append(tag);
+    }
+    // generous invisible hit area
+    const hit = el('rect', {
+      x: 60, y: yy - Math.min(12, (y(bottom) - y(top)) / ((top - bottom) / step) / 2),
+      width: 154, height: Math.min(24, height / ((top - bottom) / step)),
+      fill: 'transparent',
+    });
+    const setStrike = () => {
+      const input = ensembleForm.elements.strike;
+      input.value = String(Math.round(v * 100) / 100);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    group.addEventListener('click', setStrike);
+    group.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setStrike(); }
+    });
+    group.append(hit);
+    svg.append(group);
+  }
+
+  // today's price: hollow pointer on the left
+  const spotY = y(spot);
+  svg.append(el('path', {
+    d: `M52,${spotY} l14,-7 l0,14 Z`,
+    fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.5,
+  }));
+  const today = el('text', {
+    x: 46, y: spotY + 3.5, 'text-anchor': 'end', fill: 'var(--ink-muted)',
+    'font-size': 8.5, 'font-family': 'var(--mono)', 'font-weight': 700,
+    'letter-spacing': 1,
+  });
+  today.textContent = 'TODAY';
+  svg.append(today);
+
+  $('ladder').replaceChildren(svg);
+}
+
+/* ---- outlook barbell ---------------------------------------------------- */
+
+function renderBarbell(outlook, spot, strike) {
+  const width = 640;
+  const height = 96;
+  const pad = 46;
+  const yMid = 58;
+
+  const lo = Math.min(outlook.p5, spot, strike);
+  const hi = Math.max(outlook.p95, spot, strike);
+  const span = hi - lo || 1;
+  const x = (v) => pad + ((v - lo) / span) * (width - 2 * pad);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Outlook range ${outlook.p5.toFixed(2)} to ${outlook.p95.toFixed(2)}, ` +
+      `median ${outlook.median.toFixed(2)}, today ${spot.toFixed(2)}.`,
+  });
+
+  // bar with end stops
+  svg.append(el('line', {
+    x1: x(outlook.p5), x2: x(outlook.p95), y1: yMid, y2: yMid,
+    stroke: 'var(--line-strong)', 'stroke-width': 3, 'stroke-linecap': 'round',
+  }));
+  for (const v of [outlook.p5, outlook.p95]) {
+    svg.append(el('line', {
+      x1: x(v), x2: x(v), y1: yMid - 9, y2: yMid + 9,
+      stroke: 'var(--line-strong)', 'stroke-width': 3, 'stroke-linecap': 'round',
+    }));
+    const label = el('text', {
+      x: x(v), y: yMid + 26, 'text-anchor': 'middle', fill: 'var(--ink-muted)',
+      'font-size': 11, 'font-family': 'var(--mono)', 'font-weight': 600,
+    });
+    label.textContent = v.toFixed(2);
+    svg.append(label);
+  }
+
+  // strike marker (dashed) when it sits inside the drawn span
+  svg.append(el('line', {
+    x1: x(strike), x2: x(strike), y1: yMid - 16, y2: yMid + 16,
+    stroke: 'var(--negative)', 'stroke-width': 1.5, 'stroke-dasharray': '4 3',
+  }));
+  // The strike caption shares the top lane with MEDIAN; when the two sit
+  // close it steps aside horizontally instead of overprinting.
+  const nearMedian = Math.abs(x(strike) - x(outlook.median)) < 96;
+  const strikeLabel = el('text', {
+    x: nearMedian ? x(strike) + (x(strike) >= x(outlook.median) ? 8 : -8) : x(strike),
+    y: 12,
+    'text-anchor': nearMedian ? (x(strike) >= x(outlook.median) ? 'start' : 'end') : 'middle',
+    fill: 'var(--negative)',
+    'font-size': 9, 'font-family': 'var(--mono)', 'font-weight': 700, 'letter-spacing': 1,
+  });
+  strikeLabel.textContent = `STRIKE ${Math.round(strike * 100) / 100}`;
+  svg.append(strikeLabel);
+
+  // today: hollow bead. Its label dodges below the bar when the median sits
+  // close enough that the two captions would overprint.
+  svg.append(el('circle', {
+    cx: x(spot), cy: yMid, r: 6,
+    fill: 'var(--well)', stroke: 'var(--ink)', 'stroke-width': 2,
+  }));
+  const crowded = Math.abs(x(spot) - x(outlook.median)) < 92;
+  const todayLabel = el('text', {
+    x: x(spot), y: crowded ? yMid + 30 : yMid - 16, 'text-anchor': 'middle',
+    fill: 'var(--ink-muted)', 'font-size': 9, 'font-family': 'var(--mono)',
+    'font-weight': 700, 'letter-spacing': 1,
+  });
+  todayLabel.textContent = `TODAY ${spot.toFixed(2)}`;
+  svg.append(todayLabel);
+
+  // median: filled bead, labelled above
+  svg.append(el('circle', {
+    cx: x(outlook.median), cy: yMid, r: 8,
+    fill: 'var(--led)', stroke: 'var(--well)', 'stroke-width': 2.5,
+  }));
+  const medianLabel = el('text', {
+    x: x(outlook.median), y: 18, 'text-anchor': 'middle', fill: 'var(--accent)',
+    'font-size': 12, 'font-family': 'var(--mono)', 'font-weight': 700, id: 's-median',
+  });
+  medianLabel.textContent = `MEDIAN ${outlook.median.toFixed(2)}`;
+  svg.append(medianLabel);
+  svg.append(el('line', {
+    x1: x(outlook.median), x2: x(outlook.median), y1: 24, y2: yMid - 10,
+    stroke: 'var(--accent)', 'stroke-width': 1, 'stroke-dasharray': '2 3',
+  }));
+
+  $('barbell').replaceChildren(svg);
+}
+
+/* ---- price tape ---------------------------------------------------------- */
+
+function renderTape(prices) {
+  const width = 640;
+  const height = 150;
+  const pad = { top: 14, right: 66, bottom: 14, left: 10 };
+  const series = prices.slice(-260);
+
+  const lo = Math.min(...series);
+  const hi = Math.max(...series);
+  const span = hi - lo || 1;
+  const x = (i) => pad.left + (i / (series.length - 1)) * (width - pad.left - pad.right);
+  const y = (v) => pad.top + ((hi - v) / span) * (height - pad.top - pad.bottom);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Price tape: ${series.length} closes from ${series[0].toFixed(2)} ` +
+      `to ${series[series.length - 1].toFixed(2)}.`,
+  });
+
+  const gradient = el('linearGradient', { id: 'tape-fade', x1: 0, y1: 0, x2: 0, y2: 1 });
+  gradient.append(
+    el('stop', { offset: '0%', 'stop-color': 'var(--led)', 'stop-opacity': .18 }),
+    el('stop', { offset: '100%', 'stop-color': 'var(--led)', 'stop-opacity': 0 }));
+  const defs = el('defs');
+  defs.append(gradient);
+  svg.append(defs);
+
+  for (const v of [lo, hi]) {
+    svg.append(el('line', {
+      x1: pad.left, x2: width - pad.right, y1: y(v), y2: y(v),
+      stroke: 'var(--line)', 'stroke-width': 1, 'stroke-dasharray': '2 4',
+    }));
+    const label = el('text', {
+      x: width - pad.right + 8, y: y(v) + 3.5, fill: 'var(--ink-muted)',
+      'font-size': 10, 'font-family': 'var(--mono)',
+    });
+    label.textContent = v.toFixed(0);
+    svg.append(label);
+  }
+
+  const lineD = series.map((p, i) =>
+    `${i === 0 ? 'M' : 'L'}${x(i).toFixed(2)},${y(p).toFixed(2)}`).join(' ');
+  svg.append(el('path', {
+    d: `${lineD} L${x(series.length - 1).toFixed(2)},${height - pad.bottom} ` +
+       `L${x(0).toFixed(2)},${height - pad.bottom} Z`,
+    fill: 'url(#tape-fade)', stroke: 'none',
+  }));
+  svg.append(el('path', {
+    d: lineD, fill: 'none', stroke: 'var(--led)', 'stroke-width': 1.6,
+    'stroke-linejoin': 'round',
+  }));
+
+  const last = series[series.length - 1];
+  svg.append(el('circle', {
+    cx: x(series.length - 1), cy: y(last), r: 4,
+    fill: 'var(--led)', stroke: 'var(--well)', 'stroke-width': 2,
+  }));
+  const lastLabel = el('text', {
+    x: width - pad.right + 8, y: y(last) + 3.5, fill: 'var(--accent)',
+    'font-size': 11, 'font-family': 'var(--mono)', 'font-weight': 700,
+  });
+  lastLabel.textContent = last.toFixed(2);
+  svg.append(lastLabel);
+
+  $('tape').replaceChildren(svg);
 }
 
 /* ---- chart: where each model lands -------------------------------------
