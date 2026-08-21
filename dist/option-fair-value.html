@@ -1135,6 +1135,21 @@ select:focus { outline: none; border-color: var(--accent); }
   * { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
+/* ============================================================ native app ==
+   Inside the Capacitor shell the page runs edge-to-edge; keep the top bar
+   and content clear of notches and home indicators. Inert in browsers. */
+
+@supports (padding: env(safe-area-inset-top)) {
+  .masthead {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+  .workspace {
+    padding-left: max(clamp(12px, 2.2vw, 24px), env(safe-area-inset-left));
+    padding-right: max(clamp(12px, 2.2vw, 24px), env(safe-area-inset-right));
+  }
+  .colophon { padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
+}
+
 </style>
 
 

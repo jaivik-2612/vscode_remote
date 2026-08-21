@@ -145,3 +145,30 @@ ${bundle.join('\n\n')}
 await mkdir('dist', { recursive: true });
 await writeFile('dist/option-fair-value.html', page);
 console.log(`dist/option-fair-value.html — ${(page.length / 1024).toFixed(1)} KB`);
+
+// --app additionally emits the same bundle as a complete standalone document
+// under dist/app/, which is what the Capacitor shell loads as its webDir.
+if (process.argv.includes('--app')) {
+  const icon = 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 ' +
+    'viewBox=%270 0 32 32%27%3E%3Ctext y=%2726%27 font-size=%2726%27%3E%F0%9F%93%88' +
+    '%3C/text%3E%3C/svg%3E';
+  // The artifact page opens with <title> and inline <style>; everything from
+  // the first body element down belongs after </head>.
+  const split = page.indexOf('<header');
+  const full = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="${icon}">
+${page.slice(0, split)}</head>
+<body>
+${page.slice(split)}
+</body>
+</html>
+`;
+  await mkdir('dist/app', { recursive: true });
+  await writeFile('dist/app/index.html', full);
+  console.log(`dist/app/index.html — ${(full.length / 1024).toFixed(1)} KB (Capacitor webDir)`);
+}

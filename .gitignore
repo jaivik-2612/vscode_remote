@@ -3,3 +3,5 @@ node_modules/
 .DS_Store
 dist/preview.html
 package-lock.json
+dist/app/
+icons/

@@ -184,6 +184,24 @@ drop in just the same.
 `npm run refresh-data` refreshes `data/tickers.json` and `data/rates.json`;
 both carry their as-of dates and the UI displays them.
 
+## Native apps (Capacitor)
+
+The repo carries a Capacitor scaffold that wraps the exact same bundle as a
+native Android and iOS app:
+
+```
+npm install          # Capacitor tooling (the web app itself needs nothing)
+npm run build:app    # bundle to dist/app/ and sync both native projects
+npx cap open android # Android Studio, build the AAB
+npx cap open ios     # Xcode (macOS), archive and upload
+```
+
+App icons and splash screens are generated from `resources/` by
+`npx capacitor-assets generate --android --ios`. The store privacy policy,
+listing copy and a step-by-step submission runbook — including the
+placeholder `appId` you must change before first upload — live in
+`docs/store/`.
+
 ## The three engines
 
 The `Three models` tab starts from a price history rather than a volatility you
