@@ -1,56 +1,162 @@
 # Store listing copy
 
-## App name
-FairShare — Options Fair Value
+Everything below is written to paste straight into Play Console. The full
+description is **plain text on purpose** — Play Console renders neither
+Markdown nor HTML, so any `**` markers would show up as literal asterisks on
+the listing. Blank lines and hyphen bullets do survive.
 
-## Subtitle (App Store, 30 chars)
-Fair prices for stock options
+Character limits are hard, and count full-width and half-width characters
+alike: app name 30, short description 80, full description 4000.
 
-## Short description (Play, 80 chars)
+---
+
+## App name — 28/30 characters
+
+```
+FairShare: Option Fair Value
+```
+
+Two characters of headroom, deliberately. The earlier wording
+("FairShare — Options Fair Value") was exactly 30/30, which leaves no room
+for a localized name to be even one character longer. Any translation must
+also fit 30.
+
+## Short description — 78/80 characters
+
+```
 An educational cockpit that prices stock options three ways from real history.
+```
 
-## Full description
+Play enforces content rules on this field, not just length: no "Best", "#1",
+"Top", "New", or download counts; no calls to action; no emoji, symbols, or
+repeated punctuation; no capitalisation for emphasis. The line above is
+plain ASCII and clear of all of them.
 
-**What is this option actually worth?** FairShare answers that one question
-with an instrument panel instead of a spreadsheet.
+## Full description — ~1,900/4000 characters
 
-Pick any of 17,000+ US and Canadian listings, set a strike and an expiry
-date, and load two years of closing prices (a generated Google Sheets
-GOOGLEFINANCE formula makes that a copy-paste). FairShare then prices the
-contract three independent ways — the Black-Scholes closed form, a
-regime-switching Monte Carlo simulation, and a Baum-Welch hidden-Markov
-model that reads calm and turbulent volatility regimes out of the history —
-and shows you where they agree.
+```
+What is this option actually worth? FairShare answers that one question with
+an instrument panel instead of a spreadsheet.
 
-**The cockpit:**
-- A fair-value dial — the needle is the consensus, the shaded wedge is how
-  far the three models spread
-- A probability gauge for the chance the stock finishes past your strike
+Pick from 36,000+ listings across nine exchanges in North America, Europe and
+Asia, set a strike and an expiry date, and load two years of closing prices —
+a generated Google Sheets formula makes that a copy-paste. FairShare then
+prices the contract three independent ways and shows you where they agree:
+the Black-Scholes closed form, a regime-switching Monte Carlo simulation, and
+a Baum-Welch hidden-Markov model that reads calm and turbulent volatility
+regimes out of the price history.
+
+THE COCKPIT
+
+- A fair-value dial: the needle is the consensus, the shaded wedge is how far
+  the three models spread apart
+- A probability gauge for the chance the position finishes in profit
+- A break-even panel that takes the premium you actually paid and shows the
+  move the stock needs to make, and what the simulations say about it
+- A sell-or-exercise readout that explains, when an option is in the money,
+  why selling usually beats exercising — and the cases where it does not
 - A tappable strike ladder that reprices as you move
 - An outlook barbell showing where 9 of 10 simulated futures landed
 - An amber price tape of the history feeding it all
 
-**Advanced view** opens the machinery: fitted volatility regimes, the
-transition matrix, Greeks, implied volatility solving, employee-grant
-valuation, and full diagnostics including a live control check against the
-closed form.
+MARKETS AND CURRENCIES
 
-FairShare is for education only. It is not investment advice, it collects no
-data, and it works entirely on your device.
+US and Canada, London, Euronext, Frankfurt (XETRA), Zurich, Tokyo, Shanghai,
+Shenzhen and Mumbai. Pick a market and the ticker search, the trading
+currency and the risk-free rate all follow it — including pence for London
+listings. Rates come from each market's own published government curve.
 
-## Keywords (App Store, 100 chars)
+ADVANCED VIEW
+
+Opens the machinery: the fitted volatility regimes, the transition matrix,
+Greeks, implied-volatility solving, employee-grant valuation, and full
+diagnostics including a live control check against the closed form.
+
+FairShare is for education only. It is not investment advice. It collects no
+data, has no accounts, shows no ads, and computes everything on your device.
+```
+
+## Category and tags
+
+Google Play allows exactly **one** category — there is no primary/secondary
+split as on the App Store.
+
+- **Category: Education.** Not Finance. Finance puts the listing in the
+  bucket Google's financial-services review tooling watches, which invites
+  reviewer questions that the "no financial features" declaration then has to
+  rebut. Education matches the product and the disclaimer. (Finance is only
+  *mandatory* for personal-loan and earned-wage-access apps, which this is
+  not.)
+- **Tags** (up to 5, for discovery): Education, Finance & Investing,
+  Calculator, Reference, Business.
+
+_App Store, separately and for later: primary Education, secondary Finance —
+that store does have the two-slot model._
+
+## Keywords (App Store only, 100 chars — Play has no keyword field)
+
+```
 options,fair value,black-scholes,monte carlo,volatility,calculator,stocks,education,greeks,pricing
+```
 
-## Category
-Education (primary) · Finance (secondary)
+## Graphics
+
+Generated by `node tools/store-assets.mjs` into `docs/store/assets/`. All are
+exactly 9:16, which is what Play requires for eligibility for the
+recommendation surfaces that display apps as large screenshots.
+
+| Slot | File | Size |
+|---|---|---|
+| App icon | `icon-512.png` | 512x512, 32-bit RGBA |
+| Feature graphic | `feature-graphic-1024x500.png` | 1024x500, no alpha |
+| Phone (6) | `phone-01…06-*.png` | 1080x1920 |
+| 7-inch tablet (6) | `tablet7-01…06-*.png` | 1152x2048 |
+| 10-inch tablet (6) | `tablet10-01…06-*.png` | 1620x2880 |
+
+Tablet and Chromebook screenshots are *not* mandatory (a widely repeated
+claim that they are is simply wrong) — they are uploaded here because missing
+them costs eligibility for large-format placements. The Chromebook slot has
+no Play Developer API enum, so it can only ever be filled by hand.
+
+### Alt text
+
+Entered by hand beside each upload in Play Console. Screen-reader users rely
+on it; 140 characters maximum, and never start with "image of".
+
+| File | Alt text |
+|---|---|
+| `feature-graphic-1024x500.png` | The FairShare wordmark beside its dial logo, over the three model names: Black-Scholes, Monte Carlo and Baum-Welch. |
+| `*-01-fair-value.png` | The fair-value dial, needle resting on the consensus premium per share, with the three models' agreement below it. |
+| `*-02-break-even.png` | The break-even panel: premium paid, the break-even price at expiry, the move needed, and the sell-or-exercise readout. |
+| `*-03-probability.png` | The probability gauge showing the chance of finishing in profit, beside the tappable strike ladder. |
+| `*-04-outlook.png` | The outlook barbell marking where 9 of 10 simulated futures landed against today's price and the strike. |
+| `*-05-markets.png` | The market selector and ticker search, with a Tokyo listing chosen and its values shown in yen. |
+| `*-06-advanced.png` | The advanced view: the volatility regimes Baum-Welch fitted to the price history, with their durations. |
 
 ## Privacy
-- Data collected: none
-- Play Data safety: no data collected, no data shared
-- App Store privacy label: "Data Not Collected"
 
-## Review notes (both stores)
+- Data collected: none
+- Play Data safety: answer **No** to the single collection question; the
+  encryption and deletion follow-ups then never appear
+- Privacy policy URL: https://jaivik-2612.github.io/vscode_remote/privacy.html
+- App Store privacy label (later): "Data Not Collected"
+
+## Review notes (paste into Play Console → App content → App access)
+
+```
 FairShare is an educational calculator. It executes no trades, handles no
-money, offers no advice, and connects to no accounts. All computation is
-on-device; the app makes no network requests. A prominent education-only
-disclaimer is shown in the app at all times.
+money, offers no advice, connects to no accounts and has no sign-in — all
+functionality is available to a reviewer immediately on launch, with no
+credentials required.
+
+All computation is on-device. The shipped build makes no network requests:
+the symbol directory and interest-rate curves are bundled into the app. The
+only outbound links are ones the user explicitly taps (Google Sheets, Stooq,
+Yahoo Finance), which open in the system browser.
+
+An education-only disclaimer is shown as a modal on every single launch and
+must be acknowledged before the app can be used; it is repeated in the
+footer and in the "How to read these numbers" panel. No financial features
+are offered, which is why the Financial features declaration is answered
+"My app doesn't provide any financial features".
+```

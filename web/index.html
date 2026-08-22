@@ -326,6 +326,30 @@
           <p class="instrument-caption" id="s-band">&mdash;</p>
         </section>
 
+        <section class="block decision-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Break-even &amp; exit</h2>
+            <span class="eyebrow be-exp">&mdash;</span>
+          </div>
+          <label class="inline">Premium per share
+            <input class="be-premium" type="number" step="any" min="0"
+              inputmode="decimal" aria-label="Premium paid or collected per share">
+          </label>
+          <p class="field-note">Left empty, this uses the model&rsquo;s fair
+            premium. Type what you actually paid (or collected, if you wrote it)
+            to see your real break-even.</p>
+          <dl class="facts be-facts">
+            <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+            <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+            <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+          </dl>
+          <p class="instrument-caption be-summary">&mdash;</p>
+          <div class="explainer-box">
+            <h3 class="eyebrow">Exercising vs. selling</h3>
+            <p class="instrument-caption be-advice">&mdash;</p>
+          </div>
+        </section>
+
         <section class="block">
           <div class="panel-title-row">
             <h2 class="eyebrow">Price tape</h2>
@@ -339,11 +363,18 @@
           <ul class="plain-list">
             <li><b>Fair price</b> is what the maths says the option is worth today,
               judged three different ways from how this stock has actually moved over
-              the last two years. If the market quotes much more, the option is
-              expensive; much less, cheap &mdash; <em>by these models&rsquo; lights</em>.</li>
+              the last two years. A market quote well above or below it means the
+              market is using different assumptions from these models &mdash; a
+              disagreement worth understanding, not a signal to act on.</li>
             <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
               of simulated futures built from the same two years &mdash; the range around
               it is where 9 out of 10 of those simulations landed.</li>
+            <li><b>Break-even</b> is the strike shifted by the premium: a buyer
+              only comes out ahead at expiry once the stock has moved far enough
+              to repay what the option cost. Before expiry, an in-the-money
+              option is usually worth more <em>sold</em> than exercised, because
+              exercising collects only the intrinsic part and throws away the
+              remaining time value.</li>
             <li data-short-only><b>Writing an option is not the mirror of buying one.</b>
               A buyer can lose at most the premium paid; a writer&rsquo;s profit is
               capped at the premium collected while the loss can be far larger &mdash;
@@ -353,13 +384,6 @@
           </ul>
         </section>
 
-        <p class="disclaimer" role="note">
-          <b>Notice</b> &mdash; FairShare is for education only. Nothing on this page is
-          investment advice, a recommendation, or a prediction of what will actually
-          happen. Every figure is a model estimate built from past prices, and past
-          prices do not determine future ones. Options can expire worthless &mdash;
-          never trade money you cannot afford to lose.
-        </p>
       </div>
 
       <div class="headline-pair" data-advanced>
@@ -387,6 +411,30 @@
           </dl>
         </div>
       </div>
+
+      <section class="block decision-panel" data-advanced>
+        <div class="panel-title-row">
+          <h2 class="eyebrow">Break-even &amp; exit</h2>
+          <span class="eyebrow be-exp">&mdash;</span>
+        </div>
+        <label class="inline">Premium per share
+          <input class="be-premium" type="number" step="any" min="0"
+            inputmode="decimal" aria-label="Premium paid or collected per share">
+        </label>
+        <p class="field-note">Left empty, this uses the model&rsquo;s fair
+          premium. Type what you actually paid (or collected, if you wrote it)
+          to see your real break-even.</p>
+        <dl class="facts be-facts">
+          <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+          <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+          <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+        </dl>
+        <p class="instrument-caption be-summary">&mdash;</p>
+        <div class="explainer-box">
+          <h3 class="eyebrow">Exercising vs. selling</h3>
+          <p class="instrument-caption be-advice">&mdash;</p>
+        </div>
+      </section>
 
       <figure class="block" data-advanced>
         <h2 class="eyebrow">Where each model lands</h2>
@@ -451,6 +499,14 @@
         <h2 class="eyebrow">Diagnostics</h2>
         <dl id="ens-diagnostics" class="facts"></dl>
       </section>
+
+      <p class="disclaimer" role="note">
+        <b>Notice</b> &mdash; FairShare is for education only. Nothing on this page is
+        investment advice, a recommendation, or a prediction of what will actually
+        happen. Every figure is a model estimate built from past prices, and past
+        prices do not determine future ones. Options can expire worthless &mdash;
+        never trade money you cannot afford to lose.
+      </p>
     </section>
 
     <section data-panel="price" hidden>
@@ -552,7 +608,7 @@
   </main>
 </div>
 
-<dialog id="notice-dialog" aria-labelledby="notice-title">
+<dialog id="notice-dialog" aria-labelledby="notice-title" closedby="none">
   <p class="eyebrow" id="notice-title">Notice &middot; read before using</p>
   <p class="notice-body">
     <b>FairShare is for education only.</b> Nothing on this page is investment
@@ -572,6 +628,20 @@
     <b>FairShare</b> is an educational tool. Every figure is a model output,
     only as sound as the history and assumptions behind it &mdash; it is not
     investment advice, and options can expire worthless.
+  </p>
+  <p class="colophon-sources">
+    Symbol directories are the exchanges&rsquo; own published reference files:
+    Nasdaq Trader, TMX Group, London Stock Exchange, Euronext, Deutsche
+    B&ouml;rse (XETRA), SIX Swiss Exchange, Japan Exchange Group, Shanghai and
+    Shenzhen Stock Exchanges, and BSE India. Yield curves come from the U.S.
+    Treasury, Bank of Canada, ECB, Bank of England, Japan&rsquo;s Ministry of
+    Finance and the Swiss National Bank. Exchange names and symbols are the
+    property of their respective owners; FairShare is not affiliated with,
+    endorsed by, or a data feed for any of them.
+  </p>
+  <p class="colophon-links">
+    <a href="https://jaivik-2612.github.io/vscode_remote/privacy.html"
+       target="_blank" rel="noopener">Privacy policy</a>
   </p>
 </footer>
 

@@ -1,5 +1,5 @@
 {
-  "appId": "com.fairshare.app",
+  "appId": "io.github.jaivik2612.fairshare",
   "appName": "FairShare",
   "webDir": "dist/app",
   "backgroundColor": "#0a0e12",

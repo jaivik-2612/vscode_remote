@@ -6,7 +6,7 @@
 import {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes as bs, binomial,
-  ensembleValuation, series as seriesTools, market,
+  ensembleValuation, series as seriesTools, market, decision,
 } from '../src/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -560,6 +560,8 @@ async function chooseTicker(entry) {
   // The listing's currency labels the figures right away; a live fetch may
   // refine it, but the manual-paste path has no later chance to set it.
   activeCurrency = entry.currency ?? null;
+  // A premium typed for the previous ticker means nothing for this one.
+  for (const node of document.querySelectorAll('.be-premium')) node.value = '';
 
   if (IS_ARTIFACT) {
     renderFetchPanel(entry);
@@ -967,6 +969,8 @@ function renderEnsemble() {
 
   lastSpot = result.spot;
   renderSimpleReadout(result, f, prices);
+  lastDecisionInputs = { result, form: f };
+  renderDecision(result, f);
 
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
@@ -1081,7 +1085,7 @@ function renderSimpleReadout(result, form, prices) {
   const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
   $('s-fair').textContent = money(consensus.value, 2);
   $('s-fair-unit').textContent =
-    `${cur ? cur + ' ' : ''}/ share, you'd ${isShort ? 'collect' : 'pay'}`;
+    `${cur ? cur + ' ' : ''}/ share · premium ${isShort ? 'collected' : 'paid'}`;
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
@@ -1097,7 +1101,7 @@ function renderSimpleReadout(result, form, prices) {
 
   $('s-prob-date').textContent = fmtDate(expiry);
   $('s-chance-label').textContent = isShort
-    ? `chance of profit at expiry · you keep the edge if ${symbol} stays ` +
+    ? `chance of profit at expiry · the position finishes ahead if ${symbol} stays ` +
       `${isPut ? 'above' : 'below'} break-even ${money(breakEven)}`
     : `chance of profit at expiry · needs ${symbol} ${isPut ? 'below' : 'above'} ` +
       `break-even ${money(breakEven)}`;
@@ -1115,6 +1119,112 @@ function renderSimpleReadout(result, form, prices) {
   $('s-tape-note').textContent =
     `${count(prices.length)} closes · last ${money(result.spot)}`;
   renderTape(prices);
+}
+
+/* ---- break-even & exit --------------------------------------------------
+   Rendered twice from one function: the panel appears in the simple readout
+   and again in the advanced flow, so every dynamic field is addressed by
+   class, not id. The premium input defaults to the models' fair value; the
+   user overrides it with what they actually paid (or collected). */
+
+let lastDecisionInputs = null;
+
+const setAll = (cls, value) => {
+  for (const node of document.querySelectorAll(`.${cls}`)) node.textContent = value;
+};
+
+/** The premium the panel reasons with: the user's, else the models'. */
+function enteredPremium(fair) {
+  const raw = document.querySelector('.be-premium')?.value.trim() ?? '';
+  const typed = Number(raw);
+  return raw !== '' && Number.isFinite(typed) && typed >= 0 ? typed : fair;
+}
+
+function renderDecision(result, form) {
+  const { consensus, outlook } = result;
+  const symbol = selectedTicker?.symbol ?? 'the stock';
+  const isPut = form.type === 'put';
+  const isShort = form.direction === 'short';
+  const fair = consensus.value;
+  const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
+  const withCur = (n, digits = 2) => money(n, digits) + (cur ? ` ${cur}` : '');
+
+  for (const input of document.querySelectorAll('.be-premium')) {
+    input.placeholder = `fair ${money(fair, 2)}`;
+  }
+  const premium = enteredPremium(fair);
+  const own = premium !== fair;
+
+  const breakEven = decision.breakEvenPrice(form.type, form.strike, premium);
+  const move = (breakEven - result.spot) / result.spot;
+  const pAboveBE = probAbove(outlook.quantiles, breakEven) ?? outlook.probAboveStrike;
+  const buyerProfits = isPut ? 1 - pAboveBE : pAboveBE;
+  const chance = isShort ? 1 - buyerProfits : buyerProfits;
+
+  setAll('be-exp', `exp ${fmtDate(currentExpiry(result))}`);
+  setAll('be-price', withCur(breakEven));
+  setAll('be-move', `${move >= 0 ? '+' : '−'}${percent(Math.abs(move), 1)} ` +
+    `from last close ${money(result.spot)}`);
+  setAll('be-chance', percent(chance, 1));
+
+  const premiumWord = own ? 'your' : "the models'";
+  setAll('be-summary', isShort
+    ? `Writing this ${form.type} collects ${premiumWord} premium of ` +
+      `${withCur(premium)} per share up front. You keep all of it at expiry if ` +
+      `${symbol} stays ${isPut ? 'above' : 'below'} the ${money(form.strike, 0)} strike, ` +
+      `and still come out ahead ${isPut ? 'down to' : 'up to'} break-even ` +
+      `${withCur(breakEven)}. The simulations put the chance of ending in ` +
+      `profit at ${percent(chance, 1)}.`
+    : `Paying ${premiumWord} premium of ${withCur(premium)} per share, this ` +
+      `${form.type} is in profit at expiry only once ${symbol} is ` +
+      `${isPut ? 'below' : 'above'} ${withCur(breakEven)} — a move of ` +
+      `${percent(Math.abs(move), 1)} ${move >= 0 ? 'up' : 'down'} from the last ` +
+      `close. The simulations put the chance of that at ${percent(chance, 1)}.`);
+
+  const advice = decision.exerciseComparison({
+    type: form.type, style: form.style, direction: form.direction,
+    spot: result.spot, strike: form.strike, fair,
+  });
+  const texts = {
+    short: `You wrote this option, so exercising is the buyer's choice, not ` +
+      `yours. To get out early you buy the same option back — the models ` +
+      `price that at ${withCur(fair)} per share. Otherwise you wait, and keep ` +
+      `the premium if it expires worthless.`,
+    otm: `${symbol} at ${money(result.spot)} is ${isPut ? 'above' : 'below'} the ` +
+      `${money(form.strike, 0)} strike, so this ${form.type} is out of the ` +
+      `money — exercising would ${isPut ? 'sell' : 'buy'} shares at a worse ` +
+      `price than the market, collecting nothing. All of its value is time ` +
+      `value (${withCur(fair)} by the models), and the only way to realise ` +
+      `any of that before expiry is to sell the option.`,
+    'european-locked': `In the money by ${withCur(advice.intrinsic)} per share, ` +
+      `but this is a European-style option: it can only be exercised at ` +
+      `expiry. Until then, selling it (the models value it at ${withCur(fair)}) ` +
+      `is the only way to cash out.`,
+    sell: `In the money: exercising today collects the intrinsic ` +
+      `${withCur(advice.intrinsic)} per share, while the models value the ` +
+      `option at ${withCur(fair)} — a gap of about ` +
+      `${withCur(advice.timeValue)} in remaining time value, which exercising ` +
+      `gives up and a sale does not. That is arithmetic, not a recommendation: ` +
+      `fees, spread, tax and your own reasons for wanting the shares all sit ` +
+      `outside this calculation.`,
+    'exercise-ok': `Deep in the money: the models see essentially no time ` +
+      `value left (${signed(advice.timeValue, 2)} per share against intrinsic ` +
+      `${withCur(advice.intrinsic)}), so on these numbers the two routes land ` +
+      `in about the same place before costs. Fees and spread, which this ` +
+      `calculation does not model, would account for the difference.`,
+  };
+  setAll('be-advice', texts[advice.state]);
+}
+
+for (const input of document.querySelectorAll('.be-premium')) {
+  input.addEventListener('input', () => {
+    for (const other of document.querySelectorAll('.be-premium')) {
+      if (other !== input) other.value = input.value;
+    }
+    if (lastDecisionInputs) {
+      renderDecision(lastDecisionInputs.result, lastDecisionInputs.form);
+    }
+  });
 }
 
 /* ---- fair-value dial ----------------------------------------------------
@@ -2085,9 +2195,16 @@ for (const tab of document.querySelectorAll('.view-tab')) {
 }
 
 /* The education notice greets every open — deliberately unconditional, no
-   remembered dismissal — and holds focus until acknowledged. */
+   remembered dismissal — and holds focus until acknowledged.
+
+   Acknowledgement means the button, and only the button. A native modal
+   dialog otherwise closes on Esc and, in the Android WebView's CloseWatcher,
+   on the system back gesture; either would let someone reach the figures
+   without reading what they are. `closedby="none"` states that where it is
+   supported, and the cancel handler enforces it everywhere else. */
 const noticeDialog = $('notice-dialog');
 $('notice-accept').addEventListener('click', () => noticeDialog.close());
+noticeDialog.addEventListener('cancel', (event) => event.preventDefault());
 if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
 
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);

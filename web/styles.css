@@ -899,6 +899,49 @@ select:focus { outline: none; border-color: var(--accent); }
 
 .aside-note em { font-style: italic; }
 
+/* ----------------------------------------------------- break-even & exit */
+
+.decision-panel label.inline { margin-top: 2px; }
+
+.decision-panel .be-premium {
+  font: 600 16px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  width: 150px;
+  min-height: 40px;
+}
+
+.decision-panel .be-premium::placeholder {
+  color: var(--ink-muted);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.decision-panel .be-premium:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.decision-panel .be-facts { margin-top: 6px; }
+.decision-panel .be-summary { margin-top: 10px; }
+
+.explainer-box {
+  margin-top: 12px;
+  padding: 10px 12px 11px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.explainer-box .eyebrow { display: block; margin-bottom: 6px; }
+.explainer-box .instrument-caption { margin: 0; }
+
 /* ================================================================ charts */
 
 .lower {
@@ -1114,6 +1157,10 @@ select:focus { outline: none; border-color: var(--accent); }
 }
 
 .colophon b { color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+.colophon p + p { margin-top: 10px; }
+.colophon-sources { opacity: .8; }
+.colophon-links a { color: var(--accent); text-decoration: none; }
+.colophon-links a:hover { text-decoration: underline; }
 
 .visually-hidden {
   position: absolute;

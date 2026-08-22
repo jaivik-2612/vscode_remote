@@ -1,4 +1,4 @@
-package com.fairshare.app;
+package io.github.jaivik2612.fairshare;
 
 import com.getcapacitor.BridgeActivity;
 

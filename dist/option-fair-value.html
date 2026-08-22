@@ -901,6 +901,49 @@ select:focus { outline: none; border-color: var(--accent); }
 
 .aside-note em { font-style: italic; }
 
+/* ----------------------------------------------------- break-even & exit */
+
+.decision-panel label.inline { margin-top: 2px; }
+
+.decision-panel .be-premium {
+  font: 600 16px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  width: 150px;
+  min-height: 40px;
+}
+
+.decision-panel .be-premium::placeholder {
+  color: var(--ink-muted);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.decision-panel .be-premium:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.decision-panel .be-facts { margin-top: 6px; }
+.decision-panel .be-summary { margin-top: 10px; }
+
+.explainer-box {
+  margin-top: 12px;
+  padding: 10px 12px 11px;
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.explainer-box .eyebrow { display: block; margin-bottom: 6px; }
+.explainer-box .instrument-caption { margin: 0; }
+
 /* ================================================================ charts */
 
 .lower {
@@ -1116,6 +1159,10 @@ select:focus { outline: none; border-color: var(--accent); }
 }
 
 .colophon b { color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+.colophon p + p { margin-top: 10px; }
+.colophon-sources { opacity: .8; }
+.colophon-links a { color: var(--accent); text-decoration: none; }
+.colophon-links a:hover { text-decoration: underline; }
 
 .visually-hidden {
   position: absolute;
@@ -1555,6 +1602,30 @@ select:focus { outline: none; border-color: var(--accent); }
           <p class="instrument-caption" id="s-band">&mdash;</p>
         </section>
 
+        <section class="block decision-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Break-even &amp; exit</h2>
+            <span class="eyebrow be-exp">&mdash;</span>
+          </div>
+          <label class="inline">Premium per share
+            <input class="be-premium" type="number" step="any" min="0"
+              inputmode="decimal" aria-label="Premium paid or collected per share">
+          </label>
+          <p class="field-note">Left empty, this uses the model&rsquo;s fair
+            premium. Type what you actually paid (or collected, if you wrote it)
+            to see your real break-even.</p>
+          <dl class="facts be-facts">
+            <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+            <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+            <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+          </dl>
+          <p class="instrument-caption be-summary">&mdash;</p>
+          <div class="explainer-box">
+            <h3 class="eyebrow">Exercising vs. selling</h3>
+            <p class="instrument-caption be-advice">&mdash;</p>
+          </div>
+        </section>
+
         <section class="block">
           <div class="panel-title-row">
             <h2 class="eyebrow">Price tape</h2>
@@ -1568,11 +1639,18 @@ select:focus { outline: none; border-color: var(--accent); }
           <ul class="plain-list">
             <li><b>Fair price</b> is what the maths says the option is worth today,
               judged three different ways from how this stock has actually moved over
-              the last two years. If the market quotes much more, the option is
-              expensive; much less, cheap &mdash; <em>by these models&rsquo; lights</em>.</li>
+              the last two years. A market quote well above or below it means the
+              market is using different assumptions from these models &mdash; a
+              disagreement worth understanding, not a signal to act on.</li>
             <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
               of simulated futures built from the same two years &mdash; the range around
               it is where 9 out of 10 of those simulations landed.</li>
+            <li><b>Break-even</b> is the strike shifted by the premium: a buyer
+              only comes out ahead at expiry once the stock has moved far enough
+              to repay what the option cost. Before expiry, an in-the-money
+              option is usually worth more <em>sold</em> than exercised, because
+              exercising collects only the intrinsic part and throws away the
+              remaining time value.</li>
             <li data-short-only><b>Writing an option is not the mirror of buying one.</b>
               A buyer can lose at most the premium paid; a writer&rsquo;s profit is
               capped at the premium collected while the loss can be far larger &mdash;
@@ -1582,13 +1660,6 @@ select:focus { outline: none; border-color: var(--accent); }
           </ul>
         </section>
 
-        <p class="disclaimer" role="note">
-          <b>Notice</b> &mdash; FairShare is for education only. Nothing on this page is
-          investment advice, a recommendation, or a prediction of what will actually
-          happen. Every figure is a model estimate built from past prices, and past
-          prices do not determine future ones. Options can expire worthless &mdash;
-          never trade money you cannot afford to lose.
-        </p>
       </div>
 
       <div class="headline-pair" data-advanced>
@@ -1616,6 +1687,30 @@ select:focus { outline: none; border-color: var(--accent); }
           </dl>
         </div>
       </div>
+
+      <section class="block decision-panel" data-advanced>
+        <div class="panel-title-row">
+          <h2 class="eyebrow">Break-even &amp; exit</h2>
+          <span class="eyebrow be-exp">&mdash;</span>
+        </div>
+        <label class="inline">Premium per share
+          <input class="be-premium" type="number" step="any" min="0"
+            inputmode="decimal" aria-label="Premium paid or collected per share">
+        </label>
+        <p class="field-note">Left empty, this uses the model&rsquo;s fair
+          premium. Type what you actually paid (or collected, if you wrote it)
+          to see your real break-even.</p>
+        <dl class="facts be-facts">
+          <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+          <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+          <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+        </dl>
+        <p class="instrument-caption be-summary">&mdash;</p>
+        <div class="explainer-box">
+          <h3 class="eyebrow">Exercising vs. selling</h3>
+          <p class="instrument-caption be-advice">&mdash;</p>
+        </div>
+      </section>
 
       <figure class="block" data-advanced>
         <h2 class="eyebrow">Where each model lands</h2>
@@ -1680,6 +1775,14 @@ select:focus { outline: none; border-color: var(--accent); }
         <h2 class="eyebrow">Diagnostics</h2>
         <dl id="ens-diagnostics" class="facts"></dl>
       </section>
+
+      <p class="disclaimer" role="note">
+        <b>Notice</b> &mdash; FairShare is for education only. Nothing on this page is
+        investment advice, a recommendation, or a prediction of what will actually
+        happen. Every figure is a model estimate built from past prices, and past
+        prices do not determine future ones. Options can expire worthless &mdash;
+        never trade money you cannot afford to lose.
+      </p>
     </section>
 
     <section data-panel="price" hidden>
@@ -1781,7 +1884,7 @@ select:focus { outline: none; border-color: var(--accent); }
   </main>
 </div>
 
-<dialog id="notice-dialog" aria-labelledby="notice-title">
+<dialog id="notice-dialog" aria-labelledby="notice-title" closedby="none">
   <p class="eyebrow" id="notice-title">Notice &middot; read before using</p>
   <p class="notice-body">
     <b>FairShare is for education only.</b> Nothing on this page is investment
@@ -1801,6 +1904,20 @@ select:focus { outline: none; border-color: var(--accent); }
     <b>FairShare</b> is an educational tool. Every figure is a model output,
     only as sound as the history and assumptions behind it &mdash; it is not
     investment advice, and options can expire worthless.
+  </p>
+  <p class="colophon-sources">
+    Symbol directories are the exchanges&rsquo; own published reference files:
+    Nasdaq Trader, TMX Group, London Stock Exchange, Euronext, Deutsche
+    B&ouml;rse (XETRA), SIX Swiss Exchange, Japan Exchange Group, Shanghai and
+    Shenzhen Stock Exchanges, and BSE India. Yield curves come from the U.S.
+    Treasury, Bank of Canada, ECB, Bank of England, Japan&rsquo;s Ministry of
+    Finance and the Swiss National Bank. Exchange names and symbols are the
+    property of their respective owners; FairShare is not affiliated with,
+    endorsed by, or a data feed for any of them.
+  </p>
+  <p class="colophon-links">
+    <a href="https://jaivik-2612.github.io/vscode_remote/privacy.html"
+       target="_blank" rel="noopener">Privacy policy</a>
   </p>
 </footer>
 
@@ -3129,6 +3246,65 @@ function rateForHorizon(points, days) {
 return { curveKeyFor, exchangeInfo, yahooSymbol, stooqSymbol, googleFinanceSymbol, googleFinanceFormula, searchTickers, repairSplits, parseMarketData, rateForHorizon, EXCHANGES, MARKETS };
 })();
 
+/* src/decision.js */
+const Decision = (() => {
+/**
+ * Position decisions: where a trade breaks even, and whether an in-the-money
+ * option is better sold or exercised. Pure arithmetic — the UI turns the
+ * returned facts into prose.
+ */
+
+/** Terminal price at which a bought option exactly repays its premium. */
+function breakEvenPrice(type, strike, premium) {
+  return type === 'put' ? strike - premium : strike + premium;
+}
+
+/** What immediate exercise collects per share; zero when out of the money. */
+function intrinsicValue(type, spot, strike) {
+  return Math.max(0, type === 'put' ? strike - spot : spot - strike);
+}
+
+/**
+ * Exercising versus selling, as arithmetic.
+ *
+ * The core fact: exercising collects only intrinsic value, while selling
+ * collects intrinsic plus whatever time value is left, so the two routes
+ * converge only once time value has decayed to (or below) nothing — which
+ * does happen for deep in-the-money puts, where waiting costs interest on
+ * the strike.
+ *
+ * This reports the comparison, never a recommendation. Fees, spread, tax and
+ * whether the holder actually wants the shares all sit outside it, and the
+ * UI says so.
+ *
+ * States:
+ *   'short'           the writer holds no exercise right; exit = buy back
+ *   'otm'             no intrinsic value — exercising trades at a worse price
+ *                     than the market, so selling is the only way out
+ *   'european-locked' in the money, but European style: exercise exists only
+ *                     at expiry, so before then selling is the only exit
+ *   'sell'            in the money, American, meaningful time value left —
+ *                     exercising forfeits it, a sale does not
+ *   'exercise-ok'     in the money, American, time value ≈ 0 or negative —
+ *                     the two routes land in the same place before costs
+ */
+function exerciseComparison({ type, style, direction, spot, strike, fair }) {
+  const intrinsic = intrinsicValue(type, spot, strike);
+  const timeValue = fair - intrinsic;
+  if (direction === 'short') return { state: 'short', intrinsic, timeValue };
+  if (intrinsic === 0) return { state: 'otm', intrinsic, timeValue };
+  if (style !== 'american') return { state: 'european-locked', intrinsic, timeValue };
+  // Below this, the "forfeited" time value is inside the models' own noise
+  // (and bid-ask spread), so calling it a toss-up is the honest answer.
+  const threshold = Math.max(0.01, fair * 0.01);
+  return timeValue > threshold
+    ? { state: 'sell', intrinsic, timeValue }
+    : { state: 'exercise-ok', intrinsic, timeValue };
+}
+
+return { breakEvenPrice, intrinsicValue, exerciseComparison };
+})();
+
 /* src/hmm.js */
 const Hmm = (() => {
 /**
@@ -4388,6 +4564,7 @@ const binomial = Binomial;
 const series = Series;
 const monteCarlo = MonteCarlo;
 const market = Market;
+const decision = Decision;
 
 const { impliedVol, priceBounds } = ImpliedVol;
 const { fitHmm, projectRegimes, viterbiPath, stationaryDistribution } = Hmm;
@@ -4397,7 +4574,7 @@ const {
   valuation, valueCurve, employeeGrantValue,
 } = Valuation;
 
-return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationaryDistribution, ensembleValuation, DAYS_PER_YEAR, yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, stats, blackScholes, binomial, series, monteCarlo, market };
+return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationaryDistribution, ensembleValuation, DAYS_PER_YEAR, yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, stats, blackScholes, binomial, series, monteCarlo, market, decision };
 })();
 
 /* web/app.js */
@@ -4409,7 +4586,7 @@ return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationar
 const {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes: bs, binomial,
-  ensembleValuation, series: seriesTools, market,
+  ensembleValuation, series: seriesTools, market, decision,
 } = Engine;
 
 const $ = (id) => document.getElementById(id);
@@ -4963,6 +5140,8 @@ async function chooseTicker(entry) {
   // The listing's currency labels the figures right away; a live fetch may
   // refine it, but the manual-paste path has no later chance to set it.
   activeCurrency = entry.currency ?? null;
+  // A premium typed for the previous ticker means nothing for this one.
+  for (const node of document.querySelectorAll('.be-premium')) node.value = '';
 
   if (IS_ARTIFACT) {
     renderFetchPanel(entry);
@@ -5370,6 +5549,8 @@ function renderEnsemble() {
 
   lastSpot = result.spot;
   renderSimpleReadout(result, f, prices);
+  lastDecisionInputs = { result, form: f };
+  renderDecision(result, f);
 
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
@@ -5484,7 +5665,7 @@ function renderSimpleReadout(result, form, prices) {
   const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
   $('s-fair').textContent = money(consensus.value, 2);
   $('s-fair-unit').textContent =
-    `${cur ? cur + ' ' : ''}/ share, you'd ${isShort ? 'collect' : 'pay'}`;
+    `${cur ? cur + ' ' : ''}/ share · premium ${isShort ? 'collected' : 'paid'}`;
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
@@ -5500,7 +5681,7 @@ function renderSimpleReadout(result, form, prices) {
 
   $('s-prob-date').textContent = fmtDate(expiry);
   $('s-chance-label').textContent = isShort
-    ? `chance of profit at expiry · you keep the edge if ${symbol} stays ` +
+    ? `chance of profit at expiry · the position finishes ahead if ${symbol} stays ` +
       `${isPut ? 'above' : 'below'} break-even ${money(breakEven)}`
     : `chance of profit at expiry · needs ${symbol} ${isPut ? 'below' : 'above'} ` +
       `break-even ${money(breakEven)}`;
@@ -5518,6 +5699,112 @@ function renderSimpleReadout(result, form, prices) {
   $('s-tape-note').textContent =
     `${count(prices.length)} closes · last ${money(result.spot)}`;
   renderTape(prices);
+}
+
+/* ---- break-even & exit --------------------------------------------------
+   Rendered twice from one function: the panel appears in the simple readout
+   and again in the advanced flow, so every dynamic field is addressed by
+   class, not id. The premium input defaults to the models' fair value; the
+   user overrides it with what they actually paid (or collected). */
+
+let lastDecisionInputs = null;
+
+const setAll = (cls, value) => {
+  for (const node of document.querySelectorAll(`.${cls}`)) node.textContent = value;
+};
+
+/** The premium the panel reasons with: the user's, else the models'. */
+function enteredPremium(fair) {
+  const raw = document.querySelector('.be-premium')?.value.trim() ?? '';
+  const typed = Number(raw);
+  return raw !== '' && Number.isFinite(typed) && typed >= 0 ? typed : fair;
+}
+
+function renderDecision(result, form) {
+  const { consensus, outlook } = result;
+  const symbol = selectedTicker?.symbol ?? 'the stock';
+  const isPut = form.type === 'put';
+  const isShort = form.direction === 'short';
+  const fair = consensus.value;
+  const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
+  const withCur = (n, digits = 2) => money(n, digits) + (cur ? ` ${cur}` : '');
+
+  for (const input of document.querySelectorAll('.be-premium')) {
+    input.placeholder = `fair ${money(fair, 2)}`;
+  }
+  const premium = enteredPremium(fair);
+  const own = premium !== fair;
+
+  const breakEven = decision.breakEvenPrice(form.type, form.strike, premium);
+  const move = (breakEven - result.spot) / result.spot;
+  const pAboveBE = probAbove(outlook.quantiles, breakEven) ?? outlook.probAboveStrike;
+  const buyerProfits = isPut ? 1 - pAboveBE : pAboveBE;
+  const chance = isShort ? 1 - buyerProfits : buyerProfits;
+
+  setAll('be-exp', `exp ${fmtDate(currentExpiry(result))}`);
+  setAll('be-price', withCur(breakEven));
+  setAll('be-move', `${move >= 0 ? '+' : '−'}${percent(Math.abs(move), 1)} ` +
+    `from last close ${money(result.spot)}`);
+  setAll('be-chance', percent(chance, 1));
+
+  const premiumWord = own ? 'your' : "the models'";
+  setAll('be-summary', isShort
+    ? `Writing this ${form.type} collects ${premiumWord} premium of ` +
+      `${withCur(premium)} per share up front. You keep all of it at expiry if ` +
+      `${symbol} stays ${isPut ? 'above' : 'below'} the ${money(form.strike, 0)} strike, ` +
+      `and still come out ahead ${isPut ? 'down to' : 'up to'} break-even ` +
+      `${withCur(breakEven)}. The simulations put the chance of ending in ` +
+      `profit at ${percent(chance, 1)}.`
+    : `Paying ${premiumWord} premium of ${withCur(premium)} per share, this ` +
+      `${form.type} is in profit at expiry only once ${symbol} is ` +
+      `${isPut ? 'below' : 'above'} ${withCur(breakEven)} — a move of ` +
+      `${percent(Math.abs(move), 1)} ${move >= 0 ? 'up' : 'down'} from the last ` +
+      `close. The simulations put the chance of that at ${percent(chance, 1)}.`);
+
+  const advice = decision.exerciseComparison({
+    type: form.type, style: form.style, direction: form.direction,
+    spot: result.spot, strike: form.strike, fair,
+  });
+  const texts = {
+    short: `You wrote this option, so exercising is the buyer's choice, not ` +
+      `yours. To get out early you buy the same option back — the models ` +
+      `price that at ${withCur(fair)} per share. Otherwise you wait, and keep ` +
+      `the premium if it expires worthless.`,
+    otm: `${symbol} at ${money(result.spot)} is ${isPut ? 'above' : 'below'} the ` +
+      `${money(form.strike, 0)} strike, so this ${form.type} is out of the ` +
+      `money — exercising would ${isPut ? 'sell' : 'buy'} shares at a worse ` +
+      `price than the market, collecting nothing. All of its value is time ` +
+      `value (${withCur(fair)} by the models), and the only way to realise ` +
+      `any of that before expiry is to sell the option.`,
+    'european-locked': `In the money by ${withCur(advice.intrinsic)} per share, ` +
+      `but this is a European-style option: it can only be exercised at ` +
+      `expiry. Until then, selling it (the models value it at ${withCur(fair)}) ` +
+      `is the only way to cash out.`,
+    sell: `In the money: exercising today collects the intrinsic ` +
+      `${withCur(advice.intrinsic)} per share, while the models value the ` +
+      `option at ${withCur(fair)} — a gap of about ` +
+      `${withCur(advice.timeValue)} in remaining time value, which exercising ` +
+      `gives up and a sale does not. That is arithmetic, not a recommendation: ` +
+      `fees, spread, tax and your own reasons for wanting the shares all sit ` +
+      `outside this calculation.`,
+    'exercise-ok': `Deep in the money: the models see essentially no time ` +
+      `value left (${signed(advice.timeValue, 2)} per share against intrinsic ` +
+      `${withCur(advice.intrinsic)}), so on these numbers the two routes land ` +
+      `in about the same place before costs. Fees and spread, which this ` +
+      `calculation does not model, would account for the difference.`,
+  };
+  setAll('be-advice', texts[advice.state]);
+}
+
+for (const input of document.querySelectorAll('.be-premium')) {
+  input.addEventListener('input', () => {
+    for (const other of document.querySelectorAll('.be-premium')) {
+      if (other !== input) other.value = input.value;
+    }
+    if (lastDecisionInputs) {
+      renderDecision(lastDecisionInputs.result, lastDecisionInputs.form);
+    }
+  });
 }
 
 /* ---- fair-value dial ----------------------------------------------------
@@ -6488,9 +6775,16 @@ for (const tab of document.querySelectorAll('.view-tab')) {
 }
 
 /* The education notice greets every open — deliberately unconditional, no
-   remembered dismissal — and holds focus until acknowledged. */
+   remembered dismissal — and holds focus until acknowledged.
+
+   Acknowledgement means the button, and only the button. A native modal
+   dialog otherwise closes on Esc and, in the Android WebView's CloseWatcher,
+   on the system back gesture; either would let someone reach the figures
+   without reading what they are. `closedby="none"` states that where it is
+   supported, and the cancel handler enforces it everywhere else. */
 const noticeDialog = $('notice-dialog');
 $('notice-accept').addEventListener('click', () => noticeDialog.close());
+noticeDialog.addEventListener('cancel', (event) => event.preventDefault());
 if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
 
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
