@@ -1,0 +1,35 @@
+Copyright (c) 2026 Jaivik Patel. All rights reserved.
+
+FairShare and its source code are proprietary. No licence is granted to any
+person to copy, modify, merge, publish, distribute, sublicense, sell, or
+create derivative works from this software or any part of it, whether in
+source or compiled form, except with the prior written permission of the
+copyright holder.
+
+Viewing this repository, or the JavaScript this project serves to a browser,
+does not grant any right to reuse it.
+
+Permitted without prior permission:
+  - Running the published application as an end user.
+  - Quoting short excerpts for the purpose of commentary, review, teaching,
+    research, or news reporting, with attribution, to the extent permitted by
+    the fair-dealing provisions of the Copyright Act (Canada) or the fair-use
+    doctrine of 17 U.S.C. section 107.
+  - Any act that applicable law expressly permits notwithstanding contract,
+    including decompilation for interoperability where a statute provides it.
+
+The mathematics this software implements — the Black-Scholes-Merton formula,
+the Cox-Ross-Rubinstein binomial method, Monte Carlo simulation, and the
+Baum-Welch algorithm — is published science in the public domain and is not
+claimed here. What is claimed is this particular expression of it: the source
+code, its structure and organisation, the interface, and the accompanying
+text and graphics.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+FairShare is an educational tool. It is not investment advice.

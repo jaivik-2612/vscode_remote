@@ -1159,6 +1159,7 @@ select:focus { outline: none; border-color: var(--accent); }
 .colophon b { color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
 .colophon p + p { margin-top: 10px; }
 .colophon-sources { opacity: .8; }
+.colophon-links { display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; }
 .colophon-links a { color: var(--accent); text-decoration: none; }
 .colophon-links a:hover { text-decoration: underline; }
 
