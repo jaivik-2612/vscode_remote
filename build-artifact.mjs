@@ -172,3 +172,49 @@ ${page.slice(split)}
   await writeFile('dist/app/index.html', full);
   console.log(`dist/app/index.html — ${(full.length / 1024).toFixed(1)} KB (Capacitor webDir)`);
 }
+
+// --pwa emits an installable web app under dist/pwa/: the standalone
+// document plus manifest, icons and a precaching service worker whose cache
+// name carries this build's content hash.
+if (process.argv.includes('--pwa')) {
+  const { createHash } = await import('node:crypto');
+  const { copyFile } = await import('node:fs/promises');
+
+  const version = createHash('sha256').update(page).digest('hex').slice(0, 12);
+  const split = page.indexOf('<header');
+  const pwaHead = `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0a0e12">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FairShare">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">`;
+  const registration = `<script>
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js'));
+}
+</script>`;
+  const pwaDoc = `<!doctype html>
+<html lang="en">
+<head>
+${pwaHead}
+${page.slice(0, split)}</head>
+<body>
+${page.slice(split)}
+${registration}
+</body>
+</html>
+`;
+
+  await mkdir('dist/pwa', { recursive: true });
+  await writeFile('dist/pwa/index.html', pwaDoc);
+  const worker = await readFile('web/pwa/sw.js', 'utf8');
+  await writeFile('dist/pwa/sw.js', worker.replace('__CACHE_VERSION__', version));
+  for (const asset of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png']) {
+    await copyFile(`web/pwa/${asset}`, `dist/pwa/${asset}`);
+  }
+  console.log(`dist/pwa/ — installable build, cache fairshare-${version}`);
+}

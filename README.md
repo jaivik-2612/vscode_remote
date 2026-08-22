@@ -184,6 +184,20 @@ drop in just the same.
 `npm run refresh-data` refreshes `data/tickers.json` and `data/rates.json`;
 both carry their as-of dates and the UI displays them.
 
+## Install as an app (PWA)
+
+Every push deploys the installable build to GitHub Pages
+(`.github/workflows/pages.yml`). Open the published URL on a phone and:
+
+- **iPhone / iPad** — Share button → *Add to Home Screen*. FairShare installs
+  with the dial icon, launches full-screen, and works offline.
+- **Android** — Chrome offers *Install app* from the menu.
+
+The service worker precaches the entire app (it is one self-contained
+document), so after the first visit it runs with no connection at all. Each
+build carries a content-hashed cache name, so updates arrive on the next
+launch after a deploy.
+
 ## Native apps (Capacitor)
 
 The repo carries a Capacitor scaffold that wraps the exact same bundle as a

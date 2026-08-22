@@ -4,3 +4,4 @@ node_modules/
 dist/preview.html
 dist/app/
 icons/
+dist/pwa/
