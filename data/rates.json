@@ -1,0 +1,131 @@
+{
+ "fetched": "2026-08-20",
+ "note": "Continuously compounded, converted from semi-annual par quotes: r = 2 ln(1 + y/2).",
+ "us": {
+  "asOf": "2026-08-20",
+  "points": [
+   {
+    "days": 30,
+    "rate": 0.037643508481175335,
+    "label": "1 Mo"
+   },
+   {
+    "days": 61,
+    "rate": 0.0375453706465672,
+    "label": "2 Mo"
+   },
+   {
+    "days": 91,
+    "rate": 0.03833033852202173,
+    "label": "3 Mo"
+   },
+   {
+    "days": 122,
+    "rate": 0.03842843784760874,
+    "label": "4 Mo"
+   },
+   {
+    "days": 182,
+    "rate": 0.039016932776086026,
+    "label": "6 Mo"
+   },
+   {
+    "days": 365,
+    "rate": 0.0395072129736725,
+    "label": "1 Yr"
+   },
+   {
+    "days": 730,
+    "rate": 0.041467132773813406,
+    "label": "2 Yr"
+   },
+   {
+    "days": 1096,
+    "rate": 0.04215265120383262,
+    "label": "3 Yr"
+   },
+   {
+    "days": 1826,
+    "rate": 0.04342513381129944,
+    "label": "5 Yr"
+   },
+   {
+    "days": 2557,
+    "rate": 0.04479459488407665,
+    "label": "7 Yr"
+   },
+   {
+    "days": 3652,
+    "rate": 0.04635854589481049,
+    "label": "10 Yr"
+   },
+   {
+    "days": 7305,
+    "rate": 0.051335493497155625,
+    "label": "20 Yr"
+   },
+   {
+    "days": 10957,
+    "rate": 0.051627869785959096,
+    "label": "30 Yr"
+   }
+  ],
+  "source": "U.S. Treasury daily par yield curve"
+ },
+ "ca": {
+  "asOf": "2026-08-19",
+  "points": [
+   {
+    "days": 30,
+    "rate": 0.022572144033934982,
+    "label": "1 month"
+   },
+   {
+    "days": 91,
+    "rate": 0.0227698897331271,
+    "label": "3 month"
+   },
+   {
+    "days": 182,
+    "rate": 0.02395595351881383,
+    "label": "6 month"
+   },
+   {
+    "days": 365,
+    "rate": 0.02662202811934483,
+    "label": "1 year"
+   },
+   {
+    "days": 730,
+    "rate": 0.02958017094527069,
+    "label": "2 year"
+   },
+   {
+    "days": 1096,
+    "rate": 0.030466761281178503,
+    "label": "3 year"
+   },
+   {
+    "days": 1826,
+    "rate": 0.03273070817252846,
+    "label": "5 year"
+   },
+   {
+    "days": 2557,
+    "rate": 0.03400919763164753,
+    "label": "7 year"
+   },
+   {
+    "days": 3652,
+    "rate": 0.03656372735602496,
+    "label": "10 year"
+   },
+   {
+    "days": 10957,
+    "rate": 0.040487412954085,
+    "label": "long"
+   }
+  ],
+  "source": "Bank of Canada Valet API (T-bills, benchmark bonds)"
+ }
+}

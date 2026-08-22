@@ -1,0 +1,12 @@
+{
+  "appId": "com.fairshare.app",
+  "appName": "FairShare",
+  "webDir": "dist/app",
+  "backgroundColor": "#0a0e12",
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "automatic"
+  }
+}

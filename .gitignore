@@ -1,0 +1,7 @@
+node_modules/
+*.log
+.DS_Store
+dist/preview.html
+dist/app/
+icons/
+dist/pwa/
