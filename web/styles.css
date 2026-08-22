@@ -931,7 +931,7 @@ select:focus { outline: none; border-color: var(--accent); }
 .decision-panel .be-facts { margin-top: 6px; }
 .decision-panel .be-summary { margin-top: 10px; }
 
-.advice-box {
+.explainer-box {
   margin-top: 12px;
   padding: 10px 12px 11px;
   background: var(--well);
@@ -939,8 +939,8 @@ select:focus { outline: none; border-color: var(--accent); }
   border-radius: calc(var(--radius) - 4px);
 }
 
-.advice-box .eyebrow { display: block; margin-bottom: 6px; }
-.advice-box .instrument-caption { margin: 0; }
+.explainer-box .eyebrow { display: block; margin-bottom: 6px; }
+.explainer-box .instrument-caption { margin: 0; }
 
 /* ================================================================ charts */
 
@@ -1157,6 +1157,10 @@ select:focus { outline: none; border-color: var(--accent); }
 }
 
 .colophon b { color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+.colophon p + p { margin-top: 10px; }
+.colophon-sources { opacity: .8; }
+.colophon-links a { color: var(--accent); text-decoration: none; }
+.colophon-links a:hover { text-decoration: underline; }
 
 .visually-hidden {
   position: absolute;

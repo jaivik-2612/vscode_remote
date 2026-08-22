@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { breakEvenPrice, intrinsicValue, exerciseAdvice } from '../src/decision.js';
+import { breakEvenPrice, intrinsicValue, exerciseComparison } from '../src/decision.js';
 
 test('break-even shifts the strike by the premium, in the payoff direction', () => {
   assert.equal(breakEvenPrice('call', 100, 4.5), 104.5);
@@ -16,7 +16,7 @@ test('intrinsic value is the immediate-exercise payoff, floored at zero', () => 
 });
 
 test('a writer holds no exercise right, whatever the moneyness', () => {
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'call', style: 'american', direction: 'short',
     spot: 150, strike: 100, fair: 52,
   });
@@ -25,7 +25,7 @@ test('a writer holds no exercise right, whatever the moneyness', () => {
 });
 
 test('out of the money: nothing to exercise, selling is the only exit', () => {
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'call', style: 'american', direction: 'long',
     spot: 90, strike: 100, fair: 1.2,
   });
@@ -35,7 +35,7 @@ test('out of the money: nothing to exercise, selling is the only exit', () => {
 });
 
 test('in the money with time value left: sell, do not exercise', () => {
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'call', style: 'american', direction: 'long',
     spot: 110, strike: 100, fair: 13.4,
   });
@@ -47,7 +47,7 @@ test('in the money with time value left: sell, do not exercise', () => {
 test('deep in-the-money put with no time value left: exercise is defensible', () => {
   // Deep ITM American puts can trade below intrinsic pricing-model-wise:
   // waiting costs interest on the strike, so time value goes negative.
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'put', style: 'american', direction: 'long',
     spot: 40, strike: 100, fair: 59.95,
   });
@@ -58,7 +58,7 @@ test('deep in-the-money put with no time value left: exercise is defensible', ()
 
 test('time value within the noise threshold counts as a toss-up, not a sell', () => {
   // fair 50.30 vs intrinsic 50: 0.30 time value < 1% of fair (0.503).
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'call', style: 'american', direction: 'long',
     spot: 150, strike: 100, fair: 50.3,
   });
@@ -66,7 +66,7 @@ test('time value within the noise threshold counts as a toss-up, not a sell', ()
 });
 
 test('European style in the money: no early exercise exists, selling is the exit', () => {
-  const advice = exerciseAdvice({
+  const advice = exerciseComparison({
     type: 'call', style: 'european', direction: 'long',
     spot: 110, strike: 100, fair: 13.4,
   });

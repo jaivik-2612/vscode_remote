@@ -39,6 +39,15 @@ android {
         }
     }
     buildTypes {
+        debug {
+            // Android refuses to update a package whose signing key changed,
+            // so without a distinct id the CI debug APK and the release
+            // bundle cannot both sit on one test device — installing the
+            // second fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE. The
+            // suffix lets them coexist.
+            applicationIdSuffix '.debug'
+            versionNameSuffix '-debug'
+        }
         release {
             if (hasKeystore) {
                 signingConfig signingConfigs.release

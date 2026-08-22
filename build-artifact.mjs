@@ -187,7 +187,19 @@ ${page.slice(split)}
  * Markdown library, and this deliberately fails loud rather than guessing.
  */
 async function privacyPage() {
-  const md = await readFile('docs/store/PRIVACY.md', 'utf8');
+  let md = await readFile('docs/store/PRIVACY.md', 'utf8');
+
+  // Google wants "a privacy point of contact or a mechanism to submit
+  // inquiries". The repository issue tracker satisfies that on its own, so
+  // the policy reads correctly with no address configured; setting
+  // FAIRSHARE_CONTACT_EMAIL names the address directly, which is friendlier.
+  // Deliberately never emits a placeholder token onto a public page.
+  const contact = process.env.FAIRSHARE_CONTACT_EMAIL?.trim();
+  if (contact) {
+    md = md.replace(
+      "the contact\naddress shown on the app's store listing",
+      contact);
+  }
   const escape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const inline = (s) => escape(s)
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')

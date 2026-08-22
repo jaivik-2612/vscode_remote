@@ -211,10 +211,27 @@ npx cap open ios     # Xcode (macOS), archive and upload
 ```
 
 App icons and splash screens are generated from `resources/` by
-`npx capacitor-assets generate --android --ios`. The store privacy policy,
-listing copy and a step-by-step submission runbook — including the
-placeholder `appId` you must change before first upload — live in
-`docs/store/`.
+`npx capacitor-assets generate --android --ios`.
+
+You do not need Android Studio to produce a release build: the **Android
+build** workflow bundles, signs and verifies an AAB on every push. Without
+signing secrets it uses a throwaway key and discards the result, so the
+release path is proven continuously rather than being attempted for the
+first time on the day it matters.
+
+Publishing lives in `docs/`:
+
+| | |
+|---|---|
+| [`SIGNING-WINDOWS.md`](docs/SIGNING-WINDOWS.md) | Generating the upload keystore, encoding it for GitHub, downloading and verifying the bundle, and testing it on a phone — all from Windows, no Mac needed |
+| [`store/SUBMISSION.md`](docs/store/SUBMISSION.md) | The Play Console runbook, from registration through the 14-day closed test to production |
+| [`store/LISTING.md`](docs/store/LISTING.md) | Listing copy, categories, and alt text, within Play's character limits |
+| [`store/PRIVACY.md`](docs/store/PRIVACY.md) | The privacy policy, published to Pages as `/privacy.html` by the same build |
+
+Store graphics are generated from the running app by
+`node tools/store-assets.mjs` — icon, feature graphic, and screenshots for
+phone and both tablet sizes, all at exactly the dimensions Play validates.
+Re-run it whenever the UI changes so the listing never shows a stale screen.
 
 ## The three engines
 

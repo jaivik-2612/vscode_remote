@@ -1085,7 +1085,7 @@ function renderSimpleReadout(result, form, prices) {
   const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
   $('s-fair').textContent = money(consensus.value, 2);
   $('s-fair-unit').textContent =
-    `${cur ? cur + ' ' : ''}/ share, you'd ${isShort ? 'collect' : 'pay'}`;
+    `${cur ? cur + ' ' : ''}/ share · premium ${isShort ? 'collected' : 'paid'}`;
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
@@ -1101,7 +1101,7 @@ function renderSimpleReadout(result, form, prices) {
 
   $('s-prob-date').textContent = fmtDate(expiry);
   $('s-chance-label').textContent = isShort
-    ? `chance of profit at expiry · you keep the edge if ${symbol} stays ` +
+    ? `chance of profit at expiry · the position finishes ahead if ${symbol} stays ` +
       `${isPut ? 'above' : 'below'} break-even ${money(breakEven)}`
     : `chance of profit at expiry · needs ${symbol} ${isPut ? 'below' : 'above'} ` +
       `break-even ${money(breakEven)}`;
@@ -1181,7 +1181,7 @@ function renderDecision(result, form) {
       `${percent(Math.abs(move), 1)} ${move >= 0 ? 'up' : 'down'} from the last ` +
       `close. The simulations put the chance of that at ${percent(chance, 1)}.`);
 
-  const advice = decision.exerciseAdvice({
+  const advice = decision.exerciseComparison({
     type: form.type, style: form.style, direction: form.direction,
     spot: result.spot, strike: form.strike, fair,
   });
@@ -1201,14 +1201,17 @@ function renderDecision(result, form) {
       `expiry. Until then, selling it (the models value it at ${withCur(fair)}) ` +
       `is the only way to cash out.`,
     sell: `In the money: exercising today collects the intrinsic ` +
-      `${withCur(advice.intrinsic)} per share — but the models value the ` +
-      `option at ${withCur(fair)}. Selling it keeps the roughly ` +
-      `${withCur(advice.timeValue)} of time value that exercising would ` +
-      `throw away, so by these numbers selling looks better than exercising.`,
+      `${withCur(advice.intrinsic)} per share, while the models value the ` +
+      `option at ${withCur(fair)} — a gap of about ` +
+      `${withCur(advice.timeValue)} in remaining time value, which exercising ` +
+      `gives up and a sale does not. That is arithmetic, not a recommendation: ` +
+      `fees, spread, tax and your own reasons for wanting the shares all sit ` +
+      `outside this calculation.`,
     'exercise-ok': `Deep in the money: the models see essentially no time ` +
       `value left (${signed(advice.timeValue, 2)} per share against intrinsic ` +
-      `${withCur(advice.intrinsic)}), so selling and exercising come out ` +
-      `about level. Whichever costs you less in fees and spread is fine.`,
+      `${withCur(advice.intrinsic)}), so on these numbers the two routes land ` +
+      `in about the same place before costs. Fees and spread, which this ` +
+      `calculation does not model, would account for the difference.`,
   };
   setAll('be-advice', texts[advice.state]);
 }
@@ -2192,9 +2195,16 @@ for (const tab of document.querySelectorAll('.view-tab')) {
 }
 
 /* The education notice greets every open — deliberately unconditional, no
-   remembered dismissal — and holds focus until acknowledged. */
+   remembered dismissal — and holds focus until acknowledged.
+
+   Acknowledgement means the button, and only the button. A native modal
+   dialog otherwise closes on Esc and, in the Android WebView's CloseWatcher,
+   on the system back gesture; either would let someone reach the figures
+   without reading what they are. `closedby="none"` states that where it is
+   supported, and the cancel handler enforces it everywhere else. */
 const noticeDialog = $('notice-dialog');
 $('notice-accept').addEventListener('click', () => noticeDialog.close());
+noticeDialog.addEventListener('cancel', (event) => event.preventDefault());
 if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
 
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);

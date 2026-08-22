@@ -15,13 +15,17 @@ export function intrinsicValue(type, spot, strike) {
 }
 
 /**
- * Sell or exercise?
+ * Exercising versus selling, as arithmetic.
  *
  * The core fact: exercising collects only intrinsic value, while selling
- * collects intrinsic plus whatever time value is left, so exercise is only
- * defensible once time value has decayed to (or below) nothing — which does
- * happen for deep in-the-money puts, where waiting costs interest on the
- * strike.
+ * collects intrinsic plus whatever time value is left, so the two routes
+ * converge only once time value has decayed to (or below) nothing — which
+ * does happen for deep in-the-money puts, where waiting costs interest on
+ * the strike.
+ *
+ * This reports the comparison, never a recommendation. Fees, spread, tax and
+ * whether the holder actually wants the shares all sit outside it, and the
+ * UI says so.
  *
  * States:
  *   'short'           the writer holds no exercise right; exit = buy back
@@ -30,11 +34,11 @@ export function intrinsicValue(type, spot, strike) {
  *   'european-locked' in the money, but European style: exercise exists only
  *                     at expiry, so before then selling is the only exit
  *   'sell'            in the money, American, meaningful time value left —
- *                     exercising would forfeit it
+ *                     exercising forfeits it, a sale does not
  *   'exercise-ok'     in the money, American, time value ≈ 0 or negative —
- *                     selling and exercising come out about level
+ *                     the two routes land in the same place before costs
  */
-export function exerciseAdvice({ type, style, direction, spot, strike, fair }) {
+export function exerciseComparison({ type, style, direction, spot, strike, fair }) {
   const intrinsic = intrinsicValue(type, spot, strike);
   const timeValue = fair - intrinsic;
   if (direction === 'short') return { state: 'short', intrinsic, timeValue };
