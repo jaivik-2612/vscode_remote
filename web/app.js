@@ -2016,6 +2016,12 @@ for (const tab of document.querySelectorAll('.view-tab')) {
   tab.addEventListener('click', () => setView(tab.dataset.view));
 }
 
+/* The education notice greets every open — deliberately unconditional, no
+   remembered dismissal — and holds focus until acknowledged. */
+const noticeDialog = $('notice-dialog');
+$('notice-accept').addEventListener('click', () => noticeDialog.close());
+if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
+
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
 setView('simple');
 if (IS_ARTIFACT) renderFetchPanel(null);

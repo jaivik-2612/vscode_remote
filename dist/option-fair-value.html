@@ -1162,6 +1162,60 @@ select:focus { outline: none; border-color: var(--accent); }
 .figure.is-positive { color: var(--positive); text-shadow: 0 0 14px rgba(76, 208, 125, .18); }
 .figure.is-negative { color: var(--negative); text-shadow: 0 0 14px rgba(255, 84, 73, .18); }
 
+
+/* ======================================================== notice dialog ==
+   The education-only placard, shown on every open before the cockpit is
+   used. A native <dialog> supplies the focus trap and semantics. */
+
+#notice-dialog {
+  margin: auto;
+  max-width: min(480px, calc(100vw - 40px));
+  padding: 0 18px 18px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 24px 70px rgba(0, 0, 0, .55);
+}
+
+#notice-dialog::backdrop {
+  background: rgba(4, 6, 9, .72);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+#notice-dialog .eyebrow {
+  display: block;
+  margin: 0 -18px 14px;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.notice-body {
+  margin: 0 0 16px;
+  font: 400 13.5px/1.65 var(--body);
+}
+
+.notice-body b { font-weight: 700; }
+
+.notice-button {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font: 700 12px/1 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  padding: 13px 14px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.notice-button:hover { background: var(--accent); color: var(--surface); }
+
 </style>
 
 
@@ -2106,6 +2160,21 @@ select:focus { outline: none; border-color: var(--accent); }
 
   </main>
 </div>
+
+<dialog id="notice-dialog" aria-labelledby="notice-title">
+  <p class="eyebrow" id="notice-title">Notice &middot; read before using</p>
+  <p class="notice-body">
+    <b>FairShare is for education only.</b> Nothing on this page is investment
+    advice, a recommendation, or a prediction of what will actually happen.
+    Every figure is a model estimate built from past prices, and past prices
+    do not determine future ones. Options can expire worthless, and written
+    options can lose more than they earn &mdash; never trade money you cannot
+    afford to lose.
+  </p>
+  <button id="notice-accept" type="button" class="notice-button" autofocus>
+    I understand &mdash; education only
+  </button>
+</dialog>
 
 <footer class="colophon">
   <p>
@@ -6690,6 +6759,12 @@ function setView(view) {
 for (const tab of document.querySelectorAll('.view-tab')) {
   tab.addEventListener('click', () => setView(tab.dataset.view));
 }
+
+/* The education notice greets every open — deliberately unconditional, no
+   remembered dismissal — and holds focus until acknowledged. */
+const noticeDialog = $('notice-dialog');
+$('notice-accept').addEventListener('click', () => noticeDialog.close());
+if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
 
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
 setView('simple');
