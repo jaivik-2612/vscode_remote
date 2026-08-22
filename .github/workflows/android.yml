@@ -14,17 +14,29 @@ on:
       - 'package-lock.json'
       - '.github/workflows/android.yml'
   workflow_dispatch:
+    inputs:
+      versionName:
+        description: 'Version name shown to users (e.g. 1.0.0)'
+        required: false
+        default: ''
+      versionCode:
+        description: 'Play versionCode — must be higher than any previously uploaded build'
+        required: false
+        default: ''
 
 jobs:
   android:
     runs-on: ubuntu-latest
-    # Secrets land in env so steps can condition on their presence; a fork or
-    # a repo without signing configured still gets the debug APK.
     env:
       KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      # Play refuses a versionCode it has already seen. run_number only ever
+      # increases, so every build is uploadable; workflow_dispatch can force a
+      # specific value when a run has to be redone.
+      VERSION_CODE: ${{ inputs.versionCode || github.run_number }}
+      VERSION_NAME: ${{ inputs.versionName || '1.0.0' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -53,7 +65,10 @@ jobs:
 
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon
+        run: >
+          ./gradlew assembleDebug --no-daemon
+          -PfairshareVersionCode=$VERSION_CODE
+          -PfairshareVersionName=$VERSION_NAME
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -62,32 +77,87 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
 
-      # ---- Release AAB: only when the four ANDROID_* signing secrets exist.
-      # Generate a keystore once (keep it forever — it is the app's identity):
-      #   keytool -genkeypair -v -keystore fairshare.jks -alias fairshare \
-      #     -keyalg RSA -keysize 4096 -validity 10000
-      #   base64 -w0 fairshare.jks   ->  ANDROID_KEYSTORE_BASE64
-      - name: Build release AAB
-        if: env.KEYSTORE_BASE64 != ''
-        working-directory: android
-        run: ./gradlew bundleRelease --no-daemon
-
-      - name: Sign release AAB
-        if: env.KEYSTORE_BASE64 != ''
+      # ---- Release bundle -------------------------------------------------
+      # The release path runs on EVERY build. Without the signing secrets it
+      # uses a throwaway key generated here and discards the result, so the
+      # bundle-and-sign chain is continuously proven rather than being tried
+      # for the first time on the day it matters. With the secrets present the
+      # same steps sign with the real key and upload the result.
+      - name: Prepare the signing key
+        id: signing
         run: |
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
-          jarsigner -keystore /tmp/keystore.jks \
-            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
-            -sigalg SHA256withRSA -digestalg SHA-256 \
-            android/app/build/outputs/bundle/release/app-release.aab \
-            "$KEY_ALIAS"
-          jarsigner -verify android/app/build/outputs/bundle/release/app-release.aab
-          rm -f /tmp/keystore.jks
+          set -euo pipefail
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            # tr -d drops any newline the base64 secret picked up in transit;
+            # certutil on Windows wraps its output at 64 columns.
+            printf '%s' "$KEYSTORE_BASE64" | tr -d '\n\r ' | base64 -d > "$RUNNER_TEMP/signing.jks"
+            echo "real=true" >> "$GITHUB_OUTPUT"
+            echo "Signing with the configured release key."
+          else
+            THROWAWAY="$(openssl rand -hex 24)"
+            echo "::add-mask::$THROWAWAY"
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/signing.jks" \
+              -alias throwaway -keyalg RSA -keysize 4096 -validity 30 \
+              -storepass "$THROWAWAY" -keypass "$THROWAWAY" \
+              -dname "CN=FairShare CI throwaway, OU=CI, O=FairShare, C=US" \
+              > /dev/null 2>&1
+            {
+              echo "KEYSTORE_PASSWORD=$THROWAWAY"
+              echo "KEY_PASSWORD=$THROWAWAY"
+              echo "KEY_ALIAS=throwaway"
+            } >> "$GITHUB_ENV"
+            echo "real=false" >> "$GITHUB_OUTPUT"
+            echo "No ANDROID_KEYSTORE_BASE64 secret: exercising the release" \
+                 "path with a throwaway key. The bundle will NOT be uploaded."
+          fi
+
+      - name: Build release AAB
+        working-directory: android
+        env:
+          FAIRSHARE_KEYSTORE: ${{ runner.temp }}/signing.jks
+          FAIRSHARE_KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
+          FAIRSHARE_KEY_ALIAS: ${{ env.KEY_ALIAS }}
+          FAIRSHARE_KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+        run: >
+          ./gradlew bundleRelease --no-daemon
+          -PfairshareVersionCode=$VERSION_CODE
+          -PfairshareVersionName=$VERSION_NAME
+
+      - name: Verify the bundle is genuinely signed
+        run: |
+          set -euo pipefail
+          AAB=android/app/build/outputs/bundle/release/app-release.aab
+          test -f "$AAB" || { echo "::error::no bundle at $AAB"; exit 1; }
+
+          # `jarsigner -verify` alone exits 0 on an UNSIGNED jar, so the
+          # signature block has to be checked directly. -strict is not usable
+          # here: Android signing keys are self-signed by design, which -strict
+          # treats as an error.
+          if ! unzip -l "$AAB" | grep -qE 'META-INF/.*\.(RSA|DSA|EC)$'; then
+            echo "::error::bundle carries no signature block — it is unsigned"
+            exit 1
+          fi
+          jarsigner -verify "$AAB" | tee /tmp/verify.txt
+          grep -q 'jar verified' /tmp/verify.txt || {
+            echo "::error::jarsigner did not report the bundle as verified"; exit 1; }
+
+          echo "Signed bundle: $(du -h "$AAB" | cut -f1), versionCode $VERSION_CODE"
+
+      - name: Discard the throwaway-signed bundle
+        if: steps.signing.outputs.real != 'true'
+        run: |
+          rm -f android/app/build/outputs/bundle/release/app-release.aab
+          echo "Release path verified end to end. Add the four ANDROID_* secrets" \
+               "to have this run upload a Play-ready bundle."
 
       - name: Upload release AAB
-        if: env.KEYSTORE_BASE64 != ''
+        if: steps.signing.outputs.real == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: fairshare-release-aab
+          name: fairshare-release-aab-v${{ env.VERSION_CODE }}
           path: android/app/build/outputs/bundle/release/app-release.aab
-          retention-days: 30
+          retention-days: 90
+
+      - name: Remove the decoded keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/signing.jks"

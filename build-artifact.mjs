@@ -176,6 +176,88 @@ ${page.slice(split)}
   console.log(`dist/app/index.html — ${(full.length / 1024).toFixed(1)} KB (Capacitor webDir)`);
 }
 
+/**
+ * Renders docs/store/PRIVACY.md as a standalone page for dist/pwa/.
+ *
+ * Both app stores demand a privacy policy at a live public URL, and Pages
+ * already serves this directory — so the Markdown in the repo stays the one
+ * source of truth and the hosted page can never drift from it. The
+ * converter handles only what that document uses (setext-free ATX headings,
+ * paragraphs, bold, italic, links); anything richer belongs in a real
+ * Markdown library, and this deliberately fails loud rather than guessing.
+ */
+async function privacyPage() {
+  const md = await readFile('docs/store/PRIVACY.md', 'utf8');
+  const escape = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = (s) => escape(s)
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*_])_([^_]+)_/g, '$1<em>$2</em>');
+
+  const body = [];
+  for (const block of md.split(/\n{2,}/)) {
+    const text = block.trim();
+    if (!text) continue;
+    const heading = text.match(/^(#{1,6})\s+(.*)$/s);
+    if (heading) {
+      const level = heading[1].length;
+      body.push(`<h${level}>${inline(heading[2].trim())}</h${level}>`);
+    } else {
+      body.push(`<p>${inline(text.replace(/\s*\n\s*/g, ' '))}</p>`);
+    }
+  }
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>FairShare — Privacy Policy</title>
+<style>
+:root {
+  --ground: #f6f7f8; --ink: #191f26; --muted: #5d6771;
+  --line: #c7ccd2; --accent: #9a6a08;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --ground: #0a0e12; --ink: #e7ebef; --muted: #97a1ab;
+          --line: #29323c; --accent: #ffb52e; }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 40px 20px 72px;
+  background: var(--ground); color: var(--ink);
+  font: 400 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 680px; margin: 0 auto; }
+h1 {
+  font: 700 13px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  letter-spacing: .18em; text-transform: uppercase; color: var(--accent);
+  margin: 0 0 6px; padding-bottom: 14px; border-bottom: 1px solid var(--line);
+}
+h2 {
+  font: 600 19px/1.3 inherit; margin: 34px 0 10px;
+}
+p { margin: 0 0 14px; }
+em { color: var(--muted); font-style: normal;
+     font: 400 13px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+a { color: var(--accent); }
+footer {
+  margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
+  font-size: 14px; color: var(--muted);
+}
+</style>
+</head>
+<body>
+<main>
+${body.join('\n')}
+<footer><a href="./">&larr; Back to FairShare</a></footer>
+</main>
+</body>
+</html>
+`;
+}
+
 // --pwa emits an installable web app under dist/pwa/: the standalone
 // document plus manifest, icons and a precaching service worker whose cache
 // name carries this build's content hash.
@@ -219,5 +301,6 @@ ${registration}
   for (const asset of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png']) {
     await copyFile(`web/pwa/${asset}`, `dist/pwa/${asset}`);
   }
+  await writeFile('dist/pwa/privacy.html', await privacyPage());
   console.log(`dist/pwa/ — installable build, cache fairshare-${version}`);
 }

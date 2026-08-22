@@ -1,14 +1,26 @@
 apply plugin: 'com.android.application'
 
+// Play rejects any upload whose versionCode it has seen before, so CI passes
+// a fresh one (-PfairshareVersionCode=N). The defaults keep a bare
+// `./gradlew assembleDebug` working on a developer machine.
+def buildVersionCode = (project.findProperty('fairshareVersionCode') ?: '1') as Integer
+def buildVersionName = project.findProperty('fairshareVersionName') ?: '1.0'
+
+// Release signing comes from the environment, never from a file in the repo.
+// Absent a keystore the release build is simply left unsigned rather than
+// failing, so forks and local `bundleRelease` runs still work.
+def keystorePath = System.getenv('FAIRSHARE_KEYSTORE')
+def hasKeystore = keystorePath != null && !keystorePath.isEmpty() && file(keystorePath).exists()
+
 android {
-    namespace = "com.fairshare.app"
+    namespace = "io.github.jaivik2612.fairshare"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.fairshare.app"
+        applicationId "io.github.jaivik2612.fairshare"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode buildVersionCode
+        versionName buildVersionName
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +28,24 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasKeystore) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('FAIRSHARE_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('FAIRSHARE_KEY_ALIAS')
+                keyPassword System.getenv('FAIRSHARE_KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
+            // Left off deliberately: the Java surface here is one activity
+            // over Capacitor's bridge, so R8 saves almost nothing while
+            // adding a way for the bridge to break in release only.
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
