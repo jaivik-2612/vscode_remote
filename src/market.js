@@ -18,7 +18,7 @@ import { parsePrices } from './series.js';
  * the selector group the UI filters by. Currency is the trading currency of
  * the listing — note London equities quote in pence (GBX), not pounds.
  */
-const EXCHANGES = {
+export const EXCHANGES = {
   // North America
   Q:  { name: 'NASDAQ', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NASDAQ' },
   N:  { name: 'NYSE', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NYSE' },
@@ -86,9 +86,12 @@ export function stooqSymbol(symbol, exchangeCode) {
  * which one is meant. IEX listings get no prefix — Google resolves the few
  * of them from the bare symbol.
  */
-export function googleFinanceSymbol(symbol, exchangeCode) {
+export function googleFinanceSymbol(symbol, exchangeCode, aux = null) {
   const prefix = exchangeInfo(exchangeCode).googlePrefix;
-  return prefix ? `${prefix}:${symbol}` : symbol;
+  // BSE is addressed by numeric scrip code on Google Finance (BOM:500002)
+  // while people search the alpha id; aux carries the numeric twin.
+  const body = exchangeCode === 'BO' && aux ? aux : symbol;
+  return prefix ? `${prefix}:${body}` : body;
 }
 
 /**
@@ -96,8 +99,8 @@ export function googleFinanceSymbol(symbol, exchangeCode) {
  * Paste it into any Google Sheet cell; the sheet fills two columns (Date,
  * Close) that paste straight back into this app.
  */
-export function googleFinanceFormula(symbol, exchangeCode, days = 730) {
-  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode)}", ` +
+export function googleFinanceFormula(symbol, exchangeCode, days = 730, aux = null) {
+  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode, aux)}", ` +
     `"close", TODAY()-${days}, TODAY(), "DAILY")`;
 }
 
@@ -124,7 +127,7 @@ export function searchTickers(tickers, query, limit = 8, market = null) {
   const qLower = query.trim().toLowerCase();
 
   const scored = [];
-  for (const [symbol, name, exchange, isEtf] of tickers) {
+  for (const [symbol, name, exchange, isEtf, aux] of tickers) {
     if (market && exchangeInfo(exchange).market !== market) continue;
     let score;
     const symbolUpper = symbol.toUpperCase();
@@ -143,7 +146,7 @@ export function searchTickers(tickers, query, limit = 8, market = null) {
       else if (at > 0) score = 5;
       else continue;
     }
-    scored.push({ symbol, name, exchange, isEtf: Boolean(isEtf), score });
+    scored.push({ symbol, name, exchange, isEtf: Boolean(isEtf), aux: aux ?? null, score });
   }
 
   scored.sort((a, b) =>

@@ -417,7 +417,7 @@ async function loadReferenceData() {
       reference.rates = rates;
     }
     status.textContent =
-      `${count(reference.tickers.tickers.length)} US & Canadian listings · ` +
+      `${count(reference.tickers.tickers.length)} listings across ${market.MARKETS.length} markets · ` +
       `directory as of ${reference.tickers.asOf}`;
   } catch (error) {
     status.textContent = `Symbol directory unavailable (${error.message}) — paste prices below instead.`;
@@ -520,7 +520,11 @@ tickerInput.addEventListener('blur', () => closeListbox());
  * not fire input events, so listening for real input is enough.
  */
 const dirty = { rate: false, strike: false };
-ensembleForm.elements.rate.addEventListener('input', () => { dirty.rate = true; });
+ensembleForm.elements.rate.addEventListener('input', () => {
+  dirty.rate = true;
+  // The hand-entered rate answers the "enter it yourself" warning.
+  $('manual-rate-note').hidden = true;
+});
 ensembleForm.elements.strike.addEventListener('input', () => { dirty.strike = true; });
 
 /* Strike rocker: step by the increment listed options actually use at this
@@ -553,9 +557,13 @@ async function chooseTicker(entry) {
   tickerInput.value = entry.symbol;
   closeListbox();
   applyCurveRate();
+  // The listing's currency labels the figures right away; a live fetch may
+  // refine it, but the manual-paste path has no later chance to set it.
+  activeCurrency = entry.currency ?? null;
 
   if (IS_ARTIFACT) {
     renderFetchPanel(entry);
+    if (ensembleForm.elements.prices.value.trim()) renderEnsemble();
     return;
   }
 
@@ -573,7 +581,7 @@ async function chooseTicker(entry) {
     if (!parsed || parsed.prices.length < 30) throw new Error('provider returned too little data');
     applyMarketData(parsed, entry, payload.provider);
     status.textContent =
-      `${count(reference.tickers.tickers.length)} US & Canadian listings · ` +
+      `${count(reference.tickers.tickers.length)} listings across ${market.MARKETS.length} markets · ` +
       `directory as of ${reference.tickers.asOf}`;
   } catch (error) {
     if (generation !== fetchGeneration) return;
@@ -687,14 +695,23 @@ function applyCurveRate() {
     : MARKET_DEFAULT_CURVE[marketSelect.value] ?? 'us';
   const curve = key ? reference.rates[key] : null;
 
+  const manualNote = $('manual-rate-note');
   if (!curve?.points?.length) {
     // No automated official curve for this market: never guess a rate —
-    // leave the field alone and say so.
+    // leave the field alone and say so. The rate field only exists in the
+    // advanced view, so the warning also has to show up under the ticker,
+    // where a simple-view user actually looks.
     $('rate-note').textContent =
       'No automated risk-free curve for this market — enter the local ' +
       'government-bond or T-bill rate for your horizon by hand.';
+    manualNote.textContent =
+      `No automated risk-free rate for this market — the maths currently uses ` +
+      `${Number(ensembleForm.elements.rate.value)}%. Switch to Advanced to enter ` +
+      `the local government-bond rate.`;
+    manualNote.hidden = false;
     return;
   }
+  manualNote.hidden = true;
 
   const rate = market.rateForHorizon(curve.points, days);
   if (rate === null) return;
@@ -743,7 +760,7 @@ function renderFetchPanel(entry) {
   // With no ticker chosen yet the instructions still teach the flow, using
   // an example formula; picking a ticker above swaps in the exact one.
   const formula = entry
-    ? market.googleFinanceFormula(entry.symbol, entry.exchange)
+    ? market.googleFinanceFormula(entry.symbol, entry.exchange, 730, entry.aux)
     : market.googleFinanceFormula('AAPL', 'Q');
   const steps = [];
 

@@ -8,9 +8,10 @@
  * untouched; the client parses it with the same parser that handles pasted
  * files, so there is exactly one parsing path to test.
  *
- * Providers, all official or first-party:
- *   US history  Nasdaq's historical quote API (Yahoo Finance chart as fallback)
- *   CA history  TMX Group's GraphQL time series (Yahoo Finance as fallback)
+ * Providers:
+ *   US history      Nasdaq's historical quote API (Yahoo Finance chart as fallback)
+ *   CA history      TMX Group's GraphQL time series (Yahoo Finance as fallback)
+ *   Other markets   Yahoo Finance chart, addressed by listing suffix (.L, .T, .SS…)
  *   Yield curves are served from data/rates.json (refresh with
  *   `npm run refresh-data`).
  *
@@ -21,6 +22,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { EXCHANGES, yahooSymbol } from './src/market.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8080;
@@ -110,8 +113,8 @@ function fetchYahooHistory(yahooSym) {
 async function handleHistory(query, response) {
   const symbol = (query.get('symbol') ?? '').trim().toUpperCase();
   const exchange = (query.get('exchange') ?? 'Q').trim().toUpperCase();
-  if (!/^[A-Z0-9.\-]{1,12}$/.test(symbol)) {
-    respondJson(response, 400, { ok: false, error: 'bad symbol' });
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(symbol) || !EXCHANGES[exchange]) {
+    respondJson(response, 400, { ok: false, error: 'bad symbol or exchange' });
     return;
   }
 
@@ -119,11 +122,16 @@ async function handleHistory(query, response) {
   const cached = cacheGet(cacheKey);
   if (cached) { respondJson(response, 200, cached); return; }
 
-  const canadian = exchange === 'T' || exchange === 'X';
-  const yahooSym = symbol.replace(/\./g, '-') + (exchange === 'T' ? '.TO' : exchange === 'X' ? '.V' : '');
-  const attempts = canadian
+  // US listings get Nasdaq's API first, Canadian ones TMX; everything else
+  // has no first-party history API reachable from here, so Yahoo (which the
+  // registry maps via listing suffixes like .L/.T/.SS) is the only attempt.
+  const yahooSym = yahooSymbol(symbol, exchange);
+  const country = EXCHANGES[exchange].country;
+  const attempts = country === 'CA'
     ? [() => fetchTmxHistory(symbol), () => fetchYahooHistory(yahooSym)]
-    : [() => fetchNasdaqHistory(symbol), () => fetchYahooHistory(yahooSym)];
+    : country === 'US'
+      ? [() => fetchNasdaqHistory(symbol), () => fetchYahooHistory(yahooSym)]
+      : [() => fetchYahooHistory(yahooSym)];
 
   const failures = [];
   for (const attempt of attempts) {

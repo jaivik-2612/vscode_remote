@@ -374,14 +374,31 @@ test('the curve interpolates linearly and clamps at both ends', () => {
 
 test('the bundled ticker directory is present and plausible', () => {
   const db = JSON.parse(readFileSync(new URL('../data/tickers.json', import.meta.url)));
-  assert.ok(db.tickers.length > 15000, `only ${db.tickers.length} tickers`);
+  assert.ok(db.tickers.length > 30000, `only ${db.tickers.length} tickers`);
   assert.ok(db.asOf >= '2026-01-01');
   assert.ok(!db.tickers.some(([s]) => s.includes('$')),
     'ACT preferred-share notation must be filtered out — nothing downstream accepts it');
-  const aapl = db.tickers.find(([s, , x]) => s === 'AAPL' && x === 'Q');
-  const ry = db.tickers.find(([s, , x]) => s === 'RY' && x === 'T');
-  assert.ok(aapl && /apple/i.test(aapl[1]));
-  assert.ok(ry && /royal bank/i.test(ry[1]));
+  // One flagship per market, so a partial refresh that drops a region fails loudly.
+  const expect = [
+    ['AAPL', 'Q', /apple/i], ['RY', 'T', /royal bank/i],
+    ['HSBA', 'LN', /hsbc/i], ['AIR', 'PA', /airbus/i], ['ASML', 'AS', /asml/i],
+    ['SAP', 'DE', /sap/i], ['NESN', 'SW', /nestle/i],
+    ['7203', 'JP', /toyota/i], ['600519', 'SS', /moutai/i],
+    ['000001', 'SZ', /ping an/i], ['RELIANCE', 'BO', /reliance/i],
+  ];
+  for (const [sym, exch, name] of expect) {
+    const row = db.tickers.find(([s, , x]) => s === sym && x === exch);
+    assert.ok(row, `${sym} on ${exch} missing from the directory`);
+    assert.ok(name.test(row[1]), `${sym}/${exch} name "${row[1]}" doesn't look right`);
+  }
+  // Every exchange code in the data must exist in the registry.
+  for (const [, , x] of db.tickers) {
+    assert.ok(exchangeInfo(x), `unknown exchange code ${x} in tickers.json`);
+  }
+  // BSE rows carry the numeric scrip code as aux, and it feeds the BOM: formula.
+  const abb = db.tickers.find(([s, , x]) => s === 'ABB' && x === 'BO');
+  assert.ok(abb && /^\d+$/.test(abb[4]), 'BSE rows need a numeric scrip-code aux');
+  assert.equal(googleFinanceSymbol('ABB', 'BO', abb[4]), `BOM:${abb[4]}`);
   // No duplicate symbol+exchange pairs.
   const keys = new Set(db.tickers.map(([s, , x]) => `${s}|${x}`));
   assert.equal(keys.size, db.tickers.length);
@@ -389,16 +406,24 @@ test('the bundled ticker directory is present and plausible', () => {
 
 test('the bundled yield curves are current-ish, ordered and sane', () => {
   const rates = JSON.parse(readFileSync(new URL('../data/rates.json', import.meta.url)));
-  for (const country of ['us', 'ca']) {
+  const daily = ['us', 'ca', 'eu', 'gb', 'jp'];   // published every business day
+  const monthly = ['ch'];                          // SNB publishes with a lag
+  const manual = ['cn', 'in'];                     // no automatable source: app asks for a rate
+  for (const country of [...daily, ...monthly]) {
     const { points, asOf } = rates[country];
-    assert.ok(points.length >= 8, `${country}: only ${points.length} tenors`);
-    assert.ok(asOf >= '2026-01-01', `${country} curve as of ${asOf}`);
+    assert.ok(points.length >= 4, `${country}: only ${points.length} tenors`);
+    if (daily.includes(country)) assert.ok(asOf >= '2026-01-01', `${country} curve as of ${asOf}`);
     for (let i = 1; i < points.length; i++) {
       assert.ok(points[i].days > points[i - 1].days, `${country}: tenors out of order`);
     }
     for (const point of points) {
-      assert.ok(point.rate > 0 && point.rate < 0.2,
+      assert.ok(point.rate > -0.02 && point.rate < 0.2,
         `${country} ${point.label}: ${point.rate} is not a believable risk-free rate`);
     }
+  }
+  for (const country of manual) {
+    assert.ok(rates[country], `${country} entry missing`);
+    assert.equal(rates[country].points.length, 0, `${country} should have no automated curve`);
+    assert.ok(rates[country].source, `${country} must explain why there is no curve`);
   }
 });
