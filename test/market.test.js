@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   searchTickers, parseMarketData, repairSplits, rateForHorizon,
   exchangeInfo, yahooSymbol, stooqSymbol,
-  googleFinanceSymbol, googleFinanceFormula,
+  googleFinanceSymbol, googleFinanceFormula, curveKeyFor, MARKETS,
 } from '../src/market.js';
 
 /* ---------------------------------------------------------------- search */
@@ -75,6 +75,59 @@ test('search decorates hits with exchange metadata', () => {
 test('search honours the limit and an empty query returns nothing', () => {
   assert.equal(searchTickers(DIRECTORY, 'a', 3).length, 3);
   assert.deepEqual(searchTickers(DIRECTORY, '   '), []);
+});
+
+test('the market filter scopes search to one symbol space', () => {
+  const global = [
+    ['HSBA', 'HSBC Holdings plc', 'LN', 0],
+    ['7203', 'Toyota Motor Corporation', 'JP', 0],
+    ['600519', 'Kweichow Moutai Co., Ltd.', 'SS', 0],
+    ['RELIANCE', 'Reliance Industries Limited', 'NS', 0],
+    ['AAPL', 'Apple Inc. - Common Stock', 'Q', 0],
+    ['AIR', 'Airbus SE', 'PA', 0],
+    ['AIR', 'AAR Corp.', 'N', 0],
+  ];
+  // Same query, different markets, no collisions.
+  assert.equal(searchTickers(global, 'AIR', 8, 'eu')[0].exchangeName, 'Euronext Paris');
+  assert.equal(searchTickers(global, 'AIR', 8, 'na')[0].exchangeName, 'NYSE');
+  assert.equal(searchTickers(global, 'toyota', 8, 'jp')[0].symbol, '7203');
+  assert.deepEqual(searchTickers(global, 'toyota', 8, 'na'), []);
+  assert.equal(searchTickers(global, 'RELIANCE', 8, 'in')[0].currency, 'INR');
+  // Unscoped search still sees everything.
+  assert.equal(searchTickers(global, 'AIR', 8).length >= 2, true);
+});
+
+test('global exchanges carry the right currencies and provider symbols', () => {
+  assert.equal(exchangeInfo('LN').currency, 'GBX', 'London quotes in pence');
+  assert.equal(exchangeInfo('JP').currency, 'JPY');
+  assert.equal(exchangeInfo('SS').currency, 'CNY');
+  assert.equal(exchangeInfo('NS').currency, 'INR');
+  assert.equal(yahooSymbol('HSBA', 'LN'), 'HSBA.L');
+  assert.equal(yahooSymbol('BT.A', 'LN'), 'BT-A.L');
+  assert.equal(yahooSymbol('7203', 'JP'), '7203.T');
+  assert.equal(yahooSymbol('600519', 'SS'), '600519.SS');
+  assert.equal(yahooSymbol('RELIANCE', 'NS'), 'RELIANCE.NS');
+  assert.equal(googleFinanceSymbol('HSBA', 'LN'), 'LON:HSBA');
+  assert.equal(googleFinanceSymbol('7203', 'JP'), 'TYO:7203');
+  assert.equal(googleFinanceSymbol('600519', 'SS'), 'SHA:600519');
+  assert.equal(googleFinanceSymbol('RELIANCE', 'NS'), 'NSE:RELIANCE');
+  assert.equal(stooqSymbol('HSBA', 'LN'), null, 'Stooq path stays US-only');
+});
+
+test('every exchange maps to a curve key and a selector market', () => {
+  const marketKeys = new Set(MARKETS.map((m) => m.key));
+  for (const code of ['Q','N','A','P','Z','V','T','X','LN','PA','AS','BR','LI','MI','IR','OL','DE','SW','JP','SS','SZ','NS','BO']) {
+    assert.ok(marketKeys.has(exchangeInfo(code).market), `${code} missing market`);
+  }
+  assert.equal(curveKeyFor('LN'), 'gb');
+  assert.equal(curveKeyFor('PA'), 'eu');
+  assert.equal(curveKeyFor('DE'), 'eu');
+  assert.equal(curveKeyFor('SW'), 'ch');
+  assert.equal(curveKeyFor('JP'), 'jp');
+  assert.equal(curveKeyFor('SS'), 'cn');
+  assert.equal(curveKeyFor('NS'), 'in');
+  assert.equal(curveKeyFor('T'), 'ca');
+  assert.equal(curveKeyFor('OL'), null, 'no NOK curve: manual entry is honest');
 });
 
 test('symbol translation for external providers', () => {

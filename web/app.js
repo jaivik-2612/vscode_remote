@@ -471,11 +471,25 @@ function renderListbox() {
   else tickerInput.removeAttribute('aria-activedescendant');
 }
 
+const marketSelect = $('market');
+
 tickerInput.addEventListener('input', () => {
   if (!reference.tickers) return;
-  hits = market.searchTickers(reference.tickers.tickers, tickerInput.value, 8);
+  hits = market.searchTickers(reference.tickers.tickers, tickerInput.value, 8, marketSelect.value);
   activeHit = hits.length ? 0 : -1;
   renderListbox();
+});
+
+marketSelect.addEventListener('change', () => {
+  // A new market means a new symbol space: drop the stale popup and let the
+  // rate note follow the market's own curve.
+  closeListbox();
+  if (tickerInput.value.trim() && reference.tickers) {
+    hits = market.searchTickers(reference.tickers.tickers, tickerInput.value, 8, marketSelect.value);
+    activeHit = hits.length ? 0 : -1;
+    renderListbox();
+  }
+  applyCurveRate();
 });
 
 tickerInput.addEventListener('keydown', (event) => {
@@ -571,9 +585,12 @@ async function chooseTicker(entry) {
 }
 
 /** Fill the history box and dependent fields from a parsed data set. */
+let activeCurrency = null;
+
 function applyMarketData(parsed, entry, provider) {
   const prices = parsed.prices;
   const spot = prices[prices.length - 1];
+  activeCurrency = parsed.currency ?? entry?.currency ?? null;
 
   ensembleForm.elements.prices.value =
     prices.map((p) => (p >= 1000 ? p.toFixed(0) : p.toPrecision(6))).join('\n');
@@ -649,19 +666,41 @@ function renderSymbolHeader(parsed, entry, spot) {
   $('symbol-header').hidden = false;
 }
 
-/** Interpolate the bundled yield curve at the current horizon. */
+/** What each curve is called when the rate note cites it. */
+const CURVE_SOURCES = {
+  us: 'U.S. Treasury', ca: 'Bank of Canada', eu: 'euro-area (ECB)',
+  gb: 'UK gilt', jp: 'Japan JGB', ch: 'Swiss Confederation',
+  cn: 'China CGB', in: 'India G-sec',
+};
+
+/** The market selector's fallback curve when no ticker is chosen yet. */
+const MARKET_DEFAULT_CURVE = { na: 'us', eu: 'eu', jp: 'jp', cn: 'cn', in: 'in' };
+
+/** Interpolate the bundled yield curve for the active market's currency. */
 function applyCurveRate() {
   if (dirty.rate || !reference.rates) return;
   const days = Number(ensembleForm.elements.days.value);
   if (!(days > 0)) return;
-  const country = selectedTicker?.country === 'CA' ? 'ca' : 'us';
-  const curve = reference.rates[country];
+
+  const key = selectedTicker
+    ? market.curveKeyFor(selectedTicker.exchange)
+    : MARKET_DEFAULT_CURVE[marketSelect.value] ?? 'us';
+  const curve = key ? reference.rates[key] : null;
+
+  if (!curve?.points?.length) {
+    // No automated official curve for this market: never guess a rate —
+    // leave the field alone and say so.
+    $('rate-note').textContent =
+      'No automated risk-free curve for this market — enter the local ' +
+      'government-bond or T-bill rate for your horizon by hand.';
+    return;
+  }
+
   const rate = market.rateForHorizon(curve.points, days);
   if (rate === null) return;
   ensembleForm.elements.rate.value = (rate * 100).toFixed(2);
   $('rate-note').textContent =
-    `${(rate * 100).toFixed(2)}% from the ` +
-    `${country === 'ca' ? 'Bank of Canada' : 'U.S. Treasury'} curve ` +
+    `${(rate * 100).toFixed(2)}% from the ${CURVE_SOURCES[key] ?? key} curve ` +
     `(as of ${curve.asOf}), interpolated at ${days} days. Edit to override.`;
 }
 
@@ -1021,8 +1060,11 @@ function renderSimpleReadout(result, form, prices) {
     ? `Fair premium · ${symbol} ${money(form.strike, 0)} ${form.type}`
     : `Fair premium · ${money(form.strike, 0)} ${form.type}`;
   $('s-dial-exp').textContent = `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
+  // London lists in pence; saying so beats a silently confusing GBX number.
+  const cur = activeCurrency === 'GBX' ? 'GBX (pence)' : activeCurrency;
   $('s-fair').textContent = money(consensus.value, 2);
-  $('s-fair-unit').textContent = isShort ? "/ share, you'd collect" : "/ share, you'd pay";
+  $('s-fair-unit').textContent =
+    `${cur ? cur + ' ' : ''}/ share, you'd ${isShort ? 'collect' : 'pay'}`;
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
