@@ -260,6 +260,20 @@ test('an American option is never worth less than its European twin', () => {
   assert.ok(american.exercisedEarly > 0, 'a deep ITM American put should exercise early');
 });
 
+test('probAboveSpot reflects the drift the paths were given', () => {
+  const simulation = simulatePaths({
+    spot: 100, years: 1, rate: 0.05, yield: 0, vol: 0.2, steps: 40, paths: 20000,
+    seed: 9, measure: 'real-world', drift: 0.15,
+  });
+  const d = terminalDistribution(simulation, { strike: 120, spot: 100 });
+  assert.ok(d.probAboveSpot > 0.5, `strong positive drift, got ${d.probAboveSpot}`);
+  assert.ok(d.probAboveSpot > d.probAboveStrike,
+    'clearing today must be likelier than clearing a higher strike');
+  // omit spot -> the field stays null, as documented
+  const without = terminalDistribution(simulation, { strike: 120 });
+  assert.equal(without.probAboveSpot, null);
+});
+
 test('terminal quantiles are ordered and the histogram is a distribution', () => {
   const simulation = simulatePaths({
     spot: 50, years: 0.5, rate: 0.03, yield: 0, vol: 0.4, steps: 40, paths: 20000, seed: 23,

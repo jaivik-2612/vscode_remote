@@ -498,7 +498,7 @@
       <fieldset>
         <legend>Contract controls</legend>
         <div class="fields">
-          <label>Strike price
+          <label data-option-only>Strike price
             <span class="stepper">
               <button type="button" class="step-button" id="strike-down" aria-label="Lower the strike">&minus;</button>
               <input name="strike" type="number" step="any" value="90" required>
@@ -508,15 +508,20 @@
           <label data-simple>Expiry date<input id="expiry-date" type="date"></label>
           <label data-advanced>Days to expiry<input name="days" type="number" step="any" value="90" required></label>
         </div>
-        <p class="field-note" data-simple>The strike is the locked-in price the option
-          lets you trade at. It is set to roughly today&rsquo;s price &mdash; change it freely.</p>
-        <div class="segments" role="group" aria-label="Option type">
+        <p class="field-note" data-simple data-option-only>The strike is the locked-in
+          price the option lets you trade at. It is set to roughly today&rsquo;s
+          price &mdash; change it freely.</p>
+        <div class="segments segments-4" role="group" aria-label="Position">
           <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
           <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
+          <label class="segment"><input type="radio" name="type" value="long"><span>Long</span></label>
+          <label class="segment"><input type="radio" name="type" value="short"><span>Short</span></label>
         </div>
         <p class="field-note" data-simple>A <b>call</b> is the right to <b>buy</b> at the
-          strike (worth more if the stock rises). A <b>put</b> is the right to
-          <b>sell</b> (worth more if it falls).</p>
+          strike (worth more if the stock rises); a <b>put</b> the right to
+          <b>sell</b> (worth more if it falls). <b>Long</b> just owns the shares;
+          <b>short</b> borrows and sells them, profiting if the price falls &mdash;
+          with losses unlimited if it rises instead.</p>
         <div class="segments" data-advanced role="group" aria-label="Exercise style">
           <label class="segment"><input type="radio" name="style" value="european"><span>European</span></label>
           <label class="segment"><input type="radio" name="style" value="american" checked><span>American</span></label>
@@ -681,11 +686,16 @@
               </dl>
             </div>
           </div>
-          <div class="model-lamps">
+          <div class="model-lamps" data-option-only>
             <span class="lamp"><i></i>Black-Scholes</span>
             <span class="lamp"><i></i>Monte Carlo</span>
             <span class="lamp"><i></i>Baum-Welch</span>
             <span class="lamp lamp-agree">agree <span id="s-agree">&mdash;</span></span>
+          </div>
+          <div class="model-lamps" data-stock-only>
+            <span class="lamp"><i></i>Baum-Welch regimes</span>
+            <span class="lamp"><i></i>Monte Carlo simulation</span>
+            <span class="lamp lamp-agree">ignores dividends &amp; borrow costs</span>
           </div>
         </section>
 
@@ -699,7 +709,7 @@
             <p class="instrument-caption" id="s-chance-label">&mdash;</p>
           </section>
 
-          <section class="block">
+          <section class="block" data-option-only>
             <div class="panel-title-row">
               <h2 class="eyebrow">Strike ladder</h2>
               <span class="eyebrow">tap a rung to set</span>
@@ -736,6 +746,10 @@
             <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
               of simulated futures built from the same two years &mdash; the range around
               it is where 9 out of 10 of those simulations landed.</li>
+            <li data-stock-only><b>Shorting is not the mirror of buying.</b> A long
+              position can lose at most what you paid; a short position&rsquo;s loss
+              grows without limit as the price rises. The figures here ignore
+              dividends and stock-borrow costs.</li>
             <li>Everything here assumes the future rhymes with the recent past.
               Real markets are under no such obligation.</li>
           </ul>
@@ -750,7 +764,7 @@
         </p>
       </div>
 
-      <div class="headline-pair" data-advanced>
+      <div class="headline-pair" data-advanced data-option-only>
         <div class="headline">
           <div class="headline-figure">
             <span class="eyebrow">Fair value, three models agreed</span>
@@ -776,7 +790,7 @@
         </div>
       </div>
 
-      <figure class="block" data-advanced>
+      <figure class="block" data-advanced data-option-only>
         <h2 class="eyebrow">Where each model lands</h2>
         <div id="ens-dotplot"></div>
         <figcaption class="chart-note" id="ens-dotplot-note">&mdash;</figcaption>
@@ -830,7 +844,7 @@
         </section>
       </div>
 
-      <section class="block" data-advanced>
+      <section class="block" data-advanced data-option-only>
         <h2 class="eyebrow">Sensitivities at the regime volatility</h2>
         <div class="greeks" id="ens-greeks"></div>
       </section>

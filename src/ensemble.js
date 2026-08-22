@@ -138,7 +138,7 @@ export function ensembleValuation(input) {
   const realWorldPaths = simulatePaths({
     ...shared, measure: 'real-world', drift: drift.logDrift, seed: seed + 2,
   });
-  const outlook = terminalDistribution(realWorldPaths, { strike });
+  const outlook = terminalDistribution(realWorldPaths, { strike, spot });
 
   /* ---------------- 6. reconcile ---------------- */
 

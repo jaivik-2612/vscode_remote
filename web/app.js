@@ -855,6 +855,13 @@ function renderEnsemble() {
   errorBox.hidden = true;
 
   const f = readForm(ensembleForm);
+  // Long/short are stock positions: the regime fit and the outlook are
+  // exactly what they need, the option-pricing half goes unused. The engine
+  // still wants a valid option type, so hand it a call.
+  const stockMode = f.type === 'long' || f.type === 'short';
+  panel.classList.toggle('is-stock', stockMode);
+  document.querySelector('.rail')?.classList.toggle('is-stock', stockMode);
+
   // The multi-format parser accepts a pasted CSV or provider JSON straight
   // into the history box, not just bare numbers.
   const parsed = market.parseMarketData(f.prices);
@@ -873,7 +880,7 @@ function renderEnsemble() {
       days: f.days,
       rate: f.rate / 100,
       yield: f.yield / 100,
-      type: f.type,
+      type: stockMode ? 'call' : f.type,
       style: f.style,
       states: Number(f.states),
       paths: Number(f.paths),
@@ -980,19 +987,64 @@ function renderSimpleReadout(result, form, prices) {
   const { consensus, outlook } = result;
   const symbol = selectedTicker?.symbol ?? 'the stock';
   const expiry = currentExpiry(result);
+  const stockMode = form.type === 'long' || form.type === 'short';
+  const figure = $('s-fair');
 
+  $('s-dial-exp').textContent = stockMode
+    ? `to ${fmtDate(expiry)} · ${count(result.days)}d`
+    : `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
+  $('s-prob-date').textContent = fmtDate(expiry);
+  $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
+  $('s-band').textContent =
+    `9 of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
+  $('s-tape-note').textContent =
+    `${count(prices.length)} closes · last ${money(result.spot)}`;
+  renderTape(prices);
+
+  if (stockMode) {
+    // A share has no model price — its fair price is the market's. What the
+    // simulation CAN say is where the position's profit lands: the dial
+    // becomes a P/L gauge over the 9-in-10 band, the donut the chance of
+    // any profit at all.
+    const sign = form.type === 'short' ? -1 : 1;
+    const pl = (price) => sign * (price - result.spot);
+    const [worst, best] = [pl(outlook.p5), pl(outlook.p95)].sort((a, b) => a - b);
+    const median = pl(outlook.median);
+
+    $('s-dial-title').textContent =
+      `${form.type === 'short' ? 'Short' : 'Long'} ${symbol} · profit or loss per share`;
+    figure.textContent = signed(median, 2);
+    figure.classList.toggle('is-positive', median >= 0);
+    figure.classList.toggle('is-negative', median < 0);
+    $('s-fair-unit').textContent = '/ share, median outcome';
+    $('s-contract').textContent = signed(median * 100, 2);
+    renderDial({ value: median, low: worst, high: best, spread: best - worst, estimates: [] },
+      ['DOWNSIDE', 'UPSIDE']);
+
+    const chance = form.type === 'short'
+      ? 1 - outlook.probAboveSpot
+      : outlook.probAboveSpot;
+    $('s-chance-label').textContent =
+      `chance the position is in profit on ${fmtDate(expiry)} · ` +
+      `${symbol} ${form.type === 'short' ? 'below' : 'above'} ${money(result.spot)}`;
+    renderDonut(chance, 'in profit');
+
+    renderBarbell(outlook, result.spot, NaN);
+    return;
+  }
+
+  figure.classList.remove('is-positive', 'is-negative');
   $('s-dial-title').textContent = selectedTicker
     ? `Fair value · ${symbol} ${money(form.strike, 0)} ${form.type}`
     : `Fair value · ${money(form.strike, 0)} ${form.type}`;
-  $('s-dial-exp').textContent = `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
-  $('s-fair').textContent = money(consensus.value, 2);
+  figure.textContent = money(consensus.value, 2);
+  $('s-fair-unit').textContent = '/ share';
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
 
   const isPut = form.type === 'put';
   const chance = isPut ? 1 - outlook.probAboveStrike : outlook.probAboveStrike;
-  $('s-prob-date').textContent = fmtDate(expiry);
   $('s-chance-label').textContent =
     `chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike, 0)} · ` +
     'from the simulated futures';
@@ -1001,14 +1053,7 @@ function renderSimpleReadout(result, form, prices) {
   renderLadder(outlook, form.strike, result.spot);
   $('s-ladder-note').textContent = `selected strike ${money(form.strike, 0)}`;
 
-  $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
-  $('s-band').textContent =
-    `9 of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
   renderBarbell(outlook, result.spot, form.strike);
-
-  $('s-tape-note').textContent =
-    `${count(prices.length)} closes · last ${money(result.spot)}`;
-  renderTape(prices);
 }
 
 /* ---- fair-value dial ----------------------------------------------------
@@ -1016,7 +1061,7 @@ function renderSimpleReadout(result, form, prices) {
    range, the thin markers are the individual models, the needle is the
    consensus. Tight agreement reads as a narrow wedge under a steady needle. */
 
-function renderDial(consensus) {
+function renderDial(consensus, endLabels = ['LOW MODEL', 'HIGH MODEL']) {
   const width = 320;
   const height = 168;
   const cx = width / 2;
@@ -1108,13 +1153,13 @@ function renderDial(consensus) {
     fill: 'var(--ink-muted)', 'font-size': 9.5,
     'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
   });
-  low.textContent = 'LOW MODEL';
+  low.textContent = endLabels[0];
   const high = el('text', {
     x: cx + rOuter - 4, y: cy + 12, 'text-anchor': 'end',
     fill: 'var(--ink-muted)', 'font-size': 9.5,
     'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
   });
-  high.textContent = 'HIGH MODEL';
+  high.textContent = endLabels[1];
   svg.append(low, high);
 
   $('dial').replaceChildren(svg);
@@ -1279,8 +1324,8 @@ function renderBarbell(outlook, spot, strike) {
   const pad = 46;
   const yMid = 58;
 
-  const lo = Math.min(outlook.p5, spot, strike);
-  const hi = Math.max(outlook.p95, spot, strike);
+  const lo = Math.min(outlook.p5, spot, Number.isFinite(strike) ? strike : Infinity);
+  const hi = Math.max(outlook.p95, spot, Number.isFinite(strike) ? strike : -Infinity);
   const span = hi - lo || 1;
   const x = (v) => pad + ((v - lo) / span) * (width - 2 * pad);
 
@@ -1309,7 +1354,8 @@ function renderBarbell(outlook, spot, strike) {
     svg.append(label);
   }
 
-  // strike marker (dashed) when it sits inside the drawn span
+  // strike marker (dashed) — a stock position has none to draw
+  if (Number.isFinite(strike)) {
   svg.append(el('line', {
     x1: x(strike), x2: x(strike), y1: yMid - 16, y2: yMid + 16,
     stroke: 'var(--negative)', 'stroke-width': 1.5, 'stroke-dasharray': '4 3',
@@ -1326,6 +1372,7 @@ function renderBarbell(outlook, spot, strike) {
   });
   strikeLabel.textContent = `STRIKE ${Math.round(strike * 100) / 100}`;
   svg.append(strikeLabel);
+  }
 
   // today: hollow bead. Its label dodges below the bar when the median sits
   // close enough that the two captions would overprint.
@@ -1984,4 +2031,9 @@ renderPrice();
 renderImplied();
 renderGrant();
 renderEnsemble();
-loadReferenceData().then(() => applyCurveRate());
+loadReferenceData().then(() => {
+  // The curve rate lands after the first render; recompute so the figures on
+  // screen were priced with the rate the field shows.
+  applyCurveRate();
+  renderEnsemble();
+});

@@ -341,7 +341,7 @@ function solve3x3(matrix, rhs) {
  * Distribution of the terminal price across a path set: the projection of
  * where the stock itself lands, as opposed to what an option on it is worth.
  */
-export function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
+export function terminalDistribution(simulation, { strike, spot, bins = 40 } = {}) {
   const { paths, count, width } = simulation;
   const terminal = new Float64Array(count);
   for (let p = 0; p < count; p++) terminal[p] = paths[p * width + width - 1];
@@ -363,6 +363,13 @@ export function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
     for (let p = 0; p < count; p++) if (terminal[p] > strike) above++;
   }
 
+  // Probability of finishing above today's price — what a plain long (or
+  // short) position cares about, where no strike exists.
+  let aboveSpot = 0;
+  if (Number.isFinite(spot)) {
+    for (let p = 0; p < count; p++) if (terminal[p] > spot) aboveSpot++;
+  }
+
   const low = sorted[0];
   const high = sorted[sorted.length - 1];
   const span = high - low || 1;
@@ -382,6 +389,7 @@ export function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
     min: low,
     max: high,
     probAboveStrike: Number.isFinite(strike) ? above / count : null,
+    probAboveSpot: Number.isFinite(spot) ? aboveSpot / count : null,
     histogram: histogram.map((frequency, index) => ({
       from: low + (span * index) / bins,
       to: low + (span * (index + 1)) / bins,
