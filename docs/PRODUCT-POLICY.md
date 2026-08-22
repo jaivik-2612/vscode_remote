@@ -145,6 +145,31 @@ location. Being a Canadian sole proprietor is not a shield.
 
 ---
 
+## Where platform policy actually bites
+
+Worth separating from the securities analysis above, because it is easy to
+over-read the app stores' rules and under-read the regulators'.
+
+- **Google Play is a disclosure step, not a gate, for a Canadian developer.**
+  Neither "Stock trading and portfolio management" nor "Financial advice"
+  carries a published licensing requirement on the Financial features
+  declaration, and Canada is absent from Google's country-specific list
+  (US, India, Indonesia, Philippines, Nigeria, Kenya, Pakistan, Thailand).
+  India's presence on that list is the part that matters if India is
+  targeted.
+- **Apple Guideline 5.1.1(ix)** — in the *Data Collection and Storage*
+  section — is the provision that can block an individual developer, and it
+  fires on apps in highly regulated fields *or that require sensitive user
+  information*. It is enforced as a rejection with a stated cure (enrol as
+  an organization), not as removal. Guideline 3.2.1(viii) is often cited
+  here and should not be: it is a condition on apps submitted by financial
+  institutions, and it sits in that section's *Acceptable* list.
+- **Consequently the trigger to plan around is cloud storage of user
+  financial data, not the paid tier.** Collecting nothing is this app's
+  strongest position with both stores and both regulators. Incorporating
+  before adding that storage is the sequencing that matters; charging money
+  changes neither store's answer.
+
 ## Open questions for the lawyer
 
 In priority order. The first is the whole engagement:

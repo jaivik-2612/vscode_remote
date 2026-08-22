@@ -364,18 +364,49 @@ Monetisation is not just a Play Console setting. The constraints are in
 [`../PRODUCT-POLICY.md`](../PRODUCT-POLICY.md) — read it before designing a
 paid tier. The short version:
 
-- **Play Billing is still mandatory** outside the US, so a paid tier needs
-  two payment paths from day one, not one. **Play Billing Library 8 is
-  required for new apps from 31 August 2026.**
-- **Apple can remove an individual developer** for an investing-adjacent app
-  under App Review 3.2.1(viii) / 5.1.1(ix). That, plus Play's rule that
-  providers of financial products "must" hold an Organization account, plus
-  the EU Digital Services Act publishing an individual trader's home address,
-  are three independent reasons to **incorporate before monetising**.
-- **Charging does not change the Financial features declaration** — the
-  answer stays "no financial features". What would change it is shipping
-  personalised output.
+- **Billing is a per-country matrix, not a single rule.** Play Billing is no
+  longer mandatory for users in the US, UK and EEA (billing choice, live
+  since 30 June 2026). India, South Korea, Japan, Australia, Brazil,
+  Indonesia and South Africa permit an in-app *alternative* billing system
+  offered alongside Play Billing, at a 4% fee discount. **Canada is
+  Play-Billing-only** and is expected to stay that way until Google's
+  rollout reaches it, targeted around September 2027. Build the paywall with
+  a per-storefront switch rather than one hard-coded path.
+- **The Billing Library 8 deadline of 31 August 2026 does not apply to this
+  app.** It binds only apps that actually ship the Play Billing Library, and
+  FairShare is free with no in-app purchases. When a paid tier arrives,
+  integrate Billing Library 9.1.0 directly — v9 is current and supported to
+  2028, and Google documents a direct 7-to-9 upgrade, so there is no reason
+  to route through a version that expires in 2027.
+- **Charging does not change the Financial features declaration.** It asks
+  about financial *features*, not paid ones, and it is required of every
+  published app regardless of price. What could move the answer off "no
+  financial features" is the app holding and reasoning over a user's actual
+  positions — which is the architecture question in
+  [`../PRODUCT-POLICY.md`](../PRODUCT-POLICY.md), not a pricing question.
+- **Play does not force an Organization account here.** Neither "Stock
+  trading and portfolio management" nor "Financial advice" carries a
+  published licensing requirement, and Canada is absent from Google's
+  country-specific list (US, India, Indonesia, Philippines, Nigeria, Kenya,
+  Pakistan, Thailand). For a Canadian developer the declaration is a
+  disclosure step, not a gate.
+- **Apple's Guideline 5.1.1(ix) is the real individual-developer
+  constraint** — not 3.2.1(viii), which is a condition on apps submitted by
+  financial institutions and sits in that section's *Acceptable* list. In
+  practice Apple enforces 5.1.1(ix) as a hard requirement to enrol as an
+  organization, but it bites as a **rejection at submission with a stated
+  cure** (incorporate, or convert the account), not as removal. Apple is not
+  in the current path at all — Play is the near gate.
+- **The sharpest trigger for that Apple rule is Supabase, not the paid
+  tier.** Guideline 5.1.1 is the *Data Collection and Storage* section, and
+  (ix) fires on apps that "require sensitive user information". Collecting
+  nothing is currently this app's strongest position. So the sequencing that
+  matters is **incorporate before adding cloud storage of user financial
+  data**, rather than before charging.
 - **Adding Supabase makes the "collects no data" declaration false** and must
   be resubmitted in lockstep, along with a rewritten privacy policy, an
   in-app *and* web account-deletion route, and a Quebec Law 25 privacy
   impact assessment.
+
+The genuine legal exposure is none of the above: it is securities regulation,
+and it is jurisdiction-specific. See [`../PRODUCT-POLICY.md`](../PRODUCT-POLICY.md).
