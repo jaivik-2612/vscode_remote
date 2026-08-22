@@ -39,7 +39,16 @@
     <form id="ensemble-form" data-panel="ensemble" autocomplete="off">
       <fieldset>
         <legend>Signal source &middot; ticker</legend>
-        <div class="combobox">
+        <label class="inline" style="margin-top:0">Market
+          <select id="market" name="market">
+            <option value="na" selected>US &amp; Canada</option>
+            <option value="eu">Europe</option>
+            <option value="jp">Japan</option>
+            <option value="cn">China</option>
+            <option value="in">India</option>
+          </select>
+        </label>
+        <div class="combobox" style="margin-top:11px">
           <input id="ticker-search" type="text" role="combobox" aria-expanded="false"
             aria-controls="ticker-listbox" aria-autocomplete="list" autocomplete="off"
             autocapitalize="characters" spellcheck="false"
@@ -47,6 +56,7 @@
           <ul id="ticker-listbox" role="listbox" aria-label="Matching tickers" hidden></ul>
         </div>
         <p class="field-note" id="ticker-status">Loading the symbol directory&hellip;</p>
+        <p class="field-note" id="manual-rate-note" hidden></p>
         <div class="fetch-panel" id="fetch-panel" hidden>
           <p class="fetch-title" id="fetch-title"></p>
           <ol class="fetch-steps" id="fetch-steps"></ol>

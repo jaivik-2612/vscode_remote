@@ -13,20 +13,60 @@ import { parsePrices } from './series.js';
 
 /* ------------------------------------------------------------- exchanges */
 
-const EXCHANGES = {
-  Q: { name: 'NASDAQ', country: 'US', currency: 'USD', yahooSuffix: '' },
-  N: { name: 'NYSE', country: 'US', currency: 'USD', yahooSuffix: '' },
-  A: { name: 'NYSE American', country: 'US', currency: 'USD', yahooSuffix: '' },
-  P: { name: 'NYSE Arca', country: 'US', currency: 'USD', yahooSuffix: '' },
-  Z: { name: 'Cboe BZX', country: 'US', currency: 'USD', yahooSuffix: '' },
-  V: { name: 'IEX', country: 'US', currency: 'USD', yahooSuffix: '' },
-  T: { name: 'TSX', country: 'CA', currency: 'CAD', yahooSuffix: '.TO' },
-  X: { name: 'TSXV', country: 'CA', currency: 'CAD', yahooSuffix: '.V' },
+/**
+ * Exchange registry. `code` is what tickers.json stores per row; `market` is
+ * the selector group the UI filters by. Currency is the trading currency of
+ * the listing — note London equities quote in pence (GBX), not pounds.
+ */
+export const EXCHANGES = {
+  // North America
+  Q:  { name: 'NASDAQ', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NASDAQ' },
+  N:  { name: 'NYSE', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NYSE' },
+  A:  { name: 'NYSE American', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NYSEAMERICAN' },
+  P:  { name: 'NYSE Arca', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'NYSEARCA' },
+  Z:  { name: 'Cboe BZX', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: 'BATS' },
+  V:  { name: 'IEX', market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: '' },
+  T:  { name: 'TSX', market: 'na', country: 'CA', currency: 'CAD', yahooSuffix: '.TO', googlePrefix: 'TSE' },
+  X:  { name: 'TSXV', market: 'na', country: 'CA', currency: 'CAD', yahooSuffix: '.V', googlePrefix: 'CVE' },
+  // Europe
+  LN: { name: 'London', market: 'eu', country: 'GB', currency: 'GBX', yahooSuffix: '.L', googlePrefix: 'LON' },
+  PA: { name: 'Euronext Paris', market: 'eu', country: 'FR', currency: 'EUR', yahooSuffix: '.PA', googlePrefix: 'EPA' },
+  AS: { name: 'Euronext Amsterdam', market: 'eu', country: 'NL', currency: 'EUR', yahooSuffix: '.AS', googlePrefix: 'AMS' },
+  BR: { name: 'Euronext Brussels', market: 'eu', country: 'BE', currency: 'EUR', yahooSuffix: '.BR', googlePrefix: 'EBR' },
+  LI: { name: 'Euronext Lisbon', market: 'eu', country: 'PT', currency: 'EUR', yahooSuffix: '.LS', googlePrefix: 'ELI' },
+  MI: { name: 'Borsa Italiana', market: 'eu', country: 'IT', currency: 'EUR', yahooSuffix: '.MI', googlePrefix: 'BIT' },
+  IR: { name: 'Euronext Dublin', market: 'eu', country: 'IE', currency: 'EUR', yahooSuffix: '.IR', googlePrefix: 'ISE' },
+  OL: { name: 'Oslo Børs', market: 'eu', country: 'NO', currency: 'NOK', yahooSuffix: '.OL', googlePrefix: '' },
+  DE: { name: 'XETRA', market: 'eu', country: 'DE', currency: 'EUR', yahooSuffix: '.DE', googlePrefix: 'ETR' },
+  SW: { name: 'SIX Swiss', market: 'eu', country: 'CH', currency: 'CHF', yahooSuffix: '.SW', googlePrefix: 'SWX' },
+  // Asia
+  JP: { name: 'Tokyo', market: 'jp', country: 'JP', currency: 'JPY', yahooSuffix: '.T', googlePrefix: 'TYO' },
+  SS: { name: 'Shanghai', market: 'cn', country: 'CN', currency: 'CNY', yahooSuffix: '.SS', googlePrefix: 'SHA' },
+  SZ: { name: 'Shenzhen', market: 'cn', country: 'CN', currency: 'CNY', yahooSuffix: '.SZ', googlePrefix: 'SHE' },
+  NS: { name: 'NSE India', market: 'in', country: 'IN', currency: 'INR', yahooSuffix: '.NS', googlePrefix: 'NSE' },
+  BO: { name: 'BSE India', market: 'in', country: 'IN', currency: 'INR', yahooSuffix: '.BO', googlePrefix: 'BOM' },
 };
+
+/** The market selector's groups, in display order. */
+export const MARKETS = [
+  { key: 'na', label: 'US & Canada' },
+  { key: 'eu', label: 'Europe' },
+  { key: 'jp', label: 'Japan' },
+  { key: 'cn', label: 'China' },
+  { key: 'in', label: 'India' },
+];
+
+/** Which yield curve prices a market's risk-free rate, by exchange country. */
+export function curveKeyFor(exchangeCode) {
+  const { country } = exchangeInfo(exchangeCode);
+  return { US: 'us', CA: 'ca', GB: 'gb', JP: 'jp', CH: 'ch', CN: 'cn', IN: 'in' }[country] ??
+    ({ FR: 'eu', NL: 'eu', BE: 'eu', PT: 'eu', IT: 'eu', IE: 'eu', DE: 'eu' }[country] ?? null);
+}
 
 /** Everything the UI needs to know about an exchange code. */
 export function exchangeInfo(code) {
-  return EXCHANGES[code] ?? { name: code, country: 'US', currency: 'USD', yahooSuffix: '' };
+  return EXCHANGES[code] ??
+    { name: code, market: 'na', country: 'US', currency: 'USD', yahooSuffix: '', googlePrefix: '' };
 }
 
 /** Yahoo Finance symbol for a directory entry: BRK.B -> BRK-B, RY on TSX -> RY.TO. */
@@ -46,14 +86,12 @@ export function stooqSymbol(symbol, exchangeCode) {
  * which one is meant. IEX listings get no prefix — Google resolves the few
  * of them from the bare symbol.
  */
-const GOOGLE_PREFIX = {
-  Q: 'NASDAQ', N: 'NYSE', A: 'NYSEAMERICAN', P: 'NYSEARCA', Z: 'BATS',
-  V: '', T: 'TSE', X: 'CVE',
-};
-
-export function googleFinanceSymbol(symbol, exchangeCode) {
-  const prefix = GOOGLE_PREFIX[exchangeCode] ?? '';
-  return prefix ? `${prefix}:${symbol}` : symbol;
+export function googleFinanceSymbol(symbol, exchangeCode, aux = null) {
+  const prefix = exchangeInfo(exchangeCode).googlePrefix;
+  // BSE is addressed by numeric scrip code on Google Finance (BOM:500002)
+  // while people search the alpha id; aux carries the numeric twin.
+  const body = exchangeCode === 'BO' && aux ? aux : symbol;
+  return prefix ? `${prefix}:${body}` : body;
 }
 
 /**
@@ -61,8 +99,8 @@ export function googleFinanceSymbol(symbol, exchangeCode) {
  * Paste it into any Google Sheet cell; the sheet fills two columns (Date,
  * Close) that paste straight back into this app.
  */
-export function googleFinanceFormula(symbol, exchangeCode, days = 730) {
-  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode)}", ` +
+export function googleFinanceFormula(symbol, exchangeCode, days = 730, aux = null) {
+  return `=GOOGLEFINANCE("${googleFinanceSymbol(symbol, exchangeCode, aux)}", ` +
     `"close", TODAY()-${days}, TODAY(), "DAILY")`;
 }
 
@@ -83,13 +121,14 @@ export function googleFinanceFormula(symbol, exchangeCode, days = 730) {
  * @param {string} query
  * @param {number} [limit]
  */
-export function searchTickers(tickers, query, limit = 8) {
+export function searchTickers(tickers, query, limit = 8, market = null) {
   const q = query.trim().toUpperCase();
   if (!q) return [];
   const qLower = query.trim().toLowerCase();
 
   const scored = [];
-  for (const [symbol, name, exchange, isEtf] of tickers) {
+  for (const [symbol, name, exchange, isEtf, aux] of tickers) {
+    if (market && exchangeInfo(exchange).market !== market) continue;
     let score;
     const symbolUpper = symbol.toUpperCase();
     if (symbolUpper === q) score = 0;
@@ -107,7 +146,7 @@ export function searchTickers(tickers, query, limit = 8) {
       else if (at > 0) score = 5;
       else continue;
     }
-    scored.push({ symbol, name, exchange, isEtf: Boolean(isEtf), score });
+    scored.push({ symbol, name, exchange, isEtf: Boolean(isEtf), aux: aux ?? null, score });
   }
 
   scored.sort((a, b) =>

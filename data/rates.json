@@ -1,8 +1,18 @@
 {
- "fetched": "2026-08-20",
- "note": "Continuously compounded, converted from semi-annual par quotes: r = 2 ln(1 + y/2).",
+ "fetched": "2026-08-22",
+ "note": "Continuously compounded, converted from quoted yields: r = 2 ln(1 + y/2).",
+ "cn": {
+  "asOf": null,
+  "points": [],
+  "source": "No automatable official source (ChinaBond refuses non-browser clients) — the app asks for a manual rate."
+ },
+ "in": {
+  "asOf": null,
+  "points": [],
+  "source": "No automatable official source (FBIL/NSE refuse datacenter clients) — the app asks for a manual rate."
+ },
  "us": {
-  "asOf": "2026-08-20",
+  "asOf": "2026-08-21",
   "points": [
    {
     "days": 30,
@@ -11,69 +21,69 @@
    },
    {
     "days": 61,
-    "rate": 0.0375453706465672,
+    "rate": 0.037643508481175335,
     "label": "2 Mo"
    },
    {
     "days": 91,
-    "rate": 0.03833033852202173,
+    "rate": 0.03842843784760874,
     "label": "3 Mo"
    },
    {
     "days": 122,
-    "rate": 0.03842843784760874,
+    "rate": 0.03862462206474577,
     "label": "4 Mo"
    },
    {
     "days": 182,
-    "rate": 0.039016932776086026,
+    "rate": 0.039114998431061435,
     "label": "6 Mo"
    },
    {
     "days": 365,
-    "rate": 0.0395072129736725,
+    "rate": 0.039899350615240886,
     "label": "1 Yr"
    },
    {
     "days": 730,
-    "rate": 0.041467132773813406,
+    "rate": 0.04195681277038363,
     "label": "2 Yr"
    },
    {
     "days": 1096,
-    "rate": 0.04215265120383262,
+    "rate": 0.04264216340736767,
     "label": "3 Yr"
    },
    {
     "days": 1826,
-    "rate": 0.04342513381129944,
+    "rate": 0.043816504097759376,
     "label": "5 Yr"
    },
    {
     "days": 2557,
-    "rate": 0.04479459488407665,
+    "rate": 0.045185697305269154,
     "label": "7 Yr"
    },
    {
     "days": 3652,
-    "rate": 0.04635854589481049,
+    "rate": 0.04684702988717622,
     "label": "10 Yr"
    },
    {
     "days": 7305,
-    "rate": 0.051335493497155625,
+    "rate": 0.05182276356900206,
     "label": "20 Yr"
    },
    {
     "days": 10957,
-    "rate": 0.051627869785959096,
+    "rate": 0.05201763836210175,
     "label": "30 Yr"
    }
   ],
   "source": "U.S. Treasury daily par yield curve"
  },
  "ca": {
-  "asOf": "2026-08-19",
+  "asOf": "2026-08-20",
   "points": [
    {
     "days": 30,
@@ -97,35 +107,269 @@
    },
    {
     "days": 730,
-    "rate": 0.02958017094527069,
+    "rate": 0.029974259616496475,
     "label": "2 year"
    },
    {
     "days": 1096,
-    "rate": 0.030466761281178503,
+    "rate": 0.030860675310715187,
     "label": "3 year"
    },
    {
     "days": 1826,
-    "rate": 0.03273070817252846,
+    "rate": 0.03322253161039381,
     "label": "5 year"
    },
    {
     "days": 2557,
-    "rate": 0.03400919763164753,
+    "rate": 0.034500706813055344,
     "label": "7 year"
    },
    {
     "days": 3652,
-    "rate": 0.03656372735602496,
+    "rate": 0.037152771145870914,
     "label": "10 year"
    },
    {
     "days": 10957,
-    "rate": 0.040487412954085,
+    "rate": 0.04107530243509627,
     "label": "long"
    }
   ],
   "source": "Bank of Canada Valet API (T-bills, benchmark bonds)"
+ },
+ "eu": {
+  "asOf": "2026-08-20",
+  "points": [
+   {
+    "days": 91,
+    "rate": 0.023807415196362685,
+    "label": "3M"
+   },
+   {
+    "days": 182,
+    "rate": 0.025011449667458135,
+    "label": "6M"
+   },
+   {
+    "days": 365,
+    "rate": 0.026516231899040482,
+    "label": "1Y"
+   },
+   {
+    "days": 730,
+    "rate": 0.027720950969682735,
+    "label": "2Y"
+   },
+   {
+    "days": 1096,
+    "rate": 0.028179303448715377,
+    "label": "3Y"
+   },
+   {
+    "days": 1826,
+    "rate": 0.029130036392915042,
+    "label": "5Y"
+   },
+   {
+    "days": 2557,
+    "rate": 0.030453850746574584,
+    "label": "7Y"
+   },
+   {
+    "days": 3652,
+    "rate": 0.0325257908477607,
+    "label": "10Y"
+   },
+   {
+    "days": 7305,
+    "rate": 0.036573890594967094,
+    "label": "20Y"
+   },
+   {
+    "days": 10957,
+    "rate": 0.0369132699821924,
+    "label": "30Y"
+   }
+  ],
+  "source": "ECB euro-area AAA government yield curve"
+ },
+ "gb": {
+  "asOf": "2026-08-20",
+  "points": [
+   {
+    "days": 7,
+    "rate": 0.037152771145870914,
+    "label": "Bank Rate"
+   },
+   {
+    "days": 1826,
+    "rate": 0.04507619633635366,
+    "label": "5 year gilt"
+   },
+   {
+    "days": 3652,
+    "rate": 0.05059169048622126,
+    "label": "10 year gilt"
+   },
+   {
+    "days": 7305,
+    "rate": 0.057463522616656645,
+    "label": "20 year gilt"
+   }
+  ],
+  "source": "Bank of England (Bank Rate, benchmark gilts)"
+ },
+ "jp": {
+  "asOf": "2026-08-20",
+  "points": [
+   {
+    "days": 365,
+    "rate": 0.014249119884592017,
+    "label": "1Y"
+   },
+   {
+    "days": 731,
+    "rate": 0.016749665964359853,
+    "label": "2Y"
+   },
+   {
+    "days": 1096,
+    "rate": 0.01805822916904,
+    "label": "3Y"
+   },
+   {
+    "days": 1461,
+    "rate": 0.019900661706336184,
+    "label": "4Y"
+   },
+   {
+    "days": 1826,
+    "rate": 0.02115769233463608,
+    "label": "5Y"
+   },
+   {
+    "days": 2192,
+    "rate": 0.02256225623572508,
+    "label": "6Y"
+   },
+   {
+    "days": 2557,
+    "rate": 0.02395595351881383,
+    "label": "7Y"
+   },
+   {
+    "days": 2922,
+    "rate": 0.0255955164597214,
+    "label": "8Y"
+   },
+   {
+    "days": 3287,
+    "rate": 0.026947638083728864,
+    "label": "9Y"
+   },
+   {
+    "days": 3653,
+    "rate": 0.028338283828385696,
+    "label": "10Y"
+   },
+   {
+    "days": 5479,
+    "rate": 0.033802727750258034,
+    "label": "15Y"
+   },
+   {
+    "days": 7305,
+    "rate": 0.036848453516212354,
+    "label": "20Y"
+   },
+   {
+    "days": 9131,
+    "rate": 0.039771914314967245,
+    "label": "25Y"
+   },
+   {
+    "days": 10958,
+    "rate": 0.03955623438377613,
+    "label": "30Y"
+   },
+   {
+    "days": 14610,
+    "rate": 0.0396248623393806,
+    "label": "40Y"
+   }
+  ],
+  "source": "Japan Ministry of Finance JGB yields"
+ },
+ "ch": {
+  "asOf": "2025-07",
+  "points": [
+   {
+    "days": 365,
+    "rate": -0.0009602304737546242,
+    "label": "1 year"
+   },
+   {
+    "days": 731,
+    "rate": -0.0008301722726638608,
+    "label": "2 year"
+   },
+   {
+    "days": 1096,
+    "rate": -0.0004300462316265823,
+    "label": "3 year"
+   },
+   {
+    "days": 1461,
+    "rate": 0.0001299957751830379,
+    "label": "4 year"
+   },
+   {
+    "days": 1826,
+    "rate": 0.0007798479395342173,
+    "label": "5 year"
+   },
+   {
+    "days": 2192,
+    "rate": 0.0014394818486978159,
+    "label": "6 year"
+   },
+   {
+    "days": 2557,
+    "rate": 0.0020889087351815805,
+    "label": "7 year"
+   },
+   {
+    "days": 2922,
+    "rate": 0.002708165631858905,
+    "label": "8 year"
+   },
+   {
+    "days": 3287,
+    "rate": 0.003267329685246957,
+    "label": "9 year"
+   },
+   {
+    "days": 3653,
+    "rate": 0.003776432394475577,
+    "label": "10 year"
+   },
+   {
+    "days": 5479,
+    "rate": 0.005442587837375606,
+    "label": "15 year"
+   },
+   {
+    "days": 7305,
+    "rate": 0.006000988024477025,
+    "label": "20 year"
+   },
+   {
+    "days": 10958,
+    "rate": 0.005632062518962925,
+    "label": "30 year"
+   }
+  ],
+  "source": "Swiss National Bank Confederation bond spot rates"
  }
 }
