@@ -867,7 +867,16 @@ function renderEnsemble() {
   $('series-summary').textContent = prices.length
     ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}` +
       (parsed.source !== 'pasted prices' ? ` (${parsed.source})` : '')
-    : 'no usable prices found';
+    : 'empty — pick a ticker or paste closing prices';
+
+  // An untouched page is idle, not broken: no data means the placard, not an
+  // error the visitor never caused.
+  panel.classList.toggle('is-idle', prices.length === 0);
+  if (prices.length === 0) {
+    $('ensemble-error').hidden = true;
+    panel.classList.remove('is-computing');
+    return;
+  }
 
   let result;
   try {
