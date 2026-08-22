@@ -1147,3 +1147,88 @@ select:focus { outline: none; border-color: var(--accent); }
   }
   .colophon { padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
 }
+
+
+/* ====================================================== short positions ==
+   Writing (shorting) an option flips the reading of the same fair price;
+   the flag on the ensemble panel reveals the writer-specific education. */
+
+[data-short-only] { display: none !important; }
+[data-panel="ensemble"].is-short [data-short-only] { display: revert !important; }
+
+/* Signed figures keep their market colors where a view needs them. */
+.figure.is-positive { color: var(--positive); text-shadow: 0 0 14px rgba(76, 208, 125, .18); }
+.figure.is-negative { color: var(--negative); text-shadow: 0 0 14px rgba(255, 84, 73, .18); }
+
+
+/* ======================================================== notice dialog ==
+   The education-only placard, shown on every open before the cockpit is
+   used. A native <dialog> supplies the focus trap and semantics. */
+
+#notice-dialog {
+  margin: auto;
+  max-width: min(480px, calc(100vw - 40px));
+  padding: 0 18px 18px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 24px 70px rgba(0, 0, 0, .55);
+}
+
+#notice-dialog::backdrop {
+  background: rgba(4, 6, 9, .72);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+#notice-dialog .eyebrow {
+  display: block;
+  margin: 0 -18px 14px;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.notice-body {
+  margin: 0 0 16px;
+  font: 400 13.5px/1.65 var(--body);
+}
+
+.notice-body b { font-weight: 700; }
+
+.notice-button {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font: 700 12px/1 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  padding: 13px 14px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.notice-button:hover { background: var(--accent); color: var(--surface); }
+
+
+/* ============================================================ idle state ==
+   Before any prices are loaded the panel shows one placard instead of a
+   wall of dashed instruments (or worse, an error the visitor didn't cause). */
+
+#idle-state { display: none; }
+
+[data-panel="ensemble"].is-idle > :not(#idle-state):not(.alert) { display: none !important; }
+[data-panel="ensemble"].is-idle #idle-state { display: block; }
+
+.idle-copy {
+  margin: 0;
+  font: 400 13.5px/1.65 var(--body);
+  color: var(--ink-muted);
+  max-width: 60ch;
+}
+
+.idle-copy b { color: var(--ink); font-weight: 700; }

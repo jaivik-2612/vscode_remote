@@ -1150,6 +1150,91 @@ select:focus { outline: none; border-color: var(--accent); }
   .colophon { padding-bottom: calc(36px + env(safe-area-inset-bottom)); }
 }
 
+
+/* ====================================================== short positions ==
+   Writing (shorting) an option flips the reading of the same fair price;
+   the flag on the ensemble panel reveals the writer-specific education. */
+
+[data-short-only] { display: none !important; }
+[data-panel="ensemble"].is-short [data-short-only] { display: revert !important; }
+
+/* Signed figures keep their market colors where a view needs them. */
+.figure.is-positive { color: var(--positive); text-shadow: 0 0 14px rgba(76, 208, 125, .18); }
+.figure.is-negative { color: var(--negative); text-shadow: 0 0 14px rgba(255, 84, 73, .18); }
+
+
+/* ======================================================== notice dialog ==
+   The education-only placard, shown on every open before the cockpit is
+   used. A native <dialog> supplies the focus trap and semantics. */
+
+#notice-dialog {
+  margin: auto;
+  max-width: min(480px, calc(100vw - 40px));
+  padding: 0 18px 18px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  color: var(--ink);
+  box-shadow: 0 0 0 1px var(--line), 0 24px 70px rgba(0, 0, 0, .55);
+}
+
+#notice-dialog::backdrop {
+  background: rgba(4, 6, 9, .72);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
+#notice-dialog .eyebrow {
+  display: block;
+  margin: 0 -18px 14px;
+  padding: 12px 18px 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--accent);
+}
+
+.notice-body {
+  margin: 0 0 16px;
+  font: 400 13.5px/1.65 var(--body);
+}
+
+.notice-body b { font-weight: 700; }
+
+.notice-button {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
+  color: var(--accent);
+  font: 700 12px/1 var(--mono);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  border-radius: 8px;
+  padding: 13px 14px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.notice-button:hover { background: var(--accent); color: var(--surface); }
+
+
+/* ============================================================ idle state ==
+   Before any prices are loaded the panel shows one placard instead of a
+   wall of dashed instruments (or worse, an error the visitor didn't cause). */
+
+#idle-state { display: none; }
+
+[data-panel="ensemble"].is-idle > :not(#idle-state):not(.alert) { display: none !important; }
+[data-panel="ensemble"].is-idle #idle-state { display: block; }
+
+.idle-copy {
+  margin: 0;
+  font: 400 13.5px/1.65 var(--body);
+  color: var(--ink-muted);
+  max-width: 60ch;
+}
+
+.idle-copy b { color: var(--ink); font-weight: 700; }
+
 </style>
 
 
@@ -1208,426 +1293,7 @@ select:focus { outline: none; border-color: var(--accent); }
         <legend>Data feed &middot; closing prices, last two years</legend>
         <label class="stacked" for="prices">
           Closing prices, oldest first
-          <textarea id="prices" name="prices" rows="7" spellcheck="false">84.20
-84.09
-84.15
-84.59
-84.72
-84.91
-86.77
-86.99
-85.84
-86.98
-87.39
-87.47
-87.83
-86.93
-86.55
-86.47
-86.83
-86.28
-86.05
-85.66
-85.83
-85.21
-84.25
-84.52
-84.31
-84.42
-83.87
-84.42
-83.95
-83.59
-83.68
-83.71
-85.04
-85.57
-85.89
-85.67
-86.53
-82.85
-82.46
-82.74
-83.06
-83.22
-83.10
-82.88
-83.43
-83.58
-84.84
-85.00
-85.57
-86.28
-85.88
-85.77
-86.36
-86.31
-85.59
-86.62
-86.29
-86.49
-88.04
-88.60
-89.90
-90.34
-90.52
-88.76
-89.28
-88.22
-87.71
-88.16
-87.69
-85.49
-91.54
-86.04
-85.69
-83.57
-86.20
-87.40
-87.21
-86.17
-90.58
-90.08
-91.62
-89.97
-87.36
-88.98
-90.41
-89.12
-89.60
-92.21
-87.40
-87.97
-89.21
-83.72
-84.40
-84.51
-85.83
-87.65
-89.86
-93.58
-89.37
-88.74
-89.12
-89.74
-90.71
-91.61
-91.65
-92.79
-92.65
-92.87
-94.69
-93.46
-94.02
-95.24
-94.15
-93.72
-93.07
-94.30
-94.89
-93.55
-94.11
-93.43
-93.50
-93.37
-94.08
-93.77
-92.48
-93.08
-93.84
-94.75
-94.40
-94.92
-95.13
-94.22
-92.70
-92.70
-91.33
-92.42
-91.11
-90.58
-91.77
-94.50
-93.01
-93.34
-95.15
-93.00
-93.57
-93.50
-94.02
-93.69
-92.79
-92.85
-91.89
-91.50
-92.18
-92.94
-92.62
-92.81
-92.45
-93.54
-94.74
-94.25
-94.29
-95.52
-96.81
-97.80
-96.84
-96.94
-96.79
-96.82
-98.97
-100.42
-100.83
-101.26
-101.34
-100.64
-99.98
-93.81
-100.31
-98.21
-95.36
-97.12
-98.39
-99.16
-96.95
-92.87
-89.68
-88.59
-84.82
-86.43
-85.83
-83.52
-84.00
-82.14
-82.68
-83.10
-82.94
-85.92
-87.77
-85.34
-89.87
-88.62
-88.62
-85.35
-87.56
-86.79
-89.36
-85.74
-89.34
-86.91
-83.83
-83.69
-83.59
-81.22
-81.78
-85.62
-83.47
-82.10
-79.77
-83.61
-81.64
-79.40
-79.76
-80.48
-78.62
-81.52
-82.44
-80.05
-78.15
-79.58
-75.97
-74.18
-72.25
-73.42
-76.97
-76.14
-74.13
-69.66
-71.08
-70.23
-71.34
-71.58
-71.65
-72.14
-73.03
-73.70
-74.11
-74.97
-75.50
-76.39
-77.33
-76.85
-76.27
-76.60
-78.18
-79.80
-79.89
-80.35
-79.17
-79.49
-79.68
-80.11
-80.13
-81.19
-80.62
-81.02
-82.15
-82.76
-83.97
-83.05
-83.01
-83.44
-83.39
-84.60
-86.06
-87.36
-87.09
-86.80
-87.09
-88.84
-88.77
-88.31
-88.58
-88.41
-88.03
-86.50
-87.35
-86.91
-87.25
-87.59
-87.39
-90.89
-88.09
-89.96
-89.83
-90.96
-91.64
-91.57
-91.20
-87.18
-87.18
-86.57
-86.40
-85.66
-85.92
-85.46
-85.74
-84.91
-84.53
-83.90
-85.10
-85.16
-84.99
-84.51
-85.33
-84.53
-86.64
-86.89
-85.62
-85.93
-85.95
-85.42
-85.49
-85.96
-85.20
-85.38
-86.38
-87.12
-87.57
-86.11
-86.68
-85.68
-85.34
-85.42
-85.05
-84.53
-84.64
-87.35
-91.47
-90.86
-91.26
-91.32
-90.78
-93.37
-93.86
-95.60
-97.58
-96.69
-97.79
-99.12
-99.40
-97.80
-97.07
-97.90
-97.29
-96.97
-96.48
-96.95
-100.31
-95.63
-95.42
-97.19
-96.13
-98.90
-103.88
-99.18
-100.80
-98.84
-101.09
-98.24
-99.55
-96.48
-94.85
-93.59
-91.75
-90.96
-90.96
-92.17
-90.64
-90.04
-90.53
-90.78
-90.05
-89.98
-89.92
-88.95
-88.98
-88.81
-88.07
-89.64
-90.01
-86.84
-87.85
-88.20
-91.83
-92.55
-89.37
-89.76
-91.47
-89.46
-90.25
-92.18
-92.27
-92.66
-93.36
-92.76
-91.83
-89.36
-87.63
-87.06
-83.73
-84.39
-83.28
-82.06
-82.38
-82.34
-83.23
-84.15
-83.35
-82.88
-83.49
-83.97</textarea>
+          <textarea id="prices" name="prices" rows="7" spellcheck="false"></textarea>
         </label>
         <p class="field-note" id="series-summary">&mdash;</p>
         <label class="inline">Observed
@@ -1658,9 +1324,16 @@ select:focus { outline: none; border-color: var(--accent); }
           <label class="segment"><input type="radio" name="type" value="call" checked><span>Call</span></label>
           <label class="segment"><input type="radio" name="type" value="put"><span>Put</span></label>
         </div>
+        <div class="segments" role="group" aria-label="Position direction">
+          <label class="segment"><input type="radio" name="direction" value="long" checked><span>Long &middot; buy</span></label>
+          <label class="segment"><input type="radio" name="direction" value="short"><span>Short &middot; write</span></label>
+        </div>
         <p class="field-note" data-simple>A <b>call</b> is the right to <b>buy</b> at the
-          strike (worth more if the stock rises). A <b>put</b> is the right to
-          <b>sell</b> (worth more if it falls).</p>
+          strike (worth more if the stock rises); a <b>put</b> the right to
+          <b>sell</b> (worth more if it falls). <b>Long</b> means you buy that
+          option and pay the premium. <b>Short</b> means you write it &mdash; you
+          collect the premium up front and take on the obligation if the buyer
+          exercises.</p>
         <div class="segments" data-advanced role="group" aria-label="Exercise style">
           <label class="segment"><input type="radio" name="style" value="european"><span>European</span></label>
           <label class="segment"><input type="radio" name="style" value="american" checked><span>American</span></label>
@@ -1796,6 +1469,16 @@ select:focus { outline: none; border-color: var(--accent); }
     <section data-panel="ensemble">
       <div id="ensemble-error" class="alert" role="alert" hidden></div>
 
+      <section class="block" id="idle-state">
+        <h2 class="eyebrow">No data feed</h2>
+        <p class="idle-copy">
+          The instruments light up once FairShare has two years of closing
+          prices to learn from. <b>Pick a ticker</b> in the panel on this page
+          &mdash; or follow the Google Sheets steps there and drop the result in
+          &mdash; and everything else fills in by itself.
+        </p>
+      </section>
+
       <div id="symbol-header" class="symbol-header" hidden>
         <div class="symbol-id">
           <span id="sym-ticker" class="symbol-ticker">&mdash;</span>
@@ -1880,6 +1563,10 @@ select:focus { outline: none; border-color: var(--accent); }
             <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
               of simulated futures built from the same two years &mdash; the range around
               it is where 9 out of 10 of those simulations landed.</li>
+            <li data-short-only><b>Writing an option is not the mirror of buying one.</b>
+              A buyer can lose at most the premium paid; a writer&rsquo;s profit is
+              capped at the premium collected while the loss can be far larger &mdash;
+              unlimited for a written call. Brokers demand margin for a reason.</li>
             <li>Everything here assumes the future rhymes with the recent past.
               Real markets are under no such obligation.</li>
           </ul>
@@ -2083,6 +1770,21 @@ select:focus { outline: none; border-color: var(--accent); }
 
   </main>
 </div>
+
+<dialog id="notice-dialog" aria-labelledby="notice-title">
+  <p class="eyebrow" id="notice-title">Notice &middot; read before using</p>
+  <p class="notice-body">
+    <b>FairShare is for education only.</b> Nothing on this page is investment
+    advice, a recommendation, or a prediction of what will actually happen.
+    Every figure is a model estimate built from past prices, and past prices
+    do not determine future ones. Options can expire worthless, and written
+    options can lose more than they earn &mdash; never trade money you cannot
+    afford to lose.
+  </p>
+  <button id="notice-accept" type="button" class="notice-button" autofocus>
+    I understand &mdash; education only
+  </button>
+</dialog>
 
 <footer class="colophon">
   <p>
@@ -4120,7 +3822,7 @@ function solve3x3(matrix, rhs) {
  * Distribution of the terminal price across a path set: the projection of
  * where the stock itself lands, as opposed to what an option on it is worth.
  */
-function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
+function terminalDistribution(simulation, { strike, spot, bins = 40 } = {}) {
   const { paths, count, width } = simulation;
   const terminal = new Float64Array(count);
   for (let p = 0; p < count; p++) terminal[p] = paths[p * width + width - 1];
@@ -4142,6 +3844,13 @@ function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
     for (let p = 0; p < count; p++) if (terminal[p] > strike) above++;
   }
 
+  // Probability of finishing above today's price — what a plain long (or
+  // short) position cares about, where no strike exists.
+  let aboveSpot = 0;
+  if (Number.isFinite(spot)) {
+    for (let p = 0; p < count; p++) if (terminal[p] > spot) aboveSpot++;
+  }
+
   const low = sorted[0];
   const high = sorted[sorted.length - 1];
   const span = high - low || 1;
@@ -4151,8 +3860,14 @@ function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
     histogram[index] += 1;
   }
 
+  // A compact quantile grid (0.5% steps) lets callers evaluate the chance
+  // of finishing beyond any level — break-evens included — without hauling
+  // the whole path set around.
+  const quantiles = Array.from({ length: 201 }, (unused, i) => quantile(i / 200));
+
   return {
     mean,
+    quantiles,
     median: quantile(0.5),
     p5: quantile(0.05),
     p25: quantile(0.25),
@@ -4161,6 +3876,7 @@ function terminalDistribution(simulation, { strike, bins = 40 } = {}) {
     min: low,
     max: high,
     probAboveStrike: Number.isFinite(strike) ? above / count : null,
+    probAboveSpot: Number.isFinite(spot) ? aboveSpot / count : null,
     histogram: histogram.map((frequency, index) => ({
       from: low + (span * index) / bins,
       to: low + (span * (index + 1)) / bins,
@@ -4500,7 +4216,7 @@ function ensembleValuation(input) {
   const realWorldPaths = simulatePaths({
     ...shared, measure: 'real-world', drift: drift.logDrift, seed: seed + 2,
   });
-  const outlook = terminalDistribution(realWorldPaths, { strike });
+  const outlook = terminalDistribution(realWorldPaths, { strike, spot });
 
   /* ---------------- 6. reconcile ---------------- */
 
@@ -5493,6 +5209,10 @@ function renderEnsemble() {
   errorBox.hidden = true;
 
   const f = readForm(ensembleForm);
+  // Writing (shorting) the option reads the same fair price from the other
+  // side of the trade; the flag reveals the writer-specific education.
+  panel.classList.toggle('is-short', f.direction === 'short');
+
   // The multi-format parser accepts a pasted CSV or provider JSON straight
   // into the history box, not just bare numbers.
   const parsed = market.parseMarketData(f.prices);
@@ -5501,7 +5221,16 @@ function renderEnsemble() {
   $('series-summary').textContent = prices.length
     ? `${count(prices.length)} prices, ${money(prices[0])} to ${money(prices[prices.length - 1])}` +
       (parsed.source !== 'pasted prices' ? ` (${parsed.source})` : '')
-    : 'no usable prices found';
+    : 'empty — pick a ticker or paste closing prices';
+
+  // An untouched page is idle, not broken: no data means the placard, not an
+  // error the visitor never caused.
+  panel.classList.toggle('is-idle', prices.length === 0);
+  if (prices.length === 0) {
+    $('ensemble-error').hidden = true;
+    panel.classList.remove('is-computing');
+    return;
+  }
 
   let result;
   try {
@@ -5613,31 +5342,65 @@ function currentExpiry(result) {
     : new Date(Date.now() + result.days * 86400000);
 }
 
+/**
+ * P(terminal price > level), read off the outlook's quantile grid with
+ * linear interpolation between the 0.5% steps.
+ */
+function probAbove(quantiles, level) {
+  if (!quantiles?.length) return null;
+  const last = quantiles.length - 1;
+  if (level <= quantiles[0]) return 1;
+  if (level >= quantiles[last]) return 0;
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (quantiles[mid] <= level) lo = mid;
+    else hi = mid;
+  }
+  const span = quantiles[hi] - quantiles[lo];
+  const fraction = (lo + (span > 0 ? (level - quantiles[lo]) / span : 0)) / last;
+  return 1 - fraction;
+}
+
 /** The beginner view: one instrument per fact. */
 function renderSimpleReadout(result, form, prices) {
   const { consensus, outlook } = result;
   const symbol = selectedTicker?.symbol ?? 'the stock';
   const expiry = currentExpiry(result);
+  const isPut = form.type === 'put';
+  const isShort = form.direction === 'short';
 
   $('s-dial-title').textContent = selectedTicker
-    ? `Fair value · ${symbol} ${money(form.strike, 0)} ${form.type}`
-    : `Fair value · ${money(form.strike, 0)} ${form.type}`;
+    ? `Fair premium · ${symbol} ${money(form.strike, 0)} ${form.type}`
+    : `Fair premium · ${money(form.strike, 0)} ${form.type}`;
   $('s-dial-exp').textContent = `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
   $('s-fair').textContent = money(consensus.value, 2);
+  $('s-fair-unit').textContent = isShort ? "/ share, you'd collect" : "/ share, you'd pay";
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
 
-  const isPut = form.type === 'put';
-  const chance = isPut ? 1 - outlook.probAboveStrike : outlook.probAboveStrike;
+  // Profit needs more than the money line: a buyer must clear break-even
+  // (strike shifted by the premium paid), and the writer profits on the
+  // exact mirror of that.
+  const premium = consensus.value;
+  const breakEven = isPut ? form.strike - premium : form.strike + premium;
+  const pAboveBE = probAbove(outlook.quantiles, breakEven) ?? outlook.probAboveStrike;
+  const buyerProfits = isPut ? 1 - pAboveBE : pAboveBE;
+  const chance = isShort ? 1 - buyerProfits : buyerProfits;
+
   $('s-prob-date').textContent = fmtDate(expiry);
-  $('s-chance-label').textContent =
-    `chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike, 0)} · ` +
-    'from the simulated futures';
-  renderDonut(chance, `${isPut ? 'below' : 'above'} ${money(form.strike, 0)}`);
+  $('s-chance-label').textContent = isShort
+    ? `chance of profit at expiry · you keep the edge if ${symbol} stays ` +
+      `${isPut ? 'above' : 'below'} break-even ${money(breakEven)}`
+    : `chance of profit at expiry · needs ${symbol} ${isPut ? 'below' : 'above'} ` +
+      `break-even ${money(breakEven)}`;
+  renderDonut(chance, 'in profit');
 
   renderLadder(outlook, form.strike, result.spot);
-  $('s-ladder-note').textContent = `selected strike ${money(form.strike, 0)}`;
+  $('s-ladder-note').textContent =
+    `selected strike ${money(form.strike, 0)} · break-even ${money(breakEven)}`;
 
   $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
   $('s-band').textContent =
@@ -5654,7 +5417,7 @@ function renderSimpleReadout(result, form, prices) {
    range, the thin markers are the individual models, the needle is the
    consensus. Tight agreement reads as a narrow wedge under a steady needle. */
 
-function renderDial(consensus) {
+function renderDial(consensus, endLabels = ['LOW MODEL', 'HIGH MODEL']) {
   const width = 320;
   const height = 168;
   const cx = width / 2;
@@ -5746,13 +5509,13 @@ function renderDial(consensus) {
     fill: 'var(--ink-muted)', 'font-size': 9.5,
     'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
   });
-  low.textContent = 'LOW MODEL';
+  low.textContent = endLabels[0];
   const high = el('text', {
     x: cx + rOuter - 4, y: cy + 12, 'text-anchor': 'end',
     fill: 'var(--ink-muted)', 'font-size': 9.5,
     'font-family': 'var(--mono)', 'font-weight': 600, 'letter-spacing': 1.5,
   });
-  high.textContent = 'HIGH MODEL';
+  high.textContent = endLabels[1];
   svg.append(low, high);
 
   $('dial').replaceChildren(svg);
@@ -5917,8 +5680,8 @@ function renderBarbell(outlook, spot, strike) {
   const pad = 46;
   const yMid = 58;
 
-  const lo = Math.min(outlook.p5, spot, strike);
-  const hi = Math.max(outlook.p95, spot, strike);
+  const lo = Math.min(outlook.p5, spot, Number.isFinite(strike) ? strike : Infinity);
+  const hi = Math.max(outlook.p95, spot, Number.isFinite(strike) ? strike : -Infinity);
   const span = hi - lo || 1;
   const x = (v) => pad + ((v - lo) / span) * (width - 2 * pad);
 
@@ -5947,7 +5710,8 @@ function renderBarbell(outlook, spot, strike) {
     svg.append(label);
   }
 
-  // strike marker (dashed) when it sits inside the drawn span
+  // strike marker (dashed) — a stock position has none to draw
+  if (Number.isFinite(strike)) {
   svg.append(el('line', {
     x1: x(strike), x2: x(strike), y1: yMid - 16, y2: yMid + 16,
     stroke: 'var(--negative)', 'stroke-width': 1.5, 'stroke-dasharray': '4 3',
@@ -5964,6 +5728,7 @@ function renderBarbell(outlook, spot, strike) {
   });
   strikeLabel.textContent = `STRIKE ${Math.round(strike * 100) / 100}`;
   svg.append(strikeLabel);
+  }
 
   // today: hollow bead. Its label dodges below the bar when the median sits
   // close enough that the two captions would overprint.
@@ -6614,6 +6379,12 @@ for (const tab of document.querySelectorAll('.view-tab')) {
   tab.addEventListener('click', () => setView(tab.dataset.view));
 }
 
+/* The education notice greets every open — deliberately unconditional, no
+   remembered dismissal — and holds focus until acknowledged. */
+const noticeDialog = $('notice-dialog');
+$('notice-accept').addEventListener('click', () => noticeDialog.close());
+if (typeof noticeDialog.showModal === 'function') noticeDialog.showModal();
+
 expiryDateInput.value = isoDatePlus(Number(ensembleForm.elements.days.value) || 90);
 setView('simple');
 if (IS_ARTIFACT) renderFetchPanel(null);
@@ -6622,6 +6393,11 @@ renderPrice();
 renderImplied();
 renderGrant();
 renderEnsemble();
-loadReferenceData().then(() => applyCurveRate());
+loadReferenceData().then(() => {
+  // The curve rate lands after the first render; recompute so the figures on
+  // screen were priced with the rate the field shows.
+  applyCurveRate();
+  renderEnsemble();
+});
 
 </script>
