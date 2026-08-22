@@ -326,6 +326,30 @@
           <p class="instrument-caption" id="s-band">&mdash;</p>
         </section>
 
+        <section class="block decision-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Break-even &amp; exit</h2>
+            <span class="eyebrow be-exp">&mdash;</span>
+          </div>
+          <label class="inline">Premium per share
+            <input class="be-premium" type="number" step="any" min="0"
+              inputmode="decimal" aria-label="Premium paid or collected per share">
+          </label>
+          <p class="field-note">Left empty, this uses the model&rsquo;s fair
+            premium. Type what you actually paid (or collected, if you wrote it)
+            to see your real break-even.</p>
+          <dl class="facts be-facts">
+            <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+            <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+            <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+          </dl>
+          <p class="instrument-caption be-summary">&mdash;</p>
+          <div class="advice-box">
+            <h3 class="eyebrow">Sell or exercise?</h3>
+            <p class="instrument-caption be-advice">&mdash;</p>
+          </div>
+        </section>
+
         <section class="block">
           <div class="panel-title-row">
             <h2 class="eyebrow">Price tape</h2>
@@ -344,6 +368,12 @@
             <li><b>The stock outlook</b> is not a promise. It is the middle of thousands
               of simulated futures built from the same two years &mdash; the range around
               it is where 9 out of 10 of those simulations landed.</li>
+            <li><b>Break-even</b> is the strike shifted by the premium: a buyer
+              only comes out ahead at expiry once the stock has moved far enough
+              to repay what the option cost. Before expiry, an in-the-money
+              option is usually worth more <em>sold</em> than exercised, because
+              exercising collects only the intrinsic part and throws away the
+              remaining time value.</li>
             <li data-short-only><b>Writing an option is not the mirror of buying one.</b>
               A buyer can lose at most the premium paid; a writer&rsquo;s profit is
               capped at the premium collected while the loss can be far larger &mdash;
@@ -387,6 +417,30 @@
           </dl>
         </div>
       </div>
+
+      <section class="block decision-panel" data-advanced>
+        <div class="panel-title-row">
+          <h2 class="eyebrow">Break-even &amp; exit</h2>
+          <span class="eyebrow be-exp">&mdash;</span>
+        </div>
+        <label class="inline">Premium per share
+          <input class="be-premium" type="number" step="any" min="0"
+            inputmode="decimal" aria-label="Premium paid or collected per share">
+        </label>
+        <p class="field-note">Left empty, this uses the model&rsquo;s fair
+          premium. Type what you actually paid (or collected, if you wrote it)
+          to see your real break-even.</p>
+        <dl class="facts be-facts">
+          <div class="fact"><dt>Break-even at expiry</dt><dd class="be-price">&mdash;</dd></div>
+          <div class="fact"><dt>Move needed</dt><dd class="be-move">&mdash;</dd></div>
+          <div class="fact"><dt>Chance of profit</dt><dd class="be-chance">&mdash;</dd></div>
+        </dl>
+        <p class="instrument-caption be-summary">&mdash;</p>
+        <div class="advice-box">
+          <h3 class="eyebrow">Sell or exercise?</h3>
+          <p class="instrument-caption be-advice">&mdash;</p>
+        </div>
+      </section>
 
       <figure class="block" data-advanced>
         <h2 class="eyebrow">Where each model lands</h2>
