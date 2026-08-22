@@ -274,6 +274,24 @@ test('probAboveSpot reflects the drift the paths were given', () => {
   assert.equal(without.probAboveSpot, null);
 });
 
+test('the quantile grid is monotone and inverts to sane probabilities', () => {
+  const simulation = simulatePaths({
+    spot: 100, years: 1, rate: 0.03, yield: 0, vol: 0.3, steps: 40, paths: 20000, seed: 5,
+  });
+  const d = terminalDistribution(simulation, { strike: 110 });
+  assert.equal(d.quantiles.length, 201);
+  for (let i = 1; i < 201; i++) {
+    assert.ok(d.quantiles[i] >= d.quantiles[i - 1], `quantiles dip at ${i}`);
+  }
+  assert.equal(d.quantiles[100], d.median);
+  // inverting the grid at the strike must roughly reproduce probAboveStrike
+  let below = 0;
+  while (below < 201 && d.quantiles[below] < 110) below++;
+  const inverted = 1 - below / 200;
+  assert.ok(Math.abs(inverted - d.probAboveStrike) < 0.02,
+    `grid says ${inverted}, direct count says ${d.probAboveStrike}`);
+});
+
 test('terminal quantiles are ordered and the histogram is a distribution', () => {
   const simulation = simulatePaths({
     spot: 50, years: 0.5, rate: 0.03, yield: 0, vol: 0.4, steps: 40, paths: 20000, seed: 23,

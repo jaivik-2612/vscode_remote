@@ -855,12 +855,9 @@ function renderEnsemble() {
   errorBox.hidden = true;
 
   const f = readForm(ensembleForm);
-  // Long/short are stock positions: the regime fit and the outlook are
-  // exactly what they need, the option-pricing half goes unused. The engine
-  // still wants a valid option type, so hand it a call.
-  const stockMode = f.type === 'long' || f.type === 'short';
-  panel.classList.toggle('is-stock', stockMode);
-  document.querySelector('.rail')?.classList.toggle('is-stock', stockMode);
+  // Writing (shorting) the option reads the same fair price from the other
+  // side of the trade; the flag reveals the writer-specific education.
+  panel.classList.toggle('is-short', f.direction === 'short');
 
   // The multi-format parser accepts a pasted CSV or provider JSON straight
   // into the history box, not just bare numbers.
@@ -880,7 +877,7 @@ function renderEnsemble() {
       days: f.days,
       rate: f.rate / 100,
       yield: f.yield / 100,
-      type: stockMode ? 'call' : f.type,
+      type: f.type,
       style: f.style,
       states: Number(f.states),
       paths: Number(f.paths),
@@ -982,78 +979,74 @@ function currentExpiry(result) {
     : new Date(Date.now() + result.days * 86400000);
 }
 
+/**
+ * P(terminal price > level), read off the outlook's quantile grid with
+ * linear interpolation between the 0.5% steps.
+ */
+function probAbove(quantiles, level) {
+  if (!quantiles?.length) return null;
+  const last = quantiles.length - 1;
+  if (level <= quantiles[0]) return 1;
+  if (level >= quantiles[last]) return 0;
+  let lo = 0;
+  let hi = last;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (quantiles[mid] <= level) lo = mid;
+    else hi = mid;
+  }
+  const span = quantiles[hi] - quantiles[lo];
+  const fraction = (lo + (span > 0 ? (level - quantiles[lo]) / span : 0)) / last;
+  return 1 - fraction;
+}
+
 /** The beginner view: one instrument per fact. */
 function renderSimpleReadout(result, form, prices) {
   const { consensus, outlook } = result;
   const symbol = selectedTicker?.symbol ?? 'the stock';
   const expiry = currentExpiry(result);
-  const stockMode = form.type === 'long' || form.type === 'short';
-  const figure = $('s-fair');
+  const isPut = form.type === 'put';
+  const isShort = form.direction === 'short';
 
-  $('s-dial-exp').textContent = stockMode
-    ? `to ${fmtDate(expiry)} · ${count(result.days)}d`
-    : `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
-  $('s-prob-date').textContent = fmtDate(expiry);
-  $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
-  $('s-band').textContent =
-    `9 of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
-  $('s-tape-note').textContent =
-    `${count(prices.length)} closes · last ${money(result.spot)}`;
-  renderTape(prices);
-
-  if (stockMode) {
-    // A share has no model price — its fair price is the market's. What the
-    // simulation CAN say is where the position's profit lands: the dial
-    // becomes a P/L gauge over the 9-in-10 band, the donut the chance of
-    // any profit at all.
-    const sign = form.type === 'short' ? -1 : 1;
-    const pl = (price) => sign * (price - result.spot);
-    const [worst, best] = [pl(outlook.p5), pl(outlook.p95)].sort((a, b) => a - b);
-    const median = pl(outlook.median);
-
-    $('s-dial-title').textContent =
-      `${form.type === 'short' ? 'Short' : 'Long'} ${symbol} · profit or loss per share`;
-    figure.textContent = signed(median, 2);
-    figure.classList.toggle('is-positive', median >= 0);
-    figure.classList.toggle('is-negative', median < 0);
-    $('s-fair-unit').textContent = '/ share, median outcome';
-    $('s-contract').textContent = signed(median * 100, 2);
-    renderDial({ value: median, low: worst, high: best, spread: best - worst, estimates: [] },
-      ['DOWNSIDE', 'UPSIDE']);
-
-    const chance = form.type === 'short'
-      ? 1 - outlook.probAboveSpot
-      : outlook.probAboveSpot;
-    $('s-chance-label').textContent =
-      `chance the position is in profit on ${fmtDate(expiry)} · ` +
-      `${symbol} ${form.type === 'short' ? 'below' : 'above'} ${money(result.spot)}`;
-    renderDonut(chance, 'in profit');
-
-    renderBarbell(outlook, result.spot, NaN);
-    return;
-  }
-
-  figure.classList.remove('is-positive', 'is-negative');
   $('s-dial-title').textContent = selectedTicker
-    ? `Fair value · ${symbol} ${money(form.strike, 0)} ${form.type}`
-    : `Fair value · ${money(form.strike, 0)} ${form.type}`;
-  figure.textContent = money(consensus.value, 2);
-  $('s-fair-unit').textContent = '/ share';
+    ? `Fair premium · ${symbol} ${money(form.strike, 0)} ${form.type}`
+    : `Fair premium · ${money(form.strike, 0)} ${form.type}`;
+  $('s-dial-exp').textContent = `exp ${fmtDate(expiry)} · ${count(result.days)}d`;
+  $('s-fair').textContent = money(consensus.value, 2);
+  $('s-fair-unit').textContent = isShort ? "/ share, you'd collect" : "/ share, you'd pay";
   $('s-contract').textContent = money(consensus.value * 100);
   $('s-agree').textContent = `± ${money(consensus.spread / 2)}`;
   renderDial(consensus);
 
-  const isPut = form.type === 'put';
-  const chance = isPut ? 1 - outlook.probAboveStrike : outlook.probAboveStrike;
-  $('s-chance-label').textContent =
-    `chance ${symbol} ends ${isPut ? 'below' : 'above'} ${money(form.strike, 0)} · ` +
-    'from the simulated futures';
-  renderDonut(chance, `${isPut ? 'below' : 'above'} ${money(form.strike, 0)}`);
+  // Profit needs more than the money line: a buyer must clear break-even
+  // (strike shifted by the premium paid), and the writer profits on the
+  // exact mirror of that.
+  const premium = consensus.value;
+  const breakEven = isPut ? form.strike - premium : form.strike + premium;
+  const pAboveBE = probAbove(outlook.quantiles, breakEven) ?? outlook.probAboveStrike;
+  const buyerProfits = isPut ? 1 - pAboveBE : pAboveBE;
+  const chance = isShort ? 1 - buyerProfits : buyerProfits;
+
+  $('s-prob-date').textContent = fmtDate(expiry);
+  $('s-chance-label').textContent = isShort
+    ? `chance of profit at expiry · you keep the edge if ${symbol} stays ` +
+      `${isPut ? 'above' : 'below'} break-even ${money(breakEven)}`
+    : `chance of profit at expiry · needs ${symbol} ${isPut ? 'below' : 'above'} ` +
+      `break-even ${money(breakEven)}`;
+  renderDonut(chance, 'in profit');
 
   renderLadder(outlook, form.strike, result.spot);
-  $('s-ladder-note').textContent = `selected strike ${money(form.strike, 0)}`;
+  $('s-ladder-note').textContent =
+    `selected strike ${money(form.strike, 0)} · break-even ${money(breakEven)}`;
 
+  $('s-outlook-label').textContent = `Outlook · where ${symbol} might land`;
+  $('s-band').textContent =
+    `9 of 10 simulations landed between ${money(outlook.p5)} and ${money(outlook.p95)}`;
   renderBarbell(outlook, result.spot, form.strike);
+
+  $('s-tape-note').textContent =
+    `${count(prices.length)} closes · last ${money(result.spot)}`;
+  renderTape(prices);
 }
 
 /* ---- fair-value dial ----------------------------------------------------

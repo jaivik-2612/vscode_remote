@@ -379,8 +379,14 @@ export function terminalDistribution(simulation, { strike, spot, bins = 40 } = {
     histogram[index] += 1;
   }
 
+  // A compact quantile grid (0.5% steps) lets callers evaluate the chance
+  // of finishing beyond any level — break-evens included — without hauling
+  // the whole path set around.
+  const quantiles = Array.from({ length: 201 }, (unused, i) => quantile(i / 200));
+
   return {
     mean,
+    quantiles,
     median: quantile(0.5),
     p5: quantile(0.05),
     p25: quantile(0.25),

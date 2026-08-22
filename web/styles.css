@@ -1149,18 +1149,13 @@ select:focus { outline: none; border-color: var(--accent); }
 }
 
 
-/* ======================================================== stock positions ==
-   Long/short mode: option-only apparatus retires, stock-only pieces appear.
-   The flag lives on the ensemble panel so both views obey it. */
+/* ====================================================== short positions ==
+   Writing (shorting) an option flips the reading of the same fair price;
+   the flag on the ensemble panel reveals the writer-specific education. */
 
-[data-stock-only] { display: none !important; }
-[data-panel="ensemble"].is-stock [data-stock-only] { display: revert !important; }
-[data-panel="ensemble"].is-stock [data-option-only] { display: none !important; }
-.rail.is-stock [data-option-only] { display: none !important; }
+[data-short-only] { display: none !important; }
+[data-panel="ensemble"].is-short [data-short-only] { display: revert !important; }
 
-/* Four-way rocker: tighter type so the labels fit the rail. */
-.segments-4 .segment span { padding: 9px 2px; font-size: 10px; letter-spacing: .06em; }
-
-/* Signed P/L headline colors. */
+/* Signed figures keep their market colors where a view needs them. */
 .figure.is-positive { color: var(--positive); text-shadow: 0 0 14px rgba(76, 208, 125, .18); }
 .figure.is-negative { color: var(--negative); text-shadow: 0 0 14px rgba(255, 84, 73, .18); }
