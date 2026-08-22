@@ -99,7 +99,7 @@ policy names it directly.
 
 ---
 
-## Step 2 — Create the app and enrol in Play App Signing
+## Step 2 — Create the app
 
 Play Console → **Create app**.
 
@@ -109,20 +109,30 @@ Play Console → **Create app**.
 - **Free or paid:** Free
 - Accept the declarations.
 
-**Enrol in Play App Signing when prompted.** It is mandatory, and it is also
-what makes the app auto-register for Android developer verification (see the
-September deadline below) and what makes a lost upload key recoverable.
-
 The package name `io.github.jaivik2612.fairshare` is fixed by the first
 upload and can never be changed.
+
+### Play App Signing needs nothing from you
+
+It is mandatory for all new apps, but there is **no enrolment step to
+find** — creating the app enrols it automatically, and uploading the bundle
+does too. New apps now get *quantum-ready hybrid signing*: Google holds a
+classical RSA-4096 key plus a post-quantum ML-DSA-65 key, and your `.jks`
+is only the **upload** key. That split is what makes a lost upload key
+recoverable.
+
+(One consequence for later: if you ever add Firebase, Google Sign-in or
+Maps, you must register **three** certificate fingerprints with them, not
+one.)
 
 ### A dated item worth knowing about
 
 From **30 September 2026**, apps must be registered by a verified developer
 to install on certified devices in Brazil, Indonesia, Singapore and Thailand,
-with global rollout following in 2027. Enrolling in Play App Signing claims
-the app automatically. After your first upload, glance at the Play Console
-home page and clear any "unregistered package" task.
+with global rollout following in 2027. Play App Signing claims the app
+automatically, so this should take care of itself — but after your first
+upload, glance at the Play Console home page and clear any "unregistered
+package" task rather than assuming.
 
 ---
 
@@ -139,8 +149,12 @@ https://jaivik-2612.github.io/vscode_remote/privacy.html
 
 This is generated from `docs/store/PRIVACY.md` and deployed by the Pages
 workflow. Confirm it returns 200 in a browser before pasting it in —
-Google requires an active, public, non-geofenced, non-editable URL, and a
-404 blocks both the listing and the Data safety form.
+Google requires an active, public, non-geofenced, non-editable URL (no
+PDFs), and a 404 blocks both the listing and the Data safety form.
+
+The User Data policy also requires **a privacy policy link inside the app
+itself**, unconditionally — not only for apps handling sensitive data. The
+app satisfies this with the link in its footer colophon.
 
 **2. Ads** — No. There are no ad SDKs in the app.
 
@@ -163,7 +177,9 @@ Location — No; Digital Purchases — No; Unrestricted Internet — No.
 
 Expected result: ESRB Everyone, PEGI 3, IARC 3+.
 
-**6. Data safety** — the whole form collapses to a single answer. To *"Does
+**6. Data safety** — required on the closed, open and production tracks
+(internal testing is the one exempt track). The whole form collapses to a
+single answer. To *"Does
 your app collect or share any of the required user data types?"* answer
 **No**. The encryption and deletion follow-ups are gated behind Yes and never
 appear. Leave both optional badges unticked.
@@ -180,19 +196,36 @@ permissions and the Data safety section are different things.
 > between declared and actual behaviour.
 
 **7. Financial features** — mandatory for **every** app, including apps with
-none. Select the single opt-out: **"My app doesn't provide any financial
-features."**
+none, and since 30 October 2025 it is a hard update blocker: until it is
+completed you cannot ship any update at all. Select the single opt-out:
+**"My app doesn't provide any financial features."**
 
 Do **not** tick "Stock trading and portfolio management" (the app places no
 orders and holds no positions) or "Financial advice" (it gives none). Over-
 declaring here is expensive: ticking a financial feature implies you should
 hold an *organization* account, which requires a D-U-N-S number.
 
-The Financial Services policy itself does not reach FairShare — its only
+This is the one declaration that takes a conscious decision rather than a
+reflex. The defensible reading — an educational calculator that executes no
+trades, holds no funds and gives no personalised advice — is why the app's
+own wording was scrubbed of anything resembling a recommendation. Keep it
+that way and the declaration stays true.
+
+The Financial Services policy itself does not reach FairShare: its only
 substantive sections are binary options, personal loans and earned wage
 access. The India/Japan/Indonesia licensing declarations are personal-loan
-rules and do not apply, so the Indian and Japanese tickers create no
-obligation.
+rules, so the Indian and Japanese tickers create no obligation.
+
+**8. Health apps** — also mandatory for every app. Certify that no health
+features are offered.
+
+**9. Government apps** — likewise. Declare that this is not a government app.
+
+**10. Advertising ID** — the app does not use one.
+
+> Declarations 8–10 are easy to miss because they have nothing to do with
+> what this app is. Google requires all of them from every published app
+> regardless, and an incomplete App content page blocks the release.
 
 ---
 

@@ -99,7 +99,7 @@ jobs:
             # store and key passwords — it silently uses the store password
             # for both. Fail here with a clear message rather than letting
             # Gradle report a confusing "keystore password was incorrect".
-            if ! keytool -list -keystore "$RUNNER_TEMP/signing.jks" \
+            if ! keytool -list -v -keystore "$RUNNER_TEMP/signing.jks" \
                    -storepass "$KEYSTORE_PASSWORD" > /dev/null 2>&1; then
               echo "::error::The keystore did not open with ANDROID_KEYSTORE_PASSWORD."
               echo "::error::Check the base64 round-tripped intact, and note that"
