@@ -11,6 +11,7 @@ on:
       # The hosted privacy policy is generated from this file, and both app
       # stores require that URL to be live and current.
       - 'docs/store/PRIVACY.md'
+      - 'docs/store/TERMS.md'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 

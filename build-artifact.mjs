@@ -177,17 +177,19 @@ ${page.slice(split)}
 }
 
 /**
- * Renders docs/store/PRIVACY.md as a standalone page for dist/pwa/.
+ * Renders one of the repo's Markdown legal documents as a standalone page
+ * for dist/pwa/.
  *
  * Both app stores demand a privacy policy at a live public URL, and Pages
  * already serves this directory — so the Markdown in the repo stays the one
- * source of truth and the hosted page can never drift from it. The
+ * source of truth and the hosted page can never drift from it. The terms of
+ * use ride the same path for the same reason. The
  * converter handles only what that document uses (setext-free ATX headings,
  * paragraphs, bold, italic, links); anything richer belongs in a real
  * Markdown library, and this deliberately fails loud rather than guessing.
  */
-async function privacyPage() {
-  let md = await readFile('docs/store/PRIVACY.md', 'utf8');
+async function legalPage(source, title) {
+  let md = await readFile(source, 'utf8');
 
   // Google wants "a privacy point of contact or a mechanism to submit
   // inquiries". The repository issue tracker satisfies that on its own, so
@@ -225,7 +227,7 @@ async function privacyPage() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark light">
-<title>FairShare — Privacy Policy</title>
+<title>FairShare — ${title}</title>
 <style>
 :root {
   --ground: #f6f7f8; --ink: #191f26; --muted: #5d6771;
@@ -263,7 +265,11 @@ footer {
 <body>
 <main>
 ${body.join('\n')}
-<footer><a href="./">&larr; Back to FairShare</a></footer>
+<footer>
+<a href="./">&larr; Back to FairShare</a> &nbsp;·&nbsp;
+<a href="./privacy.html">Privacy</a> &nbsp;·&nbsp;
+<a href="./terms.html">Terms</a>
+</footer>
 </main>
 </body>
 </html>
@@ -313,6 +319,9 @@ ${registration}
   for (const asset of ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png']) {
     await copyFile(`web/pwa/${asset}`, `dist/pwa/${asset}`);
   }
-  await writeFile('dist/pwa/privacy.html', await privacyPage());
+  await writeFile('dist/pwa/privacy.html',
+    await legalPage('docs/store/PRIVACY.md', 'Privacy Policy'));
+  await writeFile('dist/pwa/terms.html',
+    await legalPage('docs/store/TERMS.md', 'Terms of Use'));
   console.log(`dist/pwa/ — installable build, cache fairshare-${version}`);
 }

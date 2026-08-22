@@ -355,3 +355,27 @@ primary/secondary category pair separate from Play's single-category model.
   education-only modal is already stronger than anything required — and it is
   the evidence that answers a reviewer asking why "Financial advice" was not
   declared. Do not let a future UI cleanup remove the acknowledgement gate.
+
+---
+
+## Before you charge money
+
+Monetisation is not just a Play Console setting. The constraints are in
+[`../PRODUCT-POLICY.md`](../PRODUCT-POLICY.md) — read it before designing a
+paid tier. The short version:
+
+- **Play Billing is still mandatory** outside the US, so a paid tier needs
+  two payment paths from day one, not one. **Play Billing Library 8 is
+  required for new apps from 31 August 2026.**
+- **Apple can remove an individual developer** for an investing-adjacent app
+  under App Review 3.2.1(viii) / 5.1.1(ix). That, plus Play's rule that
+  providers of financial products "must" hold an Organization account, plus
+  the EU Digital Services Act publishing an individual trader's home address,
+  are three independent reasons to **incorporate before monetising**.
+- **Charging does not change the Financial features declaration** — the
+  answer stays "no financial features". What would change it is shipping
+  personalised output.
+- **Adding Supabase makes the "collects no data" declaration false** and must
+  be resubmitted in lockstep, along with a rewritten privacy policy, an
+  in-app *and* web account-deletion route, and a Quebec Law 25 privacy
+  impact assessment.
