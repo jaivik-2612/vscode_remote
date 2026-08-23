@@ -944,6 +944,70 @@ select:focus { outline: none; border-color: var(--accent); }
 .explainer-box .eyebrow { display: block; margin-bottom: 6px; }
 .explainer-box .instrument-caption { margin: 0; }
 
+/* ------------------------------------------- where the price comes from */
+
+.wf-chart svg, .rv-chart svg { display: block; width: 100%; height: auto; }
+.wf-chart svg { min-width: 300px; }
+.rv-chart svg { min-width: 290px; }
+
+.wf-legend {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-legend li {
+  font: 400 12.5px/1.5 var(--body);
+  color: var(--ink-muted);
+  padding-left: 11px;
+  border-left: 2px solid var(--line);
+}
+
+.wf-legend b {
+  display: block;
+  font: 600 10.5px/1.4 var(--mono);
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.wf-note, .rv-summary { margin-top: 11px; }
+
+/* --------------------------------------------- what the market believes */
+
+.reverse-panel label.inline { margin-top: 2px; }
+
+.reverse-panel .rv-price {
+  font: 600 16px/1.2 var(--mono);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ink);
+  background: var(--well);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px 11px;
+  width: 150px;
+  min-height: 40px;
+}
+
+.reverse-panel .rv-price:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+
+.reverse-panel .rv-price::placeholder {
+  color: var(--ink-muted);
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.reverse-panel .rv-facts { margin-top: 8px; }
+
 /* ================================================================ charts */
 
 .lower {
@@ -1574,6 +1638,16 @@ select:focus { outline: none; border-color: var(--accent); }
           </div>
         </section>
 
+        <section class="block waterfall-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Where the price comes from</h2>
+            <span class="eyebrow wf-total">&mdash;</span>
+          </div>
+          <div class="well"><div class="wf-chart"></div></div>
+          <ol class="wf-legend"></ol>
+          <p class="instrument-caption wf-note">&mdash;</p>
+        </section>
+
         <div class="instrument-grid">
           <section class="block">
             <div class="panel-title-row">
@@ -1601,6 +1675,28 @@ select:focus { outline: none; border-color: var(--accent); }
           </div>
           <div class="well"><div id="barbell"></div></div>
           <p class="instrument-caption" id="s-band">&mdash;</p>
+        </section>
+
+        <section class="block reverse-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">What the market must believe</h2>
+            <span class="eyebrow rv-state">&mdash;</span>
+          </div>
+          <label class="inline">Market price per share
+            <input class="rv-price" type="number" step="any" min="0"
+              inputmode="decimal" aria-label="The option's quoted market price per share">
+          </label>
+          <p class="field-note">Type what the option is actually quoted at. FairShare
+            works backwards from it &mdash; not to say whether it is cheap or dear, but
+            to show what assumption would make that price fair.</p>
+          <div class="well"><div class="rv-chart"></div></div>
+          <dl class="facts rv-facts">
+            <div class="fact"><dt>Implied volatility</dt><dd class="rv-iv">&mdash;</dd></div>
+            <div class="fact"><dt>Implied turbulent share</dt><dd class="rv-implied">&mdash;</dd></div>
+            <div class="fact"><dt>This model projects</dt><dd class="rv-model">&mdash;</dd></div>
+            <div class="fact"><dt>This history showed</dt><dd class="rv-history">&mdash;</dd></div>
+          </dl>
+          <p class="instrument-caption rv-summary">&mdash;</p>
         </section>
 
         <section class="block decision-panel">
@@ -3309,6 +3405,302 @@ function exerciseComparison({ type, style, direction, spot, strike, fair }) {
 return { breakEvenPrice, intrinsicValue, exerciseComparison };
 })();
 
+/* src/attribution.js */
+const Attribution = (() => {
+/**
+ * Premium attribution: where an option's price actually comes from.
+ *
+ * Every options tool shows Greeks, which are rates of change. This answers a
+ * different question — why does this contract cost what it costs? — by
+ * building the price up from the floor in named, additive steps, each one
+ * the difference between two full revaluations that differ in exactly one
+ * assumption. That is the same sequential-revaluation idea desks use for
+ * P&L explain, pointed at the price level instead of a change in it.
+ *
+ * The ladder, in order:
+ *
+ *   intrinsic       what exercising right now would collect
+ * + time value      the textbook option value at plain trailing volatility
+ * + regime          what changes when the fitted regime volatility replaces
+ *                   the trailing estimate — the piece no other tool isolates
+ * + path            what the simulation sees that the closed form averages
+ *                   away: volatility that itself moves, skew, fat tails
+ * + early exercise  the right to exercise before expiry (American only)
+ * + reconciliation  the models do not fully agree; this names the gap rather
+ *                   than hiding it
+ * = the consensus price on screen
+ *
+ * The last step matters for honesty. Attribution ladders are path-dependent:
+ * re-order the steps and the individual numbers shift, because each is
+ * measured against the state left by the one before. Rather than pretend
+ * otherwise, the ladder is fixed, documented, and its residual is shown.
+ */
+
+/**
+ * Builds the attribution ladder.
+ *
+ * @param {object} result the value returned by `ensembleValuation`
+ * @returns {{steps: Array, total: number, note: string}}
+ */
+function attributePremium(result) {
+  const { blackScholes, monteCarlo, consensus, volatility, style } = result;
+  const onTrailing = blackScholes.onTrailing;
+  const onRegime = blackScholes.onRegime;
+
+  const intrinsic = onTrailing.intrinsic;
+
+  // Each rung is a difference of two prices that differ in one assumption,
+  // so the label really does describe what the number measures.
+  const timeValue = onTrailing.europeanValue - intrinsic;
+  const regime = onRegime.europeanValue - onTrailing.europeanValue;
+  const path = monteCarlo.european.price - onRegime.europeanValue;
+  const earlyExercise = style === 'american'
+    ? monteCarlo.value - monteCarlo.european.price
+    : 0;
+
+  const built = intrinsic + timeValue + regime + path + earlyExercise;
+  const reconciliation = consensus.value - built;
+
+  const steps = [
+    {
+      key: 'intrinsic',
+      label: 'Intrinsic value',
+      amount: intrinsic,
+      detail: intrinsic > 0
+        ? 'What exercising today would collect: the gap between the stock price and the strike.'
+        : 'Nothing — the strike is on the wrong side of the stock price, so exercising today collects nothing.',
+    },
+    {
+      key: 'time',
+      label: 'Time value',
+      amount: timeValue,
+      detail: `The textbook value of the remaining ${formatDays(result.days)}, priced at ` +
+        `the plain trailing volatility of ${percent(volatility.trailing)}. This is what a ` +
+        'Black-Scholes calculator with no regime model would tell you.',
+    },
+    {
+      key: 'regime',
+      label: 'Regime adjustment',
+      amount: regime,
+      detail: describeRegime(volatility, regime),
+    },
+    {
+      key: 'path',
+      label: 'Path effects',
+      amount: path,
+      detail: 'What the simulation sees and the closed form cannot: volatility that ' +
+        'moves during the option’s life, and a return distribution with skew and ' +
+        'fatter tails than the bell curve Black-Scholes assumes.',
+    },
+  ];
+
+  if (style === 'american') {
+    steps.push({
+      key: 'early',
+      label: 'Early exercise',
+      amount: earlyExercise,
+      detail: earlyExercise > 0
+        ? 'The extra worth of being able to exercise before expiry rather than only at it.'
+        : 'Effectively nothing — on these numbers there is no advantage to exercising early.',
+    });
+  }
+
+  steps.push({
+    key: 'reconciliation',
+    label: 'Model disagreement',
+    amount: reconciliation,
+    detail: 'The headline price averages three models, and this ladder walks up one ' +
+      'of the three. This is the difference between them — shown rather than ' +
+      'absorbed silently.',
+  });
+
+  return {
+    steps,
+    total: consensus.value,
+    note: 'Each step is the difference between two full valuations that differ in one ' +
+      'assumption, taken in the order shown. A different order would split the same ' +
+      'total differently.',
+  };
+}
+
+function describeRegime({ trailing, regime }, amount) {
+  const direction = regime > trailing ? 'above' : 'below';
+  // Below a cent the sign is noise, and claiming a direction it cannot
+  // support would be exactly the kind of false precision this panel exists
+  // to avoid.
+  const effect = Math.abs(amount) < 0.005
+    ? 'barely moves the price at all — this contract is not very sensitive to volatility'
+    : amount > 0 ? 'adds to the price' : 'takes off the price';
+  return `The regimes fitted to this history imply ${percent(regime)} volatility over ` +
+    `the option’s life — ${direction} the ${percent(trailing)} trailing ` +
+    `estimate — which ${effect}. No other input changed.`;
+}
+
+const percent = (v) => `${(v * 100).toFixed(1)}%`;
+const formatDays = (d) => `${Math.round(d).toLocaleString('en-US')} days`;
+
+return { attributePremium };
+})();
+
+/* src/reverse.js */
+const Reverse = (() => {
+/**
+ * Reverse mode: what would have to be true for the market's price to be fair?
+ *
+ * Implied volatility already answers one version of this — it restates a
+ * price as the volatility that produces it. This restates the same price in
+ * a unit the app's own regime model supplies: the share of the option's life
+ * the market must expect to spend in the turbulent regime.
+ *
+ * The inversion is exact rather than fitted. `projectRegimes` builds its
+ * horizon volatility as a variance blend of the fitted regime volatilities,
+ * weighted by the time the Markov chain expects to spend in each:
+ *
+ *     sigma_projected^2  =  sum_i  w_i * sigma_i^2
+ *
+ * With the two extreme regimes bracketing the range, any horizon volatility
+ * between them corresponds to exactly one turbulent weight:
+ *
+ *     w  =  (sigma^2 - sigma_calm^2) / (sigma_turbulent^2 - sigma_calm^2)
+ *
+ * So an implied volatility becomes an implied regime mix. The honest part is
+ * what happens outside the bracket: a market price can imply a volatility
+ * this stock has never shown in either regime, and then no mix explains it.
+ * That case is reported, not clamped away.
+ */
+
+const { impliedVol } = ImpliedVol;
+const bs = BlackScholes;
+
+/**
+ * Turns a quoted market price into the regime mix that would justify it.
+ *
+ * @param {object} args
+ * @param {number} args.marketPrice   what the option is quoted at
+ * @param {object} args.contract      {spot, strike, time, rate, yield, type}
+ * @param {boolean} [args.american]   invert against a binomial tree instead of
+ *                                    the closed form, matching the contract
+ * @param {number[]} args.regimeVols  annualised volatility of each fitted regime
+ * @param {number} args.modelWeight   turbulent share the chain itself projects
+ * @param {number} args.historicalWeight  long-run share, from the stationary distribution
+ */
+function impliedRegimeMix({
+  marketPrice, contract, regimeVols, modelWeight, historicalWeight,
+  american = false,
+}) {
+  if (!Array.isArray(regimeVols) || regimeVols.length < 2) {
+    return { state: 'not-applicable', reason: 'needs at least two fitted regimes' };
+  }
+  if (!(marketPrice > 0)) {
+    return { state: 'not-applicable', reason: 'no market price entered' };
+  }
+
+  // impliedVol throws when the quote breaches the no-arbitrage bounds, and
+  // reports identifiable:false when it sits on a flat spot where every
+  // volatility gives the same price. Both mean "no regime mix explains this",
+  // for different reasons, and both are worth saying out loud.
+  let solved;
+  try {
+    solved = impliedVol({ ...contract, price: marketPrice, american });
+  } catch (error) {
+    return {
+      state: 'no-solution',
+      reason: `That price cannot come from any volatility: ${error.message}.`,
+    };
+  }
+  if (!solved || !Number.isFinite(solved.vol)) {
+    return { state: 'no-solution', reason: 'No volatility reproduces this price.' };
+  }
+  if (solved.identifiable === false) {
+    // Same condition the vega guard below catches, reported by the solver
+    // when the quote sits exactly on the floor or ceiling. One state, so the
+    // UI says one thing.
+    return {
+      state: 'insensitive',
+      impliedVolatility: solved.vol,
+      perVolPoint: 0,
+      reason: 'At this price the option barely moves with volatility, so no ' +
+        'single regime mix is implied — every mix fits about equally well.',
+    };
+  }
+
+  const impliedVolatility = solved.vol;
+
+  // Deep in or far out of the money, an option's price barely responds to
+  // volatility, so the arithmetic still returns a number but that number is
+  // not meaningfully implied by the quote — a one-cent difference in the
+  // price would move it by tens of percentage points. `impliedVol` only
+  // reports this at the exact floor and ceiling; the useless region is much
+  // wider than that, and vega is what measures it.
+  const { vega } = bs.greeks({ ...contract, vol: impliedVolatility });
+  const perVolPoint = Math.abs(vega);
+  if (perVolPoint < Math.max(0.01, 0.002 * marketPrice)) {
+    return {
+      state: 'insensitive',
+      impliedVolatility,
+      perVolPoint,
+      reason: 'This contract is so far from the strike that its price hardly ' +
+        'moves with volatility — a one-point change in volatility shifts it by ' +
+        `about ${perVolPoint < 0.005 ? 'less than half a cent' : perVolPoint.toFixed(2)}. ` +
+        'Almost any mix of regimes fits the quote, so none is really implied by it.',
+    };
+  }
+
+  const calm = Math.min(...regimeVols);
+  const turbulent = Math.max(...regimeVols);
+
+  const span = turbulent ** 2 - calm ** 2;
+  if (!(span > 0)) {
+    return { state: 'not-applicable', reason: 'the fitted regimes have the same volatility' };
+  }
+  const weight = (impliedVolatility ** 2 - calm ** 2) / span;
+
+  // Outside the bracket the question has no answer, and saying so is more
+  // useful than reporting a weight of 1.4 or -0.2 as though it meant
+  // something. The tolerance keeps a quote that sits exactly on a regime's
+  // own volatility from being called out of range by one float ulp.
+  const EDGE = 1e-9;
+  const state = weight < -EDGE ? 'below-calmest'
+    : weight > 1 + EDGE ? 'above-most-turbulent'
+    : 'ok';
+
+  return {
+    state,
+    impliedVolatility,
+    calmVol: calm,
+    turbulentVol: turbulent,
+    /** Share of the option's life the market implies in the turbulent regime. */
+    impliedWeight: weight,
+    modelWeight,
+    historicalWeight,
+    /** Positive: the market implies more turbulence than the chain projects. */
+    versusModel: Number.isFinite(modelWeight) ? weight - modelWeight : null,
+    versusHistory: Number.isFinite(historicalWeight) ? weight - historicalWeight : null,
+  };
+}
+
+/**
+ * The turbulent-regime share implied by a projected regime path.
+ *
+ * `projectRegimes` returns the distribution over regimes at each step; the
+ * variance blend weights each regime by the time spent in it, so the
+ * comparable weight is the time-average of the most turbulent regime's
+ * probability — not its probability at the end of the horizon.
+ */
+function projectedTurbulentWeight(regimePath, regimeVols) {
+  if (!Array.isArray(regimePath) || !regimePath.length) return null;
+  if (!Array.isArray(regimeVols) || regimeVols.length < 2) return null;
+  const turbulent = regimeVols.indexOf(Math.max(...regimeVols));
+  // The path carries one extra entry: the distribution after the final step,
+  // which no step's variance was drawn from.
+  const steps = regimePath.slice(0, Math.max(1, regimePath.length - 1));
+  const total = steps.reduce((sum, dist) => sum + (dist[turbulent] ?? 0), 0);
+  return total / steps.length;
+}
+
+return { impliedRegimeMix, projectedTurbulentWeight };
+})();
+
 /* src/hmm.js */
 const Hmm = (() => {
 /**
@@ -4569,6 +4961,8 @@ const series = Series;
 const monteCarlo = MonteCarlo;
 const market = Market;
 const decision = Decision;
+const attribution = Attribution;
+const reverse = Reverse;
 
 const { impliedVol, priceBounds } = ImpliedVol;
 const { fitHmm, projectRegimes, viterbiPath, stationaryDistribution } = Hmm;
@@ -4578,7 +4972,7 @@ const {
   valuation, valueCurve, employeeGrantValue,
 } = Valuation;
 
-return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationaryDistribution, ensembleValuation, DAYS_PER_YEAR, yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, stats, blackScholes, binomial, series, monteCarlo, market, decision };
+return { impliedVol, priceBounds, fitHmm, projectRegimes, viterbiPath, stationaryDistribution, ensembleValuation, DAYS_PER_YEAR, yearsFromDays, yearsBetween, valuation, valueCurve, employeeGrantValue, stats, blackScholes, binomial, series, monteCarlo, market, decision, attribution, reverse };
 })();
 
 /* web/app.js */
@@ -4591,6 +4985,7 @@ const {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes: bs, binomial,
   ensembleValuation, series: seriesTools, market, decision,
+  attribution, reverse,
 } = Engine;
 
 const $ = (id) => document.getElementById(id);
@@ -5555,6 +5950,9 @@ function renderEnsemble() {
   renderSimpleReadout(result, f, prices);
   lastDecisionInputs = { result, form: f };
   renderDecision(result, f);
+  renderAttribution(result);
+  lastReverseInputs = { result, form: f };
+  renderReverse(result, f);
 
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
@@ -5807,6 +6205,326 @@ for (const input of document.querySelectorAll('.be-premium')) {
     }
     if (lastDecisionInputs) {
       renderDecision(lastDecisionInputs.result, lastDecisionInputs.form);
+    }
+  });
+}
+
+/* ---- where the price comes from -----------------------------------------
+   A waterfall over the attribution ladder: each bar is one assumption's
+   contribution, floating at the running total, so the eye follows the price
+   being built from the intrinsic floor up to the headline number. Bars are
+   signed — the regime step genuinely subtracts when the fitted regime is
+   calmer than the trailing estimate. */
+
+function renderAttribution(result) {
+  const panel = document.querySelector('.waterfall-panel');
+  if (!panel) return;
+  const { steps, total, note } = attribution.attributePremium(result);
+  const cur = activeCurrency === 'GBX' ? 'GBX' : activeCurrency;
+
+  panel.querySelector('.wf-total').textContent =
+    `${money(total, 2)}${cur ? ' ' + cur : ''} / share`;
+
+  // The scale must cover the running total AND any bar that dips below it.
+  const running = [];
+  let at = 0;
+  for (const step of steps) {
+    running.push({ from: at, to: at + step.amount, step });
+    at += step.amount;
+  }
+  const lo = Math.min(0, ...running.map((r) => Math.min(r.from, r.to)));
+  const hi = Math.max(...running.map((r) => Math.max(r.from, r.to)));
+  const span = Math.max(hi - lo, 1e-9);
+
+  const width = 320;
+  const rowHeight = 30;
+  const height = steps.length * rowHeight + 26;
+  const left = 4;
+  const right = width - 4;
+  const x = (v) => left + ((v - lo) / span) * (right - left);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Premium attribution: ${steps.map((s) =>
+      `${s.label} ${s.amount.toFixed(2)}`).join(', ')}. Total ${total.toFixed(2)}.`,
+  });
+
+  // Baseline at zero, so a negative bar reads as one.
+  svg.append(el('line', {
+    x1: x(0), y1: 6, x2: x(0), y2: height - 20,
+    stroke: 'var(--line-strong)', 'stroke-width': 1, 'stroke-dasharray': '2 3',
+  }));
+
+  running.forEach(({ from, to, step }, index) => {
+    const y = 10 + index * rowHeight;
+    const x1 = x(Math.min(from, to));
+    const x2 = x(Math.max(from, to));
+    const isTotalish = step.key === 'reconciliation';
+    const colour = step.amount >= 0 ? 'var(--accent)' : 'var(--negative)';
+
+    // The bar is a wash so the label can sit over it and stay readable; the
+    // leading edge is drawn solid, which is the part the eye actually reads
+    // the value off. A step worth nothing still gets its edge tick, so the
+    // row is never blank.
+    svg.append(el('rect', {
+      x: x1, y, width: Math.max(x2 - x1, 1.5), height: rowHeight - 16,
+      rx: 2,
+      fill: isTotalish ? 'var(--line-strong)' : colour,
+      opacity: isTotalish ? 0.18 : 0.26,
+    }));
+    svg.append(el('rect', {
+      x: x(to) - 1.25, y, width: 2.5, height: rowHeight - 16,
+      fill: isTotalish ? 'var(--line-strong)' : colour,
+    }));
+
+    // Connector down to the next bar's starting edge.
+    if (index < running.length - 1) {
+      svg.append(el('line', {
+        x1: x(to), y1: y + rowHeight - 16, x2: x(to), y2: y + rowHeight,
+        stroke: 'var(--line)', 'stroke-width': 1,
+      }));
+    }
+
+    // Both texts share the bar's own vertical centre. Drawn any lower they
+    // read against the bar below them, which inverts the whole chart.
+    const textY = y + (rowHeight - 16) / 2 + 3.5;
+
+    const label = el('text', {
+      x: left, y: textY,
+      'font-size': 9, fill: 'var(--ink-muted)',
+      'font-family': 'var(--mono)', 'letter-spacing': '.08em',
+    });
+    label.textContent = step.label.toUpperCase();
+    svg.append(label);
+
+    const value = el('text', {
+      x: right, y: textY, 'text-anchor': 'end',
+      'font-size': 10, fill: step.amount >= 0 ? 'var(--ink)' : 'var(--negative)',
+      'font-family': 'var(--mono)',
+    });
+    value.textContent = (step.amount >= 0 ? '+' : '−') + money(Math.abs(step.amount), 2);
+    svg.append(value);
+  });
+
+  const chart = panel.querySelector('.wf-chart');
+  chart.replaceChildren(svg);
+
+  // The legend carries the explanations; the chart carries the shape.
+  const legend = panel.querySelector('.wf-legend');
+  // Plain HTML here, not el() — that helper builds SVG-namespaced nodes,
+  // which render as nothing inside a <ol>.
+  legend.replaceChildren(...steps.map((step) => {
+    const item = document.createElement('li');
+    const head = document.createElement('b');
+    head.textContent = `${step.label} ${step.amount >= 0 ? '+' : '−'}` +
+      `${money(Math.abs(step.amount), 2)}`;
+    item.append(head, step.detail);
+    return item;
+  }));
+
+  panel.querySelector('.wf-note').textContent = note;
+}
+
+/* ---- what the market must believe ---------------------------------------
+   Implied volatility restates a price as one number. This restates the same
+   price in the app's own units: the share of the option's life the market
+   must expect to spend in the turbulent regime. Deliberately reports, never
+   judges — no "cheap" or "expensive" anywhere. */
+
+let lastReverseInputs = null;
+
+function renderReverse(result, form) {
+  const panel = document.querySelector('.reverse-panel');
+  if (!panel) return;
+
+  const vols = result.hmm.annualisedVols ?? [];
+  const modelWeight = reverse.projectedTurbulentWeight(result.hmm.regimePath, vols);
+  const turbulent = vols.indexOf(Math.max(...vols));
+  const historicalWeight = result.hmm.stationary?.[turbulent] ?? null;
+
+  const input = panel.querySelector('.rv-price');
+  const blendAnchor = result.blackScholes.onRegime.fairValue;
+  input.placeholder = `blend ${money(blendAnchor, 2)}`;
+  const raw = input.value.trim();
+  const marketPrice = raw === '' ? null : Number(raw);
+
+  const setAllIn = (cls, text) => {
+    const node = panel.querySelector(`.${cls}`);
+    if (node) node.textContent = text;
+  };
+
+  // Always show what the model itself says, even before a price is typed —
+  // the comparison is the point, and half of it is available immediately.
+  setAllIn('rv-model', modelWeight === null ? '—' : percent(modelWeight, 1));
+  setAllIn('rv-history', historicalWeight === null ? '—' : percent(historicalWeight, 1));
+
+  if (marketPrice === null || !(marketPrice > 0)) {
+    setAllIn('rv-state', 'awaiting a price');
+    setAllIn('rv-iv', '—');
+    setAllIn('rv-implied', '—');
+    setAllIn('rv-summary',
+      `This stock's fitted regimes run from ${percent(Math.min(...vols), 1)} ` +
+      `volatility when calm to ${percent(Math.max(...vols), 1)} when turbulent. ` +
+      'Enter a quoted price above and FairShare will work out which mix of the ' +
+      `two the market is pricing in. A steady blend of those regimes prices this ` +
+      `contract at ${money(blendAnchor, 2)}.`);
+    panel.querySelector('.rv-chart').replaceChildren();
+    return;
+  }
+
+  const contract = {
+    spot: result.spot, strike: form.strike, time: result.years,
+    rate: form.rate / 100, yield: form.yield / 100, type: form.type,
+  };
+  const mix = reverse.impliedRegimeMix({
+    marketPrice, contract, regimeVols: vols, modelWeight, historicalWeight,
+    american: result.style === 'american',
+  });
+
+  if (mix.state === 'not-applicable' || mix.state === 'no-solution'
+      || mix.state === 'insensitive') {
+    setAllIn('rv-state', mix.state === 'insensitive' ? 'not implied by this price' : 'no answer');
+    setAllIn('rv-iv', mix.impliedVolatility ? percent(mix.impliedVolatility, 1) : '—');
+    setAllIn('rv-implied', '—');
+    setAllIn('rv-summary', mix.reason);
+    panel.querySelector('.rv-chart').replaceChildren();
+    return;
+  }
+
+  setAllIn('rv-iv', percent(mix.impliedVolatility, 1));
+  setAllIn('rv-implied', percent(mix.impliedWeight, 1));
+
+  if (mix.state === 'ok') {
+    setAllIn('rv-state', 'within this stock’s range');
+    const versus = mix.versusHistory;
+    const comparison = Math.abs(versus) < 0.02
+      ? 'almost exactly the share this stock’s own history spent there'
+      : versus > 0
+        ? `${percent(Math.abs(versus), 1)} more turbulence than this stock’s ` +
+          'history actually delivered'
+        : `${percent(Math.abs(versus), 1)} less turbulence than this stock’s ` +
+          'history actually delivered';
+    setAllIn('rv-summary',
+      `At ${money(marketPrice, 2)}, the market is pricing ${percent(mix.impliedWeight, 1)} ` +
+      `of the next ${count(result.days)} days in the turbulent regime — ${comparison}. ` +
+      'That is a description of the price, not a verdict on it: the market may ' +
+      'know something this history cannot.');
+  } else {
+    const beyond = mix.state === 'above-most-turbulent' ? 'above' : 'below';
+    const bound = mix.state === 'above-most-turbulent'
+      ? percent(mix.turbulentVol, 1) : percent(mix.calmVol, 1);
+    setAllIn('rv-state', 'outside this stock’s range');
+    // The app's own headline price legitimately lands here: the simulation
+    // prices fat tails and moving volatility that a constant-volatility blend
+    // cannot reproduce. Saying so beats letting it look like an error.
+    const ownPrice = Math.abs(marketPrice - result.consensus.value) < 0.005 * Math.max(1, result.consensus.value);
+    const tailNote = ownPrice && mix.state === 'above-most-turbulent'
+      ? ' That is FairShare’s own headline price, and it sits above the blend ' +
+        'because the simulation adds value for fat tails and moving volatility ' +
+        'that a single steady volatility cannot express.'
+      : '';
+    setAllIn('rv-summary',
+      `At ${money(marketPrice, 2)}, the market implies ${percent(mix.impliedVolatility, 1)} ` +
+      `volatility — ${beyond} the ${bound} of even the ` +
+      `${mix.state === 'above-most-turbulent' ? 'most turbulent' : 'calmest'} regime ` +
+      'this history contains, so no mix of the two explains it.' + tailNote +
+      ' That is a description of the price, not a verdict on it.');
+  }
+
+  renderRegimeBar(panel.querySelector('.rv-chart'), mix);
+}
+
+/** Three markers on one axis: what the market implies, what the model
+ *  projects, and what actually happened. The two reference marks sit below
+ *  the axis and dodge onto separate rows when they crowd each other, which
+ *  they routinely do — a quiet stock's model and history both hug zero. */
+function renderRegimeBar(host, mix) {
+  const width = 320;
+  const height = 112;
+  const left = 30;
+  const right = width - 30;
+  const axis = 46;
+  const x = (w) => left + Math.max(0, Math.min(1, w)) * (right - left);
+  const text = (attrs, content) => {
+    const node = el('text', {
+      'font-size': 8.5, 'font-family': 'var(--mono)',
+      'letter-spacing': '.08em', ...attrs,
+    });
+    node.textContent = content;
+    return node;
+  };
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`, role: 'img',
+    'aria-label': 'Share of the option’s life spent in the turbulent regime: ' +
+      `market implies ${(mix.impliedWeight * 100).toFixed(0)} per cent, ` +
+      `the model projects ${(mix.modelWeight * 100).toFixed(0)}, ` +
+      `and this history showed ${(mix.historicalWeight * 100).toFixed(0)}.`,
+  });
+
+  svg.append(el('line', {
+    x1: left, y1: axis, x2: right, y2: axis,
+    stroke: 'var(--line-strong)', 'stroke-width': 2,
+  }));
+  for (const [w, label, anchor] of [[0, 'ALL CALM', 'start'], [1, 'ALL TURBULENT', 'end']]) {
+    svg.append(el('line', {
+      x1: x(w), y1: axis - 5, x2: x(w), y2: axis + 5,
+      stroke: 'var(--line-strong)', 'stroke-width': 2,
+    }));
+    svg.append(text({
+      x: x(w), y: height - 3, 'text-anchor': anchor, fill: 'var(--ink-muted)',
+      'font-size': 8,
+    }, label));
+  }
+
+  // The market sits above the axis; the two references below it, on rows that
+  // separate as soon as their labels would touch.
+  if (Number.isFinite(mix.impliedWeight)) {
+    const cx = x(mix.impliedWeight);
+    svg.append(el('line', {
+      x1: cx, y1: axis, x2: cx, y2: axis - 13,
+      stroke: 'var(--accent)', 'stroke-width': 1.5,
+    }));
+    svg.append(el('circle', { cx, cy: axis - 13, r: 5, fill: 'var(--accent)' }));
+    svg.append(text({
+      x: Math.max(left, Math.min(right, cx)), y: axis - 23,
+      'text-anchor': 'middle', fill: 'var(--accent)', 'font-size': 9,
+    }, `MARKET ${(mix.impliedWeight * 100).toFixed(0)}%`));
+  }
+
+  const below = [
+    { w: mix.modelWeight, label: 'MODEL', colour: 'var(--line-strong)' },
+    { w: mix.historicalWeight, label: 'HISTORY', colour: 'var(--ink-muted)' },
+  ].filter((m) => Number.isFinite(m.w)).sort((a, b) => a.w - b.w);
+
+  // Two labels of this length need roughly 74px of clear space between their
+  // centres; closer than that and the second drops to its own row.
+  const CROWDED = 74;
+  let row = 0;
+  let previousX = -Infinity;
+  for (const mark of below) {
+    const cx = x(mark.w);
+    if (cx - previousX < CROWDED) row += 1; else row = 0;
+    previousX = cx;
+    const cy = axis + 12 + row * 17;
+    svg.append(el('line', {
+      x1: cx, y1: axis, x2: cx, y2: cy, stroke: mark.colour, 'stroke-width': 1.2,
+    }));
+    svg.append(el('circle', { cx, cy, r: 3.5, fill: mark.colour }));
+    svg.append(text({
+      x: Math.max(left + 2, Math.min(right - 2, cx)), y: cy + 12,
+      'text-anchor': 'middle', fill: mark.colour,
+    }, `${mark.label} ${(mark.w * 100).toFixed(0)}%`));
+  }
+
+  host.replaceChildren(svg);
+}
+
+for (const input of document.querySelectorAll('.rv-price')) {
+  input.addEventListener('input', () => {
+    if (lastReverseInputs) {
+      renderReverse(lastReverseInputs.result, lastReverseInputs.form);
     }
   });
 }

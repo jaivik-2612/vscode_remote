@@ -15,6 +15,8 @@ export * as series from './series.js';
 export * as monteCarlo from './monteCarlo.js';
 export * as market from './market.js';
 export * as decision from './decision.js';
+export * as attribution from './attribution.js';
+export * as reverse from './reverse.js';
 
 export { impliedVol, priceBounds } from './impliedVol.js';
 export { fitHmm, projectRegimes, viterbiPath, stationaryDistribution } from './hmm.js';

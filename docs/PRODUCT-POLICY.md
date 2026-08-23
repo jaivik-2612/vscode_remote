@@ -57,6 +57,28 @@ out of scope.
   order-flow payment, no affiliate commission on brokerage sign-ups.
 - **No claim of past or expected performance** for the models.
 
+### A note on the reverse-mode panel
+
+"What the market must believe" takes a price the user types and restates it
+as an implied regime mix. That is commentary on a *security's market price*,
+which is closer to the line than a plain calculator, so it is deliberately
+built to stay on the safe side:
+
+- It reports and never judges. The words *cheap*, *expensive*, *overpriced*,
+  *underpriced* and *mispriced* appear nowhere in it, and its summary says in
+  terms that the output is a description of the price, not a verdict on it.
+- It draws no conclusion from the comparison. Showing that the market implies
+  more turbulence than the history delivered is a fact about two numbers; the
+  panel stops there and explicitly allows that the market may know something
+  the history cannot.
+- It refuses to answer when the answer would be false precision — deep in or
+  far out of the money, where the price barely responds to volatility, and
+  when the implied volatility falls outside every fitted regime.
+- The price is typed by the user. The app fetches no quotes, so it never
+  forms a view about a security on its own initiative.
+
+Keep all four properties if this panel is ever reworked.
+
 ## Changes that need a lawyer before they ship
 
 These are not forbidden. They are the ones where the answer is genuinely

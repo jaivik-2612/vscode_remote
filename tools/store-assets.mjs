@@ -17,8 +17,8 @@
  *   icon              512x512   32-bit PNG (alpha channel required)
  *   feature graphic  1024x500   PNG, no alpha, no important text at the edges
  *   phone            1080x1920  9:16, 2-8 of them
- *   7" tablet        1200x2048
- *   10" tablet       1600x2560
+ *   7" tablet        1152x2048
+ *   10" tablet       1620x2880
  */
 
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
@@ -250,7 +250,8 @@ const SHOTS = [
   { file: '04-outlook', setup: { strike: 175 }, at: '#barbell' },
   { file: '05-markets', setup: { market: 'jp', ticker: 'toyota motor', strike: 3000 }, at: null,
     top: true },
-  { file: '06-advanced', setup: { strike: 175, view: 'advanced' }, at: '#ens-regimes' },
+  { file: '06-attribution', setup: { strike: 175 }, at: '.waterfall-panel' },
+  { file: '07-advanced', setup: { strike: 175, view: 'advanced' }, at: '#ens-regimes' },
 ];
 
 /*
