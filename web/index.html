@@ -297,6 +297,16 @@
           </div>
         </section>
 
+        <section class="block waterfall-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">Where the price comes from</h2>
+            <span class="eyebrow wf-total">&mdash;</span>
+          </div>
+          <div class="well"><div class="wf-chart"></div></div>
+          <ol class="wf-legend"></ol>
+          <p class="instrument-caption wf-note">&mdash;</p>
+        </section>
+
         <div class="instrument-grid">
           <section class="block">
             <div class="panel-title-row">
@@ -324,6 +334,28 @@
           </div>
           <div class="well"><div id="barbell"></div></div>
           <p class="instrument-caption" id="s-band">&mdash;</p>
+        </section>
+
+        <section class="block reverse-panel">
+          <div class="panel-title-row">
+            <h2 class="eyebrow">What the market must believe</h2>
+            <span class="eyebrow rv-state">&mdash;</span>
+          </div>
+          <label class="inline">Market price per share
+            <input class="rv-price" type="number" step="any" min="0"
+              inputmode="decimal" aria-label="The option's quoted market price per share">
+          </label>
+          <p class="field-note">Type what the option is actually quoted at. FairShare
+            works backwards from it &mdash; not to say whether it is cheap or dear, but
+            to show what assumption would make that price fair.</p>
+          <div class="well"><div class="rv-chart"></div></div>
+          <dl class="facts rv-facts">
+            <div class="fact"><dt>Implied volatility</dt><dd class="rv-iv">&mdash;</dd></div>
+            <div class="fact"><dt>Implied turbulent share</dt><dd class="rv-implied">&mdash;</dd></div>
+            <div class="fact"><dt>This model projects</dt><dd class="rv-model">&mdash;</dd></div>
+            <div class="fact"><dt>This history showed</dt><dd class="rv-history">&mdash;</dd></div>
+          </dl>
+          <p class="instrument-caption rv-summary">&mdash;</p>
         </section>
 
         <section class="block decision-panel">
@@ -642,6 +674,9 @@
   <p class="colophon-links">
     <a href="https://jaivik-2612.github.io/vscode_remote/privacy.html"
        target="_blank" rel="noopener">Privacy policy</a>
+    <a href="https://jaivik-2612.github.io/vscode_remote/terms.html"
+       target="_blank" rel="noopener">Terms of use</a>
+    <span class="colophon-rights">&copy; 2026 Jaivik Patel. All rights reserved.</span>
   </p>
 </footer>
 

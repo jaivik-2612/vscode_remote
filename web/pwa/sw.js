@@ -15,6 +15,7 @@ const ASSETS = [
   './icon-512.png',
   './apple-touch-icon.png',
   './privacy.html',
+  './terms.html',
 ];
 
 self.addEventListener('install', (event) => {

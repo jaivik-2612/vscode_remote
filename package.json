@@ -1,7 +1,7 @@
 {
   "name": "fairshare",
   "version": "1.0.0",
-  "description": "FairShare — an educational fair-price calculator for stock options",
+  "description": "FairShare \u2014 an educational fair-price calculator for stock options",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -28,13 +28,12 @@
     "implied-volatility",
     "finance"
   ],
-  "license": "MIT",
+  "license": "UNLICENSED",
   "engines": {
     "node": ">=18"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
-    "playwright": "^1.62.1",
     "xlsx": "^0.18.5"
   },
   "dependencies": {
@@ -42,5 +41,6 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/core": "^8.5.0",
     "@capacitor/ios": "^8.5.0"
-  }
+  },
+  "private": true
 }

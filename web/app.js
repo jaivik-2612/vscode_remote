@@ -7,6 +7,7 @@ import {
   valuation, valueCurve, employeeGrantValue, yearsFromDays,
   impliedVol, priceBounds, blackScholes as bs, binomial,
   ensembleValuation, series as seriesTools, market, decision,
+  attribution, reverse,
 } from '../src/index.js';
 
 const $ = (id) => document.getElementById(id);
@@ -971,6 +972,9 @@ function renderEnsemble() {
   renderSimpleReadout(result, f, prices);
   lastDecisionInputs = { result, form: f };
   renderDecision(result, f);
+  renderAttribution(result);
+  lastReverseInputs = { result, form: f };
+  renderReverse(result, f);
 
   $('ens-outlook-label').textContent = `Projected price in ${count(result.days)} days`;
   $('ens-projected').textContent = money(outlook.median);
@@ -1223,6 +1227,326 @@ for (const input of document.querySelectorAll('.be-premium')) {
     }
     if (lastDecisionInputs) {
       renderDecision(lastDecisionInputs.result, lastDecisionInputs.form);
+    }
+  });
+}
+
+/* ---- where the price comes from -----------------------------------------
+   A waterfall over the attribution ladder: each bar is one assumption's
+   contribution, floating at the running total, so the eye follows the price
+   being built from the intrinsic floor up to the headline number. Bars are
+   signed — the regime step genuinely subtracts when the fitted regime is
+   calmer than the trailing estimate. */
+
+function renderAttribution(result) {
+  const panel = document.querySelector('.waterfall-panel');
+  if (!panel) return;
+  const { steps, total, note } = attribution.attributePremium(result);
+  const cur = activeCurrency === 'GBX' ? 'GBX' : activeCurrency;
+
+  panel.querySelector('.wf-total').textContent =
+    `${money(total, 2)}${cur ? ' ' + cur : ''} / share`;
+
+  // The scale must cover the running total AND any bar that dips below it.
+  const running = [];
+  let at = 0;
+  for (const step of steps) {
+    running.push({ from: at, to: at + step.amount, step });
+    at += step.amount;
+  }
+  const lo = Math.min(0, ...running.map((r) => Math.min(r.from, r.to)));
+  const hi = Math.max(...running.map((r) => Math.max(r.from, r.to)));
+  const span = Math.max(hi - lo, 1e-9);
+
+  const width = 320;
+  const rowHeight = 30;
+  const height = steps.length * rowHeight + 26;
+  const left = 4;
+  const right = width - 4;
+  const x = (v) => left + ((v - lo) / span) * (right - left);
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`,
+    role: 'img',
+    'aria-label': `Premium attribution: ${steps.map((s) =>
+      `${s.label} ${s.amount.toFixed(2)}`).join(', ')}. Total ${total.toFixed(2)}.`,
+  });
+
+  // Baseline at zero, so a negative bar reads as one.
+  svg.append(el('line', {
+    x1: x(0), y1: 6, x2: x(0), y2: height - 20,
+    stroke: 'var(--line-strong)', 'stroke-width': 1, 'stroke-dasharray': '2 3',
+  }));
+
+  running.forEach(({ from, to, step }, index) => {
+    const y = 10 + index * rowHeight;
+    const x1 = x(Math.min(from, to));
+    const x2 = x(Math.max(from, to));
+    const isTotalish = step.key === 'reconciliation';
+    const colour = step.amount >= 0 ? 'var(--accent)' : 'var(--negative)';
+
+    // The bar is a wash so the label can sit over it and stay readable; the
+    // leading edge is drawn solid, which is the part the eye actually reads
+    // the value off. A step worth nothing still gets its edge tick, so the
+    // row is never blank.
+    svg.append(el('rect', {
+      x: x1, y, width: Math.max(x2 - x1, 1.5), height: rowHeight - 16,
+      rx: 2,
+      fill: isTotalish ? 'var(--line-strong)' : colour,
+      opacity: isTotalish ? 0.18 : 0.26,
+    }));
+    svg.append(el('rect', {
+      x: x(to) - 1.25, y, width: 2.5, height: rowHeight - 16,
+      fill: isTotalish ? 'var(--line-strong)' : colour,
+    }));
+
+    // Connector down to the next bar's starting edge.
+    if (index < running.length - 1) {
+      svg.append(el('line', {
+        x1: x(to), y1: y + rowHeight - 16, x2: x(to), y2: y + rowHeight,
+        stroke: 'var(--line)', 'stroke-width': 1,
+      }));
+    }
+
+    // Both texts share the bar's own vertical centre. Drawn any lower they
+    // read against the bar below them, which inverts the whole chart.
+    const textY = y + (rowHeight - 16) / 2 + 3.5;
+
+    const label = el('text', {
+      x: left, y: textY,
+      'font-size': 9, fill: 'var(--ink-muted)',
+      'font-family': 'var(--mono)', 'letter-spacing': '.08em',
+    });
+    label.textContent = step.label.toUpperCase();
+    svg.append(label);
+
+    const value = el('text', {
+      x: right, y: textY, 'text-anchor': 'end',
+      'font-size': 10, fill: step.amount >= 0 ? 'var(--ink)' : 'var(--negative)',
+      'font-family': 'var(--mono)',
+    });
+    value.textContent = (step.amount >= 0 ? '+' : '−') + money(Math.abs(step.amount), 2);
+    svg.append(value);
+  });
+
+  const chart = panel.querySelector('.wf-chart');
+  chart.replaceChildren(svg);
+
+  // The legend carries the explanations; the chart carries the shape.
+  const legend = panel.querySelector('.wf-legend');
+  // Plain HTML here, not el() — that helper builds SVG-namespaced nodes,
+  // which render as nothing inside a <ol>.
+  legend.replaceChildren(...steps.map((step) => {
+    const item = document.createElement('li');
+    const head = document.createElement('b');
+    head.textContent = `${step.label} ${step.amount >= 0 ? '+' : '−'}` +
+      `${money(Math.abs(step.amount), 2)}`;
+    item.append(head, step.detail);
+    return item;
+  }));
+
+  panel.querySelector('.wf-note').textContent = note;
+}
+
+/* ---- what the market must believe ---------------------------------------
+   Implied volatility restates a price as one number. This restates the same
+   price in the app's own units: the share of the option's life the market
+   must expect to spend in the turbulent regime. Deliberately reports, never
+   judges — no "cheap" or "expensive" anywhere. */
+
+let lastReverseInputs = null;
+
+function renderReverse(result, form) {
+  const panel = document.querySelector('.reverse-panel');
+  if (!panel) return;
+
+  const vols = result.hmm.annualisedVols ?? [];
+  const modelWeight = reverse.projectedTurbulentWeight(result.hmm.regimePath, vols);
+  const turbulent = vols.indexOf(Math.max(...vols));
+  const historicalWeight = result.hmm.stationary?.[turbulent] ?? null;
+
+  const input = panel.querySelector('.rv-price');
+  const blendAnchor = result.blackScholes.onRegime.fairValue;
+  input.placeholder = `blend ${money(blendAnchor, 2)}`;
+  const raw = input.value.trim();
+  const marketPrice = raw === '' ? null : Number(raw);
+
+  const setAllIn = (cls, text) => {
+    const node = panel.querySelector(`.${cls}`);
+    if (node) node.textContent = text;
+  };
+
+  // Always show what the model itself says, even before a price is typed —
+  // the comparison is the point, and half of it is available immediately.
+  setAllIn('rv-model', modelWeight === null ? '—' : percent(modelWeight, 1));
+  setAllIn('rv-history', historicalWeight === null ? '—' : percent(historicalWeight, 1));
+
+  if (marketPrice === null || !(marketPrice > 0)) {
+    setAllIn('rv-state', 'awaiting a price');
+    setAllIn('rv-iv', '—');
+    setAllIn('rv-implied', '—');
+    setAllIn('rv-summary',
+      `This stock's fitted regimes run from ${percent(Math.min(...vols), 1)} ` +
+      `volatility when calm to ${percent(Math.max(...vols), 1)} when turbulent. ` +
+      'Enter a quoted price above and FairShare will work out which mix of the ' +
+      `two the market is pricing in. A steady blend of those regimes prices this ` +
+      `contract at ${money(blendAnchor, 2)}.`);
+    panel.querySelector('.rv-chart').replaceChildren();
+    return;
+  }
+
+  const contract = {
+    spot: result.spot, strike: form.strike, time: result.years,
+    rate: form.rate / 100, yield: form.yield / 100, type: form.type,
+  };
+  const mix = reverse.impliedRegimeMix({
+    marketPrice, contract, regimeVols: vols, modelWeight, historicalWeight,
+    american: result.style === 'american',
+  });
+
+  if (mix.state === 'not-applicable' || mix.state === 'no-solution'
+      || mix.state === 'insensitive') {
+    setAllIn('rv-state', mix.state === 'insensitive' ? 'not implied by this price' : 'no answer');
+    setAllIn('rv-iv', mix.impliedVolatility ? percent(mix.impliedVolatility, 1) : '—');
+    setAllIn('rv-implied', '—');
+    setAllIn('rv-summary', mix.reason);
+    panel.querySelector('.rv-chart').replaceChildren();
+    return;
+  }
+
+  setAllIn('rv-iv', percent(mix.impliedVolatility, 1));
+  setAllIn('rv-implied', percent(mix.impliedWeight, 1));
+
+  if (mix.state === 'ok') {
+    setAllIn('rv-state', 'within this stock’s range');
+    const versus = mix.versusHistory;
+    const comparison = Math.abs(versus) < 0.02
+      ? 'almost exactly the share this stock’s own history spent there'
+      : versus > 0
+        ? `${percent(Math.abs(versus), 1)} more turbulence than this stock’s ` +
+          'history actually delivered'
+        : `${percent(Math.abs(versus), 1)} less turbulence than this stock’s ` +
+          'history actually delivered';
+    setAllIn('rv-summary',
+      `At ${money(marketPrice, 2)}, the market is pricing ${percent(mix.impliedWeight, 1)} ` +
+      `of the next ${count(result.days)} days in the turbulent regime — ${comparison}. ` +
+      'That is a description of the price, not a verdict on it: the market may ' +
+      'know something this history cannot.');
+  } else {
+    const beyond = mix.state === 'above-most-turbulent' ? 'above' : 'below';
+    const bound = mix.state === 'above-most-turbulent'
+      ? percent(mix.turbulentVol, 1) : percent(mix.calmVol, 1);
+    setAllIn('rv-state', 'outside this stock’s range');
+    // The app's own headline price legitimately lands here: the simulation
+    // prices fat tails and moving volatility that a constant-volatility blend
+    // cannot reproduce. Saying so beats letting it look like an error.
+    const ownPrice = Math.abs(marketPrice - result.consensus.value) < 0.005 * Math.max(1, result.consensus.value);
+    const tailNote = ownPrice && mix.state === 'above-most-turbulent'
+      ? ' That is FairShare’s own headline price, and it sits above the blend ' +
+        'because the simulation adds value for fat tails and moving volatility ' +
+        'that a single steady volatility cannot express.'
+      : '';
+    setAllIn('rv-summary',
+      `At ${money(marketPrice, 2)}, the market implies ${percent(mix.impliedVolatility, 1)} ` +
+      `volatility — ${beyond} the ${bound} of even the ` +
+      `${mix.state === 'above-most-turbulent' ? 'most turbulent' : 'calmest'} regime ` +
+      'this history contains, so no mix of the two explains it.' + tailNote +
+      ' That is a description of the price, not a verdict on it.');
+  }
+
+  renderRegimeBar(panel.querySelector('.rv-chart'), mix);
+}
+
+/** Three markers on one axis: what the market implies, what the model
+ *  projects, and what actually happened. The two reference marks sit below
+ *  the axis and dodge onto separate rows when they crowd each other, which
+ *  they routinely do — a quiet stock's model and history both hug zero. */
+function renderRegimeBar(host, mix) {
+  const width = 320;
+  const height = 112;
+  const left = 30;
+  const right = width - 30;
+  const axis = 46;
+  const x = (w) => left + Math.max(0, Math.min(1, w)) * (right - left);
+  const text = (attrs, content) => {
+    const node = el('text', {
+      'font-size': 8.5, 'font-family': 'var(--mono)',
+      'letter-spacing': '.08em', ...attrs,
+    });
+    node.textContent = content;
+    return node;
+  };
+
+  const svg = el('svg', {
+    viewBox: `0 0 ${width} ${height}`, role: 'img',
+    'aria-label': 'Share of the option’s life spent in the turbulent regime: ' +
+      `market implies ${(mix.impliedWeight * 100).toFixed(0)} per cent, ` +
+      `the model projects ${(mix.modelWeight * 100).toFixed(0)}, ` +
+      `and this history showed ${(mix.historicalWeight * 100).toFixed(0)}.`,
+  });
+
+  svg.append(el('line', {
+    x1: left, y1: axis, x2: right, y2: axis,
+    stroke: 'var(--line-strong)', 'stroke-width': 2,
+  }));
+  for (const [w, label, anchor] of [[0, 'ALL CALM', 'start'], [1, 'ALL TURBULENT', 'end']]) {
+    svg.append(el('line', {
+      x1: x(w), y1: axis - 5, x2: x(w), y2: axis + 5,
+      stroke: 'var(--line-strong)', 'stroke-width': 2,
+    }));
+    svg.append(text({
+      x: x(w), y: height - 3, 'text-anchor': anchor, fill: 'var(--ink-muted)',
+      'font-size': 8,
+    }, label));
+  }
+
+  // The market sits above the axis; the two references below it, on rows that
+  // separate as soon as their labels would touch.
+  if (Number.isFinite(mix.impliedWeight)) {
+    const cx = x(mix.impliedWeight);
+    svg.append(el('line', {
+      x1: cx, y1: axis, x2: cx, y2: axis - 13,
+      stroke: 'var(--accent)', 'stroke-width': 1.5,
+    }));
+    svg.append(el('circle', { cx, cy: axis - 13, r: 5, fill: 'var(--accent)' }));
+    svg.append(text({
+      x: Math.max(left, Math.min(right, cx)), y: axis - 23,
+      'text-anchor': 'middle', fill: 'var(--accent)', 'font-size': 9,
+    }, `MARKET ${(mix.impliedWeight * 100).toFixed(0)}%`));
+  }
+
+  const below = [
+    { w: mix.modelWeight, label: 'MODEL', colour: 'var(--line-strong)' },
+    { w: mix.historicalWeight, label: 'HISTORY', colour: 'var(--ink-muted)' },
+  ].filter((m) => Number.isFinite(m.w)).sort((a, b) => a.w - b.w);
+
+  // Two labels of this length need roughly 74px of clear space between their
+  // centres; closer than that and the second drops to its own row.
+  const CROWDED = 74;
+  let row = 0;
+  let previousX = -Infinity;
+  for (const mark of below) {
+    const cx = x(mark.w);
+    if (cx - previousX < CROWDED) row += 1; else row = 0;
+    previousX = cx;
+    const cy = axis + 12 + row * 17;
+    svg.append(el('line', {
+      x1: cx, y1: axis, x2: cx, y2: cy, stroke: mark.colour, 'stroke-width': 1.2,
+    }));
+    svg.append(el('circle', { cx, cy, r: 3.5, fill: mark.colour }));
+    svg.append(text({
+      x: Math.max(left + 2, Math.min(right - 2, cx)), y: cy + 12,
+      'text-anchor': 'middle', fill: mark.colour,
+    }, `${mark.label} ${(mark.w * 100).toFixed(0)}%`));
+  }
+
+  host.replaceChildren(svg);
+}
+
+for (const input of document.querySelectorAll('.rv-price')) {
+  input.addEventListener('input', () => {
+    if (lastReverseInputs) {
+      renderReverse(lastReverseInputs.result, lastReverseInputs.form);
     }
   });
 }
