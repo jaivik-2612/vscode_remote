@@ -28,6 +28,16 @@ AVBTOOL_URL=https://android.googlesource.com/platform/external/avb/+/refs/heads/
 AVBTOOL_URL_FORMAT=base64
 AVBTOOL_SHA256=e5a664a38db623da00f080219bc0ee60a640a9dc4a872803616fae4938ac749b
 
+# mkbootimg and unpack_bootimg (Apache-2.0, AOSP system/tools/mkbootimg):
+# pinned scripts, because distribution packages of mkbootimg vary and
+# Ubuntu 24.04's is missing its gki module
+MKBOOTIMG_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/mkbootimg.py?format=TEXT
+MKBOOTIMG_SHA256=37d84b3d162e0bc62e36c1f4e1c63c85ea0caa9f29be023eb2f8efe006ad948c
+UNPACK_BOOTIMG_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/unpack_bootimg.py?format=TEXT
+UNPACK_BOOTIMG_SHA256=a9d260978a63bd06a24b6347e7dee8a28ff96639793caea15dff6aa491316308
+GKI_CERT_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/gki/generate_gki_certificate.py?format=TEXT
+GKI_CERT_SHA256=1bb1feec68a13da18d581aa2c631798f86f6bc10b55d587b2dd31446a0f8a203
+
 # Tor Browser for Linux aarch64 (alpha channel: the only aarch64 build)
 TORBROWSER_VERSION=16.0a13
 TORBROWSER_URL=https://dist.torproject.org/torbrowser/16.0a13/tor-browser-linux-aarch64-16.0a13.tar.xz

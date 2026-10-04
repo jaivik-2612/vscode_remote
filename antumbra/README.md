@@ -37,7 +37,7 @@ cd antumbra
 sudo apt-get install -y mmdebstrap debian-archive-keyring qemu-user-static binfmt-support arch-test \
     squashfs-tools e2fsprogs android-sdk-libsparse-utils systemd-repart zstd python3 \
     clang lld llvm make bc bison flex libssl-dev libelf-dev kmod cpio git curl gpg gpgv \
-    mkbootimg cryptsetup-bin fastboot
+    cryptsetup-bin fastboot
 make lint                       # static checks
 build/fetch-sources.sh          # pinned kernel tree, patches, Tor Browser (verified)
 build/kernel.sh                 # Image + modules + DTB (about an hour on 4 cores)

@@ -60,12 +60,15 @@ log "live partition: ${LIVE_MIB} MiB ext4, label ANTUMBRA_LIVE, UUID ${LIVE_FS_U
 # --- GPT sized to the physical userdata partition --------------------------------
 REPART="${WORK}/repart.d"
 rm -rf "${REPART}"; mkdir -p "${REPART}"
+LIVE_BYTES="$(stat -c %s "${LIVE_EXT4}")"
 cat > "${REPART}/10-live.conf" <<CONF
 [Partition]
 Type=linux-generic
 Label=ANTUMBRA_LIVE
 UUID=${LIVE_PART_UUID}
 CopyBlocks=${LIVE_EXT4}
+SizeMinBytes=${LIVE_BYTES}
+SizeMaxBytes=${LIVE_BYTES}
 CONF
 cat > "${REPART}/20-data.conf" <<CONF
 [Partition]

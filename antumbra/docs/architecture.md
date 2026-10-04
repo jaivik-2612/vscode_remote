@@ -160,8 +160,10 @@ Facts that constrain the design:
   `extra_cmdline`. `bootimg.sh` refuses longer lines.
 - `fastboot boot` is refused by this ABL; every test is a flash.
 - The AVB footer is unsigned (`--algorithm NONE`). It is a format
-  requirement, not a security feature. `avbtool.py` is fetched from AOSP
-  at build time and verified by SHA-256 (Debian does not package it).
+  requirement, not a security feature. `avbtool.py`, `mkbootimg.py` and
+  `unpack_bootimg.py` are fetched from AOSP at build time and verified by
+  SHA-256 (Debian does not package avbtool, and distribution mkbootimg
+  packages differ).
 - Required kernel parameters from the port: `iommu.passthrough=0
   arm-smmu.disable_bypass=0 clk_ignore_unused`. `console=ttyGS0` must not
   be set.

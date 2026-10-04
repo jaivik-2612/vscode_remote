@@ -13,7 +13,7 @@ set -euo pipefail
 # shellcheck source=lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
-require_tools mkbootimg unpack_bootimg python3
+require_tools python3
 ensure_dirs
 # shellcheck source=../device/oneplus-hotdog/bootimg.conf
 source "${DEVICE_DIR}/bootimg.conf"
@@ -21,7 +21,9 @@ source "${DEVICE_DIR}/bootimg.conf"
 KOUT="${OUT}/kernel"
 ROUT="${OUT}/rootfs"
 AVBTOOL="${CACHE}/tools/avbtool.py"
-for f in "${KOUT}/Image" "${KOUT}/sm8150-oneplus-hotdog.dtb" "${ROUT}/initrd.img" "${AVBTOOL}"; do
+MKBOOTIMG="${CACHE}/tools/mkbootimg.py"
+UNPACK_BOOTIMG="${CACHE}/tools/unpack_bootimg.py"
+for f in "${KOUT}/Image" "${KOUT}/sm8150-oneplus-hotdog.dtb" "${ROUT}/initrd.img" "${AVBTOOL}" "${MKBOOTIMG}" "${UNPACK_BOOTIMG}"; do
     [ -f "${f}" ] || die "missing input ${f}"
 done
 [ "$(dd if="${KOUT}/Image" bs=1 skip=56 count=4 2>/dev/null)" = "ARM$(printf '\x64')" ] || die "Image is not a raw arm64 kernel"
@@ -43,7 +45,7 @@ log "command line (${#CMDLINE} bytes): ${CMDLINE}"
 
 # --- mkbootimg --------------------------------------------------------------------
 RAW="${WORK}/boot-raw.img"
-mkbootimg \
+python3 "${MKBOOTIMG}" \
     --header_version "${HEADER_VERSION}" \
     --pagesize "${PAGESIZE}" \
     --base "${BASE}" \
@@ -70,7 +72,7 @@ python3 "${AVBTOOL}" add_hash_footer --image "${OUTIMG}" --partition_name boot \
 [ "$(stat -c %s "${OUTIMG}")" -eq "${BOOT_PARTITION_SIZE}" ] || die "boot.img is not exactly ${BOOT_PARTITION_SIZE} bytes"
 
 # --- Verify what we produced -------------------------------------------------------------
-INFO="$(unpack_bootimg --boot_img "${OUTIMG}" --out "${WORK}/boot-unpacked" 2>&1)"
+INFO="$(python3 "${UNPACK_BOOTIMG}" --boot_img "${OUTIMG}" --out "${WORK}/boot-unpacked" 2>&1)"
 echo "${INFO}" | grep -q "boot image header version: ${HEADER_VERSION}" || die "unexpected header version: ${INFO}"
 echo "${INFO}" | grep -q "page size: ${PAGESIZE}" || die "unexpected page size"
 echo "${INFO}" | grep -q "kernel load address: 0x$(printf '%08x' $((BASE + KERNEL_OFFSET)))" || die "unexpected kernel load address: ${INFO}"

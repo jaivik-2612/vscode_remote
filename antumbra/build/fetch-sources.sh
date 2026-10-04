@@ -153,9 +153,35 @@ fetch_tor_browser() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# mkbootimg / unpack_bootimg (base64 text from googlesource, like avbtool)
+# ---------------------------------------------------------------------------
+fetch_b64_tool() { # fetch_b64_tool LOCKKEY DEST
+    local key="$1" dest="$2" sha
+    sha="$(lock_get "${key}_SHA256")"
+    if [ -f "${dest}" ] && [ "$(sha256sum "${dest}" | cut -d' ' -f1)" = "${sha}" ]; then
+        log "cached: $(basename "${dest}")"; return 0
+    fi
+    fetch "$(lock_get "${key}_URL")" "${dest}.b64"
+    base64 -d "${dest}.b64" > "${dest}.tmp"
+    rm -f "${dest}.b64"
+    mv "${dest}.tmp" "${dest}"
+    sha256_check "${dest}" "${sha}"
+    chmod 0755 "${dest}"
+}
+fetch_bootimg_tools() {
+    mkdir -p "${CACHE}/tools/gki"
+    fetch_b64_tool MKBOOTIMG "${CACHE}/tools/mkbootimg.py"
+    fetch_b64_tool UNPACK_BOOTIMG "${CACHE}/tools/unpack_bootimg.py"
+    fetch_b64_tool GKI_CERT "${CACHE}/tools/gki/generate_gki_certificate.py"
+    : > "${CACHE}/tools/gki/__init__.py"
+    log "mkbootimg tools verified"
+}
+
 [ -n "${SKIP_KERNEL}" ] || fetch_kernel
 fetch_port_patches
 fetch_avbtool
+fetch_bootimg_tools
 fetch_device_assets
 [ -n "${SKIP_TB}" ] || fetch_tor_browser
 log "all pinned inputs present in ${CACHE}"

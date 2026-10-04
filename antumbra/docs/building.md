@@ -12,7 +12,7 @@ file ownership); everything else runs as a user.
 sudo apt-get install -y mmdebstrap debian-archive-keyring qemu-user-static binfmt-support arch-test \
     squashfs-tools e2fsprogs android-sdk-libsparse-utils systemd-repart zstd python3 \
     clang lld llvm make bc bison flex libssl-dev libelf-dev kmod cpio git curl gpg gpgv \
-    mkbootimg cryptsetup-bin fastboot shellcheck nftables tor python3-pytest yamllint
+    cryptsetup-bin fastboot shellcheck nftables tor python3-pytest yamllint
 arch-test arm64        # must print "arm64: ok" on an x86_64 host
 ```
 
