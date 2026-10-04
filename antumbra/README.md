@@ -14,11 +14,15 @@ Project, Inc. Antumbra is an independent derivative endorsed by neither.
 ## Status: alpha, not yet booted on hardware
 
 Everything in this repository was built and validated on a build machine:
-the kernel builds from the mainline port's sources, the root filesystem
-builds and its firewall, Tor configuration, units and scripts pass their
-checks, and the images come out in the exact format the phone's bootloader
-validated for the mainline port. What has **not** happened yet is a boot on
-a physical OnePlus 7T Pro. `docs/hardware-validation.md` is the checklist
+the kernel builds from the mainline port's sources, the unattended
+pipeline (`ANTUMBRA_MINIMAL=1 build/build.sh`) produces a root filesystem
+whose firewall, Tor configuration, units and scripts pass their checks and
+whose initramfs is proven free of network drivers, and the images come out
+in the exact format the phone's bootloader validated for the mainline
+port: the sparse userdata image expands to the full partition, its live
+partition mounts, the squashfs hash matches and dm-verity verifies, and
+the release directory passes `build/verify-release.sh`. What has **not**
+happened yet is a boot on a physical OnePlus 7T Pro. `docs/hardware-validation.md` is the checklist
 for that first boot. Treat this as a developer preview.
 
 | Area | What you get |

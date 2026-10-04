@@ -75,6 +75,13 @@ make check-packages
 ANTUMBRA_MINIMAL=1 build/build.sh    # pipeline validation end to end
 ```
 
+The minimal pipeline has been run unattended on an x86-64 build host
+(arm64 under qemu-user binfmt): every hook, the initramfs check
+(`80-base-initramfs.sh`), the squashfs and verity step, the sparse image,
+the boot image and the release checksums completed, and the resulting live
+partition was mounted and its squashfs and verity tree verified. The
+kernel step was validated with LLVM 18 on the same host.
+
 The CI workflow (`.github/workflows/antumbra.yml`) runs the lint and unit
 tests on every push, assembles a boot image from the pinned inputs, and on
 manual dispatch builds the kernel and a minimal root filesystem on a native
