@@ -1,0 +1,17 @@
+[Unit]
+Description=Prepare network namespaces for confined applications
+Documentation=https://gitlab.tails.boum.org/tails/tails/-/issues/18123
+Wants=network.target
+Before=network.target
+Before=onion-grater.service
+After=nftables.service
+Requires=nftables.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/antumbra-create-netns start
+ExecStop=/usr/local/lib/antumbra-create-netns stop
+
+[Install]
+WantedBy=multi-user.target

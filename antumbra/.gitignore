@@ -1,0 +1,11 @@
+# Build inputs and outputs (never committed)
+build/cache/
+build/out/
+build/work/
+*.img
+*.img.zst*
+*.squashfs
+*.deb
+__pycache__/
+*.pyc
+.pytest_cache/

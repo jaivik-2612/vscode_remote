@@ -1,0 +1,6 @@
+#!/bin/sh
+# Tails' 05-replace_swapon: swap is only ever allowed on zram devices.
+case "$*" in
+    *zram*) exec /sbin/swapon.real "$@" ;;
+    *) echo "swapon: refusing swap outside zram on an amnesic system" >&2; exit 1 ;;
+esac

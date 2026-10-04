@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Tor Browser
+Comment=Browse the web anonymously through Tor
+Exec=/usr/local/bin/tor-browser %u
+Icon=tor-browser
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=Tor Browser
+X-Purism-FormFactor=Workstation;Mobile;

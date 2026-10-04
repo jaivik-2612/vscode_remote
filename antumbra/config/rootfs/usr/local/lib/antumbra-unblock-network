@@ -1,0 +1,38 @@
+#!/bin/sh
+# Adapted from Tails' tails-unblock-network: remove the build-time blocklist
+# of all network drivers, load them (the MAC-spoofing udev rule fires for
+# every new interface), then start NetworkManager. Called once per boot by
+# antumbra-apply-welcome-settings after the Welcome screen.
+set -eu
+
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=tails-shell-library/tails-greeter.sh
+. /usr/local/lib/tails-shell-library/tails-greeter.sh
+
+if ! tails_network_enabled; then
+    echo "network disabled by the user (offline mode); leaving drivers blocked" >&2
+    exit 0
+fi
+
+# Refuse to expose a network device if the early self-check found the
+# firewall missing or wrong.
+if ! grep -qs '^firewall OK' /run/antumbra/selfcheck.status; then
+    echo "refusing to unblock the network: firewall self-check did not pass" >&2
+    exit 1
+fi
+
+rm -f /etc/modprobe.d/all-net-blocklist.conf
+touch /etc/modprobe.d
+sync --file-system /etc/modprobe.d
+udevadm control --reload
+
+# Load the known Wi-Fi driver explicitly, then replay add events for the
+# platform and net subsystems so anything else blocked comes up too.
+modprobe ath10k_snoc || true
+timeout --verbose 120 udevadm trigger --settle --type=devices --action=add \
+    --subsystem-match=platform --subsystem-match=net --subsystem-match=ieee80211 || true
+udevadm settle
+
+systemctl enable NetworkManager.service NetworkManager-wait-online.service || :
+systemctl start NetworkManager.service NetworkManager-dispatcher.service || :
+systemctl --no-block start NetworkManager-wait-online.service || :

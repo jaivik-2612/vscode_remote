@@ -1,0 +1,46 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Pack the root filesystem tree into a reproducible squashfs and compute its
+# dm-verity hash tree.
+#
+# Inputs : build/work/rootfs (rootfs.sh), config/squashfs-excludes
+# Outputs: build/out/rootfs/filesystem.squashfs
+#          build/out/rootfs/filesystem.squashfs.verity   (unless ANTUMBRA_VERITY=0)
+#          build/out/rootfs/filesystem.squashfs.roothash
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=lib/common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+
+require_root
+require_tools mksquashfs
+ensure_dirs
+ROOT="${WORK}/rootfs"
+ROUT="${OUT}/rootfs"
+[ -d "${ROOT}/usr" ] || die "root filesystem tree missing; run rootfs.sh"
+mkdir -p "${ROUT}"
+
+SQ="${ROUT}/filesystem.squashfs"
+rm -f "${SQ}" "${SQ}.verity" "${SQ}.roothash"
+log "building squashfs (xz, arm BCJ, 1 MiB blocks)"
+mksquashfs "${ROOT}" "${SQ}" \
+    -comp xz -Xbcj arm -Xdict-size 1M -b 1M \
+    -noappend -no-recovery -no-progress \
+    -xattrs \
+    -mkfs-time "${SOURCE_DATE_EPOCH}" -all-time "${SOURCE_DATE_EPOCH}" \
+    -processors "$(nproc)" \
+    -wildcards -ef "${CONFIG_DIR}/squashfs-excludes" >/dev/null
+log "squashfs: $(stat -c %s "${SQ}") bytes"
+
+if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then
+    require_tools veritysetup python3
+    SALT="$(printf 'antumbra-verity-%s-%s' "${ANTUMBRA_VERSION}" "${SOURCE_DATE_EPOCH}" | sha256sum | cut -d' ' -f1)"
+    VUUID="$(python3 -c "import uuid,sys; print(uuid.uuid5(uuid.NAMESPACE_URL, 'antumbra:${ANTUMBRA_VERSION}:verity'))")"
+    veritysetup format --data-block-size=4096 --hash-block-size=4096 \
+        --salt="${SALT}" --uuid="${VUUID}" \
+        --root-hash-file="${SQ}.roothash" "${SQ}" "${SQ}.verity" >/dev/null
+    veritysetup verify --root-hash-file="${SQ}.roothash" "${SQ}" "${SQ}.verity" >/dev/null \
+        || die "verity self-verification failed"
+    log "dm-verity root hash: $(cat "${SQ}.roothash")"
+fi
+sha256sum "${SQ}" > "${SQ}.sha256"

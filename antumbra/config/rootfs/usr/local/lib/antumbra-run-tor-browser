@@ -1,0 +1,14 @@
+#!/bin/sh
+# Root helper (sudoers: amnesia may run it without a password): enter the
+# tbb network namespace, drop to the user, launch the browser. Arguments are
+# restricted to URLs and files so a confined application cannot pass options.
+set -eu
+export PATH='/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
+for arg in "$@"; do
+    case "${arg}" in
+        -*) echo "tor-browser: options are not accepted (${arg})" >&2; exit 2 ;;
+    esac
+done
+exec ip netns exec tbb sudo --close-from 3 \
+    --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LANG,LANGUAGE,XDG_SESSION_TYPE,XDG_CURRENT_DESKTOP \
+    -u amnesia -- /usr/local/lib/launch-tor-browser "$@"

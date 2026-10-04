@@ -1,0 +1,64 @@
+#!/bin/sh
+# Antumbra: expose the nested GPT inside the UFS "userdata" partition and
+# publish the live partition as /dev/antumbra/live for live-boot
+# (live-media=/dev/antumbra/live on the kernel command line).
+#
+# Only a partition named "userdata" on the internal UFS controller is
+# considered, and the filesystem UUID must match the one recorded at build
+# time, so no attached USB medium can be mistaken for the system.
+PREREQ="udev"
+prereqs() { echo "${PREREQ}"; }
+case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
+. /scripts/functions
+
+EXPECTED_UUID="$(cat /etc/antumbra/live-fs-uuid 2>/dev/null || true)"
+if [ -z "${EXPECTED_UUID}" ]; then
+    panic "antumbra: no live filesystem UUID recorded in the initramfs"
+fi
+
+find_userdata() {
+    # Walk block devices: partition name "userdata" whose parent is on the UFS host.
+    for part in /sys/class/block/*; do
+        [ -r "${part}/partition" ] || continue
+        devpath="$(readlink -f "${part}")"
+        case "${devpath}" in *ufshc*|*ufs*) ;; *) continue ;; esac
+        dev="/dev/$(basename "${part}")"
+        label="$(blkid -o value -s PART_ENTRY_NAME -p "${dev}" 2>/dev/null || true)"
+        if [ "${label}" = "userdata" ]; then
+            printf '%s\n' "${dev}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+log_begin_msg "antumbra: locating the system partition"
+USERDATA=""
+i=0
+while [ -z "${USERDATA}" ] && [ "${i}" -lt 60 ]; do
+    USERDATA="$(find_userdata || true)"
+    [ -n "${USERDATA}" ] || { sleep 1; i=$((i + 1)); }
+done
+[ -n "${USERDATA}" ] || panic "antumbra: no userdata partition on the UFS storage"
+
+LOOP="$(losetup --sector-size 4096 --partscan --find --show --direct-io=on "${USERDATA}")" \
+    || panic "antumbra: losetup failed on ${USERDATA}"
+udevadm settle --timeout=30 || true
+mkdir -p /run/antumbra
+printf '%s\n' "${LOOP}" > /run/antumbra/loop-device
+
+LIVE=""
+for p in "${LOOP}"p*; do
+    [ -e "${p}" ] || continue
+    if [ "$(blkid -o value -s UUID "${p}" 2>/dev/null)" = "${EXPECTED_UUID}" ]; then
+        LIVE="${p}"
+        break
+    fi
+done
+if [ -z "${LIVE}" ]; then
+    losetup -d "${LOOP}" 2>/dev/null || true
+    panic "antumbra: no live partition with UUID ${EXPECTED_UUID} inside ${USERDATA}"
+fi
+mkdir -p /dev/antumbra
+ln -sf "${LIVE}" /dev/antumbra/live
+log_end_msg

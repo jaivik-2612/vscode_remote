@@ -1,0 +1,17 @@
+#!/bin/sh
+# Adapted from Tails' initramfs-restore: unpack the initramfs (the copy in
+# /boot of the read-only root, covered by dm-verity) into /run/initramfs so
+# systemd-shutdown can return to it at shutdown.
+set -eu
+WORKDIR=$(/bin/mktemp -d)
+INITRD="/boot/initrd.img-$(uname -r)"
+[ -f "${INITRD}" ] || { echo "no ${INITRD}" >&2; exit 1; }
+/usr/bin/unmkinitramfs "${INITRD}" "${WORKDIR}"
+if [ -d "${WORKDIR}/main" ]; then SRC="${WORKDIR}/main"; else SRC="${WORKDIR}"; fi
+/bin/rm -rf "${SRC}/lib/modules" "${SRC}/usr/lib/modules"
+/bin/mv "${SRC}"/* /run/initramfs/
+# util-linux mount/umount instead of busybox's (Tails: fewer leftover mounts)
+mkdir -p /run/initramfs/usr/bin
+rm -f /run/initramfs/usr/bin/mount /run/initramfs/usr/bin/umount
+cp /bin/mount /bin/umount /run/initramfs/usr/bin/
+/bin/rm -rf "${WORKDIR}"

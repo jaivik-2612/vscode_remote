@@ -1,0 +1,50 @@
+# Pinned external inputs for the Antumbra build (KEY=VALUE, read by
+# build/lib/common.sh lock_get). Change a pin only together with the
+# corresponding SHA-256. Patch hashes live in kernel/port-patches.sha256.
+
+# Kernel tree the port is based on
+KERNEL_GIT_URL=https://gitlab.com/sm8150-mainline/linux.git
+KERNEL_GIT_TAG=v6.17.0-sm8150
+KERNEL_GIT_COMMIT=379d8fe35c7ca685a650bd82fd023af0ea3f0de0
+
+# The hotdog port: 27 patches and the kernel configuration they were built with
+PORT_REPO=https://github.com/Sr-0w/hotdog-linux-bringup
+PORT_TAG=v0.2.0-alpha.2
+PORT_PATCH_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/device/testing/linux-oneplus-hotdog-mainline617-clean
+PORT_KERNEL_CONFIG=config-oneplus-hotdog-mainline617-clean.aarch64
+PORT_KERNEL_CONFIG_SHA256=3d6b53abc795b7fff07fb87c7f1ca2da43d0401809a358366f5225cde09dc72e
+
+# Hardware-validated slot-B companions from the port's release (not rebuilt here)
+DTBO_URL=https://github.com/Sr-0w/hotdog-linux-bringup/releases/download/v0.2.0-alpha.2/oneplus-7t-pro-hotdog-v0.2.0-alpha.2-dtbo.img
+DTBO_SHA256=d23564d42c989c2b86f760937cb6ea8d570074b20b74bd8c0bc0b94d2ba0d8cd
+DTBO_SIZE=25165824
+VBMETA_URL=https://github.com/Sr-0w/hotdog-linux-bringup/releases/download/v0.2.0-alpha.2/oneplus-7t-pro-hotdog-v0.2.0-alpha.2-vbmeta-disabled.img
+VBMETA_SHA256=e1d9ee620f4fac7939042396de966bea0b735bf11cea8ccc9b346f4d0fee0d50
+VBMETA_SIZE=65536
+
+# avbtool (Apache-2.0, AOSP external/avb), used only to add the unsigned
+# hash footer the bootloader expects
+AVBTOOL_URL=https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT
+AVBTOOL_URL_FORMAT=base64
+AVBTOOL_SHA256=e5a664a38db623da00f080219bc0ee60a640a9dc4a872803616fae4938ac749b
+
+# Tor Browser for Linux aarch64 (alpha channel: the only aarch64 build)
+TORBROWSER_VERSION=16.0a13
+TORBROWSER_URL=https://dist.torproject.org/torbrowser/16.0a13/tor-browser-linux-aarch64-16.0a13.tar.xz
+TORBROWSER_SIG_URL=https://dist.torproject.org/torbrowser/16.0a13/tor-browser-linux-aarch64-16.0a13.tar.xz.asc
+TORBROWSER_SHA256=4dba033e7c5fb00f8d23fb5412a0825cd13aee565d31fc84b329d0927ac6ccf7
+TORBROWSER_SIGNING_KEY_FPR=EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
+TORBROWSER_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
+
+# Debian base
+DEBIAN_SUITE=trixie
+DEBIAN_MIRROR=https://deb.debian.org/debian
+# Set to a snapshot.debian.org timestamp (YYYYMMDDTHHMMSSZ) for a
+# reproducible package set; empty uses the live mirror.
+DEBIAN_SNAPSHOT=
+
+# Proprietary device firmware (never redistributed by Antumbra; see docs/legal.md)
+FIRMWARE_GIT_URL=https://github.com/sm8150-linux-mainline/firmware-oneplus-hotdog
+FIRMWARE_GIT_COMMIT=5e5c534784a848bc39a02c421cc5273d79678fb3
+# Protection-domain maps and the NFC configuration come from the port's packaging
+PORT_FIRMWARE_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/device/testing/firmware-oneplus-hotdog

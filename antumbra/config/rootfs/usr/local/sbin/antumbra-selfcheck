@@ -1,0 +1,95 @@
+#!/bin/sh
+# Antumbra privacy self-check. Writes one "<check> OK|FAIL[: detail]" line per
+# check to /run/antumbra/selfcheck.status and the journal. The early run
+# (default) covers the firewall and the amnesia properties before the
+# network is unblocked; --late re-checks after the modem and the session
+# are up. Exit status 1 if any check failed.
+set -u
+STATE_DIR=/run/antumbra
+STATUS="${STATE_DIR}/selfcheck.status"
+LATE=""
+[ "${1:-}" = "--late" ] && LATE=1
+mkdir -p "${STATE_DIR}"
+TMP="$(mktemp)"
+fail=0
+ok()   { printf '%s OK\n' "$1" >> "${TMP}"; }
+bad()  { printf '%s FAIL: %s\n' "$1" "$2" >> "${TMP}"; fail=1; logger -t antumbra-selfcheck -p daemon.err -- "FAIL $1: $2"; }
+
+# --- firewall ---------------------------------------------------------------------
+if nft list chain inet antumbra output 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain inet antumbra input 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain inet antumbra forward 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain ip antumbra-nat output 2>/dev/null | grep -q 'redirect to :9040' \
+   && nft list chain ip antumbra-nat output 2>/dev/null | grep -q 'udp dport 53 redirect to :5353'; then
+    ok firewall
+else
+    bad firewall "Tor-enforcement ruleset is not loaded or incomplete"
+fi
+if [ "$(grep -v '^#' /etc/resolv.conf | grep -c .)" -eq 1 ] && grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf; then ok resolver; else bad resolver "/etc/resolv.conf does not point only at 127.0.0.1"; fi
+if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ] && [ "$(cat /proc/sys/net/ipv6/conf/default/disable_ipv6 2>/dev/null)" = "1" ]; then ok ipv6-disabled; else bad ipv6-disabled "IPv6 is not disabled by sysctl"; fi
+if journalctl -b -u systemd-sysctl --no-pager -q 2>/dev/null | grep -qiE "couldn't write|failed to"; then bad sysctl "systemd-sysctl reported errors (see journal)"; else ok sysctl; fi
+
+# --- amnesia -------------------------------------------------------------------------
+if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then ok overlay-root; else bad overlay-root "root is not an overlay"; fi
+if grep -q -E '^/dev/(sd|mmcblk|nvme|loop)' /proc/swaps 2>/dev/null; then bad swap "swap on flash storage"; else ok swap; fi
+if findmnt -rn -o SOURCE,OPTIONS 2>/dev/null | grep -E '^/dev/(sd|mmcblk|loop)' | grep -v -E '^/dev/mapper' | grep -q -w 'rw'; then
+    bad flash-writes "a flash partition is mounted read-write outside Persistent Storage"
+else
+    ok flash-writes
+fi
+if grep -q -w 'init_on_free=1' /proc/cmdline; then ok init-on-free; else bad init-on-free "init_on_free=1 missing from the kernel command line"; fi
+if [ -d /sys/fs/pstore ] && [ -n "$(ls -A /sys/fs/pstore 2>/dev/null)" ]; then bad pstore "persistent kernel log records present"; else ok pstore; fi
+
+# --- radios and peripherals ---------------------------------------------------------
+if lsmod | grep -q -E '^(bluetooth|hci_uart|btqca|nxp_nci|nxp_nci_i2c|nfc) '; then bad radios "Bluetooth or NFC driver loaded"; else ok radios; fi
+if lsmod | grep -q -E '^(usb_f_rndis|usb_f_ncm|usb_f_ecm|usb_f_acm|usb_f_fs|usb_f_mass_storage) '; then bad usb-gadget "USB gadget function loaded"; else ok usb-gadget; fi
+if command -v usbguard >/dev/null 2>&1; then
+    if systemctl is-active -q usbguard.service; then ok usbguard; else bad usbguard "usbguard is not running"; fi
+fi
+if pgrep -x ModemManager >/dev/null 2>&1; then bad modemmanager "ModemManager is running"; else ok modemmanager; fi
+# Unprivileged processes must not reach the modem's QMI channel (AF_QIPCRTR = 42).
+if runuser -u nobody -- python3 -c 'import socket; socket.socket(42, socket.SOCK_DGRAM)' >/dev/null 2>&1; then
+    bad qrtr-access "unprivileged processes can open QRTR sockets"
+else
+    ok qrtr-access
+fi
+
+# --- late checks: modem state, MAC addresses ----------------------------------------
+if [ -n "${LATE}" ]; then
+    if [ -r "${STATE_DIR}/modem-mode" ]; then
+        mode="$(sed -n 's/^mode: //p' "${STATE_DIR}/modem-mode")"
+        reg="$(sed -n 's/^registration: //p' "${STATE_DIR}/modem-mode")"
+        case "${mode}" in
+            persistent-low-power|low-power) ok modem-radio ;;
+            absent*|unavailable*) ok modem-radio ;;
+            *) bad modem-radio "operating mode is '${mode}'" ;;
+        esac
+        case "${reg}" in
+            registered*|roaming*) bad modem-registration "modem is registered on a network (${reg})" ;;
+            *) ok modem-registration ;;
+        esac
+    else
+        bad modem-radio "no modem state recorded"
+    fi
+    for nic in /sys/class/net/wl*; do
+        [ -e "${nic}" ] || continue
+        n="$(basename "${nic}")"
+        cur="$(cat "${nic}/address")"
+        perm="$(ethtool -P "${n}" 2>/dev/null | sed -n 's/^Permanent address: //p')"
+        second_hex="$(printf '%s' "${cur}" | cut -c2)"
+        case "${second_hex}" in 2|6|a|e|A|E) la=1 ;; *) la=0 ;; esac
+        if [ -n "${perm}" ] && [ "${perm}" != "00:00:00:00:00:00" ] && [ "${perm}" = "${cur}" ]; then
+            bad "mac-${n}" "address equals the permanent address"
+        elif [ "${la}" -ne 1 ]; then
+            bad "mac-${n}" "address is not locally administered"
+        else
+            ok "mac-${n}"
+        fi
+    done
+    if [ -e "${STATE_DIR}/mac-spoof-failed" ]; then bad mac-spoofing "$(head -n1 "${STATE_DIR}/mac-spoof-failed")"; fi
+fi
+
+cat "${TMP}" >> "${STATUS}"
+logger -t antumbra-selfcheck -p daemon.info -- "$(tr '\n' ';' < "${TMP}")"
+rm -f "${TMP}"
+exit "${fail}"

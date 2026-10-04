@@ -1,0 +1,87 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Root-side applier for the Welcome screen (Tails' /etc/gdm3/PostLogin/Default
+# as a systemd unit). Runs once per boot, triggered by the greeter user's
+# welcome-done marker; refuses anything not owned by the greeter user and
+# anything after /run/antumbra/welcome-applied exists.
+set -euo pipefail
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ROOT=/var/lib/antumbra/settings
+PERSISTENT="${ROOT}/persistent"; TRANSIENT="${ROOT}/transient"; APPLIED="${ROOT}/applied"
+MARKER=/run/antumbra/welcome-applied
+FAILED=/run/antumbra/welcome-failed
+LIVE_USERNAME=amnesia
+GREETER_USER=antumbra-greeter
+SUDOERS=/etc/sudoers.d/antumbra-admin
+POLKIT=/etc/polkit-1/rules.d/10-antumbra-admin.rules
+EXPORTED_PERSISTENT="tails.macspoof tails.network tails.bridges antumbra.admin"
+
+log() { logger -t antumbra-welcome -p daemon.info -- "$*"; echo "$*" >&2; }
+fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; exit 1; }
+
+mkdir -p /run/antumbra "${APPLIED}"
+rm -f "${FAILED}"
+[ -e "${MARKER}" ] && fail "settings were already applied this boot"
+[ -e "${TRANSIENT}/welcome-done" ] || fail "no welcome-done marker"
+for d in "${PERSISTENT}" "${TRANSIENT}"; do
+    [ "$(stat -c %U "${d}")" = "${GREETER_USER}" ] || fail "${d} is not owned by ${GREETER_USER}"
+done
+owned_by_greeter() { [ -e "$1" ] && [ "$(stat -c %U "$1")" = "${GREETER_USER}" ]; }
+
+# --- Persistent Storage first: persistent settings may live on it -------------------
+PERS_MODE="$(sed -n 's/^ANTUMBRA_PERSISTENCE=//p' "${TRANSIENT}/antumbra.persistence" 2>/dev/null | tr -d "'\"")"
+PP="${TRANSIENT}/antumbra.persistence-passphrase"
+case "${PERS_MODE:-none}" in
+    create)
+        owned_by_greeter "${PP}" || fail "no passphrase for creating Persistent Storage"
+        antumbra-persistence create --passphrase-file "${PP}" || fail "creating Persistent Storage failed"
+        antumbra-persistence unlock --passphrase-file "${PP}" || fail "unlocking the new Persistent Storage failed"
+        antumbra-persistence activate || fail "activating Persistent Storage failed"
+        ;;
+    unlock)
+        owned_by_greeter "${PP}" || fail "no passphrase for unlocking Persistent Storage"
+        antumbra-persistence unlock --passphrase-file "${PP}" || fail "wrong passphrase, or Persistent Storage is damaged"
+        antumbra-persistence activate || fail "activating Persistent Storage failed"
+        ;;
+esac
+if [ -e "${PP}" ]; then shred -u "${PP}" 2>/dev/null || rm -f "${PP}"; fi
+
+# --- Export the settings (root-owned copies) -----------------------------------------
+for setting in ${EXPORTED_PERSISTENT}; do
+    src="${PERSISTENT}/${setting}"
+    owned_by_greeter "${src}" || continue
+    install -m 0640 -o root -g root "${src}" "${APPLIED}/${setting}"
+done
+# tca and the shell read the network setting as the user
+[ -e "${APPLIED}/tails.network" ] && chmod 0644 "${APPLIED}/tails.network"
+# Persistent-settings feature: keep the greeter's persistent files on the volume
+if antumbra-persistence status --quiet 2>/dev/null && [ -d /var/lib/antumbra/persistence/welcome-settings ]; then
+    cp -a "${PERSISTENT}/." /var/lib/antumbra/persistence/welcome-settings/ 2>/dev/null || true
+fi
+
+# --- Passphrase, administration -------------------------------------------------------------
+HASH=""
+if owned_by_greeter "${PERSISTENT}/tails.password"; then
+    HASH="$(sed -n "s/^TAILS_USER_PASSWORD=//p" "${PERSISTENT}/tails.password" | tr -d "'\"")"
+fi
+ADMIN="$(sed -n 's/^ANTUMBRA_ADMIN_ENABLED=//p' "${APPLIED}/antumbra.admin" 2>/dev/null | tr -d "'\"")"
+rm -f "${SUDOERS}" "${POLKIT}"
+if [ -n "${HASH}" ]; then
+    echo "${LIVE_USERNAME}:${HASH}" | chpasswd -e
+    log "screen-lock passphrase set"
+    if [ "${ADMIN}" = "true" ]; then
+        printf '%s ALL = (ALL) ALL\n' "${LIVE_USERNAME}" > "${SUDOERS}"
+        chmod 0440 "${SUDOERS}"
+        printf 'polkit.addAdminRule(function(action, subject) {\n    return ["unix-user:%s"];\n});\n' "${LIVE_USERNAME}" > "${POLKIT}"
+        log "administration enabled"
+    fi
+else
+    passwd -d "${LIVE_USERNAME}" >/dev/null
+    log "no passphrase: screen lock is not protective, administration disabled"
+fi
+
+# --- Network: unblock drivers (MAC spoofing fires per interface) ---------------------------
+touch "${MARKER}"
+/usr/local/lib/antumbra-unblock-network || log "network unblock reported an error (see journal)"
+rm -f "${TRANSIENT}/welcome-done"
+log "welcome settings applied"

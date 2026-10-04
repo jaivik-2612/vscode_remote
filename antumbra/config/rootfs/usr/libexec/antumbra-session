@@ -1,0 +1,9 @@
+#!/bin/sh
+# The user's session, started by greetd on the Welcome screen's request.
+# phosh-session does not export the session variables itself.
+set -eu
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+export XDG_SESSION_DESKTOP=phosh
+export GDMSESSION=phosh
+exec /usr/bin/phosh-session

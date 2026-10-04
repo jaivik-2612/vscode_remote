@@ -1,0 +1,4 @@
+# The user may launch Tor Browser inside its network namespace (root enters
+# the namespace and drops privileges again); session variables pass through.
+Defaults!/usr/local/lib/antumbra-run-tor-browser env_keep += "WAYLAND_DISPLAY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS LANG LANGUAGE XDG_SESSION_TYPE XDG_CURRENT_DESKTOP"
+amnesia ALL = (root) NOPASSWD: /usr/local/lib/antumbra-run-tor-browser

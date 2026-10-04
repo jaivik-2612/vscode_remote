@@ -1,0 +1,12 @@
+# Graphics, fonts and media stack for the Phosh session.
+mesa-vulkan-drivers
+libgl1-mesa-dri
+libegl-mesa0
+fonts-cantarell
+fonts-noto-core
+fonts-noto-color-emoji
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-pipewire
+alsa-ucm-conf
+adwaita-icon-theme

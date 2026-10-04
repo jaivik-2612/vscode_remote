@@ -1,0 +1,12 @@
+#!/bin/sh
+# greetd default_session: a bare phoc compositor with the on-screen keyboard
+# and the Welcome screen, running as the greeter user. This is how phrog's
+# greeter session works too.
+set -eu
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+export XDG_SESSION_DESKTOP=antumbra-greeter
+export GSETTINGS_BACKEND=memory
+PHOC_INI=/usr/share/phosh/phoc.ini
+[ -f /etc/antumbra/phoc.ini ] && PHOC_INI=/etc/antumbra/phoc.ini
+exec /usr/bin/phoc -S -C "${PHOC_INI}" -E /usr/libexec/antumbra-greeter-inner

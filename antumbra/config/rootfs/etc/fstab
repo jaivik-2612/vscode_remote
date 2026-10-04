@@ -1,0 +1,2 @@
+# Antumbra: the root is assembled by live-boot; Persistent Storage is
+# mounted by antumbra-persistence. Nothing to mount here.

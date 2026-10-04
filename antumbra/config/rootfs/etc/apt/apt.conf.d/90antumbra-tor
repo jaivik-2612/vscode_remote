@@ -1,0 +1,5 @@
+// Tails: APT reaches the network only through Tor (the firewall allows the
+// _apt user to use SocksPort 9050 and nothing else).
+Acquire::http::Proxy "socks5h://127.0.0.1:9050";
+Acquire::https::Proxy "socks5h://127.0.0.1:9050";
+Acquire::tor::Proxy "socks5h://127.0.0.1:9050";

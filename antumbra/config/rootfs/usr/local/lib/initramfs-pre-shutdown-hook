@@ -1,0 +1,23 @@
+#!/bin/sh
+# Adapted from Tails' initramfs-pre-shutdown-hook. Installed into the
+# initramfs as /lib/systemd/system-shutdown/antumbra; run by the copy of
+# systemd-shutdown that executes from the unpacked initramfs immediately
+# before halt/poweroff/reboot. No random-seed sector, no removable medium:
+# unmount everything, detach the loop device and drop the page cache so
+# init_on_free zeroes what is left.
+set -x
+sync
+/usr/bin/mount -o remount,rw /proc
+/usr/bin/mount -o remount,rw /
+mkdir -p /mnt/live/rootfs /mnt/live/medium /mnt/live/dev /mnt/live/run
+/usr/bin/mount --move /oldroot/run/live/rootfs/filesystem.squashfs /mnt/live/rootfs 2>/dev/null || true
+/usr/bin/mount --move /oldroot/run/live/medium /mnt/live/medium 2>/dev/null || true
+/usr/bin/mount --move /oldroot/dev /mnt/live/dev 2>/dev/null || true
+/usr/bin/mount --move /oldroot/run /mnt/live/run 2>/dev/null || true
+/usr/bin/umount --recursive /oldroot 2>/dev/null || true
+/usr/bin/umount /oldroot 2>/dev/null || true
+/usr/bin/umount --recursive /mnt/live/rootfs 2>/dev/null || true
+/usr/bin/umount --recursive /mnt/live/medium 2>/dev/null || true
+/sbin/dmsetup remove_all 2>/dev/null || true
+/sbin/losetup -D 2>/dev/null || true
+echo 3 > /proc/sys/vm/drop_caches

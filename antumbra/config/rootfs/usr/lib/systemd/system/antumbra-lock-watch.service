@@ -1,0 +1,13 @@
+[Unit]
+Description=Arm the auto-shutdown timer while the session is locked
+After=dbus.service systemd-logind.service
+
+[Service]
+ExecStart=/usr/local/lib/antumbra-lock-watch
+Restart=on-failure
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

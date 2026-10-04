@@ -1,0 +1,238 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Antumbra Welcome screen: the Tails Welcome Screen in phone form.
+
+Runs as the greeter user under a bare phoc compositor before any user
+process exists. Writes the chosen settings (Tails' file format), waits for
+the root-side applier, then asks greetd to start the user's Phosh session.
+
+  antumbra-welcome [--demo]   # --demo: run anywhere, write to a temp dir, no greetd
+"""
+import os
+import sys
+import tempfile
+import threading
+import time
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gtk  # noqa: E402
+
+from antumbra import settings as S  # noqa: E402
+
+DEMO = "--demo" in sys.argv
+STATUS_FILE = "/run/antumbra/selfcheck.status"
+DATA_STATE_FILE = "/run/antumbra/persistence-state"   # written by antumbra-persistence status at boot
+TOR_BROWSER_WARNING = ("Tor Browser for arm64 Linux exists only in Tor Project's alpha channel. "
+                       "Tor Project advises people at risk not to rely on alpha releases.")
+
+
+def selfcheck_failures():
+    try:
+        with open(STATUS_FILE, encoding="utf-8") as f:
+            return [l.strip() for l in f if " FAIL" in l]
+    except OSError:
+        return []
+
+
+def persistence_state():
+    """'none' (no volume), 'luks' (encrypted volume present), 'unknown'."""
+    try:
+        with open(DATA_STATE_FILE, encoding="utf-8") as f:
+            return f.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+class WelcomeWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Welcome to Antumbra")
+        self.set_default_size(480, 1000)
+        self.fullscreen()
+        self.model = S.WelcomeSettings()
+
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
+        header.set_show_start_title_buttons(False)
+        view.add_top_bar(header)
+        self.set_content(view)
+
+        self.banner = Adw.Banner()
+        failures = selfcheck_failures()
+        if failures:
+            self.banner.set_title("Privacy self-check failed: " + "; ".join(failures)[:200])
+            self.banner.set_revealed(True)
+        view.add_top_bar(self.banner)
+
+        page = Adw.PreferencesPage()
+        view.set_content(page)
+
+        # --- Persistent Storage ------------------------------------------------
+        g = Adw.PreferencesGroup(title="Persistent Storage",
+                                 description="Encrypted storage that survives shutdown. Everything else is forgotten.")
+        page.add(g)
+        state = persistence_state()
+        self.pers_combo = Adw.ComboRow(title="Persistent Storage")
+        choices = Gtk.StringList()
+        self.pers_choices = []
+        choices.append("Do not use (amnesic session)"); self.pers_choices.append("none")
+        if state == "luks":
+            choices.append("Unlock"); self.pers_choices.append("unlock")
+        else:
+            choices.append("Create (erases the data partition)"); self.pers_choices.append("create")
+        self.pers_combo.set_model(choices)
+        self.pers_combo.connect("notify::selected", self.on_persistence_changed)
+        g.add(self.pers_combo)
+        self.pers_pass = Adw.PasswordEntryRow(title="Persistent Storage passphrase")
+        self.pers_pass.set_sensitive(False)
+        g.add(self.pers_pass)
+        self.pers_pass2 = Adw.PasswordEntryRow(title="Repeat passphrase")
+        self.pers_pass2.set_sensitive(False)
+        self.pers_pass2.set_visible(state != "luks")
+        g.add(self.pers_pass2)
+
+        # --- Network ---------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Network and Tor")
+        page.add(g)
+        self.mac_row = Adw.SwitchRow(title="MAC address anonymization",
+                                     subtitle="Random Wi-Fi hardware address for this session")
+        self.mac_row.set_active(True)
+        g.add(self.mac_row)
+        self.net_combo = Adw.ComboRow(title="Connect to Tor")
+        self.net_combo.set_model(Gtk.StringList.new([
+            "Automatically", "Through bridges (enter below)", "Offline mode (no network at all)"]))
+        self.net_combo.connect("notify::selected", self.on_network_changed)
+        g.add(self.net_combo)
+        self.bridges_row = Adw.EntryRow(title="Bridge lines (obfs4 …, snowflake …), one per line")
+        self.bridges_row.set_sensitive(False)
+        g.add(self.bridges_row)
+
+        # --- Security -----------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Security",
+                                 description="A passphrase locks the screen. Without one, anyone who picks up the phone can use the session.")
+        page.add(g)
+        self.pass_row = Adw.PasswordEntryRow(title="Screen-lock passphrase (recommended)")
+        g.add(self.pass_row)
+        self.pass2_row = Adw.PasswordEntryRow(title="Repeat passphrase")
+        g.add(self.pass2_row)
+        self.admin_row = Adw.SwitchRow(title="Administration (sudo) with that passphrase",
+                                       subtitle="Off by default, as in Tails")
+        g.add(self.admin_row)
+
+        # --- Notes ------------------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Before you start")
+        page.add(g)
+        for text in (TOR_BROWSER_WARNING,
+                     "The bootloader is unlocked: an attacker with the phone in hand can replace the system. The orange warning at boot is expected.",
+                     "The cellular radio stays off. Only Wi-Fi is used, through Tor."):
+            row = Adw.ActionRow(title=text)
+            row.set_title_lines(0)
+            g.add(row)
+
+        self.error_label = Gtk.Label(wrap=True, css_classes=["error"])
+        g = Adw.PreferencesGroup()
+        g.add(self.error_label)
+        page.add(g)
+
+        self.start_button = Gtk.Button(label="Start Antumbra", css_classes=["suggested-action", "pill"],
+                                       halign=Gtk.Align.CENTER, margin_bottom=24, margin_top=12)
+        self.start_button.connect("clicked", self.on_start)
+        view.add_bottom_bar(self.start_button)
+        if not DEMO and os.path.exists(S.APPLIED_MARKER):
+            # Settings were applied earlier this boot (the user logged out):
+            # only a new session can be started, settings cannot change.
+            page.set_sensitive(False)
+            self.start_button.set_label("Start a new session")
+
+    def on_persistence_changed(self, *_):
+        choice = self.pers_choices[self.pers_combo.get_selected()]
+        self.pers_pass.set_sensitive(choice != "none")
+        self.pers_pass2.set_sensitive(choice == "create")
+
+    def on_network_changed(self, *_):
+        self.bridges_row.set_sensitive(self.net_combo.get_selected() == 1)
+
+    def collect(self):
+        m = self.model
+        m.persistence = self.pers_choices[self.pers_combo.get_selected()]
+        m.persistence_passphrase = self.pers_pass.get_text()
+        if m.persistence == "create":
+            if len(m.persistence_passphrase) < 12:
+                raise ValueError("The Persistent Storage passphrase needs at least 12 characters.")
+            if m.persistence_passphrase != self.pers_pass2.get_text():
+                raise ValueError("The Persistent Storage passphrases differ.")
+        if m.persistence == "unlock" and not m.persistence_passphrase:
+            raise ValueError("Enter the Persistent Storage passphrase, or choose not to use it.")
+        m.mac_spoof = self.mac_row.get_active()
+        m.network = ["direct", "bridges", "offline"][self.net_combo.get_selected()]
+        m.bridges = self.bridges_row.get_text().strip()
+        if m.network == "bridges" and not m.bridges:
+            raise ValueError("Enter at least one bridge line, or connect automatically.")
+        m.user_password = self.pass_row.get_text()
+        if m.user_password != self.pass2_row.get_text():
+            raise ValueError("The screen-lock passphrases differ.")
+        if m.user_password and len(m.user_password) < 6:
+            raise ValueError("The screen-lock passphrase needs at least 6 characters.")
+        m.admin = self.admin_row.get_active()
+        if m.admin and not m.user_password:
+            raise ValueError("Administration needs a passphrase.")
+
+    def on_start(self, _button):
+        self.error_label.set_text("")
+        try:
+            self.collect()
+        except ValueError as e:
+            self.error_label.set_text(str(e))
+            return
+        self.start_button.set_sensitive(False)
+        self.start_button.set_label("Applying settings…")
+        threading.Thread(target=self.apply_and_start, daemon=True).start()
+
+    def apply_and_start(self):
+        try:
+            if DEMO:
+                root = tempfile.mkdtemp(prefix="antumbra-welcome-demo-")
+                self.model.write(root)
+                GLib.idle_add(self.finish_demo, root)
+                return
+            if not os.path.exists(S.APPLIED_MARKER):
+                self.model.write()
+                deadline = time.monotonic() + 600
+                while not os.path.exists(S.APPLIED_MARKER):
+                    if os.path.exists("/run/antumbra/welcome-failed"):
+                        with open("/run/antumbra/welcome-failed", encoding="utf-8") as f:
+                            raise RuntimeError(f.read().strip() or "settings could not be applied")
+                    if time.monotonic() > deadline:
+                        raise RuntimeError("timed out waiting for the settings to be applied")
+                    time.sleep(0.5)
+            from antumbra.greetd import Greetd
+            env = ["XDG_SESSION_TYPE=wayland", "XDG_CURRENT_DESKTOP=Phosh:GNOME",
+                   "XDG_SESSION_DESKTOP=phosh", "GDMSESSION=phosh"]
+            Greetd().start_user_session("amnesia", ["/usr/libexec/antumbra-session"], env)
+            GLib.idle_add(self.get_application().quit)
+        except Exception as e:  # noqa: BLE001
+            GLib.idle_add(self.show_error, str(e))
+
+    def finish_demo(self, root):
+        self.error_label.set_text(f"Demo: settings written to {root}")
+        self.start_button.set_label("Done (demo)")
+
+    def show_error(self, text):
+        self.error_label.set_text(text)
+        self.start_button.set_sensitive(True)
+        self.start_button.set_label("Start Antumbra")
+
+
+class WelcomeApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.antumbra.Welcome")
+
+    def do_activate(self):
+        WelcomeWindow(self).present()
+
+
+if __name__ == "__main__":
+    sys.exit(WelcomeApp().run([a for a in sys.argv if a != "--demo"]))

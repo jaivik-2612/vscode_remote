@@ -1,0 +1,58 @@
+# Antumbra base system (installed in every build, including ANTUMBRA_MINIMAL).
+# One package per line; '#' starts a comment. Names are verified against the
+# Debian trixie arm64 index by tests/check-packages.sh.
+
+# init, device management, policy
+systemd
+systemd-sysv
+udev
+dbus
+dbus-user-session
+libpam-systemd
+polkitd
+kmod
+procps
+util-linux
+iproute2
+ca-certificates
+tzdata
+locales
+sudo
+less
+bash-completion
+busybox
+usbutils
+pciutils
+
+# filesystems and encryption (Persistent Storage)
+e2fsprogs
+f2fs-tools
+dosfstools
+cryptsetup
+cryptsetup-bin
+
+# scripting runtime for the Tails-derived helpers
+python3
+python3-yaml
+python3-gi
+perl
+
+# confinement
+apparmor
+apparmor-utils
+apparmor-profiles
+apparmor-profiles-extra
+
+# redistributable firmware (qcom/a630_sqe.fw for the Adreno 640); the
+# proprietary device firmware comes from ANTUMBRA_FIRMWARE_DIR
+firmware-qcom-soc
+
+# A/B slot marking
+qbootctl
+
+# compression tools used by the system itself
+zstd
+xz-utils
+
+# applying Tails' AppArmor adjustments at build time
+patch

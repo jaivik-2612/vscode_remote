@@ -1,0 +1,20 @@
+# Paths left out of the root filesystem squashfs (mksquashfs -wildcards -ef).
+# Paths are relative to the root filesystem tree.
+proc/*
+sys/*
+dev/*
+run/*
+tmp/*
+var/tmp/*
+var/cache/apt/*
+var/lib/apt/lists/*
+var/log/*
+root/.bash_history
+root/.cache/*
+home/*/.cache/*
+usr/share/doc/*/changelog*
+usr/share/doc/*/NEWS*
+usr/share/doc/*/README*
+usr/share/info/*
+usr/share/man/??/*
+usr/share/man/??_*/*

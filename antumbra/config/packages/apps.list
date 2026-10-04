@@ -1,0 +1,16 @@
+# Applications (Tails' set, adapted to the phone; Tor Browser is installed
+# from the verified tarball, not from Debian).
+gnome-console
+nautilus
+loupe
+papers
+gnome-text-editor
+gnome-calculator
+gnome-clocks
+metadata-cleaner
+secrets
+onionshare
+onionshare-cli
+electrum
+megapixels
+gnupg

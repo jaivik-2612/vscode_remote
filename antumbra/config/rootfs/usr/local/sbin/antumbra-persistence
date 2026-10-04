@@ -1,0 +1,125 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Persistent Storage for Antumbra: a LUKS2 (argon2id) volume on the
+# ANTUMBRA_DATA partition of the nested GPT, with Tails-style "features"
+# bind-mounted from it. Root only.
+#
+#  antumbra-persistence status [--quiet]       # writes /run/antumbra/persistence-state
+#  antumbra-persistence create --passphrase-file F
+#  antumbra-persistence unlock --passphrase-file F
+#  antumbra-persistence activate | deactivate | lock
+set -euo pipefail
+PART=/dev/disk/by-partlabel/ANTUMBRA_DATA
+MAPPER=antumbra_data
+MNT=/var/lib/antumbra/persistence
+STATE=/run/antumbra/persistence-state
+FEATURES=/etc/antumbra/persistence-features.conf
+LUKS_LABEL=AntumbraData
+die() { echo "antumbra-persistence: $*" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+mkdir -p /run/antumbra
+
+resolve_part() {
+    # The partition appears on the loop device created in the initramfs.
+    [ -e "${PART}" ] || die "no ANTUMBRA_DATA partition (is the nested GPT present?)"
+    readlink -f "${PART}"
+}
+
+cmd_status() {
+    local dev state=none
+    if [ -e "${PART}" ]; then
+        dev="$(resolve_part)"
+        if cryptsetup isLuks "${dev}" 2>/dev/null; then state=luks; fi
+    else
+        state=absent
+    fi
+    printf '%s\n' "${state}" > "${STATE}"
+    [ "${1:-}" = "--quiet" ] || echo "${state}"
+    [ -e "/dev/mapper/${MAPPER}" ] && mountpoint -q "${MNT}"
+}
+
+cmd_create() {
+    local pf="$1" dev
+    dev="$(resolve_part)"
+    [ -s "${pf}" ] || die "empty passphrase file"
+    # Tails' tps parameters: LUKS2, argon2id, 1 GiB memory, 4 iterations.
+    cryptsetup luksFormat --batch-mode --type luks2 --label "${LUKS_LABEL}" \
+        --pbkdf argon2id --pbkdf-memory 1048576 --pbkdf-force-iterations 4 \
+        --key-file "${pf}" "${dev}"
+    cryptsetup open --key-file "${pf}" "${dev}" "${MAPPER}"
+    mkfs.ext4 -q -L "${LUKS_LABEL}" "/dev/mapper/${MAPPER}"
+    mkdir -p "${MNT}"
+    mount "/dev/mapper/${MAPPER}" "${MNT}"
+    while IFS='|' read -r name src dest owner mode; do
+        case "${name}" in ''|'#'*) continue ;; esac
+        mkdir -p "${MNT}/${src}"
+        chown "${owner}" "${MNT}/${src}"
+        chmod "${mode}" "${MNT}/${src}"
+    done < "${FEATURES}"
+    umount "${MNT}"
+    cryptsetup close "${MAPPER}"
+    echo luks > "${STATE}"
+    echo "Persistent Storage created"
+}
+
+cmd_unlock() {
+    local pf="$1" dev
+    dev="$(resolve_part)"
+    cryptsetup isLuks "${dev}" || die "no LUKS volume on ${dev}"
+    [ -e "/dev/mapper/${MAPPER}" ] || cryptsetup open --key-file "${pf}" "${dev}" "${MAPPER}"
+    mkdir -p "${MNT}"
+    mountpoint -q "${MNT}" || mount -o noatime,nodev,nosuid "/dev/mapper/${MAPPER}" "${MNT}"
+    echo "Persistent Storage unlocked"
+}
+
+cmd_activate() {
+    mountpoint -q "${MNT}" || die "Persistent Storage is not unlocked"
+    while IFS='|' read -r name src dest owner mode; do
+        case "${name}" in ''|'#'*) continue ;; esac
+        [ -d "${MNT}/${src}" ] || { echo "feature ${name}: missing on the volume, skipped" >&2; continue; }
+        mkdir -p "${dest}"
+        chown "${owner}" "${dest}"; chmod "${mode}" "${dest}"
+        mountpoint -q "${dest}" || mount --bind -o nodev,nosuid "${MNT}/${src}" "${dest}"
+        echo "feature ${name}: ${dest}"
+    done < "${FEATURES}"
+    # Dotfiles: symlink every entry of the dotfiles feature into the home
+    if [ -d "${MNT}/dotfiles" ]; then
+        ( cd "${MNT}/dotfiles" && find . -mindepth 1 -maxdepth 1 -printf '%P\n' ) | while read -r entry; do
+            [ -e "/home/amnesia/${entry}" ] || ln -s "${MNT}/dotfiles/${entry}" "/home/amnesia/${entry}"
+        done
+    fi
+}
+
+cmd_deactivate() {
+    while IFS='|' read -r name src dest owner mode; do
+        case "${name}" in ''|'#'*) continue ;; esac
+        mountpoint -q "${dest}" && umount "${dest}"
+    done < <(tac "${FEATURES}")
+}
+
+cmd_lock() {
+    cmd_deactivate || true
+    mountpoint -q "${MNT}" && umount "${MNT}"
+    [ -e "/dev/mapper/${MAPPER}" ] && cryptsetup close "${MAPPER}"
+    echo "Persistent Storage locked"
+}
+
+cmd="${1:-}"; shift || true
+PF=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --passphrase-file) PF="$2"; shift ;;
+        --quiet) QUIET=--quiet ;;
+        *) die "unknown argument $1" ;;
+    esac
+    shift
+done
+case "${cmd}" in
+    status) cmd_status "${QUIET:-}" ;;
+    create) [ -n "${PF}" ] || die "--passphrase-file required"; cmd_create "${PF}" ;;
+    unlock) [ -n "${PF}" ] || die "--passphrase-file required"; cmd_unlock "${PF}" ;;
+    activate) cmd_activate ;;
+    deactivate) cmd_deactivate ;;
+    lock) cmd_lock ;;
+    *) die "usage: antumbra-persistence status|create|unlock|activate|deactivate|lock" ;;
+esac
