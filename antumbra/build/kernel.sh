@@ -141,7 +141,7 @@ cp "${O}/.config" "${KOUT}/config"
 export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER=antumbra KBUILD_BUILD_HOST=antumbra
 KBUILD_BUILD_TIMESTAMP="$(date -u -d "@${SOURCE_DATE_EPOCH}" '+%a %b %e %H:%M:%S UTC %Y')"
 log "building Image, modules and DTB with ${TOOLCHAIN} (-j${JOBS})"
-make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" -j"${JOBS}" Image modules dtbs
+make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION=-antumbra -j"${JOBS}" Image modules dtbs
 
 IMAGE="${O}/arch/arm64/boot/Image"
 DTB="${O}/arch/arm64/boot/dts/qcom/sm8150-oneplus-hotdog.dtb"
@@ -153,7 +153,7 @@ DTB="${O}/arch/arm64/boot/dts/qcom/sm8150-oneplus-hotdog.dtb"
 KREL="$(cat "${O}/include/config/kernel.release")"
 MODDIR="${WORK}/kernel-modules"
 rm -rf "${MODDIR}"
-make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" INSTALL_MOD_PATH="${MODDIR}" INSTALL_MOD_STRIP=1 modules_install >/dev/null
+make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION=-antumbra INSTALL_MOD_PATH="${MODDIR}" INSTALL_MOD_STRIP=1 modules_install >/dev/null
 rm -f "${MODDIR}/lib/modules/${KREL}/build" "${MODDIR}/lib/modules/${KREL}/source"
 tar -C "${MODDIR}" --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner -cf - lib \
     | zstd -q -T0 -19 -o "${KOUT}/modules.tar.zst" -f

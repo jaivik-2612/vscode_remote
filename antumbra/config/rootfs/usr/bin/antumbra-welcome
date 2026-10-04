@@ -6,7 +6,8 @@ Runs as the greeter user under a bare phoc compositor before any user
 process exists. Writes the chosen settings (Tails' file format), waits for
 the root-side applier, then asks greetd to start the user's Phosh session.
 
-  antumbra-welcome [--demo]   # --demo: run anywhere, write to a temp dir, no greetd
+  antumbra-welcome [--demo]        # --demo: run anywhere, write to a temp dir, no greetd
+  antumbra-welcome --self-test     # build the UI, write default settings to a temp dir, exit
 """
 import os
 import sys
@@ -22,7 +23,8 @@ from gi.repository import Adw, GLib, Gtk  # noqa: E402
 
 from antumbra import settings as S  # noqa: E402
 
-DEMO = "--demo" in sys.argv
+DEMO = "--demo" in sys.argv or "--self-test" in sys.argv
+SELF_TEST = "--self-test" in sys.argv
 STATUS_FILE = "/run/antumbra/selfcheck.status"
 DATA_STATE_FILE = "/run/antumbra/persistence-state"   # written by antumbra-persistence status at boot
 TOR_BROWSER_WARNING = ("Tor Browser for arm64 Linux exists only in Tor Project's alpha channel. "
@@ -231,8 +233,33 @@ class WelcomeApp(Adw.Application):
         super().__init__(application_id="org.antumbra.Welcome")
 
     def do_activate(self):
-        WelcomeWindow(self).present()
+        win = WelcomeWindow(self)
+        win.present()
+        if SELF_TEST:
+            GLib.timeout_add(500, self.self_test, win)
+
+    def self_test(self, win):
+        try:
+            win.pass_row.set_text("selftest-passphrase")
+            win.pass2_row.set_text("selftest-passphrase")
+            win.collect()
+            root = tempfile.mkdtemp(prefix="antumbra-welcome-selftest-")
+            win.model.write(root)
+            print("self-test: settings written to", root)
+            for d in ("persistent", "transient"):
+                for name in sorted(os.listdir(os.path.join(root, d))):
+                    print(f"  {d}/{name}")
+            self.selftest_ok = True
+        except Exception as e:  # noqa: BLE001
+            print("self-test FAILED:", repr(e))
+            self.selftest_ok = False
+        self.quit()
+        return False
 
 
 if __name__ == "__main__":
-    sys.exit(WelcomeApp().run([a for a in sys.argv if a != "--demo"]))
+    app = WelcomeApp()
+    status = app.run([a for a in sys.argv if a not in ("--demo", "--self-test")])
+    if SELF_TEST and not getattr(app, "selftest_ok", False):
+        sys.exit(1)
+    sys.exit(status)

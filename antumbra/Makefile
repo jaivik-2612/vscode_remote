@@ -5,8 +5,9 @@ SHELL := /bin/bash
 lint:            ## static checks: shell, python, nftables, tor, systemd units, yaml
 	tests/lint.sh
 
-test: lint       ## lint plus unit tests
+test: lint       ## lint, unit tests and the headless Welcome UI self-test
 	python3 -m pytest -q tests/unit
+	tests/ui-selftest.sh
 
 check-packages:  ## every package name exists in Debian trixie arm64
 	tests/check-packages.sh

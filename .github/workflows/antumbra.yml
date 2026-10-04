@@ -26,13 +26,17 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck nftables tor python3-pytest yamllint
+          sudo apt-get install -y -qq shellcheck nftables tor python3-pytest yamllint \
+            python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 xvfb openssl
       - name: Lint
         working-directory: antumbra
         run: tests/lint.sh
       - name: Unit tests
         working-directory: antumbra
         run: python3 -m pytest -q tests/unit
+      - name: Welcome screen UI self-test (headless)
+        working-directory: antumbra
+        run: tests/ui-selftest.sh
       - name: Package names exist in Debian trixie arm64
         working-directory: antumbra
         run: tests/check-packages.sh
