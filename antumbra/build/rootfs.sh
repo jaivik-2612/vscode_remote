@@ -116,6 +116,7 @@ mmdebstrap \
     --dpkgopt='path-include=/usr/share/doc/*/copyright' \
     --dpkgopt='path-exclude=/usr/share/info/*' \
     --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
+    --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \
     --customize-hook="chroot \"\$1\" env ${HOOK_ENV} /bin/sh -e /run/antumbra-build/run-hooks.sh" \
     --customize-hook='chroot "$1" dpkg-query -W -f "\${Package} \${Version}\n" > '"${ROUT}/packages.txt" \
