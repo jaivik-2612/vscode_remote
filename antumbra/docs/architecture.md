@@ -8,10 +8,10 @@ Debian 13 "trixie" with the Phosh mobile shell.
 Tails is a trademark of the Tails project. Antumbra is an independent
 derivative and is not endorsed by Tails or by the Tor Project.
 
-This document is the engineering reference for the project. Every
-hardware fact in it comes from the fact-checked research summarised in
-`docs/research-notes.md`; the few points that still need validation on a
-physical phone are listed in section 19.
+This document describes what the repository implements. Hardware facts
+come from the fact-checked research summarised in `research-notes.md`;
+what still needs a physical phone is listed in section 19 and in
+`hardware-validation.md`.
 
 ## 1. Goals and non-goals
 
@@ -25,8 +25,7 @@ Goals, in order of priority:
    to flash unless the user unlocks an encrypted Persistent Storage.
 3. **Radio hygiene.** Wi-Fi MAC addresses are randomised per session, the
    hostname and DHCP identity leak nothing, Bluetooth, NFC and GNSS are off
-   by default, and the cellular radio never attaches to a network unless
-   the user explicitly opts in (and is warned what that reveals).
+   by default, and the cellular radio never attaches to a network.
 4. **Honesty.** The user is told what the OS does and does not protect
    against, in particular that an unlocked bootloader means no verified
    boot.
@@ -55,11 +54,12 @@ Non-goals for version 1:
 | Mainline port | `github.com/Sr-0w/hotdog-linux-bringup` (GPL-2.0 tooling), boots from the stock OnePlus A/B bootloader without Halium or kexec |
 | Kernel | `gitlab.com/sm8150-mainline/linux` tag `v6.17.0-sm8150` (commit `379d8fe35c7ca685a650bd82fd023af0ea3f0de0`) plus the 27 patches in `aports/device/testing/linux-oneplus-hotdog-mainline617-clean/` at release tag `v0.2.0-alpha.2` |
 | Device tree | `qcom/sm8150-oneplus-hotdog.dtb` (added by the patch series; not in upstream Linux or in the sm8150-mainline tree) |
-| Working on the port | UFS, GPU (Freedreno/Turnip), display at 60 Hz, touch, Wi-Fi (incl. suspend), USB-C (dual role, DisplayPort out), speakers and handset mic, all four cameras (raw capture), s2idle suspend, charging, haptics, NFC reader mode (6.17 line) |
-| Partial or broken | Bluetooth (fixed on 6.17 r13 via the `hsuart0 = &uart13` alias; broken on 6.16), 90 Hz display, earpiece/headset audio, modem (boots, scans, nothing SIM-validated), GNSS (engine starts, no fixes), sensors (SLPI, needs vendor firmware 2.2-00083 and a libssc build of iio-sensor-proxy), fingerprint (never) |
+| Functional on the port (its status matrix calls most rows "partial") | UFS, GPU (Freedreno/Turnip), display at 60 Hz, touch while awake, Wi-Fi (incl. suspend), USB-C dual role and DisplayPort, speakers and handset mic, cameras (raw capture), s2idle suspend, charging, haptics, Bluetooth (with patches 0021-0023, included in the series) |
+| Not functional or not validated | 90 Hz display, earpiece/headset audio, modem (boots, scans, nothing SIM-validated), GNSS (engine starts, no fixes), sensors (vendor SLPI firmware and a special iio-sensor-proxy build), fingerprint (never) |
 
-The port is a one-developer project in alpha. Antumbra inherits its
-hardware status and does not claim anything the port has not validated.
+The port is a one-developer project in alpha. Its hardware status rows
+were established on its 6.16 kernel and only partly re-validated on the
+6.17 line Antumbra uses. Antumbra claims nothing beyond that.
 
 ## 3. System overview
 
@@ -69,48 +69,60 @@ hardware status and does not claim anything the port has not validated.
    │  applies dtbo_b, consults vbmeta_b (verification disabled)
    ▼
  initramfs (Debian initramfs-tools + live-boot + Antumbra hooks)
-   │  qbootctl marks the slot successful
-   │  losetup -P --sector-size 4096 on the `userdata` partition exposes the nested GPT
-   │  live-boot mounts /live/filesystem.squashfs read-only + tmpfs overlay
+   │  losetup -P --sector-size 4096 on the UFS `userdata` partition
+   │  live partition selected by its build-time UUID → /dev/antumbra/live
+   │  live-boot mounts the squashfs through dm-verity, tmpfs overlay on top
    ▼
  systemd (Debian 13 arm64)
-   │  nftables Tor-enforcement ruleset loaded before any network device exists
-   │  Wi-Fi driver blocked; Tor started with DisableNetwork 1
+   │  nftables Tor-enforcement ruleset before any network device exists
+   │  network drivers blocklisted; Tor started with DisableNetwork 1
+   │  modem processor up (Wi-Fi needs it), radio pinned to low-power
    ▼
- Phosh session, auto-login as user `amnesia`
-   │  Welcome screen: Persistent Storage unlock, MAC spoofing, offline mode,
-   │  admin password, screen-lock passphrase
-   │  → network unblocked, MAC spoofed, Tor Connection assistant
+ greetd → Welcome screen, running as the `antumbra-greeter` user
+   │  Persistent Storage, MAC spoofing, Tor mode and bridges,
+   │  screen-lock passphrase, administration
+   │  → root applies the settings once, unblocks the network
+   │  → the Welcome screen asks greetd to start the user session
    ▼
- Applications reach the network only through Tor (SocksPort, TransPort, DNSPort)
+ Phosh session as `amnesia`; applications reach the network only through Tor
 ```
 
 ## 4. Storage layout
 
 Antumbra follows the port's current (v0.2.0) layout: the operating system
 lives in the Android `userdata` partition, inside a nested GPT with
-4096-byte logical sectors. Slot A keeps the user's Android (OxygenOS or
-LineageOS) boot and recovery, which is the escape hatch.
+4096-byte logical sectors.
 
 ```
-userdata (physical Android partition, written with fastbootd `fastboot -S 128M flash userdata`)
-└── GPT, 4096-byte sectors
-    ├── p1  ANTUMBRA_LIVE   ext4, read-only at runtime
-    │         /live/filesystem.squashfs   the root filesystem (xz, arm BCJ)
-    │         /live/antumbra.manifest     package list, build id, hashes
-    │         /.disk/info                 live-boot medium marker
-    └── p2  ANTUMBRA_DATA   LUKS2 (argon2id) → ext4, the Persistent Storage
-              created unformatted at flash time; formatted by the Welcome
-              screen only when the user asks for Persistent Storage
+userdata (physical Android partition, 232,382,812,160 bytes; written from fastbootd as a sparse image)
+└── GPT, 4096-byte sectors, sized to the physical partition
+    ├── p1  ANTUMBRA_LIVE   ext4 without journal, read-only at runtime
+    │         /live/filesystem.squashfs          the root filesystem (xz, arm BCJ)
+    │         /live/filesystem.squashfs.verity   dm-verity hash tree
+    │         /live/filesystem.module, antumbra.manifest, /.disk/info
+    └── p2  ANTUMBRA_DATA   (Tails' Persistent Storage type GUID) grows to the end;
+              unformatted until the Welcome screen creates the LUKS2 volume
 ```
 
-Why not `super`: the port moved from `super` to `userdata` in v0.2.0
-because the bootloader's fastboot stalled on large `super` transfers, and
-because `userdata` is the partition Android expects to be user-owned.
-Why a nested GPT: Linux does not scan partition tables inside a
-partition; the initramfs runs `losetup --sector-size 4096 -P` on
-`userdata`, which yields `loopXp1`/`loopXp2`, and live-boot then finds the
-medium by filesystem label. This is what the port's initramfs does.
+Why `userdata` and not `super`: the port records three reasons. A short
+image written to the 15 GB `super` left its backup GPT in the middle of
+the partition, which the kernel rejected; `userdata` leaves Android's
+`super`, both recoveries and slot A untouched; and `userdata` has the
+capacity. For either target, writing has to go through fastbootd in
+128 MiB chunks, because the bootloader's fastboot stalls on large
+transfers.
+
+Why the image is full size: a nested GPT carries its backup header at
+the end of the device, so `image.sh` builds the GPT at the exact physical
+size and exports it as an Android sparse image in which the empty regions
+are "don't care" chunks; fastboot writes only the live partition and the
+two GPT copies.
+
+Slot A keeps the user's Android boot and recovery. It is **not** an
+escape hatch for Android: booting the Android system there formats the
+shared `userdata` and erases Antumbra together with its Persistent
+Storage. The way back is the slot-B backup that `flash.sh` makes, or the
+OnePlus MSM Download Tool.
 
 Boot-critical partitions, all in slot B:
 
@@ -140,88 +152,100 @@ avbtool add_hash_footer --image boot.img --partition_name boot \
 
 Facts that constrain the design:
 
-- The kernel is an uncompressed arm64 `Image`; the DTB goes in the v2 DTB
-  field, not appended.
+- The kernel is the raw arm64 `Image` from the build tree (the port's
+  configuration has `EFI_ZBOOT`, so a packaged `vmlinuz` would be a PE
+  file the bootloader cannot load); `kernel.sh` checks the `ARM\x64`
+  magic. The DTB goes in the v2 DTB field, not appended.
 - The ABL truncates the command line at 511 bytes and ignores
-  `extra_cmdline`. Boot-critical parameters come first.
+  `extra_cmdline`. `bootimg.sh` refuses longer lines.
 - `fastboot boot` is refused by this ABL; every test is a flash.
 - The AVB footer is unsigned (`--algorithm NONE`). It is a format
-  requirement, not a security feature.
+  requirement, not a security feature. `avbtool.py` is fetched from AOSP
+  at build time and verified by SHA-256 (Debian does not package it).
 - Required kernel parameters from the port: `iommu.passthrough=0
   arm-smmu.disable_bypass=0 clk_ignore_unused`. `console=ttyGS0` must not
-  be set (it trips the SLPI watchdog path in the port's notes).
-- `avbtool` is not packaged in Debian; the build fetches `avbtool.py`
-  from AOSP `external/avb` at a pinned commit with a recorded SHA-256.
+  be set.
 
-Antumbra kernel command line (version 1):
+Antumbra command line (`device/oneplus-hotdog/cmdline.txt`, 328 bytes,
+plus the parameters `bootimg.sh` appends):
 
 ```
-boot=live live-media=/dev/disk/by-label/ANTUMBRA_LIVE live-media-path=/live
-union=overlay nopersistence noprompt noautologin timezone=Etc/UTC
-module=antumbra iommu.passthrough=0 arm-smmu.disable_bypass=0 clk_ignore_unused
+boot=live live-media=/dev/antumbra/live live-media-path=/live union=overlay nopersistence
+iommu.passthrough=0 arm-smmu.disable_bypass=0 clk_ignore_unused
 slab_nomerge slub_debug=FZ init_on_free=1 init_on_alloc=1 page_alloc.shuffle=1
-randomize_kstack_offset=on systemd.condition_needs_update=no quiet splash
+randomize_kstack_offset=on usbcore.authorized_default=0 systemd.condition_needs_update=no quiet
+dm-verity-root-hash=filesystem.squashfs:<64 hex> dm-verity-oncorruption=panic   (appended; ANTUMBRA_VERITY=0 omits)
+antumbra.debug=1                                                              (appended by debug builds, which also drop quiet)
 ```
 
 Compared with Tails' command line, the x86-only options (`mce=0`,
 `vsyscall=none`, `mds=full,nosmt`, `spec_store_bypass_disable=on`,
-`efi_pstore.pstore_disable=1`, `erst_disable`) are dropped, and
+`efi_pstore.pstore_disable=1`, `erst_disable`) are dropped, live-config's
+options are dropped (Antumbra does not use live-config), and
 `page_poison` is deliberately absent: on this kernel `page_poison=on`
 would disable `init_on_free`, the mechanism Tails relies on for memory
-erasure.
+erasure. `usbcore.authorized_default=0` keeps USB devices unauthorised
+until usbguard applies its policy.
 
 ## 6. Initramfs
 
-Debian's `initramfs-tools` generates the initramfs inside the chroot when
-the Antumbra kernel package is installed. live-boot supplies the live
-medium logic (`boot=live`), and it is verified that: scripts dropped in
-`/etc/initramfs-tools/scripts/live-premount/` run before live-boot's
-medium search; an explicit `live-media=/dev/disk/by-label/…` is honoured
-without the UUID check; live-boot's own device scan skips loop devices,
-so the explicit path is required; live-boot's hook copies the util-linux
-`losetup` (which has `--partscan` and `--sector-size`) into the
-initramfs; and udev's storage rules create `by-label`, `by-uuid` and
-`by-partlabel` symlinks for loop partitions. Antumbra adds:
+Debian's `initramfs-tools` generates the initramfs inside the chroot
+(`config/hooks/20-kernel-install.sh`), with `MODULES=list` so only what
+the boot path needs is included. live-boot supplies the live medium
+logic. Verified properties of Debian's live-boot that the design relies
+on: scripts in `scripts/live-premount/` run before the medium search; an
+explicit `live-media=<path>` is honoured without the medium UUID check;
+live-boot's own device scan skips loop devices, so the explicit path is
+mandatory; its hook copies util-linux `losetup`; udev in the initramfs
+creates the loop partitions' symlinks; dm-verity is built in
+(`dm-verity-root-hash=`).
 
-- `scripts/live-premount/05-antumbra-loop`: waits for
-  `/dev/disk/by-partlabel/userdata`, runs `losetup --sector-size 4096
-  --partscan --find --show` on it, runs `udevadm settle`, and verifies
-  that `/dev/disk/by-label/ANTUMBRA_LIVE` now exists (creating the symlink
-  from `blkid` output as a fallback).
-- `hooks/antumbra`: copies `blkid`, the GPU firmware the display needs
-  for early output, the panel and touch modules, and `veritysetup` when
-  `ANTUMBRA_VERITY=1`.
-- `hooks/antumbra-shutdown` and the matching `initramfs-shutdown.service`
-  (ported from Tails): on shutdown systemd returns into an unpacked copy
-  of the initramfs (`/run/initramfs`), which unmounts the overlay, drops
-  the page cache and powers off. This is Tails' memory-erasure design
-  minus the removable medium.
+Antumbra adds (`config/rootfs/etc/initramfs-tools/`):
 
-Slot marking is **not** done in the initramfs. Debian's `qbootctl`
-package ships `qbootctl.service`, which runs `qbootctl -m` once
-`multi-user.target` is reached; Antumbra enables it unchanged. If the
-system fails before that point, the bootloader's retry counter is left
-to count down and after seven failed boots the phone falls back to slot
-A (the user's Android), which is the desired failure mode.
+- `scripts/live-premount/05-antumbra-loop`: finds the partition named
+  `userdata` whose device path lies on the UFS host controller (so no
+  USB medium qualifies), runs `losetup --sector-size 4096 --partscan`,
+  waits for udev, then looks for the loop partition whose filesystem
+  UUID equals the value recorded at build time in
+  `/etc/antumbra/live-fs-uuid`, and publishes it as `/dev/antumbra/live`.
+  Any mismatch is a panic: live-boot's fallback scan of removable devices
+  never runs with the right medium missing.
+- `hooks/antumbra`: copies that UUID file, `blkid`, `losetup`, `udevadm`
+  and the `overlay`, `loop`, `squashfs`, `ext4` and `dm-verity` modules
+  (most are built in).
+- `hooks/antumbra-shutdown` and the matching units (section 7): on
+  shutdown systemd returns into an unpacked copy of the initramfs
+  (`/run/initramfs`), which unmounts the overlay and the medium, detaches
+  the loop device and drops the page cache. This is Tails' memory-erasure
+  design minus the removable medium; the initrd copy comes from `/boot`
+  inside the read-only, verity-covered root.
+
+No proprietary firmware is in the initramfs, so `boot.img` is a
+publishable artifact. Slot marking is **not** done in the initramfs:
+Debian's `qbootctl.service` runs `qbootctl -m` once `multi-user.target`
+is reached. If the system fails before that point, the bootloader's
+retry counter is left to count down and after seven failed boots the
+phone falls back to slot A's recovery.
 
 The initramfs contains **no** USB gadget networking, no DHCP server, no
 serial console and no shell. The postmarketOS initramfs the port uses
 exposes NCM/RNDIS networking with SSH and a passwordless root console on
-`ttyGS0`; Antumbra ships none of that. A debug variant can be built with
-`ANTUMBRA_DEBUG=1`, which is never used for release images.
+`ttyGS0`; Antumbra ships none of that.
 
 ## 7. Amnesia and memory
 
 | Mechanism | Antumbra | Tails equivalent |
 |---|---|---|
-| Root filesystem | squashfs, read-only, with a tmpfs overlay (live-boot `union=overlay`) | same |
-| Writes to flash | none without Persistent Storage; `nopersistence` on the cmdline | same |
-| Swap | zram only (`systemd-zram-generator`, whose Debian vendor config already enables `zram0`; Antumbra pins zstd and half of RAM), never disk swap; `swapon` wrapped like Tails' `05-replace_swapon` | zram |
-| Memory zeroing | `init_on_free=1 init_on_alloc=1` on the cmdline | `init_on_free=1`; Debian's kernel has `INIT_ON_ALLOC_DEFAULT_ON` |
-| Shutdown | overlay `rw`/`work` directories removed late in shutdown, return to initramfs to unmount everything | same |
-| Emergency shutdown | long press of the power button (`HandlePowerKeyLongPress=poweroff`), a lock-screen "Shut down now" action, and an auto-shutdown timer that fires after a configurable time locked (default 18 h, GrapheneOS's auto-reboot default) | pulling the USB stick (udev-watchdog), which has no equivalent on UFS |
-| Suspend | allowed, but the Welcome screen warns that suspend keeps keys in RAM; the auto-shutdown timer still runs | n/a |
-| Journal and logs | `Storage=volatile`, `rsyslog` not installed | same |
+| Root filesystem | squashfs, read-only, under dm-verity, with a tmpfs overlay (live-boot `union=overlay`) | squashfs + overlay |
+| Writes to flash | none without Persistent Storage; `nopersistence` on the cmdline; the modem's storage partitions served read-only (`rmtfs -r`) | same |
+| Swap | zram only (`systemd-zram-generator`, zstd, half of RAM); `swapon` diverted to a wrapper that refuses anything but zram | zram |
+| Memory zeroing | `init_on_free=1 init_on_alloc=1` on the cmdline and as kernel defaults | `init_on_free=1` |
+| Kernel log stores | pstore and ramoops disabled in the kernel and removed from the device tree; `dmesg_restrict=1` | `efi_pstore` disabled |
+| Shutdown | overlay `rw`/`work` directories removed late in shutdown (`antumbra-remove-overlayfs-dirs.service`), return to the initramfs to unmount everything (`initramfs-shutdown.service`, `run-initramfs.mount`), caches dropped | same |
+| Emergency shutdown | long press of the power button (`HandlePowerKeyLongPress=poweroff`, about 5 s), Phosh's power menu, and `antumbra-auto-shutdown.timer`, armed by `antumbra-lock-watch` when the session locks and fired after 18 h with `WakeSystem=yes` so it works from suspend through the PMIC RTC alarm | pulling the USB stick (udev-watchdog), which has no equivalent on UFS |
+| Suspend | allowed; the Welcome screen warns that suspend keeps keys in RAM; the auto-shutdown alarm still fires | n/a |
+| Logs | journal `Storage=volatile`, no syslog, no core dumps (`systemd-coredump` masked, `core_pattern` disabled) | same |
+| Debug surfaces | `debugfs` and `tracefs` mounts masked, `kexec_load_disabled=1`, Yama `ptrace_scope=2`, unprivileged BPF off, `dmesg` restricted | same, where applicable |
 
 ## 8. Tor enforcement
 
@@ -229,44 +253,47 @@ exposes NCM/RNDIS networking with SSH and a passwordless root console on
 
 Tails enforces Tor with a ferm-generated iptables ruleset keyed on the
 Unix user of the socket owner. Antumbra ports `ferm.conf` to native
-nftables (`/etc/nftables.conf`), because the port's kernel builds nftables
-but not the legacy `xt_owner` match, and because ferm 2.5 only emits
-iptables syntax. The semantics are kept one-to-one:
+nftables (`config/rootfs/etc/nftables.conf`), because the port's kernel
+builds nftables but not the legacy `xt_owner` match, and because ferm 2.5
+only emits iptables syntax. The file is the specification; in summary:
 
-- Output policy `drop`; established connections accepted; everything
-  else that is not matched is logged (`Dropped outbound packet:`) and
-  rejected with port-unreachable.
-- User `debian-tor` may open any TCP connection and send UDP DNS. Nobody
-  else may leave the device directly.
-- User `amnesia` (UID 1000) may connect only to Tor's local ports:
-  SocksPorts 9050/9062 (not 9063, not the ControlPort 9052), DNSPort
-  5353 via the redirect of UDP 53, and TransPort 9040. All of its other
-  TCP traffic to the Internet is transparently redirected to 9040 (nat
-  `redirect to :9040`); RFC 1918 destinations are reachable directly but
-  LAN DNS and NetBIOS are rejected, as in Tails.
-- Mapped `.onion` addresses (`127.192.0.0/10`, Tor's
-  `AutomapHostsOnResolve` range) are redirected to the TransPort.
-- `_apt`, `proxy`, `nobody` may use SocksPort 9050; `htp` (time sync) may
-  use 9062; `root` may reach the ControlPort 9052 and the control-port
-  filter on 951.
-- `clearnet` may reach anything on non-loopback interfaces (used only
-  by the pre-Tor clock step and the Unsafe Browser, both opt-in).
-- IPv6: everything dropped except loopback.
-- Network namespaces: the Tor Browser, OnionShare and the Tor Connection
-  assistant run in their own namespaces (`tbb`, `onionshare`, `tca`, and
-  `clearnet` for the Unsafe Browser) wired to the host with veth pairs in
-  `10.200.1.0/24` and reach Tor only via SocksPort `10.200.1.1:9050` and
-  the control-port filter on 951, exactly as Tails' `tails-create-netns`
-  does. The namespace addresses are hard-coded in torrc, the firewall and
-  the onion-grater filters, so they are kept verbatim.
-- Forwarding is dropped; the TTL of the clearnet namespace is reset to 64
-  so the Unsafe Browser is not fingerprintable by a LAN observer.
+- `inet antumbra` table: `input`, `forward` and `output` chains with
+  policy `drop`, `log_reject` logging to the journal (`Dropped outbound
+  packet:` with the UID) and rejecting with port-unreachable.
+- Output: IPv4 established traffic accepted; on loopback, related ICMP,
+  Tor's SocksPorts for `_apt`/`proxy`/`nobody` (9050) and `htp` (9062),
+  the user rejected from 9063 and from the ControlPort 9052, root allowed
+  to 9052 and to the control-port filter 951, UDP 53/5353 for the user,
+  `htp` and root (rejected for `_apt`), and any other local TCP for the
+  user (so OnionShare and local servers work). The user's redirected
+  traffic to TransPort 9040 is accepted; `clearnet` may send TCP and UDP
+  DNS on external interfaces; `debian-tor` may open any TCP connection and
+  send UDP DNS; the local network is reachable directly except DNS and
+  NetBIOS; everything else, including all IPv6 and all ICMP to the
+  outside, is logged and rejected.
+- Input: IPv4 established and loopback accepted; the four application
+  namespaces accepted only for the exact source/destination/port pairs
+  they need (SocksPort and/or 951); the clearnet namespace rejected from
+  the host network.
+- Forward: policy drop; per-session accepts for the clearnet namespace
+  live in the separate `antumbra-session` tables, which a reload never
+  flushes; a mangle chain resets the TTL of forwarded clearnet packets to
+  64, as Tails does against passive fingerprinting.
+- `ip antumbra-nat` output chain: `.onion` automap addresses
+  (`127.192.0.0/10`) and the user's outgoing TCP (except the local
+  network) redirected to 9040; UDP 53 to loopback redirected to the
+  DNSPort 5353.
+- Loaded by `nftables.service` before `network-pre.target`, never flushed
+  on stop (Tails' no-drop-on-stop), re-applied by the NetworkManager
+  dispatcher on every interface up, syntax-checked in CI, and verified at
+  boot by `antumbra-selfcheck` before the network is unblocked.
 
-The ruleset is loaded by `nftables.service` before `network-pre.target`
-and is never flushed on stop (Tails' `no-drop-on-stop` drop-in). A
-NetworkManager dispatcher script re-applies it on every interface event.
-The kernel config fragment enables `NFT_REDIR`, `NFT_FIB_INET` and the
-connection-tracking netlink pieces the ruleset needs (section 13).
+Namespaces (`antumbra-create-netns`, Tails' `tails-create-netns` with
+nftables inside the namespaces): `tbb` (Tor Browser), `onioncircs`,
+`tca`, `onionshare` and `clearnet`, veth pairs in `10.200.1.0/24`, each
+reaching the host only through DNAT of its loopback ports to the host
+address. The addresses are hard-coded in torrc, the firewall and the
+onion-grater filters and are therefore kept verbatim.
 
 ### 8.2 Tor configuration
 
@@ -276,134 +303,147 @@ browser namespace, `ControlPort 9052` with cookie authentication,
 `DNSPort 5353` with `AutomapHostsOnResolve`, `TransPort 9040`,
 `Sandbox 1`, `AvoidDiskWrites 1`, `DisableNetwork 1` until the user has
 chosen how to connect. The `tor@default.service` drop-ins (writable
-`/etc/tor` for SAVECONF, `resolv.conf` override, no `NoNewPrivileges`
-for pluggable transports) are carried over.
+`/etc/tor` for SAVECONF, `resolv.conf` override for bridge-mode DNS, no
+`NoNewPrivileges` for the transports) and Tails' AppArmor adjustments to
+Debian's Tor profile are carried over.
 
 The control port is never exposed to applications directly. Tails'
 `onion-grater` (Python, stem) listens on 951 and applies per-application
-YAML allow-lists (Tor Browser, OnionShare, Onion Circuits, Tor
-Connection). It is vendored from the Tails tree.
+YAML allow-lists. It is installed unchanged, as are the units that raise
+the "Tor has bootstrapped" flag.
 
-Bridges and pluggable transports follow Tails exactly: the transport
-binaries come from the Tor Browser tarball that the build already
-verifies. The Linux aarch64 tarball ships `lyrebird` (which implements
-obfs4, meek_lite, webtunnel and snowflake) and `conjure-client`;
-`lyrebird` is installed as `/usr/bin/obfs4proxy` so Debian's Tor AppArmor
-abstraction keeps matching, and Tails' `tor-pt-configuration-helper`
-writes the `ClientTransportPlugin` line and turns the seccomp sandbox
-off only when a transport is in use. Debian's `obfs4proxy` and
-`snowflake-client` packages are not needed.
+Bridges and pluggable transports follow Tails: the transport binaries
+come from the Tor Browser tarball the build verifies. The Linux aarch64
+tarball ships `lyrebird` (obfs4, meek_lite, webtunnel, snowflake) and
+`conjure-client`; `lyrebird` is installed as `/usr/bin/obfs4proxy` so
+Debian's Tor AppArmor abstraction keeps matching, and Tails'
+`tor-pt-configuration-helper` writes the `ClientTransportPlugin` line and
+turns the seccomp sandbox off only when a transport is in use.
+
+Connecting: Tails' Tor Connection assistant is not ported yet. The
+Welcome screen records the mode (automatic, bridges with the lines
+given, or offline), and the NetworkManager dispatcher calls
+`antumbra-tor-connect` when a connection comes up; the same tool serves
+on the command line (`direct`, `bridges FILE|-`, `status`,
+`disconnect`).
 
 ### 8.3 DNS and name resolution
 
 `/etc/resolv.conf` is a static file pointing at `127.0.0.1`.
 NetworkManager runs with `dns=none` and `dhcp=internal` so it never
-touches it. UDP 53 to loopback is redirected to Tor's DNSPort 5353.
+touches it (the DHCP-provided servers are only recorded in
+`/etc/resolv-over-clearnet.conf` for Tor's own bridge-mode lookups).
+UDP 53 to loopback is redirected to Tor's DNSPort 5353.
 `systemd-resolved` is not installed. There is no IPv6 resolution because
-IPv6 is disabled by sysctl on every interface except loopback.
+IPv6 is disabled by sysctl on every interface except loopback and dropped
+by the firewall everywhere.
 
 ### 8.4 Time
 
 Tor needs a roughly correct clock, and a phone has no trusted time
 source: the modem's NITZ time is a tracking channel and NTP is a leak.
-Antumbra ports Tails' two-step design:
-
-1. Optional pre-Tor step, run as user `clearnet` and only with the user's
-   consent in the Tor Connection assistant: fetch a captive-portal
-   detection URL and set the clock from the HTTP `Date` header
-   (`tails-get-network-time`).
-2. After Tor has bootstrapped: `htpdate` over SocksPort 9062 as user
-   `htp`, taking the median of three pools of HTTPS servers, accepting
-   not-yet-valid certificates for the reason explained in Tails' design
-   notes.
-
-`systemd-timesyncd` and `hwclock-save` are masked. ModemManager is not
-installed, so NITZ cannot reach the clock.
+After Tor has bootstrapped, Tails' `htpdate` (the Perl implementation
+vendored in `/usr/local/sbin/htpdate`, not Debian's package of the same
+name) runs as user `htp` over SocksPort 9062, taking the median of three
+pools of HTTPS servers and accepting not-yet-valid certificates for the
+reason explained in Tails' design notes. `systemd-timesyncd` is masked
+and ModemManager is absent, so nothing else can set the clock. Tails'
+optional pre-Tor clock fix through a captive-portal `Date` header (as
+user `clearnet`) is prepared for in the firewall but not yet offered to
+the user.
 
 ## 9. Radio and hardware policy
 
 ### 9.1 Wi-Fi
 
-- The Wi-Fi driver module (`ath10k_snoc`, plus `ath10k_core`) is
-  blocklisted at build time and loaded only after the Welcome screen has
-  recorded the MAC-spoofing decision (`antumbra-unblock-network`, Tails'
-  `80-block-network` / `tails-unblock-network` pattern).
+- Every network driver module is blocklisted at build time
+  (`config/hooks/42-network-block-drivers.sh` generates
+  `/etc/modprobe.d/all-net-blocklist.conf`) and loaded only after the
+  Welcome screen has recorded the MAC-spoofing decision
+  (`antumbra-unblock-network`, Tails' pattern).
 - Every new Ethernet-type interface triggers `antumbra-spoof-mac` from a
-  udev rule: `macchanger -e` (keeps the OUI, randomises the device part),
-  three attempts; on failure the module is unloaded and the interface is
-  reported to the user, exactly as `tails-spoof-mac` does. Changing the
-  MAC with `ip link set address` is confirmed to work on WCN3990.
+  udev rule: `macchanger -e`, three attempts; on failure the module is
+  unloaded and blocklisted for the session, and if the interface
+  survives that, NetworkManager is stopped and masked (Tails' panic
+  mode). On this port the pre-spoof address is already random at every
+  boot (the port has no factory-address provisioning yet); Antumbra must
+  never add any (no `local-mac-address` property, no `bootmac`).
 - NetworkManager: `wifi.cloned-mac-address=preserve` (the udev step owns
-  the address, as in Tails), `wifi.scan-rand-mac-address=yes`,
+  the address), `wifi.scan-rand-mac-address=yes`,
   `ipv4.dhcp-send-hostname=false`, `ipv6.dhcp-send-hostname=false`,
-  `ipv4.dhcp-client-id=stable`, `connection.stable-id=${CONNECTION}/${BOOT}`,
+  `ipv4.dhcp-client-id=stable` with a per-boot `stable-id`,
   `hostname-mode=none`, `ipv6.ip6-privacy=2`, `dns=none`, `dhcp=internal`.
-  Hidden-network profiles are refused (they broadcast the SSID in probes).
+  A pre-up dispatcher script tears down and deletes any profile with
+  `802-11-wireless.hidden=yes` (hidden networks make the phone broadcast
+  their names everywhere).
 - Hostname is `amnesia` and is never sent on the wire.
 
 ### 9.2 Cellular modem
 
 On SM8150 the modem processor (MPSS) is a hard dependency of Wi-Fi, not
 only of telephony. The WLAN firmware (`wlanmdsp.mbn`) is not loaded by
-`ath10k`; it runs as a protection domain inside the modem's Hexagon DSP,
-the modem fetches it over TFTP from `tqftpserv`, and `ath10k_snoc` only
+`ath10k`; it runs as a protection domain inside the modem's DSP, the
+modem fetches it over TFTP from `tqftpserv`, and `ath10k_snoc` only
 talks to it through a QMI service that appears once the modem is up. The
-port isolated this step by step (Wi-Fi disabled with the modem off,
-`wlan0` appearing only after the modem reached `running` with `rmtfs` and
-`tqftpserv` active), and the postmarketOS SDM845 documentation states the
-same dependency. The modem processor must therefore boot, with:
+port isolated this step by step and the postmarketOS SDM845 documentation
+states the same dependency. The modem processor therefore boots, with:
 
-- `rmtfs -s -P -r` (synchronise modem start-up, serve the modem's
-  storage partitions **read-only**, so the modem can never write to the
-  phone's flash),
+- `rmtfs -r -P -s` (Debian's unit already runs it read-only: the modem can
+  never write to the phone's flash),
 - `tqftpserv` (serves `wlanmdsp.mbn` to the modem),
-- a protection-domain mapper (the kernel's `qcom_pd_mapper`, which has
-  an SM8150 table, or the userspace `pd-mapper`; only one of them runs).
+- the kernel's own protection-domain mapper (`qcom_pd_mapper`, loaded
+  from `modules-load.d`; the userspace `pd-mapper` and its vendor maps
+  are not installed).
 
 What keeps this compatible with goal 3 is that the modem's **radio** is
 separate from the modem **processor**, and nothing on mainline turns the
 radio on by itself: the port observed the firmware booting into the
-`shutting-down` operating mode and staying there; RF bring-up only
-happens on an explicit QMI DMS "online" request, which ModemManager
-sends when NetworkManager enables the modem. Antumbra therefore:
+`shutting-down` operating mode; RF bring-up only happens on an explicit
+QMI DMS "online" request, which ModemManager sends when NetworkManager
+enables the modem. Antumbra therefore:
 
-1. does not install ModemManager, and additionally ships a D-Bus
+1. does not install ModemManager, masks its unit, and ships a D-Bus
    activation override (`Exec=/bin/false`) for
-   `org.freedesktop.ModemManager1` so nothing can start it on demand
-   (the port needed the same fix);
-2. runs `antumbra-modem-radio-off.service` after `rmtfs` and
-   `tqftpserv`: as soon as the DMS service is reachable on QRTR node 0 it
-   requests `qmicli --dms-set-operating-mode=persistent-low-power`
-   (falling back to `low-power` if the firmware rejects the transition
-   from `shutting-down`), which in Qualcomm's definition means IMSI detach
-   and RF off, and it re-applies the setting on every modem restart;
-3. verifies in `antumbra-selfcheck` that `--dms-get-operating-mode`
-   reports low-power and `--nas-get-serving-system` reports
-   `not-registered` with no cell, and alerts the user otherwise.
+   `org.freedesktop.ModemManager1` so nothing can start it on demand (the
+   port needed the same fix);
+2. runs `antumbra-modem-radio-off.service` after `rmtfs` and `tqftpserv`:
+   once the DMS service is reachable on QRTR node 0 it requests
+   `--dms-set-operating-mode=persistent-low-power` (falling back to
+   `low-power`), which in Qualcomm's definition means IMSI detach and RF
+   off, records the mode and registration state, and a timer re-asserts
+   it every five minutes so a modem restart cannot bring RF back;
+3. **gates the control channel**: a small kernel patch
+   (`device/oneplus-hotdog/kernel/patches/0101-…`) makes creating an
+   `AF_QIPCRTR` socket require `CAP_NET_ADMIN`. Without it any process
+   could send the modem an "online" request, because QMI has no client
+   authentication. In-kernel users (ath10k, the name service, the
+   pd-mapper) are unaffected; the root-owned daemons keep working;
+   `antumbra-selfcheck` verifies that `nobody` cannot open such a socket.
+4. verifies in the late self-check that the mode is low-power and the
+   registration state is not registered, and records the result for the
+   session.
 
 There is no kernel rfkill switch for a QRTR modem, so `rfkill block wwan`
 does nothing here; the QMI operating mode is the control. The modem
-configuration catalogue (MCFG), SIM handling and anything else that only
-telephony needs are not installed. Cellular data as an opt-in "cellular
-session" with explicit warnings is on the roadmap, not in version 1.
+configuration catalogue (MCFG), SIM handling, IPA and rmnet (disabled in
+the kernel) and anything else that only telephony needs are absent.
 
 Residual facts the user is told: the modem firmware runs with the
 phone's IMEI inside it; in low-power mode it does not transmit, but the
 firmware is proprietary and this cannot be audited, and whether a
 low-power modem still answers emergency-camping requests on this
-firmware has not been measured. Users who need certainty beyond that
-should not carry a phone.
+firmware has not been measured.
 
 ### 9.3 Bluetooth, NFC, GNSS, sensors, cameras, microphones
 
 | Radio or sensor | Default | Mechanism |
 |---|---|---|
-| Bluetooth | off | `rfkill block bluetooth` in a unit ordered before `bluetooth.service`; the Welcome screen can enable it for the session; when enabled a random public address is set with `btmgmt public-addr` before power-on (plan: the controller only works on the 6.17 r13 kernel) |
-| NFC | off | `nxp_nci_i2c` and `nxp_nci` blocklisted in `modprobe.d`, `rfkill block nfc` |
-| GNSS | off | lives in the modem (QMI LOC) and only tracks between an explicit `Start` and `Stop`; nothing in Antumbra sends `Start`, and ModemManager (the usual client) is absent |
-| Motion, light, proximity sensors | unavailable to apps | `iio-sensor-proxy` is not installed (trixie's build has no SLPI backend anyway); the SLPI firmware is still loaded because the ultrasonic proximity path shares the DSP stack |
-| Cameras | available, no indicator | libcamera via PipeWire and the GNOME portal permission prompts |
-| Microphones | available | PipeWire; the Welcome screen offers "mute microphones for this session" |
+| Bluetooth | off | the driver stack (`bluetooth`, `bnep`, `btusb`, `btqca`, `hci_uart`) is blocklisted in `modprobe.d`, as in Tails; bluez is not installed; rfkill soft-block is defence in depth, not the control (the seat user can toggle rfkill). An opt-in session with a random address before power-on is on the roadmap |
+| NFC | off | `nfc`, `nci`, `nxp_nci`, `nxp_nci_i2c` blocklisted |
+| GNSS | off | lives in the modem (QMI LOC) and only tracks between an explicit `Start` and `Stop`; nothing sends `Start`, and the QRTR gate keeps applications away |
+| Motion, light, proximity sensors | unavailable | the sensor DSP (SLPI) is disabled in the device tree by Antumbra's override; no sensor daemon is installed; the ultrasonic proximity path that depends on it is not shipped either (no calls, so no need) |
+| Cameras | available, no indicator | libcamera via PipeWire and the portal permission prompts |
+| Microphones | available | PipeWire; a per-session mute switch is on the roadmap |
 
 Cameras and microphones have no hardware kill switch on this phone;
 software policy is the only control, as on every phone.
@@ -413,278 +453,237 @@ software policy is the only control, as on every phone.
 The phone is a USB gadget most of the time (charging). The kernel keeps
 gadget and dual-role support because the Type-C role switch and the
 port's USB-PD handling depend on the same controller driver; Antumbra
-simply configures **no** gadget function in userspace: no RNDIS/NCM
-networking, no ACM console, no MTP, no ADB-like debug, and nothing
-mounts `configfs` gadget directories. In host mode (a dock or an OTG
-adapter) `usbguard` runs with Debian's defaults
-(`ImplicitPolicyTarget=block`, `PresentDevicePolicy=apply-policy`,
-`PresentControllerPolicy=keep`) and an Antumbra-provided 0600
-`rules.conf` that allows only hubs, so a dock enumerates but every
-device behind it needs the user's approval from the shell. The rules
+configures **no** gadget function in userspace and blocklists the gadget
+function modules (`usb_f_rndis`, `usb_f_ncm`, `usb_f_ecm`, `usb_f_acm`,
+`usb_f_fs`, `usb_f_mass_storage`, the legacy `g_*` drivers). In host mode
+(a dock or an OTG adapter) devices stay unauthorised from the kernel
+command line until `usbguard` (Debian's defaults: `ImplicitPolicyTarget=block`,
+`PresentDevicePolicy=apply-policy`) applies the Antumbra policy, which
+allows only hubs; every other device needs the user's approval. The rules
 file is written by the build, because Debian's package would otherwise
-generate an allow-list from whatever was attached to the build host. A
-"charge only / file transfer" chooser is on the roadmap.
+generate an allow-list from whatever was attached to the build host.
+Charging from USB hosts may follow the USB default (about 500 mA) rather
+than the 900 mA the port negotiated through gadget enumeration; dedicated
+chargers are unaffected.
 
 ### 9.5 Boot security, honestly
 
 The bootloader is unlocked and shows the "Orange state" warning at
 every boot. Android Verified Boot is disabled (vbmeta flags = 3), so
-nothing anchors the boot image or the root filesystem to the hardware,
-and an attacker with the phone in hand can replace them. This is the
-same assumption Tails makes (physical control of the device). Antumbra
-mitigates what it can:
+nothing anchors the boot image to the hardware, and an attacker with the
+phone in hand can replace it. This is the same assumption Tails makes
+(physical control of the device). Antumbra mitigates what it can:
 
+- The squashfs root is covered by a dm-verity hash tree whose root hash
+  is embedded in the boot image command line (live-boot's own support).
+  It does not resist an attacker who replaces the boot image, but silent
+  tampering with the root filesystem alone, or a corrupted flash, is
+  detected at boot. On by default; `ANTUMBRA_VERITY=0` builds without it.
+- The live medium is selected by its UUID on the internal UFS storage
+  and USB devices are not authorised during early boot, so a labelled
+  USB stick cannot hijack the boot.
 - Persistent Storage is LUKS2 with argon2id (memory cost 1 GiB, 4
   iterations, mirroring Tails' `tps` parameters) and is only ever opened
   from the running system with the user's passphrase.
-- The squashfs root is covered by a `dm-verity` hash tree whose root hash
-  is embedded in the boot image command line. It does not resist an
-  attacker who replaces the boot image, but it makes silent tampering with
-  the root filesystem alone detectable at boot. `DM_VERITY` is enabled in
-  the kernel fragment; this feature is behind `ANTUMBRA_VERITY=1` until
-  validated on hardware because it adds a second loop device and a
-  `veritysetup` step in the initramfs.
-- No swap on flash, zeroing on free, shutdown instead of suspend when the
-  user wants amnesia.
+- No swap on flash, zeroing on free, no persistent kernel logs, shutdown
+  instead of suspend when the user wants amnesia.
+
+Forced reset and cold boot: an attacker who holds the power button long
+enough for a PMIC reset, or enters the bootloader with the phone powered
+on, bypasses the orderly shutdown and can boot a memory-dumping image.
+Only short lock-to-shutdown timers and shutting the phone down before
+handing it over help; LPDDR4X remanence on SM8150 is unmeasured.
 
 ## 10. Session, Welcome screen and lock screen
 
 The shell is Phosh (phoc compositor, squeekboard on-screen keyboard),
 the same stack Mobian ships on Debian. Session start-up was decided from
-the actual trixie package contents:
+the actual trixie package contents: Debian's `phosh.service` is a
+development unit hard-wired to UID 1000 with no greeter; `greetd` has a
+documented IPC and runs greeters as their own user; `phosh-session`
+exports none of the session variables itself.
 
-- Debian's `phosh.service` is a development unit hard-wired to UID 1000
-  with `Restart=always` and no greeter; `phoc` ships no unit at all.
-- `greetd` has a documented auto-login (`[initial_session]`, run exactly
-  once per boot, full PAM/logind session) and a greeter fallback after
-  logout. `phrog` (the Phosh-based greetd greeter) is available if a
-  graphical login screen is wanted.
-- `phosh-session` itself exports none of the `XDG_*` session variables;
-  the unit or greeter must.
+Antumbra's trust boundary is Tails': the Welcome screen runs **before**
+any user process exists, as a dedicated system user, and root applies its
+answers once.
 
-Antumbra therefore uses **greetd auto-login** into a small wrapper:
+1. `greetd` (`/etc/greetd/config.toml`) starts
+   `/usr/libexec/antumbra-greeter-session` as the `antumbra-greeter` user:
+   a bare phoc compositor (`/etc/antumbra/phoc.ini`: scale 3, 60 Hz)
+   running squeekboard and `antumbra-welcome`, exactly as the phrog
+   greeter's session works.
+2. `antumbra-welcome` (GTK4/libadwaita) asks the Tails Welcome Screen
+   questions in phone form: Persistent Storage (unlock, or create if the
+   partition is still empty), MAC address anonymisation (on by default),
+   Tor connection (automatic, bridge lines, or offline), a screen-lock
+   passphrase (recommended), and administration (sudo with that
+   passphrase, off by default). It writes the answers in Tails' file
+   format and keys (`tails.macspoof`, `tails.network`, `tails.password`,
+   `tails.create-persistence`, plus `antumbra.*`) to
+   `/var/lib/antumbra/settings/{persistent,transient}`, directories owned
+   by the greeter user, then touches `welcome-done`.
+3. `antumbra-apply-welcome-settings.path` wakes the root one-shot of the
+   same name, Tails' `PostLogin/Default` as a unit. It refuses to run if
+   `/run/antumbra/welcome-applied` exists or if any input is not owned by
+   the greeter user; unlocks or creates Persistent Storage and activates
+   its features (so persistent settings come from the volume); copies the
+   settings to `settings/applied/` (root-owned); sets the user's password
+   with `chpasswd -e` or deletes it; installs the sudoers and polkit admin
+   rules when asked; writes the marker; runs `antumbra-unblock-network`.
+   The Persistent Storage passphrase travels in a 0600 file in the
+   greeter's tmpfs directory that the applier shreds; a D-Bus service as in
+   Tails' `tps` is on the roadmap.
+4. The Welcome screen waits for the marker, then uses greetd's IPC to
+   create a session for `amnesia` (a dedicated PAM stack lets that user
+   in without a password, since the passphrase is only for the lock
+   screen) and starts `/usr/libexec/antumbra-session`, which exports the
+   session variables and runs `phosh-session`. If the user logs out,
+   greetd shows the Welcome screen again; settings cannot change in the
+   same boot, only a new session can start.
 
-```
-# /etc/greetd/config.toml
-[terminal]
-vt = 7
-[default_session]
-command = "/usr/libexec/phrog-greetd-session"   # fallback after logout
-user = "_greetd"
-[initial_session]
-command = "/usr/libexec/antumbra-session"
-user = "amnesia"
-```
-
-`antumbra-session` exports `XDG_SESSION_TYPE=wayland`,
-`XDG_CURRENT_DESKTOP=Phosh:GNOME`, `XDG_SESSION_DESKTOP=phosh` and runs
-phoc with an inner script, exactly as phrog's own session does:
-
-1. **Welcome, before the shell.** Under bare phoc the inner script starts
-   squeekboard (which only needs phoc's input-method and layer-shell
-   protocols, as phrog's greeter session proves) and runs
-   `antumbra-welcome`, a full-screen GTK4/libadwaita application that asks
-   the Tails Welcome Screen questions in phone form:
-   - unlock Persistent Storage (passphrase), or create it;
-   - MAC address anonymisation (on by default);
-   - network: connect normally / configure a bridge first / offline mode;
-   - administration password for this session (off by default; enables
-     `sudo` for `amnesia`);
-   - screen-lock passphrase for this session (strongly recommended; the
-     Persistent Storage passphrase can double as it);
-   - Unsafe Browser on/off (off by default);
-   - mute microphones (off by default).
-   It writes the answers as `KEY=value` files to
-   `/var/lib/antumbra/settings/{persistent,transient}` (the Tails greeter
-   file format and keys: `tails.password`, `tails.macspoof`,
-   `tails.network`, `tails.unsafe-browser`, `tails.create-persistence`),
-   so Tails' shell library (`tails-greeter.sh`) and Python helpers keep
-   working.
-2. **Apply, as root, once per boot.** `antumbra-apply-welcome-settings.path`
-   watches for the `done` marker; the matching one-shot service
-   (`ConditionPathExists=!/run/antumbra/welcome-applied`) sets the admin
-   password with `chpasswd -e`, installs the sudoers rule, configures the
-   screen lock, activates Persistent Storage features, writes the
-   `welcome-applied` marker so it can never run again in this boot, and
-   finally runs `antumbra-unblock-network`, which loads the Wi-Fi driver
-   (triggering MAC spoofing) and starts NetworkManager and Tor. This is
-   Tails' `/etc/gdm3/PostLogin/Default` logic as a systemd unit.
-3. **Shell.** The inner script stops its squeekboard and `exec`s
-   `gnome-session --session=phosh`, which starts Phosh, the session's own
-   on-screen keyboard and the settings daemons. The Tor Connection
-   assistant (Tails' `tca`, in the `tca` namespace) then takes over:
-   automatic connection, or bridge configuration, optional pre-Tor clock
-   fix, and the "Tor is ready" notification.
-
-The fallback design, if the bare-phoc Welcome proves unworkable on
-hardware, is phrog's documented `first-run` hook: phrog runs a program
-before showing its login screen, with its on-screen keyboard available,
-which is exactly the Tails greeter pattern at the cost of one extra tap
-to log in.
-
-Lock screen: Phosh's lock screen authenticates through PAM. If the user
-set a lock passphrase the session locks on the power button and after a
-timeout; the lock screen carries a "Shut down now" action
-(`antumbra-emergency-shutdown`), and the auto-shutdown timer (section 7)
-runs while locked. The dconf default
-`org.gnome.desktop.a11y.applications screen-keyboard-enabled=true` is
-shipped so squeekboard appears whenever a text field has focus.
+Lock screen: Phosh's lock screen authenticates through PAM with the
+passphrase the Welcome screen set; without one the lock is not
+protective, and the Welcome screen says so. `antumbra-lock-watch` arms
+the auto-shutdown timer on lock and disarms it on unlock.
 
 ## 11. Applications
 
 | Role | Package or source | Notes |
 |---|---|---|
-| Browser | Tor Browser for Linux aarch64 from the 16.0 alpha channel (currently `tor-browser-linux-aarch64-16.0a13.tar.xz`, 140 MB), verified at build against the Tor Browser Developers key `EF6E 286D DA85 EA2A 4BA7 DE68 4E2C 6E87 9329 8290` and the signed `sha256sums-signed-build.txt` | The only official Tor Browser for this architecture; stable 15.0.x is x86 only. Tor Project advises at-risk users against alphas; the Welcome screen and docs say so. Runs as `amnesia` in the `tbb` namespace with Tails' launcher, prefs and AppArmor profile; switches to the stable tarball the day one exists for aarch64. The tarball's built-in bridge list (`pt_config.json`) seeds the Tor Connection assistant's defaults, as in Tails. |
-| Unsafe Browser | the same binary in the `clearnet` namespace, Tails' overlay/bwrap design | opt-in, for captive portals |
-| File sharing | OnionShare 2.6.3 (CLI and GTK) | Qt GUI is usable on the phone but not adaptive |
-| Passwords | GNOME Secrets (KeePass format), KeePassXC as an alternative | Secrets is adaptive |
-| Metadata | Metadata Cleaner (`mat2` back end) | adaptive |
-| Files, images, documents, text | Nautilus, Loupe, Papers, GNOME Text Editor, GNOME Console | all adaptive GTK4 |
-| Email and chat | none by default; Chatty (XMPP/Matrix) is an optional feature | Thunderbird is not adaptive and Tails' patched build is x86 |
-| Crypto wallet | Electrum (as Tails ships) | optional feature |
+| Browser | Tor Browser for Linux aarch64 from the 16.0 alpha channel (`tor-browser-linux-aarch64-16.0a13.tar.xz`), verified at build against the Tor Browser Developers key `EF6E 286D DA85 EA2A 4BA7 DE68 4E2C 6E87 9329 8290` (vendored) and the signed checksum list | The only official Tor Browser for this architecture; stable 15.0.x is x86 only. Tor Project advises at-risk users against alphas; the Welcome screen says so. Launched as `amnesia` inside the `tbb` namespace (`tor-browser` → sudo → `antumbra-run-tor-browser` → `ip netns exec` → drop privileges → `launch-tor-browser`), with Tails' preferences; no AppArmor profile yet |
+| Unsafe Browser | not ported | the `clearnet` namespace and firewall rules are in place |
+| File sharing | OnionShare 2.6.3 (CLI and GTK) | Qt GUI usable, not adaptive |
+| Passwords | GNOME Secrets (KeePass format) | adaptive |
+| Metadata | Metadata Cleaner (`mat2`) | adaptive |
+| Files, images, documents, text, calculator, clocks | Nautilus, Loupe, Papers, GNOME Text Editor, GNOME Console, Calculator, Clocks | adaptive GTK4 |
+| Crypto wallet | Electrum (as Tails ships) | |
 | Camera | Megapixels | raw capture quality only |
-| Encryption | GnuPG, `gnome-keyring`, Kleopatra omitted | |
+| Encryption | GnuPG, `gnome-keyring` | |
 
-No app store or Flatpak by default (Tails' Additional Software feature is
-on the roadmap as a Persistent Storage feature).
+APT reaches the network only through Tor (`socks5h://127.0.0.1:9050`, user
+`_apt`). No app store or Flatpak by default.
 
 ## 12. Persistent Storage
 
-The Tails Persistent Storage service (`tps`, Python, UDisks, cryptsetup)
-is vendored with its D-Bus service and feature definitions. Differences:
-
-- The LUKS2 volume is the pre-allocated `ANTUMBRA_DATA` partition of the
-  nested GPT rather than a partition created on a USB stick; `tps`'s
-  parent-device discovery is pointed at the loop device instead of the
-  boot medium. The partition keeps Tails' type GUID
-  (`8DA63339-0007-60C0-C436-083AC8230908`) so its tooling recognises it.
-- Features offered in version 1: Persistent Folder, Welcome Screen
-  settings, Network Connections, Tor Bridges, Tor Browser bookmarks,
-  Secrets/KeePass database, GnuPG, SSH client, Dotfiles. Features are
-  bind mounts applied through a `nosymfollow` view of `/`, as in Tails.
-- The Welcome screen creates the volume on first use (`cryptsetup
-  luksFormat --type luks2 --pbkdf argon2id --pbkdf-memory 1048576
-  --pbkdf-force-iterations 4`) and the format is reflected in a
-  `persistence.conf` so live-boot could also mount it in a future
-  initramfs-based design.
+`antumbra-persistence` (root only) manages the LUKS2 volume on the
+`ANTUMBRA_DATA` partition with Tails' `tps` parameters and the partition
+type GUID Tails uses. Features (`/etc/antumbra/persistence-features.conf`)
+are directories on the volume bind-mounted onto their targets, in order:
+Persistent folder, Welcome settings, Network connections, Tor bridges
+(`/var/lib/tca`), GnuPG, SSH client, and Dotfiles (symlinked into the
+home). Creation formats the partition (`luksFormat --type luks2 --pbkdf
+argon2id --pbkdf-memory 1048576 --pbkdf-force-iterations 4`) and
+pre-creates every feature directory with its owner and mode. Differences
+from Tails: no D-Bus service, no `nosymfollow` bind of `/` (roadmap), and
+OS updates currently erase the volume because they re-flash `userdata`.
 
 ## 13. Kernel
 
 Source: `gitlab.com/sm8150-mainline/linux` at `v6.17.0-sm8150` with the
-27-patch series from the port, applied in order, then the Antumbra
-configuration fragment merged over
-`config-oneplus-hotdog-mainline617-clean.aarch64` with
-`scripts/kconfig/merge_config.sh`. Built with Debian's cross toolchain
-(`crossbuild-essential-arm64`, GCC) via `make bindeb-pkg`; `LLVM=1` is
-supported because the port builds with clang.
+27-patch series from the port applied in order, then Antumbra's own
+patch (`0101`, the QRTR capability gate), then the device-tree overrides
+appended to the hotdog DTS (`antumbra-dts-overrides.dtsi`: SLPI remote
+processor disabled, ramoops node deleted), then the configuration
+fragment merged over the port's config with `merge_config.sh`.
+`kernel.sh` fails if any fragment line is not honoured. Built with LLVM
+by default (the port's validated recipe); `ANTUMBRA_KERNEL_TOOLCHAIN=gcc`
+is experimental.
 
-The port's configuration was read option by option. Relevant facts: it
-has `VT=y` (greetd and phoc are fine), `NF_TABLES=m` with nat, ct, log
-and reject but **no** `NFT_REDIR`, no `NF_CT_NETLINK` and no
-`xt_owner`; `SQUASHFS=y` with zlib/lz4/lzo/xz, single-threaded
-decompression and no zstd; `OVERLAY_FS=m`; `DM_CRYPT=y` but no
-`DM_VERITY`; `ZRAM=m` with zstd as default; `IPV6=m`; `LSM` lists
-landlock, lockdown and yama but none of the three is built, and AppArmor
-is absent; `MODULE_SIG` is off; `DEBUG_FS`, `KEXEC`, `DEVMEM`
-(strict) and `IKCONFIG_PROC` are on; `VA_BITS=52` with 4K pages, which
-caps `vm.mmap_rnd_bits` at 18; USB gadget, configfs functions and dual
-role are built in.
-
-The fragment (`device/oneplus-hotdog/kernel/antumbra.config`) changes
-only what the design needs or what is safe hardening:
+The fragment (`device/oneplus-hotdog/kernel/antumbra.config`):
 
 | Option | Why |
 |---|---|
-| `CONFIG_NFT_REDIR=m`, `CONFIG_NFT_FIB_INET=m`, `CONFIG_NF_CT_NETLINK=m`, `CONFIG_NETFILTER_XT_MATCH_OWNER=m` | the Tor-enforcement ruleset needs the `redirect` statement; conntrack tooling for the self-check; `xt_owner` keeps `iptables-nft` compatibility for Tails scripts |
-| `CONFIG_SQUASHFS_FILE_DIRECT=y`, `CONFIG_SQUASHFS_DECOMP_MULTI_PERCPU=y`, `CONFIG_SQUASHFS_ZSTD=y` | multi-core decompression of the root filesystem; zstd available (xz remains the image default) |
-| `CONFIG_DM_VERITY=y` | root filesystem integrity (section 9.5) |
-| `CONFIG_SECURITY_APPARMOR=y`, `CONFIG_SECURITY_YAMA=y`, `CONFIG_SECURITY_LANDLOCK=y`, `CONFIG_SECURITY_LOCKDOWN_LSM=y`, `CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,integrity,apparmor,bpf"` | Tails' confinement of Tor Browser, OnionShare and Tor needs AppArmor; its `kernel.yama.ptrace_scope=2` sysctl needs Yama; lockdown is compiled but not forced until tested |
-| `CONFIG_MODULE_SIG=y`, `CONFIG_MODULE_SIG_FORCE=y`, `CONFIG_MODULE_SIG_ALL=y`, `CONFIG_MODULE_SIG_SHA512=y` | only modules from the build load (signed with the build's ephemeral key) |
-| `CONFIG_INIT_ON_FREE_DEFAULT_ON=y`, `CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y`, `CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT=y` | the command line enables them too; defaults make a truncated command line safe |
-| `CONFIG_SLAB_FREELIST_RANDOM=y`, `CONFIG_SLAB_FREELIST_HARDENED=y`, `CONFIG_HARDENED_USERCOPY=y`, `CONFIG_FORTIFY_SOURCE=y` | standard hardening Debian's kernel also enables |
-| `CONFIG_IKCONFIG_PROC=n` | nothing needs the config exposed at run time |
+| `NFT_REDIR=m`, `NFT_FIB_INET=m`, `NF_CT_NETLINK=m`, `NETFILTER_XT_MATCH_OWNER=m` | the Tor-enforcement ruleset needs the `redirect` statement; conntrack tooling; `xt_owner` keeps `iptables-nft` compatibility for Tails scripts |
+| `SQUASHFS_FILE_DIRECT=y`, `SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU=y` (single and file-cache off), `SQUASHFS_ZSTD=y` | multi-core decompression of the root filesystem; zstd available (xz remains the image default) |
+| `DM_VERITY=y` | root filesystem integrity (section 9.5) |
+| `SECURITY_APPARMOR=y`, `SECURITY_YAMA=y`, `SECURITY_LANDLOCK=y`, `LSM="landlock,lockdown,yama,loadpin,safesetid,ipe,apparmor,bpf"`, `SECURITY_DMESG_RESTRICT=y` | Tails' confinement of Tor needs AppArmor; its `ptrace_scope=2` sysctl needs Yama; the port built none of them |
+| `INIT_ON_FREE_DEFAULT_ON=y`, `INIT_ON_ALLOC_DEFAULT_ON=y`, `RANDOMIZE_KSTACK_OFFSET_DEFAULT=y`, `SHUFFLE_PAGE_ALLOCATOR=y` | the command line enables them too; defaults make a truncated command line safe, and `page_alloc.shuffle=1` needs the allocator option |
+| `SLAB_FREELIST_RANDOM=y`, `SLAB_FREELIST_HARDENED=y`, `RANDOM_KMALLOC_CACHES=y`, `HARDENED_USERCOPY=y`, `FORTIFY_SOURCE=y`, `BUG_ON_DATA_CORRUPTION=y`, `ARM64_BTI_KERNEL=y` | hardening Debian's kernel also enables |
+| `ACPI_APEI` and `PSTORE` off | ACPI APEI selected pstore; this phone has no ACPI tables, and no kernel log may survive a reboot (the port's ramoops region would keep Wi-Fi identifiers and firewall lines in DRAM) |
+| `QRTR_TUN` off | no userspace tunnel into the QRTR bus |
+| `QCOM_IPA` and `RMNET` off | no cellular data path in version 1 |
+| `IKCONFIG_PROC`, `LEGACY_PTYS`, `DEVPORT`, `CRYPTO_USER_API_ENABLE_OBSOLETE` off; `CRYPTO_USER_API_AEAD=m` | attack surface; the AEAD interface as a module so Tails' `algif_aead` blocklist is effective |
+| `RTC_DRV_PM8XXX=y` | the auto-shutdown timer's alarm wake-up |
+| `QCOM_PD_MAPPER=m` | the in-kernel protection-domain mapper (it cannot be built in because QRTR is a module; `modules-load.d` loads it) |
 
-Deliberately **not** changed in version 1: `DEBUG_FS` (the port's
-diagnostics; Antumbra masks `sys-kernel-debug.mount` instead), `KEXEC`
-(disabled at run time with Tails' `kernel.kexec_load_disabled=1`
-sysctl), `DEVMEM` (already strict), USB gadget support (section 9.4),
-`VA_BITS` and everything the port needs to boot from the ABL
-(`CONFIG_ONEPLUS_HOTDOG_EARLY_BOOT=y`, `EFI`, the watchdog handling).
-The build reads `CONFIG_ARCH_MMAP_RND_BITS_MAX` and
-`CONFIG_ARCH_MMAP_RND_COMPAT_BITS_MAX` from the final kernel config and
-writes `/etc/sysctl.d/mmap_aslr.conf` from them instead of copying
-Tails' x86 values.
+Deliberately **not** changed: `DEBUG_FS` (masked at run time), `KEXEC`
+(disabled by sysctl), `DEVMEM` (already strict), USB gadget support
+(section 9.4), module signing (it would make builds unreproducible; the
+read-only verity root covers the modules), `VA_BITS` and everything the
+port needs to boot from the ABL (`CONFIG_ONEPLUS_HOTDOG_EARLY_BOOT=y`,
+`EFI`, the watchdog handling). The build reads
+`CONFIG_ARCH_MMAP_RND_BITS_MAX` and its compat counterpart from the final
+configuration and writes `/etc/sysctl.d/mmap_aslr.conf` from them (33 and
+16 for this kernel) instead of copying Tails' x86 values.
 
 ## 14. Firmware and licensing
 
 Every radio, the GPU, the DSPs and the modem need proprietary firmware
-that OnePlus and Qualcomm do not license for redistribution, and the
-GPU's `a640_zap.mbn` is signed per device. Debian's `firmware-qcom-soc`
-contains nothing for SM8150. Therefore:
+that OnePlus and Qualcomm do not license for redistribution. Debian's
+`firmware-qcom-soc` provides only `qcom/a630_sqe.fw` of what this phone
+needs. Therefore:
 
-- Published Antumbra images contain **no device firmware**. The build
-  pulls firmware from a directory the builder provides
+- Published Antumbra images contain **no** device firmware. The build
+  copies firmware from a directory the builder provides
   (`ANTUMBRA_FIRMWARE_DIR`), populated by `build/fetch-firmware.sh` from
-  the community mirror the port uses
-  (`github.com/sm8150-linux-mainline/firmware-oneplus-hotdog`, pinned
-  commit, SHA-256 manifest) for the user's own device, with the legal
-  caveat spelled out in `docs/legal.md`.
-- Firmware needed per feature: `qcom/a630_sqe.fw`, `qcom/a640_gmu.bin`,
-  `qcom/sm8150/oneplus/hotdog/a640_zap.mbn` (display and GPU);
-  `ath10k/WCN3990/hw1.0/{firmware-5.bin,board-2.bin}` and
-  `qcom/sm8150/oneplus/hotdog/wlanmdsp.mbn` (Wi-Fi);
-  `qcom/sm8150/oneplus/hotdog/{adsp,cdsp}.mbn` (audio, DSP);
-  `modem.mbn` (the modem processor, which Wi-Fi requires, section 9.2);
-  `qca/crbtfw21.tlv`, `qca/crnv21.bin` (Bluetooth); `venus.mbn` (video);
-  `slpi.mbn` version 2.2-00083 only for sensors, which Antumbra does not
-  expose.
-- The per-device proximity calibration and the SLPI registry from the
-  phone's `persist` partition are never needed because sensors are off.
+  the community mirror the port uses, pinned by commit and per-file
+  SHA-256, for the user's own device, after an explicit acknowledgement
+  (`docs/legal.md`).
+- Files installed: `qcom/a630_sqe.fw`, `qcom/a640_gmu.bin` and
+  `qcom/sm8150/oneplus/hotdog/a640_zap.mbn` (GPU; the zap shader is signed
+  by OnePlus for this model); `qcom/sm8150/oneplus/hotdog/{adsp,cdsp}.mbn`
+  (audio and compute DSPs); `qcom/sm8150/oneplus/hotdog/modem.mbn` and
+  `wlanmdsp.mbn` (the modem processor, which Wi-Fi requires);
+  `ath10k/WCN3990/hw1.0/{firmware-5.bin,board-2.bin}` (Wi-Fi);
+  `qcom/sm8150/oneplus/hotdog/venus.mbn` (video); `qca/crbtfw21.tlv` and
+  `qca/crnv21.bin` (Bluetooth, for the future opt-in session).
+- Not installed: `slpi.mbn` (sensor DSP disabled), the pd-mapper vendor
+  maps (kernel pd-mapper used), the NFC configuration, `ipa_fws.mbn` (IPA
+  disabled), and the per-unit calibration from the `persist` partition.
 
 ## 15. Build pipeline and reproducibility
 
 ```
-build/build.sh                      orchestrates the steps below; every step is idempotent
-  fetch-sources.sh                  kernel tree + port patches + avbtool + Tor Browser tarball, all pinned and hash-checked
-  kernel.sh                         cross-compile, bindeb-pkg → linux-image-*.deb + dtb
-  rootfs.sh                         mmdebstrap (root mode, arm64, trixie, pinned snapshot) + overlay + hooks → directory
-  squashfs.sh                       mksquashfs -comp xz -Xbcj arm -b 1M -all-root -noappend, SOURCE_DATE_EPOCH
-  image.sh                          mke2fs -d (live partition) + systemd-repart (4096-byte-sector GPT) → userdata.img
-  bootimg.sh                        mkbootimg v2 + avbtool footer → boot.img
-  release.sh                        zstd, split < 1.9 GiB, SHA256SUMS, manifest
-build/flash.sh                      guided fastboot/fastbootd flashing with backups and safety checks
+build/build.sh                      orchestrates; every step is idempotent and runs alone too
+  fetch-sources.sh                  kernel tree + port patches + avbtool + DTBO/vbmeta + Tor Browser, all pinned and verified
+  fetch-firmware.sh                 (separate, explicit) the builder's own device firmware
+  kernel.sh                         patches, DTS overrides, fragment merge and check, Image + modules + DTB
+  rootfs.sh (root)                  mmdebstrap (arm64, trixie) + overlay + hooks inside the chroot → tree, initramfs, package list
+  squashfs.sh (root)                mksquashfs xz/arm BCJ with fixed times; dm-verity hash tree and root hash
+  image.sh                          ext4 live partition (mke2fs -d), GPT at the physical size (systemd-repart), img2simg -s
+  bootimg.sh                        mkbootimg v2 + verity hash on the cmdline + avbtool footer, then unpack_bootimg checks
+  release.sh                        boot.img, userdata.simg.zst (split under 2 GiB), DTBO/vbmeta copies, SHA256SUMS, MANIFEST, minisign
+build/flash.sh                      guided fastboot/fastbootd flashing with identity, size and backup checks
+build/verify-release.sh             signature and hash verification for downloads
 ```
 
 Reproducibility: `SOURCE_DATE_EPOCH` from the git commit everywhere
-(mmdebstrap, mksquashfs, mke2fs, kernel `KBUILD_BUILD_TIMESTAMP`), apt
-pinned to a `snapshot.debian.org` timestamp, fixed filesystem UUIDs and
-GPT GUIDs (`systemd-repart --seed`), `/etc/machine-id` empty, no
-`resolv.conf` or `hostname` leaked from the build host, and the package
-manifest recorded in the image.
+(mmdebstrap, mksquashfs, mke2fs, kernel timestamp), apt optionally pinned
+to a `snapshot.debian.org` timestamp, filesystem UUIDs and GPT GUIDs
+derived from the version string (the initramfs only accepts the live
+partition with that UUID), `/etc/machine-id` empty, no `resolv.conf` or
+`hostname` from the build host, and the package manifest recorded in the
+image and the release.
 
 Hosts: any Debian/Ubuntu x86_64 machine with `qemu-user-static` (the
-rootfs step runs arm64 maintainer scripts under emulation, about 3x
-slower), or a native arm64 machine. In CI the `ubuntu-24.04-arm` runner
-builds the rootfs natively; the kernel is cross-built on x86_64.
-Validation performed in this repository's CI without hardware: shellcheck,
-`nft -c` on the ruleset, `tor --verify-config`, Python byte-compilation,
-unit tests of the helpers, a real arm64 rootfs build of the package set,
-and `unpack_bootimg` on the produced boot image.
+rootfs step runs arm64 maintainer scripts under emulation), or a native
+arm64 machine. Validation performed without hardware: shellcheck on
+every script, `nft -c` on the ruleset, `tor --verify-config`,
+`systemd-analyze verify`, Python byte-compilation and unit tests, every
+package name checked against the Debian index, a boot image assembled and
+inspected with `unpack_bootimg` and `avbtool info_image`, and the minimal
+root filesystem build end to end.
 
 ## 16. Updates
 
 Version 1 updates are full re-flashes of `boot_b` and `userdata` with
 `build/flash.sh`, after `build/verify-release.sh` checks the release's
-signature (minisign) and hashes. Persistent Storage survives because the
-flash script writes only the live partition when `--keep-data` is given
-(the LUKS partition is left untouched).
-
-The designed path to over-the-air updates mirrors Tails' incremental
-upgrade kit model on A/B slots: a signed upgrade description lists
-`boot` and `live` images with hashes and a monotonically increasing
-version; the updater writes to the inactive slot, flips it with
-`qbootctl`, and marks success only after the first successful boot.
-This needs a per-slot live partition, which the nested GPT can hold.
+signature (minisign) and hashes. This erases Persistent Storage; the user
+exports it first. The designed path to in-place updates mirrors Tails'
+incremental upgrade model on A/B slots: a signed upgrade description
+listing `boot` and `live` images with hashes and a monotonically
+increasing version; the updater writes to the inactive slot, flips it
+with `qbootctl`, and marks success only after the first successful boot.
 
 ## 17. Hardware support status for Antumbra
 
@@ -692,12 +691,12 @@ This needs a per-slot live partition, which the nested GPT can hold.
 |---|---|---|
 | Boot from stock bootloader | expected to work | identical boot contract to the port's v0.2.0-alpha.2 |
 | Display, touch, GPU | expected to work at 60 Hz | 90 Hz disabled |
-| Wi-Fi with MAC spoofing | expected to work | requires the modem processor running with its radio in low-power mode (section 9.2) |
-| Tor over Wi-Fi, firewall, DNS | expected to work | validated by the self-check script on first boot |
-| Suspend, charging | expected to work | Warp charging unsupported |
-| Speakers, handset microphone | expected to work | earpiece and headset unsupported |
+| Wi-Fi with MAC spoofing | expected to work | the modem processor runs with its radio in low-power mode |
+| Tor over Wi-Fi, firewall, DNS | expected to work | verified by the self-check at boot |
+| Suspend, charging | expected to work | Warp charging unsupported; USB-host charging may be limited to the default |
+| Speakers, handset microphone | expected to work | earpiece and headset unsupported; generic UCM profiles |
 | Cameras | preview and raw capture | no production image quality |
-| Bluetooth | plan | only on the 6.17 r13 kernel line; off by default |
+| Bluetooth | off, roadmap | driver stack works on the 6.17 line |
 | Calls, SMS, mobile data | out of scope | |
 | Fingerprint | never | |
 | Persistent Storage | expected to work | FDE has not been validated by the port either |
@@ -706,16 +705,18 @@ This needs a per-slot live partition, which the nested GPT can hold.
 
 ```
 antumbra/
-  README.md                  what it is, status, quick start
-  LICENSE                    GPL-3.0-or-later (Tails is GPL-3+)
-  docs/                      this document, threat model, device, building, flashing, legal, roadmap
-  build/                     build and flash scripts (bash, shellcheck-clean)
-  device/oneplus-hotdog/     kernel config fragment, boot parameters, pinned sources and hashes
-  config/rootfs/             files copied over the Debian root filesystem (the overlay)
-  config/packages/           package lists
-  config/hooks/              scripts run inside the chroot at build time
-  tests/                     lint and unit tests (host), antumbra-selfcheck (device)
-  vendor/tails/              files taken from Tails with their provenance recorded
+  README.md, VERSION, LICENSE (GPL-3.0-or-later), Makefile
+  docs/                      this document, threat model, device, building, flashing, legal,
+                             roadmap, known issues, porting map, research notes, validation checklist
+  build/                     build and flash scripts (bash), build/lib/common.sh
+  device/oneplus-hotdog/     sources.lock, cmdline.txt, bootimg.conf, keys/, firmware/*.sha256,
+                             kernel/{antumbra.config, patches.list, port-patches.sha256, patches/, antumbra-dts-overrides.dtsi}
+  config/rootfs/             files installed over the Debian root filesystem (the overlay)
+  config/packages/           package lists (base, amnesia, network, session, phosh, apps)
+  config/hooks/              scripts run inside the chroot at build time, in numeric order
+  config/squashfs-excludes
+  tests/                     lint.sh, check-packages.sh, unit/
+  vendor/tails/              the Tails 7.11 files this derives from, with PROVENANCE.md
 ```
 
 ## 19. Open questions to resolve on hardware
@@ -724,21 +725,17 @@ antumbra/
    `persistent-low-power` directly from `shutting-down`, whether the
    setting survives a modem restart, and whether a low-power modem still
    answers emergency-camping requests. The self-check reports the
-   operating mode and registration state on every boot.
+   operating mode and registration state.
 2. **Welcome under bare phoc.** Squeekboard and a GTK4 application before
    `gnome-session` is how phrog's greeter works, but Antumbra's exact
-   sequence (Welcome, then the shell in the same logind session) has not
-   run on hardware; the phrog `first-run` fallback is documented in
-   section 10.
+   sequence has not run on hardware.
 3. **vbmeta.** Antumbra reuses the port's vbmeta with flags = 3. Whether an
-   `avbtool make_vbmeta_image --flags 3` image generated by the build
-   works equally must be tested before the build can be self-contained.
-4. **dm-verity in the initramfs** (section 9.5) on top of the loop device.
-5. **Touch in early boot** for a future initramfs passphrase prompt
-   (`unl0kr` is in Debian; the S6SY761 module would need to be in the
-   initramfs). Not needed for version 1, where unlocking happens in the
-   session.
-6. **Power.** Whether keeping the modem in low-power mode (rather than
-   fully stopped) costs measurable battery, and whether the port's
-   power-domain fixes hold with Antumbra's service set.
-7. **90 Hz.** Stays off until the port's DSI issue is fixed upstream.
+   image generated by `avbtool make_vbmeta_image --flags 3` works equally
+   must be tested before the build can be self-contained.
+4. **dm-verity through live-boot** on the loop partition.
+5. **RTC alarm wake-up** from s2idle for the auto-shutdown timer.
+6. **Power.** The cost of keeping the modem in low-power mode rather than
+   fully stopped, and whether the port's power-domain fixes hold with
+   Antumbra's service set and the SLPI disabled.
+7. **Audio routing** with Debian's generic UCM profiles.
+8. **90 Hz.** Stays off until the port's DSI issue is fixed upstream.
