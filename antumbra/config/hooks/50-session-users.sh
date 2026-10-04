@@ -1,6 +1,7 @@
 #!/bin/sh
 # The greeter user runs the Welcome screen before any user process exists.
 set -eu
+if [ -n "${ANTUMBRA_MINIMAL:-}" ]; then echo "minimal build: no greeter user"; exit 0; fi
 getent group antumbra-greeter >/dev/null || addgroup --system --quiet --gid 1104 antumbra-greeter
 getent passwd antumbra-greeter >/dev/null || adduser --system --quiet --uid 1104 --gid 1104 \
     --home /var/lib/antumbra-greeter --shell /usr/sbin/nologin antumbra-greeter

@@ -534,9 +534,9 @@ answers once.
    greeter's tmpfs directory that the applier shreds; a D-Bus service as in
    Tails' `tps` is on the roadmap.
 4. The Welcome screen waits for the marker, then uses greetd's IPC to
-   create a session for `amnesia` (a dedicated PAM stack lets that user
-   in without a password, since the passphrase is only for the lock
-   screen) and starts `/usr/libexec/antumbra-session`, which exports the
+   create a session for `amnesia` (greetd's PAM stack for IPC sessions,
+   `/etc/pam.d/greetd`, lets that user in without a password, since the
+   passphrase is only for the lock screen) and starts `/usr/libexec/antumbra-session`, which exports the
    session variables and runs `phosh-session`. If the user logs out,
    greetd shows the Welcome screen again; settings cannot change in the
    same boot, only a new session can start.

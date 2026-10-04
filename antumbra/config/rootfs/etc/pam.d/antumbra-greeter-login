@@ -1,6 +1,0 @@
-# PAM stack greetd uses when the Welcome screen starts the live user's
-# session: the live user has no password of their own at that point (the
-# Welcome screen sets one for the screen lock), so authentication succeeds
-# for that user only; everything else follows the login stack.
-auth    [success=done default=ignore]   pam_succeed_if.so user = amnesia quiet_success
-@include login
