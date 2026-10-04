@@ -23,7 +23,9 @@ mkdir -p "${ROUT}"
 SQ="${ROUT}/filesystem.squashfs"
 rm -f "${SQ}" "${SQ}.verity" "${SQ}.roothash"
 log "building squashfs (xz, arm BCJ, 1 MiB blocks)"
-mksquashfs "${ROOT}" "${SQ}" \
+# squashfs-tools >= 4.6 reads SOURCE_DATE_EPOCH itself and refuses the
+# explicit -mkfs-time/-all-time we pass for older versions; keep the flags.
+env -u SOURCE_DATE_EPOCH mksquashfs "${ROOT}" "${SQ}" \
     -comp xz -Xbcj arm -Xdict-size 1M -b 1M \
     -noappend -no-recovery -no-progress \
     -xattrs \

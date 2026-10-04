@@ -192,8 +192,9 @@ until usbguard applies its policy.
 ## 6. Initramfs
 
 Debian's `initramfs-tools` generates the initramfs inside the chroot
-(`config/hooks/20-kernel-install.sh`), with `MODULES=list` so only what
-the boot path needs is included. live-boot supplies the live medium
+(`config/hooks/80-base-initramfs.sh`, after every modprobe.d blocklist
+it must carry exists), with `MODULES=list` so only what the boot path
+needs is included. live-boot supplies the live medium
 logic. Verified properties of Debian's live-boot that the design relies
 on: scripts in `scripts/live-premount/` run before the medium search; an
 explicit `live-media=<path>` is honoured without the medium UUID check;
@@ -212,9 +213,24 @@ Antumbra adds (`config/rootfs/etc/initramfs-tools/`):
   `/etc/antumbra/live-fs-uuid`, and publishes it as `/dev/antumbra/live`.
   Any mismatch is a panic: live-boot's fallback scan of removable devices
   never runs with the right medium missing.
-- `hooks/antumbra`: copies that UUID file, `blkid`, `losetup`, `udevadm`
-  and the `overlay`, `loop`, `squashfs`, `ext4` and `dm-verity` modules
-  (most are built in).
+- `hooks/antumbra`: copies that UUID file, the driver blocklist,
+  `blkid`, `losetup`, `udevadm` and the `overlay`, `loop`, `squashfs`,
+  `ext4` and `dm-verity` modules (most are built in). It then removes
+  every network-related module that live-boot's own hook pulls in for
+  netboot (`auto_add_modules net`: USB NICs copied at once, Ethernet, MDIO
+  and PHY drivers queued for later), both from the staging tree and from
+  initramfs-tools' pending module list, and refuses to run if that list
+  interface disappears. Tails patches live-boot for the same end: nothing
+  in the initramfs may bring up a network interface before the firewall
+  and the MAC spoofer exist. Four modules initramfs-tools adds after all
+  hooks ran, as hidden dependencies of the built-in `msm` display driver
+  (`qrtr`, `pmic_glink`, `pmic_glink_altmode`, `gpio_sbu_mux`), cannot be
+  kept out; the hook makes them unloadable inside the initramfs with
+  `install <module> /bin/false` instead (the root filesystem loads them
+  itself later). `80-base-initramfs.sh` fails the build if any module
+  outside the filesystem, device-mapper, block, crypto and library
+  subtrees is present without that block, or if the UUID file, the
+  blocklist, the premount script, `losetup` or `veritysetup` is missing.
 - `hooks/antumbra-shutdown` and the matching units (section 7): on
   shutdown systemd returns into an unpacked copy of the initramfs
   (`/run/initramfs`), which unmounts the overlay and the medium, detaches
@@ -344,9 +360,14 @@ by the firewall everywhere.
 
 Tor needs a roughly correct clock, and a phone has no trusted time
 source: the modem's NITZ time is a tracking channel and NTP is a leak.
-After Tor has bootstrapped, Tails' `htpdate` (the Perl implementation
-vendored in `/usr/local/sbin/htpdate`, not Debian's package of the same
-name) runs as user `htp` over SocksPort 9062, taking the median of three
+The NetworkManager dispatcher `10-antumbra-tor.sh` (Tails' `10-tor.sh`
+adapted) runs on every connection: it connects Tor the way the Welcome
+screen asked (`antumbra-tor-connect direct` or `bridges`), then restarts
+`htpdate.service` unless `/run/htpdate/success` already exists, and when
+the last connection goes down it stops `tails-tor-has-bootstrapped.target`
+so dependants notice. Once Tor has bootstrapped, Tails' `htpdate` (the
+Perl implementation vendored in `/usr/local/sbin/htpdate`, not Debian's
+package of the same name) runs as user `htp` over SocksPort 9062, taking the median of three
 pools of HTTPS servers and accepting not-yet-valid certificates for the
 reason explained in Tails' design notes. `systemd-timesyncd` is masked
 and ModemManager is absent, so nothing else can set the clock. Tails'
