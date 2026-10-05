@@ -105,7 +105,8 @@ asserts, in order:
    left the guest before the Welcome decision, and the display shows the
    drawn Welcome screen rather than a text console;
 5. with `--through-welcome` (what `make vm-test` runs): the harness finds
-   the "Start Antumbra" button on the display and presses it with the
+   the "Start Antumbra" button on the display (by the theme's accent
+   colour) and presses it with the
    defaults (amnesic session, MAC address anonymization, Tor connected
    automatically), then checks that the settings were applied and Phosh
    started, that the network driver loaded only now and the interface got
