@@ -137,3 +137,43 @@ each course (`dmesg | grep camera-popup`).
 35. `status` is `-r--------`, and `pulse_up`, `restore_closed`, `open`,
     `finish_open` and `close` exist only when the module was loaded with
     `debug_knobs=1`.
+
+## Android apps
+
+Only for images built with `ANTUMBRA_ANDROID=1` (`architecture.md`,
+section 11.1). The VM covers the network and the setup
+(`vm-testing.md`, "Android apps"), not the hardware.
+
+36. With "Android apps" off at the Welcome screen: `ls -l /dev/*binder`
+    shows mode 0600, owner root; `ip -4 addr show waydroid-tor` shows
+    10.200.2.1/30; the self-check's `firewall-android`, `android-bridge`,
+    `binder` and `android-off` lines are OK.
+37. With it on: Android's full UI opens from the "Android" launcher.
+    Record the time from Start to `waydroid shell getprop
+    sys.boot_completed` printing 1, and the memory used (`free -m` before
+    and after), with and without Tor Browser open.
+38. The `arm64` images' 32-bit half runs: `waydroid shell getprop
+    ro.product.cpu.abilist` lists `armeabi-v7a`, and `waydroid shell ps -A`
+    shows both `zygote64` and `zygote`.
+39. Graphics: Android renders on the GPU (`waydroid shell dumpsys
+    SurfaceFlinger | grep GLES` names Mesa's Adreno driver, not
+    SwiftShader); text at density 480 is readable; touch and Android's
+    keyboard work in Android apps; Android windows fit Phosh's screen.
+40. Network: F-Droid refreshes its index; an Android browser installed
+    from F-Droid shows Tor at <https://check.torproject.org>; on the host,
+    `ss -tnp` shows Android's connections only as 10.200.2.2 to
+    10.200.2.1:9041 (`tor`), and the counters in `nft list chain ip
+    antumbra-nat android` grow.
+41. Audio: an Android app plays through the speakers; recording works
+    only after Android's microphone prompt is allowed.
+42. Suspend and resume with Android running: Android, Wi-Fi and Tor come
+    back; compare overnight battery drain with Android on and off.
+43. `waydroid session stop`: the container stops, the binder devices are
+    0600 again, and `/dev/dri/renderD128`, `/dev/dma_heap/*` and
+    `/dev/fb0` have udev's modes again.
+44. "Keep Android apps and data": install an app, reboot, unlock with the
+    switch on and find it; unlock with the switch off and get a fresh
+    Android.
+45. What apps see: record `uname -a`, `/proc/cpuinfo`,
+    `getprop ro.product.model` and the GPU strings inside Android, for
+    `threat-model.md`.

@@ -320,7 +320,8 @@ on loopback with destination isolation, `10.200.1.1:9050` for the
 browser namespace, `ControlPort 9052` with cookie authentication,
 `DNSPort 5353` with `AutomapHostsOnResolve`, `TransPort 9040`,
 `Sandbox 1`, `AvoidDiskWrites 1`, `DisableNetwork 1` until the user has
-chosen how to connect. The `tor@default.service` drop-ins (writable
+chosen how to connect. Images built with Android apps append a second
+TransPort and DNSPort for the Android container (section 8.5). The `tor@default.service` drop-ins (writable
 `/etc/tor` for SAVECONF, `resolv.conf` override for bridge-mode DNS, no
 `NoNewPrivileges` for the transports) and Tails' AppArmor adjustments to
 Debian's Tor profile are carried over.
@@ -386,6 +387,75 @@ and ModemManager is absent, so nothing else can set the clock. Tails'
 optional pre-Tor clock fix through a captive-portal `Date` header (as
 user `clearnet`) is prepared for in the firewall but not yet offered to
 the user.
+
+### 8.5 Android apps' traffic
+
+Android apps (section 11.1) run in an LXC container with its own network
+namespace. Its packets reach the host through a veth pair on the
+`waydroid-tor` bridge and take the prerouting, input and forward hooks;
+they never pass the output chain, so the per-user rules of section 8.1 do
+not apply to them. One invariant holds instead: Android's traffic is never
+forwarded or NAT-ed. It is delivered locally, to Tor and to a DHCP-only
+server, and everything else is dropped or rejected.
+
+- **Bridge.** In images built with Android apps, `antumbra-create-netns`
+  creates `waydroid-tor` at boot with 10.200.2.1/30 (the container gets 10.200.2.2), `forwarding=0`,
+  `route_localnet=0` and IPv6 off. It does so after the clearnet namespace
+  has switched `ip_forward` on, because that switch sets every interface's
+  `forwarding` to 1 and new interfaces inherit it. The bridge exists
+  whether Android is on or off: Tor binds its Android listeners when it is
+  told to connect, and refuses to connect at all (`553 ... Failed to bind
+  one of the listener ports`) if their address is missing.
+- **Tor.** `TransPort 10.200.2.1:9041 IsolateClientAddr IsolateDestAddr
+  IsolateDestPort` and `DNSPort 10.200.2.1:5354`, appended to the torrc by
+  the Android build hook. They are separate listeners, so Android's streams
+  never share circuits with the host's. All Android apps share one client
+  address, so isolation between them is per destination only.
+- **Firewall** (`nftables.conf`, the `android_*` defines and chains). In
+  `ip antumbra-nat`, a prerouting chain sends UDP 53 to any address to the
+  DNSPort and TCP to any public address to the TransPort; `redirect`
+  rewrites to the bridge's own address, so nothing is translated to
+  127.0.0.1, which would need `route_localnet` and expose the ControlPort.
+  The input chain accepts from the bridge only DHCP and the two redirected
+  flows (`ct status dnat`, so the listeners addressed directly are refused
+  too), and rejects DNS over TLS (port 853) first, so that Android falls
+  back at once to plain DNS. Everything else from the bridge is rejected,
+  as is everything the forward chain sees from or to it (its policy stays
+  drop). The output chain accepts the DHCP server's replies on the bridge.
+  The two redirects carry counters. These rules are in every image; without
+  Android the bridge does not exist and they match nothing.
+- **Routing.** Because the bridge does not forward, packets addressed past
+  the host (the local network, UDP or ICMP to the Internet) are dropped by
+  the routing code before the forward chain sees them: connections to the
+  local network time out rather than fail at once. The forward chain's
+  reject is the second layer.
+- **DHCP.** `antumbra-waydroid-dhcp.service`, only while Android is on:
+  dnsmasq with `--port=0` (no DNS), one address reserved for Waydroid's
+  fixed container MAC address, router and DNS server 10.200.2.1.
+- **No other bridge.** LXC's own `lxc-net` (the `lxcbr0` bridge with NAT,
+  DHCP and DNS) is masked. Waydroid's templates attach the container to
+  `waydroid-tor`, so Waydroid's own network script, which would add NAT,
+  `ip_forward` and a DNS-serving dnsmasq on `waydroid0`, exits at once.
+- **Fail closed.** LXC runs `antumbra-waydroid-start-host` before Android's
+  init, and a failing hook aborts the start. It requires the Android nat
+  chain with both redirects, the forward and input rejects, the bridge's
+  address, `route_localnet=0`, and a container attached to `waydroid-tor`
+  by a single veth; then it sets `forwarding=0` on the bridge again.
+- **Checks.** `antumbra-selfcheck` reports the rules (`firewall-android`),
+  the bridge (`android-bridge`), the absence of `lxcbr0` (`lxc-net`) and,
+  while Android is off, root-only binder devices (`binder`) and no
+  container service (`android-off`). The MAC-spoofing udev rule and
+  NetworkManager leave the bridge alone; LXC's host-side `veth*` were
+  already excluded.
+- **Inside Android**, `antumbra-waydroid-provision` reduces what Android
+  sends through Tor, in every session: no captive-portal checks to
+  Google's `generate_204` servers, Private DNS off, no network time.
+
+Not in this version: UDP (calls, games, VPN apps; QUIC falls back to TCP),
+IPv6, and `.onion` addresses, which Tor maps into 127.192.0.0/10 and
+Android routes to its own loopback. Per-app isolation by source address
+inside the container and `.onion` support through `VirtualAddrNetworkIPv4
+10.192.0.0/10` were tried in a namespace lab and left for later.
 
 ## 9. Radio and hardware policy
 
@@ -551,8 +621,9 @@ answers once.
    questions in phone form: Persistent Storage (unlock, or create if the
    partition is still empty), MAC address anonymisation (on by default),
    Tor connection (automatic, bridge lines, or offline), a screen-lock
-   passphrase (recommended), and administration (sudo with that
-   passphrase, off by default). It writes the answers in Tails' file
+   passphrase (recommended), administration (sudo with that
+   passphrase, off by default) and, in images built with them, Android
+   apps (off by default; section 11.1). It writes the answers in Tails' file
    format and keys (`tails.macspoof`, `tails.network`, `tails.password`,
    `tails.create-persistence`, plus `antumbra.*`) to
    `/var/lib/antumbra/settings/{persistent,transient}`, directories owned
@@ -660,6 +731,97 @@ and `apps.css` differ.
 APT reaches the network only through Tor (`socks5h://127.0.0.1:9050`, user
 `_apt`). No app store or Flatpak by default.
 
+### 11.1 Android apps (Waydroid, opt-in)
+
+Only in images built with `ANTUMBRA_ANDROID=1`; an image built without it
+has none of the packages, images, units or settings below. In such an
+image Android stays off until the user turns on "Android apps
+(experimental)" on the Welcome screen, and then only for that session.
+
+| Part | What |
+|---|---|
+| Runtime | Waydroid 1.6.3 from Debian trixie-backports (with `python3-gbinder`, `libgbinder1`, `libglibutil1`; pinned in `preferences.d/antumbra-backports`) and LXC 6.0.4 from trixie (`config/packages/android.list`) |
+| Android | LineageOS 20 (Android 13), Waydroid's VANILLA system and MAINLINE vendor images of 2026-09-27, the newest its official channel publishes: `arm64` on the phone, whose 32-bit half runs on the SoC's AArch32 support, `arm64_only` in the VM. No Google apps or services |
+| App store | F-Droid 2.0.1, installed into Android on its first start in a session |
+| Network | Tor only, TCP and DNS (section 8.5) |
+| Data | Android's `/data` is `~/.local/share/waydroid/data`: in RAM and gone at shutdown, unless the `android` Persistent Storage feature keeps it (section 12) |
+
+**Build.** `fetch-sources.sh` downloads the two image zips and F-Droid
+pinned in `sources.lock`: each zip by SHA-256 and size, as listed in
+Waydroid's update channel, and each image inside by its size and CRC-32
+(an optional `*_IMG_SHA256` key also pins the extracted image); F-Droid by
+SHA-256, F-Droid's OpenPGP signature (key vendored in
+`device/oneplus-hotdog/keys/f-droid.asc`) and the SHA-256 of the
+certificate in its signature block. `rootfs.sh` adds `android.list`,
+installs the Android-only overlay `config/rootfs-android/` and copies the
+images to `/usr/share/waydroid-extra/images`, where `waydroid init`
+treats them as preinstalled: it never contacts Waydroid's update servers
+and disables Android's own image updater. The images sit in the
+verity-covered squashfs and are loop-mounted read-only, so they take no
+RAM. `config/hooks/56-session-android.sh` then:
+
+- masks `lxc-net`, `lxc` and `lxc-monitord` and turns `lxcbr0` off in
+  `/etc/default/lxc-net`;
+- disables `waydroid-container.service` at boot; a drop-in makes it, and
+  D-Bus activation of `id.waydro.Container`, depend on the session flag
+  `/run/antumbra/android-enabled` and on the bridge and its DHCP server,
+  orders it to stop before the overlay is emptied and the system returns
+  to the initramfs (so the images' loop mounts are released), and puts the
+  binder devices back to root-only when it stops;
+- edits Waydroid's LXC templates, from which Waydroid regenerates the
+  container's configuration on every `init` and `upgrade`: the link moves
+  from `waydroid0` to `waydroid-tor`, `sys_time` leaves the kept
+  capabilities (Waydroid's seccomp profile already makes the set-time
+  calls no-ops), and `config_3` gains the start-host hook, a device-cgroup
+  deny of V4L2 (major 81) and an empty read-only tmpfs over
+  `/sys/firmware`, which otherwise shows apps the phone's device-tree
+  model through the host's sysfs. Every edit is checked; a template that
+  no longer matches fails the build;
+- applies `waydroid-no-video.diff` (dry run first, failure fails the
+  build): Waydroid stops making `/dev/video*` mode 0777 and passing it
+  into the container;
+- removes `pkexec`'s setuid bit with `dpkg-statoverride` (a Waydroid
+  dependency that Waydroid 1.6.3 never calls);
+- checks that Waydroid's `lxc-waydroid` AppArmor profile parses, appends
+  Tor's Android listeners to the torrc and the `android` feature to the
+  Persistent Storage features, and enables the user units below.
+
+**Run time.**
+
+1. The Welcome screen writes `antumbra.android`
+   (`ANTUMBRA_ANDROID_ENABLED`, `ANTUMBRA_ANDROID_PERSISTENT`). The
+   applier copies it to `settings/applied/` before activating Persistent
+   Storage (activation mounts the stored Welcome settings over this boot's
+   choices), creates `/run/antumbra/android-enabled` and starts
+   `antumbra-waydroid.service` without waiting for it.
+2. `antumbra-waydroid` (root) loads the `lxc-waydroid` profile (complain
+   mode, as Debian ships it; `apparmor.service` does not load profiles
+   from subdirectories), writes `waydroid.cfg` (overlays off, since the
+   root is already an overlayfs; the Waydroid image's own generic product
+   values from `/usr/share/antumbra/android/product.prop`; multi-window
+   mode; density 480 on the phone and 320 in the VM; in a VM software
+   rendering, which Waydroid turns into ANGLE on SwiftShader), runs
+   `waydroid init` and `waydroid upgrade -o`, checks the generated
+   configuration, starts the container service and writes
+   `/run/antumbra/android-ready`.
+3. In the session, `antumbra-android-session.path` starts `waydroid
+   session start` once Android is ready: Android boots, its apps open as
+   ordinary windows (app_id `waydroid.<package>`), and Waydroid writes a
+   launcher per app into `~/.local/share/applications`.
+   `antumbra-android-folder` gathers them in an "Android" folder of the app
+   grid, after Antumbra's "Android" launcher (Android's full-screen
+   interface; Waydroid's own launcher, which offers to download images, is
+   hidden). `antumbra-fdroid-install` installs F-Droid unless it is
+   already there, and `antumbra-waydroid-provision` (root) applies the
+   settings of section 8.5 inside Android.
+
+The binder devices are static, root-only (0600) nodes; binderfs stays off
+because it can be mounted from an unprivileged user namespace. While
+Android runs, Waydroid opens them, the GPU render node, the DMA-BUF heaps
+and the framebuffers to every local user, because Waydroid's host-side
+session, which runs as the user, talks to Android through binder. What
+this means is in `threat-model.md`.
+
 ## 12. Persistent Storage
 
 `antumbra-persistence` (root only) manages the LUKS2 volume on the
@@ -670,7 +832,13 @@ Persistent folder, Welcome settings, Network connections, Tor bridges
 (`/var/lib/tca`), GnuPG, SSH client, and Dotfiles (symlinked into the
 home). Creation formats the partition (`luksFormat --type luks2 --pbkdf
 argon2id --pbkdf-memory 1048576 --pbkdf-force-iterations 4`) and
-pre-creates every feature directory with its owner and mode. Differences
+pre-creates every feature directory with its owner and mode, except
+features marked `off`. The only one so far is `android` (images with
+Android apps: `~/.local/share/waydroid`, Android's apps and data), created
+by `antumbra-persistence enable android` the first time the user chooses
+"Keep Android apps and data" and mounted only in sessions with Android on
+and that choice made; only its top directory is chowned, so Android's
+own file owners survive. It also keeps Android's own usage history. Differences
 from Tails: no D-Bus service, no `nosymfollow` bind of `/` (roadmap), and
 OS updates currently erase the volume because they re-flash `userdata`.
 
@@ -703,6 +871,7 @@ The fragment (`device/oneplus-hotdog/kernel/antumbra.config`):
 | `IKCONFIG_PROC`, `LEGACY_PTYS`, `DEVPORT`, `CRYPTO_USER_API_ENABLE_OBSOLETE` off; `CRYPTO_USER_API_AEAD=m` | attack surface; the AEAD interface as a module so Tails' `algif_aead` blocklist is effective |
 | `RTC_DRV_PM8XXX=y` | the auto-shutdown timer's alarm wake-up |
 | `QCOM_PD_MAPPER=m` | the in-kernel protection-domain mapper (it cannot be built in because QRTR is a module; `modules-load.d` loads it) |
+| `ANDROID_BINDER_IPC=y`, `ANDROID_BINDER_DEVICES="binder,hwbinder,vndbinder"`, `ANDROID_BINDERFS` off, `PSI=y` (not disabled by default), `COMPAT=y` | pinned for Android apps (section 11.1); the port's configuration already has them. Static binder nodes are root-only until Waydroid opens them; binderfs would let any user mount binder devices from a user namespace even with Android off. PSI drives Android's memory killer; COMPAT runs the 32-bit half of the arm64 images |
 
 Deliberately **not** changed: `DEBUG_FS` (masked at run time), `KEXEC`
 (disabled by sysctl), `DEVMEM` (already strict), USB gadget support
@@ -744,6 +913,7 @@ needs. Therefore:
 ```
 build/build.sh                      orchestrates; every step is idempotent and runs alone too
   fetch-sources.sh                  kernel tree + port patches + avbtool + DTBO/vbmeta + Tor Browser, all pinned and verified
+                                    (with ANTUMBRA_ANDROID=1 also Waydroid's images and F-Droid)
   fetch-firmware.sh                 (separate, explicit) the builder's own device firmware
   kernel.sh                         patches, DTS overrides, fragment merge and check, Image + modules + DTB
   rootfs.sh (root)                  mmdebstrap (arm64, trixie) + overlay + hooks inside the chroot → tree, initramfs, package list
@@ -810,7 +980,8 @@ antumbra/
   device/oneplus-hotdog/     sources.lock, cmdline.txt, bootimg.conf, keys/, firmware/*.sha256,
                              kernel/{antumbra.config, patches.list, port-patches.sha256, patches/, antumbra-dts-overrides.dtsi}
   config/rootfs/             files installed over the Debian root filesystem (the overlay)
-  config/packages/           package lists (base, amnesia, network, session, phosh, apps)
+  config/rootfs-android/     the overlay's Android-only part, installed only with ANTUMBRA_ANDROID=1
+  config/packages/           package lists (base, amnesia, network, session, phosh, apps, android)
   config/hooks/              scripts run inside the chroot at build time, in numeric order
   config/squashfs-excludes
   tests/                     lint.sh, check-packages.sh, unit/

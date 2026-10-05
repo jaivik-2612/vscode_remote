@@ -137,6 +137,74 @@ Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed; a command that fails on the debug console is a FAIL of its own,
 never output for a check to read. `--timeout-scale 2` doubles every timeout for slow hosts.
 
+## Android apps
+
+The VM profile selects Waydroid's `arm64_only` images: the test bundle
+may run the VM under HVF or KVM with a host CPU that has no 32-bit
+(AArch32) mode, which the phone's `arm64` images need. Build an image with
+Android apps beside the plain one:
+
+```sh
+ANTUMBRA_DEVICE=qemu-virt ANTUMBRA_DEBUG=1 ANTUMBRA_ANDROID=1 build/build.sh
+```
+
+Both modes below need such an image and imply `--through-welcome`; on a
+plain image their first check fails. Before the Welcome screen, both check
+that Android is off: binder devices root-only, no container, no DHCP
+server, LXC's own services masked, D-Bus activation of Waydroid's
+container service refused, Waydroid's templates edited (bridge
+`waydroid-tor`, no `sys_time`, the start-host hook, cameras denied,
+`/sys/firmware` hidden), the images and F-Droid in the read-only system,
+`pkexec` not setuid. The usual checks of a session then run too, with the
+Android listeners excluded from "everything goes to Tor".
+
+`tests/vm-smoke.sh --android-net` presses Start without turning Android
+on, and tests the network Android would use without booting Android: a
+stand-in container (a network namespace with the container's MAC address
+on the bridge) runs the DHCP client and a set of probes. It checks the
+bridge's address and sysctls, Tor's two listeners, the self-check lines,
+the DHCP lease (with and without the broadcast flag), that TCP to the
+Internet reaches Tor's TransPort for Android and a held connection ends in
+the `tor` process, that the local network gets nowhere, that the host's
+address and services, Tor's control and SOCKS ports and DNS over TLS are
+refused at once, that any DNS server is answered by Tor, that NTP, QUIC,
+ping and IPv6 get no answer, the firewall's redirect counters, the
+start-host hook failing closed without each part of the network (and
+passing with it), that Tor refuses to connect while the bridge is missing,
+and from the packet capture that nothing of the stand-in left the guest.
+It takes a few minutes longer than `--through-welcome`.
+
+`tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
+at the Welcome screen (Alt+A, the switch's mnemonic, then a screenshot
+`welcome-android.png`) and boots Android, with 6 GiB of guest memory
+unless `--memory` is given. It checks that
+`antumbra-waydroid.service` prepared Waydroid from the images in the
+system without touching the network, the generated container
+configuration, that Waydroid's own `waydroid-net.sh` does nothing, that
+the container runs and Android reports `sys.boot_completed=1` (the
+harness waits 40 minutes times the timeout scale; software emulation is
+slow), the generic Waydroid identity,
+`/sys/firmware` hidden, the DHCP lease and route, the provisioning
+(captive-portal checks, Private DNS and network time off), a screenshot
+of Android's full UI (`android-full-ui.png`), F-Droid installed and
+listed in the app grid's "Android" folder, F-Droid's index fetch counted
+at Tor's TransPort for Android, the session's traffic, no frame from the
+container's MAC address or network in the capture, and the start-host
+hook refusing to start the container without the firewall's Android
+rules, after which Android starts again.
+
+To check the `android` Persistent Storage feature by hand: run with
+`--keep-disk`, create Persistent Storage and turn on both Android
+switches, install an app from F-Droid, power off, start again with
+`--keep-disk`, unlock with Android on and see the app; unlock with "Keep
+Android apps and data" off and see a fresh Android.
+
+What the VM cannot tell about Android: performance and memory use on the
+phone, the 32-bit half of the `arm64` images, the Adreno GPU under
+Android (the VM renders in software), audio and the microphone, the
+on-screen layout at the phone's density, and suspend with Android
+running.
+
 ## Kernel test modules
 
 `tests/kernel/genpd-sleep-vm.sh` loads a small genpd test module into a
