@@ -1,6 +1,6 @@
 # Antumbra developer entry points. See docs/building.md.
 SHELL := /bin/bash
-.PHONY: lint test check-packages build minimal clean vm-build vm-run vm-start vm-console vm-stop vm-test
+.PHONY: lint test check-packages build minimal clean vm-build vm-run vm-start vm-console vm-stop vm-test vm-bundle
 
 lint:            ## static checks: shell, python, nftables, tor, systemd units, yaml
 	tests/lint.sh
@@ -35,3 +35,5 @@ vm-stop:         ## stop the background VM
 	$(VM_ENV) build/vm.sh stop
 vm-test:         ## boot in the background and run the smoke test
 	$(VM_ENV) tests/vm-smoke.sh
+vm-bundle:       ## package the qemu-virt build as a self-contained test bundle (.tar)
+	$(VM_ENV) build/vm-bundle.sh
