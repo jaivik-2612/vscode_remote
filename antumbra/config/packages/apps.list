@@ -12,5 +12,11 @@ secrets
 onionshare
 onionshare-cli
 electrum
-megapixels
+# Camera: GNOME Snapshot through the camera portal and PipeWire's libcamera
+# node (docs/camera.md). Snapshot only recommends the soft-ISP module and the
+# PipeWire camera plugin, and recommends are off, so they are listed; the
+# pins in preferences.d/antumbra-backports take both from trixie-backports.
+gnome-snapshot
+libcamera-ipa
+libspa-0.2-libcamera
 gnupg

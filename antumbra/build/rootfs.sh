@@ -47,6 +47,10 @@ if [ -n "${ANTUMBRA_MINIMAL}" ]; then
     LISTS=(base network amnesia)
 else
     LISTS=(base network amnesia session phosh apps)
+    # Test tools for the qemu-virt debug build only (docs/vm-testing.md).
+    if [ -n "${ANTUMBRA_DEBUG}" ] && [ "${ANTUMBRA_DEVICE}" = "qemu-virt" ]; then
+        LISTS+=(vm-debug)
+    fi
 fi
 PKGS=()
 for l in "${LISTS[@]}"; do
