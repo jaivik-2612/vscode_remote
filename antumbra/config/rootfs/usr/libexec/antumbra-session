@@ -6,4 +6,6 @@ export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=Phosh:GNOME
 export XDG_SESSION_DESKTOP=phosh
 export GDMSESSION=phosh
+# shellcheck source=antumbra-session-env
+. /usr/libexec/antumbra-session-env
 exec /usr/bin/phosh-session

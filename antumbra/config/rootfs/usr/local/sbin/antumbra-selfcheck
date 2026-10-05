@@ -57,11 +57,16 @@ fi
 # --- late checks: modem state, MAC addresses ----------------------------------------
 if [ -n "${LATE}" ]; then
     if [ -r "${STATE_DIR}/modem-mode" ]; then
+        # antumbra-modem-radio-off writes either "mode: ...\nregistration: ..."
+        # or a single "absent: ..." / "unavailable: ..." line (no modem to
+        # switch off, e.g. without its firmware or in a virtual machine).
+        first="$(head -n1 "${STATE_DIR}/modem-mode")"
         mode="$(sed -n 's/^mode: //p' "${STATE_DIR}/modem-mode")"
         reg="$(sed -n 's/^registration: //p' "${STATE_DIR}/modem-mode")"
+        case "${first}" in absent:*|unavailable:*) mode="${first}" ;; esac
         case "${mode}" in
             persistent-low-power|low-power) ok modem-radio ;;
-            absent*|unavailable*) ok modem-radio ;;
+            absent:*|unavailable:*) ok modem-radio ;;
             *) bad modem-radio "operating mode is '${mode}'" ;;
         esac
         case "${reg}" in

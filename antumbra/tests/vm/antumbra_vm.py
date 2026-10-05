@@ -268,7 +268,7 @@ def pcap_summary(path):
 # ---------------------------------------------------------------------------
 class VM:
     def __init__(self, run_dir):
-        self.run = run_dir
+        self.run = os.path.abspath(run_dir)   # QEMU resolves paths from its own cwd
         self.serial = SerialLog(os.path.join(run_dir, "serial.log"))
         self.console = Console(os.path.join(run_dir, "hvc0.sock"), os.path.join(run_dir, "hvc0.log"))
 

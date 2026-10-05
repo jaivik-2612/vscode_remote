@@ -7,6 +7,10 @@ export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=Phosh:GNOME
 export XDG_SESSION_DESKTOP=antumbra-greeter
 export GSETTINGS_BACKEND=memory
+# shellcheck source=antumbra-session-env
+. /usr/libexec/antumbra-session-env
 PHOC_INI=/usr/share/phosh/phoc.ini
 [ -f /etc/antumbra/phoc.ini ] && PHOC_INI=/etc/antumbra/phoc.ini
-exec /usr/bin/phoc -S -C "${PHOC_INI}" -E /usr/libexec/antumbra-greeter-inner
+# No -S (shell mode): that makes phoc wait, showing only a spinner, for a
+# Phosh shell to attach, and the greeter session runs no Phosh.
+exec /usr/bin/phoc -C "${PHOC_INI}" -E /usr/libexec/antumbra-greeter-inner
