@@ -21,6 +21,20 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
 - Bluetooth is off by default and has no opt-in flow yet.
 - Sensors (rotation, light, proximity) are not available: the sensor DSP
   is disabled. There is no automatic screen rotation.
+- The pop-up front camera has no drop protection. OxygenOS retracts it
+  when the phone falls, on a signal from the sensor DSP, which Antumbra
+  disables; mainline offers no free-fall sensor either. Do not keep the
+  selfie camera open while walking, and do not push a raised camera down
+  by hand: the driver reads the Hall sensors only while the motor moves,
+  so it does not follow a push, and the push loads the idle gear train.
+- The front camera rises whenever the front sensor is powered, which makes
+  it a physical indicator for that camera only. It is not a boundary
+  against root, it can lag a few hundred milliseconds behind around
+  suspend and resume, and the rear cameras have no indicator at all.
+- The pop-up motor's Hall thresholds were measured on a single HD1913, and
+  its retraction before suspend, power-off and at boot (kernel patch
+  `0102`) has not run on hardware yet (`hardware-validation.md` items
+  28-35).
 - Fingerprint unlock will never work on mainline.
 
 ## Software

@@ -136,6 +136,14 @@ Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed; a command that fails on the debug console is a FAIL of its own,
 never output for a check to read. `--timeout-scale 2` doubles every timeout for slow hosts.
 
+## Kernel test modules
+
+`tests/kernel/genpd-sleep-vm.sh` loads a small genpd test module into a
+running debug VM and runs suspend-to-idle cycles with an RTC wake-up. It
+shows that genpd calls a power domain's callbacks in the noirq phases and
+that the pop-up motor patch's sleep gate keeps them from driving the
+motor (`tests/kernel/README.md`).
+
 ## What the first VM runs found
 
 Booting the full image and pressing Start exposed these defects, all fixed

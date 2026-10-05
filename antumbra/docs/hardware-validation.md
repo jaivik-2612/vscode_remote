@@ -87,3 +87,53 @@ from `flash.sh`.
 26. Suspend (s2idle) and resume keep Wi-Fi and the MAC address.
 27. Battery drain overnight with the screen off, Wi-Fi on, modem in
     low-power mode: record the percentage.
+
+## Pop-up camera motor
+
+Kernel patch `0102` (motor safety). The motor follows the front sensor's
+runtime power state, so it can be driven without a camera app: as root,
+`echo on > /sys/bus/i2c/drivers/imx471/*/power/control` powers the IMX471
+and raises the camera, and `echo auto` to the same file lets it idle and
+retract. `/sys/bus/platform/devices/camera-popup/status` (root only) shows
+the Hall readings, the last course and the sleep state; the driver logs
+each course (`dmesg | grep camera-popup`).
+
+28. Lifecycle: `on` raises the camera and `status` shows `endpoint=1
+    error=0`; `auto` retracts it. Repeat about 20 times and keep the
+    `open stopped: steps=… elapsed_us=…` and `close stopped: …` lines.
+    Every normal course must end with `endpoint=1 error=0`, `steps` below
+    44160 and `elapsed_us` below `course_cap_us` from `status`. A normal
+    course ending in error -34 (microstep budget spent) or -110
+    (wall-clock cap) means the budget cuts real courses short.
+29. Once a camera app ships: the camera rises when the preview starts
+    and retracts when it stops, when the app is killed with SIGKILL and
+    when the stream fails to start.
+30. Suspend with the camera down (`auto`, then `rtcwake -m freeze -s 20`):
+    no `open stopped`, `close stopped` or `automatic open failed` line
+    between `Freezing user space processes` and `Restarting tasks`, where
+    the I2C bus to the Hall sensors goes down; the camera stays down and
+    `status` shows `sleeping=0` afterwards.
+31. Suspend with the camera up (`on`, which looks like a stream held
+    across sleep): after `PM: suspend entry` but before `Freezing user
+    space processes`, `camera not closed at system sleep` and a `close
+    stopped … endpoint=1 error=0`; the camera is down while the phone
+    sleeps; after `Restarting tasks`, `raising the camera again for a
+    stream held across sleep` and an `open stopped … endpoint=1`. `auto`
+    then retracts it.
+32. Power-off and reboot with the camera up (`on`, then `systemctl
+    poweroff`; again with `systemctl reboot`): the camera retracts before
+    the phone goes off (`camera not closed at reboot or power-off` on a
+    debug build's console).
+33. Boot with the camera up: raise it (`on`), then force a PMIC hard reset
+    (power and volume up held until the phone restarts), which runs no
+    kernel code. On the next boot, before any camera use, `dmesg` shows
+    `camera not closed at probe` and the camera retracts.
+34. Hall thresholds on this unit: record `hall_up` and `hall_down` with
+    the camera closed and fully raised. The driver's thresholds come from
+    one HD1913: closed needs |up| < 50 and |down| >= 340 (that unit read
+    about -13 and -369), fully open needs |up| >= 300 and |down| <= 50.
+    Readings near a limit mean refused courses or false endpoints on this
+    unit.
+35. `status` is `-r--------`, and `pulse_up`, `restore_closed`, `open`,
+    `finish_open` and `close` exist only when the module was loaded with
+    `debug_knobs=1`.
