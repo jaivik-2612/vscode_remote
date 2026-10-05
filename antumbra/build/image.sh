@@ -23,6 +23,7 @@ case "${IMAGE_OUTPUT}" in
     *) die "device.conf: IMAGE_OUTPUT must be sparse or vmdisk" ;;
 esac
 ROUT="${OUT}/rootfs"
+require_profile_stamps rootfs
 SQ="${ROUT}/filesystem.squashfs"
 [ -f "${SQ}" ] || die "squashfs missing; run squashfs.sh"
 

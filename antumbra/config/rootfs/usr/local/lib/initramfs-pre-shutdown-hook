@@ -20,4 +20,10 @@ mkdir -p /mnt/live/rootfs /mnt/live/medium /mnt/live/dev /mnt/live/run
 /usr/bin/umount --recursive /mnt/live/medium 2>/dev/null || true
 /sbin/dmsetup remove_all 2>/dev/null || true
 /sbin/losetup -D 2>/dev/null || true
-echo 3 > /proc/sys/vm/drop_caches
+# State the end result (systemd-shutdown usually unmounted most of it
+# already, which is why the moves and umounts above may fail harmlessly).
+if grep -q ' /oldroot' /proc/mounts; then echo 'antumbra-shutdown: oldroot STILL MOUNTED'; else echo 'antumbra-shutdown: oldroot unmounted'; fi
+if grep -qE ' /(mnt/live|oldroot/run/live)/medium ' /proc/mounts; then echo 'antumbra-shutdown: medium STILL MOUNTED'; else echo 'antumbra-shutdown: medium unmounted'; fi
+if /sbin/dmsetup ls --target verity 2>/dev/null | grep -qv '^No devices'; then echo 'antumbra-shutdown: verity STILL ACTIVE'; else echo 'antumbra-shutdown: verity removed'; fi
+if [ -n "$(/sbin/losetup -a 2>/dev/null)" ]; then echo 'antumbra-shutdown: loop STILL ATTACHED'; else echo 'antumbra-shutdown: loops detached'; fi
+echo 3 > /proc/sys/vm/drop_caches && echo 'antumbra-shutdown: caches dropped'

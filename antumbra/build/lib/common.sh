@@ -42,8 +42,10 @@ if [ "${ANTUMBRA_DEVICE}" = "oneplus-hotdog" ]; then
 else
     _antumbra_profile_suffix="/${ANTUMBRA_DEVICE}"
 fi
-OUT="${ANTUMBRA_OUT:-${BUILD_DIR}/out${_antumbra_profile_suffix}}"    # build products
-WORK="${ANTUMBRA_WORK:-${BUILD_DIR}/work${_antumbra_profile_suffix}}" # scratch space
+# The suffix applies to ANTUMBRA_OUT/ANTUMBRA_WORK overrides too, so a VM build
+# can never write into the phone's directories.
+OUT="${ANTUMBRA_OUT:-${BUILD_DIR}/out}${_antumbra_profile_suffix}"    # build products
+WORK="${ANTUMBRA_WORK:-${BUILD_DIR}/work}${_antumbra_profile_suffix}" # scratch space
 
 # ---------------------------------------------------------------------------
 # Version and reproducibility
@@ -112,6 +114,25 @@ lock_get() {
     value="$(grep -E "^${key}=" "${lock}" | head -n1 | cut -d= -f2-)"
     [ -n "${value}" ] || die "missing ${key} in ${lock}"
     printf '%s\n' "${value}"
+}
+
+# Build stamps. kernel.sh writes OUT/kernel/profile, rootfs.sh writes
+# OUT/rootfs/build-flags; later steps refuse inputs built for another profile.
+stamp_value() { # stamp_value FILE KEY
+    sed -n "s/^$2=//p" "$1" 2>/dev/null | head -n1
+}
+require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
+    local what f dev
+    for what in "$@"; do
+        case "${what}" in
+            kernel) f="${OUT}/kernel/profile" ;;
+            rootfs) f="${OUT}/rootfs/build-flags" ;;
+            *) die "require_profile_stamps: unknown stamp ${what}" ;;
+        esac
+        [ -f "${f}" ] || die "${f} missing: rebuild the ${what} step for ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE}"
+        dev="$(stamp_value "${f}" ANTUMBRA_DEVICE)"
+        [ "${dev}" = "${ANTUMBRA_DEVICE}" ] || die "${f} was built for ${dev:-an unknown profile}, not ${ANTUMBRA_DEVICE}"
+    done
 }
 
 # fetch URL DEST : download with curl, atomically, following redirects.

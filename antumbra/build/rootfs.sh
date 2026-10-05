@@ -38,6 +38,7 @@ if [ "${HOSTARCH}" != "arm64" ] && [ "${HOSTARCH}" != "aarch64" ]; then
 fi
 
 [ -f "${KOUT}/modules.tar.zst" ] || die "kernel modules missing; run kernel.sh"
+require_profile_stamps kernel
 [ -f "${KOUT}/kernel.release" ] || die "kernel release missing; run kernel.sh"
 
 # --- Package list ---------------------------------------------------------------
@@ -138,6 +139,10 @@ mmdebstrap \
 # Antumbra ships its own, so put them back from the overlay.
 install -m 0644 "${CONFIG_DIR}/rootfs/etc/resolv.conf" "${ROOT}/etc/resolv.conf"
 install -m 0644 "${CONFIG_DIR}/rootfs/etc/hostname" "${ROOT}/etc/hostname"
+
+# What this tree is: later steps (squashfs, image, bootimg, release) check it.
+printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nKERNEL_RELEASE=%s\n' \
+    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
 
 # --- Collect the initramfs ----------------------------------------------------------------------
 KREL="$(cat "${KOUT}/kernel.release")"

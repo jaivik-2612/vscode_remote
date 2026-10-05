@@ -21,6 +21,8 @@ source "${DEVICE_DIR}/bootimg.conf"
 
 KOUT="${OUT}/kernel"
 ROUT="${OUT}/rootfs"
+require_profile_stamps kernel rootfs
+[[ "$(cat "${KOUT}/kernel.release")" == *"${KERNEL_LOCALVERSION}" ]] || die "kernel.release does not end with ${KERNEL_LOCALVERSION}"
 AVBTOOL="${CACHE}/tools/avbtool.py"
 MKBOOTIMG="${CACHE}/tools/mkbootimg.py"
 UNPACK_BOOTIMG="${CACHE}/tools/unpack_bootimg.py"

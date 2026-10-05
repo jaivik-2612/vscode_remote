@@ -16,6 +16,7 @@ require_root
 require_tools mksquashfs
 ensure_dirs
 ROOT="${WORK}/rootfs"
+require_profile_stamps rootfs
 ROUT="${OUT}/rootfs"
 [ -d "${ROOT}/usr" ] || die "root filesystem tree missing; run rootfs.sh"
 mkdir -p "${ROUT}"

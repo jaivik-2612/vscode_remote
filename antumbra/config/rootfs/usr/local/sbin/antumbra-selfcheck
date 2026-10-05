@@ -63,11 +63,22 @@ if [ -n "${LATE}" ]; then
         first="$(head -n1 "${STATE_DIR}/modem-mode")"
         mode="$(sed -n 's/^mode: //p' "${STATE_DIR}/modem-mode")"
         reg="$(sed -n 's/^registration: //p' "${STATE_DIR}/modem-mode")"
-        case "${first}" in absent:*|unavailable:*) mode="${first}" ;; esac
+        case "${first}" in
+            'absent: virtual machine')
+                systemd-detect-virt -q --vm && mode="${first}" ;;
+            'absent: no DMS service on QRTR')
+                # acceptable only when the modem processor is not running at all
+                mss_up=""
+                for r in /sys/class/remoteproc/remoteproc*; do
+                    [ -r "${r}/name" ] || continue
+                    if [ "$(cat "${r}/name")" = modem ] && [ "$(cat "${r}/state" 2>/dev/null)" = running ]; then mss_up=1; fi
+                done
+                [ -n "${mss_up}" ] || mode="${first}" ;;
+        esac
         case "${mode}" in
             persistent-low-power|low-power) ok modem-radio ;;
-            absent:*|unavailable:*) ok modem-radio ;;
-            *) bad modem-radio "operating mode is '${mode}'" ;;
+            absent:*) ok modem-radio ;;
+            *) bad modem-radio "operating mode is '${mode:-${first}}'" ;;
         esac
         case "${reg}" in
             registered*|roaming*) bad modem-registration "modem is registered on a network (${reg})" ;;
@@ -95,10 +106,22 @@ if [ -n "${LATE}" ]; then
             bad "mac-${n}" "address equals the permanent address"
         elif [ ! -r "${rec}" ]; then
             bad "mac-${n}" "no record of spoofing this interface"
-        elif [ "$(cut -d' ' -f3 "${rec}")" != "${cur}" ] || [ "$(cut -d' ' -f2 "${rec}")" = "${cur}" ]; then
-            bad "mac-${n}" "address changed since it was spoofed"
         else
-            ok "mac-${n}"
+            orig="$(cut -d' ' -f2 "${rec}")"; spoofed="$(cut -d' ' -f3 "${rec}")"
+            case "$(printf '%s' "${cur}" | cut -c2)" in 2|6|a|e|A|E) la=1 ;; *) la=0 ;; esac
+            nmstate="$(nmcli -g GENERAL.STATE device show "${n}" 2>/dev/null | cut -d' ' -f1)"
+            case "${nmstate}" in ''|*[!0-9]*) nmstate=0 ;; esac
+            if [ "${cur}" = "${orig}" ]; then
+                bad "mac-${n}" "address reverted to the pre-spoof address"
+            elif [ "${cur}" = "${spoofed}" ]; then
+                ok "mac-${n}"
+            elif [ "${nmstate}" -lt 40 ] && [ "${la}" -eq 1 ]; then
+                # not connecting or connected: NetworkManager's random scan
+                # address (wifi.scan-rand-mac-address) is on the interface
+                ok "mac-${n} (scan address)"
+            else
+                bad "mac-${n}" "address changed since it was spoofed"
+            fi
         fi
     done
     if [ -e "${STATE_DIR}/mac-spoof-failed" ]; then bad mac-spoofing "$(head -n1 "${STATE_DIR}/mac-spoof-failed")"; fi

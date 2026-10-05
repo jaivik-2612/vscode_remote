@@ -29,10 +29,6 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   Linux arm64 build. Tor Project advises people at risk not to rely on
   alphas. It runs without an AppArmor profile (network isolation comes
   from its namespace and the firewall, as before).
-- Four AppArmor profiles shipped by Debian do not parse with AppArmor 4.1
-  ("merged rule with conflicting x modifiers"): plasmashell, pidgin, totem
-  and papers. The build sets them aside, so the installed document viewer
-  Papers runs unconfined, as it would have anyway.
 - Tor Browser is a desktop browser on a phone screen: usable with the
   compositor's 3x scale, not adapted.
 - No Unsafe Browser (captive portals cannot be handled from the device

@@ -176,6 +176,8 @@ rm -f "${MODDIR}/lib/modules/${KREL}/build" "${MODDIR}/lib/modules/${KREL}/sourc
 tar -C "${MODDIR}" --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner -cf - lib \
     | zstd -q -T0 -19 -o "${KOUT}/modules.tar.zst" -f
 cp "${IMAGE}" "${KOUT}/Image"
+rm -f "${KOUT}"/*.dtb
 [ -z "${KERNEL_DTB}" ] || cp "${DTB}" "${KOUT}/$(basename "${KERNEL_DTB}")"
+printf 'ANTUMBRA_DEVICE=%s\nKERNEL_RELEASE=%s\n' "${ANTUMBRA_DEVICE}" "${KREL}" > "${KOUT}/profile"
 printf '%s\n' "${KREL}" > "${KOUT}/kernel.release"
 log "kernel ${KREL}: Image $(stat -c %s "${KOUT}/Image") bytes, modules $(stat -c %s "${KOUT}/modules.tar.zst") bytes"

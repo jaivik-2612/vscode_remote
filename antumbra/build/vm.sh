@@ -50,7 +50,17 @@ KOUT="${OUT}/kernel"; ROUT="${OUT}/rootfs"; DISK="${OUT}/vm-disk.img"
 QEMU="${QEMU_SYSTEM_AARCH64:-qemu-system-aarch64}"
 
 qemu_pid() { if [ -f "${RUN}/qemu.pid" ]; then cat "${RUN}/qemu.pid" 2>/dev/null || true; fi; }
-running() { local pid; pid="$(qemu_pid)"; [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; }
+# Only a live process whose command line names this run directory's QMP
+# socket counts; a stale or reused PID is never signalled.
+running() {
+    local pid; pid="$(qemu_pid)"
+    if [[ "${pid}" =~ ^[1-9][0-9]*$ ]] && kill -0 "${pid}" 2>/dev/null \
+       && grep -qaF "unix:${RUN}/qmp.sock" "/proc/${pid}/cmdline" 2>/dev/null; then
+        return 0
+    fi
+    [ -z "${pid}" ] || rm -f "${RUN}/qemu.pid"
+    return 1
+}
 
 case "${MODE}" in
     run|start) ;;
@@ -58,9 +68,11 @@ case "${MODE}" in
         if running; then echo "running (pid $(qemu_pid)), run directory ${RUN}"; else echo "not running"; exit 1; fi; exit 0 ;;
     stop)
         running || { echo "not running"; exit 0; }
-        python3 "${HARNESS}" --run-dir "${RUN}" qmp quit >/dev/null 2>&1 || kill "$(qemu_pid)" 2>/dev/null || true
+        pid="$(qemu_pid)"
+        python3 "${HARNESS}" --run-dir "${RUN}" qmp quit >/dev/null 2>&1 || kill "${pid}" 2>/dev/null || true
         for _ in $(seq 1 50); do running || break; sleep 0.2; done
-        running && kill -9 "$(qemu_pid)" 2>/dev/null; rm -f "${RUN}/qemu.pid"; echo "stopped"; exit 0 ;;
+        if running; then kill -9 "${pid}" 2>/dev/null || true; fi
+        rm -f "${RUN}/qemu.pid"; echo "stopped"; exit 0 ;;
     powerdown) exec python3 "${HARNESS}" --run-dir "${RUN}" qmp system_powerdown ;;
     console)
         running || die "not running (vm.sh start first)"
@@ -103,10 +115,12 @@ rm -f "${RUN}/serial.sock" "${RUN}/hvc0.sock" "${RUN}/qmp.sock" "${RUN}/qemu.pid
 : > "${RUN}/serial.log"; : > "${RUN}/hvc0.log"; rm -f "${RUN}/net.pcap"
 printf '%s\n' "${CMDLINE}" > "${RUN}/cmdline"
 
-ACCEL=(-accel "tcg,thread=multi")
-[ -w /dev/kvm ] && [ "$(uname -m)" = "aarch64" ] && ACCEL=(-accel kvm)
+# KVM only on an arm64 host, and then only with the host's CPU model and
+# GIC (QEMU refuses cortex-a72 under KVM); everywhere else TCG emulation.
+ACCEL=(-accel "tcg,thread=multi"); CPU=cortex-a72; GIC=3
+if [ -w /dev/kvm ] && [ "$(uname -m)" = "aarch64" ]; then ACCEL=(-accel kvm); CPU=host; GIC=max; fi
 ARGS=(
-    -M "virt,gic-version=3" -cpu cortex-a72 -smp "${SMP}" -m "${MEMORY}" "${ACCEL[@]}"
+    -M "virt,gic-version=${GIC}" -cpu "${CPU}" -smp "${SMP}" -m "${MEMORY}" "${ACCEL[@]}"
     -kernel "${KOUT}/Image" -initrd "${ROUT}/initrd.img" -append "${CMDLINE}"
     # The disk: the only partition is "userdata", 4096-byte sectors like the phone's UFS.
     -drive "if=none,id=userdata,file=${RUN}/overlay.qcow2,format=qcow2,cache=writeback,discard=unmap"
@@ -130,7 +144,8 @@ if [ -n "${NET}" ]; then
 else
     ARGS+=(-nic none)
 fi
-if [ -n "${VNC}" ]; then ARGS+=(-vnc ":${VNC}"); else ARGS+=(-display none); fi
+# VNC has no authentication here: listen on the loopback interface only.
+if [ -n "${VNC}" ]; then ARGS+=(-vnc "127.0.0.1:${VNC}"); else ARGS+=(-display none); fi
 
 log "qemu-virt: ${MEMORY} MiB, ${SMP} CPUs, ${ACCEL[1]}, $( [ -n "${NET}" ] && echo "user network + pcap" || echo "no network" ), $( [ -n "${DEBUG}" ] && echo "debug console" || echo "no debug console" )"
 if [ "${MODE}" = "run" ]; then

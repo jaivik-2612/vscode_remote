@@ -15,9 +15,9 @@ if ! command -v qmicli >/dev/null 2>&1 || ! command -v qrtr-lookup >/dev/null 2>
     exit 0
 fi
 
-# No remote processor at all (a virtual machine): nothing to switch off.
-if ! ls -d /sys/class/remoteproc/remoteproc* >/dev/null 2>&1; then
-    printf 'absent: no remote processors\n' > "${STATE}"
+# A virtual machine (the qemu-virt test profile) has no modem processor.
+if systemd-detect-virt -q --vm; then
+    printf 'absent: virtual machine\n' > "${STATE}"
     exit 0
 fi
 

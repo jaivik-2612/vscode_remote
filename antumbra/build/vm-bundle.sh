@@ -50,7 +50,16 @@ cd "$(dirname "$0")"
 HEADLESS=""; DEBUG=""; FRESH=""; EXTRA=""
 for a in "$@"; do case "$a" in --headless) HEADLESS=1 ;; --debug) DEBUG=1 ;; --fresh) FRESH=1 ;; *) EXTRA="$EXTRA $a" ;; esac; done
 for t in qemu-system-aarch64 qemu-img zstd; do command -v "$t" >/dev/null || { echo "missing $t (see README.md)" >&2; exit 1; }; done
-[ -f vm-disk.img ] || { echo "decompressing the disk image (4 GiB, sparse)..."; zstd -q -d --sparse vm-disk.img.zst -o vm-disk.img; }
+# The unpacked disk belongs to the vm-disk.img.zst it came from; after a newer
+# bundle is extracted over an older one, unpack again and drop the overlay.
+DISK_ID="$(grep ' vm-disk.img.zst$' SHA256SUMS)"
+if [ ! -f vm-disk.img ] || [ "$(cat vm-disk.img.id 2>/dev/null || true)" != "$DISK_ID" ]; then
+    echo "decompressing the disk image (4 GiB, sparse)..."
+    rm -f vm-disk.img vm-disk.img.id overlay.qcow2
+    zstd -q -d -f --sparse vm-disk.img.zst -o vm-disk.img.tmp
+    mv vm-disk.img.tmp vm-disk.img
+    printf '%s\n' "$DISK_ID" > vm-disk.img.id
+fi
 [ -z "$FRESH" ] || rm -f overlay.qcow2
 [ -f overlay.qcow2 ] || qemu-img create -q -f qcow2 -b vm-disk.img -F raw overlay.qcow2
 CMDLINE="$(cat cmdline.txt)"

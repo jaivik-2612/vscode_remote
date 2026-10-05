@@ -25,6 +25,10 @@ done
 if [ -n "${ANTUMBRA_DEBUG}" ]; then
     die "refusing to package a debug build (ANTUMBRA_DEBUG is set)"
 fi
+require_profile_stamps kernel rootfs
+[ -z "$(stamp_value "${OUT}/rootfs/build-flags" ANTUMBRA_DEBUG)" ] || die "refusing to package a debug root filesystem (see ${OUT}/rootfs/build-flags)"
+[ "$(stamp_value "${OUT}/kernel/profile" KERNEL_RELEASE)" = "$(stamp_value "${OUT}/rootfs/build-flags" KERNEL_RELEASE)" ] \
+    || die "the root filesystem was built for another kernel than build/out/kernel"
 
 cp "${OUT}/boot.img" "${REL}/${NAME}-boot.img"
 cp "${CACHE}/device-assets/dtbo.img" "${REL}/${NAME}-dtbo.img"
