@@ -7,6 +7,11 @@ export XDG_SESSION_TYPE=wayland
 export XDG_CURRENT_DESKTOP=Phosh:GNOME
 export XDG_SESSION_DESKTOP=antumbra-greeter
 export GSETTINGS_BACKEND=memory
+# libadwaita takes the colour scheme and accent from the Settings portal
+# unless this is set; with it, it reads GSettings, which the memory backend
+# answers with the schema defaults (90_antumbra.gschema.override). The
+# Welcome screen's look then does not depend on a portal process.
+export ADW_DISABLE_PORTAL=1
 # shellcheck source=antumbra-session-env
 . /usr/libexec/antumbra-session-env
 PHOC_INI=/usr/share/phosh/phoc.ini

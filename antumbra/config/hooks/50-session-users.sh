@@ -14,3 +14,13 @@ getent passwd antumbra-greeter >/dev/null || adduser --system --quiet ${uid_opt}
 for g in video render input; do
     if getent group "$g" >/dev/null; then adduser --quiet antumbra-greeter "$g"; fi
 done
+# Interface theme for the Welcome screen and its on-screen keyboard: the
+# same one-line imports antumbra-session writes for the user, root-owned.
+# The greeter keeps ~/.config itself for anything else that writes there.
+GREETER_CONFIG=/var/lib/antumbra-greeter/.config
+install -d -o antumbra-greeter -g antumbra-greeter -m 0755 "${GREETER_CONFIG}"
+install -d -o root -g root -m 0755 "${GREETER_CONFIG}/gtk-3.0" "${GREETER_CONFIG}/gtk-4.0"
+printf '@import url("file:///usr/share/antumbra/theme/shell.css");\n' > "${GREETER_CONFIG}/gtk-3.0/gtk.css"
+printf '@import url("file:///usr/share/antumbra/theme/apps.css");\n' > "${GREETER_CONFIG}/gtk-4.0/gtk.css"
+chown root:root "${GREETER_CONFIG}/gtk-3.0/gtk.css" "${GREETER_CONFIG}/gtk-4.0/gtk.css"
+chmod 0644 "${GREETER_CONFIG}/gtk-3.0/gtk.css" "${GREETER_CONFIG}/gtk-4.0/gtk.css"
