@@ -413,22 +413,27 @@ server, and everything else is dropped or rejected.
   address, so isolation between them is per destination only.
 - **Firewall** (`nftables.conf`, the `android_*` defines and chains). In
   `ip antumbra-nat`, a prerouting chain sends UDP 53 to any address to the
-  DNSPort and TCP to any public address to the TransPort; `redirect`
-  rewrites to the bridge's own address, so nothing is translated to
-  127.0.0.1, which would need `route_localnet` and expose the ControlPort.
-  The input chain accepts from the bridge only DHCP and the two redirected
-  flows (`ct status dnat`, so the listeners addressed directly are refused
-  too), and rejects DNS over TLS (port 853) first, so that Android falls
-  back at once to plain DNS. Everything else from the bridge is rejected,
-  as is everything the forward chain sees from or to it (its policy stays
-  drop). The output chain accepts the DHCP server's replies on the bridge.
+  DNSPort and TCP to any public address, the host's own included, to the
+  TransPort; `redirect` rewrites to the bridge's own address, so nothing is
+  translated to 127.0.0.1, which would need `route_localnet` and expose the
+  ControlPort. The input chain accepts from the bridge only DHCP and the
+  two redirected flows (`ct status dnat`, so the listeners addressed
+  directly are refused too). What is addressed to any other address of the
+  host (its LAN address, the namespaces' veths) is dropped silently, so
+  those addresses time out like every other LAN address; a fast refusal
+  there would let an app find the phone's address by a sweep. DNS over TLS
+  (port 853) is rejected, so that Android falls back at once to plain DNS.
+  Everything else addressed to the bridge's host address is rejected, as
+  is everything the forward chain sees from or to the bridge (its policy
+  stays drop). The output chain accepts the DHCP server's replies on the bridge.
   The two redirects carry counters. These rules are in every image; without
   Android the bridge does not exist and they match nothing.
 - **Routing.** Because the bridge does not forward, packets addressed past
   the host (the local network, UDP or ICMP to the Internet) are dropped by
   the routing code before the forward chain sees them: connections to the
-  local network time out rather than fail at once. The forward chain's
-  reject is the second layer.
+  local network time out rather than fail at once, and the input chain's
+  silent drop gives the host's own addresses there the same time-out. The
+  forward chain's reject is the second layer.
 - **DHCP.** `antumbra-waydroid-dhcp.service`, only while Android is on:
   dnsmasq with `--port=0` (no DNS), one address reserved for Waydroid's
   fixed container MAC address, router and DNS server 10.200.2.1.
@@ -440,21 +445,33 @@ server, and everything else is dropped or rejected.
   init, and a failing hook aborts the start. It requires the Android nat
   chain with both redirects, the forward and input rejects, the bridge's
   address, `route_localnet=0`, and a container attached to `waydroid-tor`
-  by a single veth; then it sets `forwarding=0` on the bridge again.
+  by a single veth; then it sets `forwarding=0` on the bridge again and,
+  in the container's own network namespace (`nsenter` into that of
+  `LXC_PID`, before Android's init runs), adds the table `ip
+  antumbra_onion`, which rejects 127.192.0.0/10 (see below). Without a
+  container PID, or if that fails, the start is refused too.
 - **Checks.** `antumbra-selfcheck` reports the rules (`firewall-android`),
   the bridge (`android-bridge`), the absence of `lxcbr0` (`lxc-net`) and,
   while Android is off, root-only binder devices (`binder`) and no
   container service (`android-off`). The MAC-spoofing udev rule and
   NetworkManager leave the bridge alone; LXC's host-side `veth*` were
-  already excluded.
+  already excluded. `tests/android-net-lab.py` (run by `tests/lint.sh`)
+  loads the ruleset and runs the start-host hook in network namespaces laid
+  out like the phone, and judges the VM test's probes there.
 - **Inside Android**, `antumbra-waydroid-provision` reduces what Android
   sends through Tor, in every session: no captive-portal checks to
   Google's `generate_204` servers, Private DNS off, no network time.
 
 Not in this version: UDP (calls, games, VPN apps; QUIC falls back to TCP),
-IPv6, and `.onion` addresses, which Tor maps into 127.192.0.0/10 and
-Android routes to its own loopback. Per-app isolation by source address
-inside the container and `.onion` support through `VirtualAddrNetworkIPv4
+IPv6, and `.onion` addresses. Tor's DNSPort answers a `.onion` name with
+an address in 127.192.0.0/10 (the torrc's global `AutomapHostsOnResolve`,
+as in Tails; `NoOnionTraffic` on the DNSPort does not stop it). Inside the container that range is Android's own loopback, where any
+app listening on that port on every address would receive the
+connection; Android 13's resolver does not filter `.onion` names (RFC
+7686). The start-host hook's table refuses connections to that range in
+the container instead. Android's root could remove the table, as it could
+anything in the container. Per-app isolation by source address inside the
+container and `.onion` support through `VirtualAddrNetworkIPv4
 10.192.0.0/10` were tried in a namespace lab and left for later.
 
 ## 9. Radio and hardware policy

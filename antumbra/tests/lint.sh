@@ -33,6 +33,9 @@ sed -e 's/"debian-tor"/9001/g; s/"htp"/1101/g; s/"clearnet"/1102/g; s/"_apt"/900
 nft -c -f "${TMPNFT}" && echo "nftables.conf: syntax OK" || fail=1
 rm -f "${TMPNFT}"
 
+step "Android's network (namespace lab: the firewall, the start-host hook, the VM's probes)"
+python3 tests/android-net-lab.py || fail=1
+
 step "tor configuration (tor --verify-config)"
 TMPTOR="$(mktemp -d)"
 { printf 'DataDirectory %s\nUser %s\n' "${TMPTOR}" "$(id -un)"; grep -v '^User ' config/rootfs/etc/tor/torrc; } > "${TMPTOR}/torrc"

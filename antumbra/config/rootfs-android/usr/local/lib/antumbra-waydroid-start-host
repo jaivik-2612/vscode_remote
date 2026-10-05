@@ -11,7 +11,14 @@
 # the bridge with its address, no route from the bridge to the host's
 # loopback, and a container configuration attached to that bridge. Any
 # doubt fails closed. Finally it switches forwarding off on the bridge
-# again, in case something switched ip_forward off and on since boot.
+# again, in case something switched ip_forward off and on since boot, and
+# rejects .onion virtual addresses inside the container's own network
+# namespace (LXC_PID is the container's first process): Tor answers
+# Android's lookups of .onion names with addresses in 127.192.0.0/10
+# (AutomapHostsOnResolve), which inside the container are Android's own
+# loopback, where any app listening on that port would receive the
+# connection. Android's netd uses iptables-legacy and leaves this nft
+# table alone; Android's root could remove it, as it could anything here.
 set -u
 BRIDGE=waydroid-tor
 CONFIG="${LXC_CONFIG_FILE:-/var/lib/waydroid/lxc/waydroid/config}"
@@ -45,5 +52,12 @@ grep -Eq "^lxc\\.net\\.0\\.link[[:space:]]*=[[:space:]]*${BRIDGE}[[:space:]]*\$"
 if grep -Eq '^lxc\.net\.[1-9]' "${CONFIG}"; then fail "the container has a second network interface"; fi
 
 sysctl -q "net.ipv4.conf.${BRIDGE}.forwarding=0" || fail "could not switch forwarding off on ${BRIDGE}"
+
+case "${LXC_PID:-}" in
+    '' | *[!0-9]*) fail "no container PID (LXC_PID)" ;;
+esac
+printf '%s\n' 'table ip antumbra_onion {}' 'flush table ip antumbra_onion' \
+    'table ip antumbra_onion { chain output { type filter hook output priority filter; policy accept; ip daddr 127.192.0.0/10 reject; }; }' \
+    | nsenter --target "${LXC_PID}" --net nft -f - || fail "could not block .onion virtual addresses inside Android"
 logger -t antumbra-waydroid -p daemon.info -- "Android container network checked: Tor only"
 exit 0
