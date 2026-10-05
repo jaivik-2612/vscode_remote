@@ -10,7 +10,7 @@
 #          --vnc N        show the display on VNC :N (default: headless, screenshots still work)
 #          --no-net       no network device at all
 #          --keep-disk    reuse this run directory's disk overlay (default: fresh copy of vm-disk.img)
-#          --memory MiB   guest memory (default 3072)
+#          --memory MiB   guest memory (default 4096; the display is rendered in software)
 #          --smp N        virtual CPUs (default 3)
 #          --append ARGS  extra kernel command-line arguments
 #
@@ -27,7 +27,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 usage() { sed -n '4,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 MODE="${1:-}"; [ $# -gt 0 ] && shift
-DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=3072; SMP=3; EXTRA_APPEND=""
+DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=4096; SMP=3; EXTRA_APPEND=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --debug) DEBUG=1 ;;

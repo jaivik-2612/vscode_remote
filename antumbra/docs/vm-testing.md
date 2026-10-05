@@ -27,6 +27,14 @@ be exercised without the phone. It is a test target, not a release target:
 
 ## What differs
 
+- The kernel keeps the port's direct-boot contract for the phone's bootloader
+  (`CONFIG_ONEPLUS_HOTDOG_EARLY_BOOT`): at entry, with the MMU off, it
+  writes zero to the SM8150 watchdog's address. On the virt machine that
+  address lies in the empty PCIe window, where the write is discarded; the
+  first VM boot confirmed it is harmless, so the VM kernel stays identical
+  to the phone's in this respect. The same option sets the Image header's
+  load offset, hence QEMU's "Kernel image misaligned" warning at boot.
+
 - No modem, no Wi-Fi, no Qualcomm remote processors: the units that talk to
   them fail or stay inactive, and the network interface is a virtio NIC on
   QEMU's user-mode network (10.0.2.0/24). That network has no route to Tor
@@ -95,8 +103,9 @@ asserts, in order:
 3. a screenshot of the display (`build/work/qemu-virt/vm-run/smoke/display.png`);
 4. from the packet capture of the VM's network (`net.pcap`): no IP packet
    left the guest before the Welcome decision;
-5. the virtual power button powers the VM off through the
-   return-to-initramfs shutdown path.
+5. a short press of the virtual power button is ignored (only a long
+   press powers off, as on the phone), and a power-off requested from the
+   console goes through the return-to-initramfs shutdown path.
 
 Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed. `--timeout-scale 2` doubles every timeout for slow hosts.

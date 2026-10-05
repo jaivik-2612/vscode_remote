@@ -417,7 +417,15 @@ def smoke(vm, scale, stop_after, debug):
     rep.check("network: no packet left the guest before the Welcome decision", not leaks,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(counts.items())) or "no frames")
     if stop_after:
-        # 2. Shutdown: a short power-key press is ignored by design (logind
+        # 2. A short power-key press must be ignored (logind HandlePowerKey=ignore,
+        #    only a long press powers off): QEMU's system_powerdown is a short press.
+        try:
+            vm.qmp("system_powerdown")
+            time.sleep(T(20))
+            rep.check("power key: a short press does not shut the system down", vm.alive())
+        except Exception as e:  # noqa: BLE001
+            rep.check("power key: a short press does not shut the system down", False, str(e))
+        # 3. Shutdown: a short power-key press is ignored by design (logind
         #    HandlePowerKey=ignore, long press powers off), so ask from inside;
         #    without a console, send the key anyway and expect nothing.
         try:

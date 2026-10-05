@@ -55,7 +55,7 @@ for t in qemu-system-aarch64 qemu-img zstd; do command -v "$t" >/dev/null || { e
 CMDLINE="$(cat cmdline.txt)"
 [ -z "$DEBUG" ] || CMDLINE="$CMDLINE antumbra.debug=1"
 ACCEL="tcg,thread=multi"; [ -w /dev/kvm ] && [ "$(uname -m)" = "aarch64" ] && ACCEL=kvm
-set -- -M virt,gic-version=3 -cpu cortex-a72 -smp 4 -m 3072 -accel "$ACCEL" \
+set -- -M virt,gic-version=3 -cpu cortex-a72 -smp 4 -m 4096 -accel "$ACCEL" \
     -kernel Image -initrd initrd.img -append "$CMDLINE" \
     -drive if=none,id=userdata,file=overlay.qcow2,format=qcow2 \
     -device virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096 \
