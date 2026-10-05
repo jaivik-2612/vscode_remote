@@ -115,8 +115,10 @@ match the VM kernel's release (`6.17.0-sm8150-hotdog-clean-antumbra-virt`).
 first had them, inside a small model of genpd, and replays the failure
 sequences of the review findings it fixed: a suspend aborted after a failed
 close (the camera was raised with no stream), a retract or Hall read that
-fails before sleep (the camera stayed raised), and a close of a camera
-already seated (a settle push into the stop). It fails when the fixed logic
+fails before sleep (the camera stayed raised). The third finding, a settle
+push into the stop for a camera already seated, is a change in the close's
+motion rather than in the flags, so it is checked on the phone
+(`docs/hardware-validation.md` item 34), not here. It fails when the fixed logic
 shows a defect or when the old logic no longer does. `tests/lint.sh` runs
 it; it needs nothing but Python.
 

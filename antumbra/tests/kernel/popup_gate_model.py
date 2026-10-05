@@ -183,13 +183,10 @@ def stream_across_sleep(new, abort=False):
     return p.raised
 
 
-def ms5(new, down=345):
-    """hotdog_popup_close() on a camera whose Halls read it seated
-    (|up| < 50, |down| >= 340): the course takes no step."""
-    last_steps = 0
-    if (new and last_steps == 0) or abs(down) >= 350:
-        return 0
-    return EPROTO  # restore_closed(320) into the stop: |down| cannot grow
+# motor-safety-5 (no settle push for a camera already seated) is a change in
+# hotdog_popup_close()'s motion, not in the flag logic modelled here; a
+# replay would only restate the new condition. hardware-validation.md item
+# 34 checks it on the phone.
 
 
 CASES = [
@@ -203,8 +200,6 @@ CASES = [
     ("stream held across sleep is raised again", stream_across_sleep, True, True),
     ("stream held across an aborted suspend is raised again",
      lambda n: stream_across_sleep(n, abort=True), True, True),
-    ("motor-safety-5: close of a seated camera reading 345 succeeds",
-     lambda n: ms5(n) == 0, True, False),
 ]
 
 

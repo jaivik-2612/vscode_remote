@@ -106,7 +106,7 @@ rc=\$?; echo 0 > /sys/class/rtc/rtc0/wakealarm 2>/dev/null; sleep 1; \
 printf \"genpd-sleep-%s-end rc=%s\\n\" ${tag} \$rc' </dev/null >/dev/hvc0 2>&1 &" >/dev/null
     report=""
     for i in $(seq 300); do
-        report="$(tail -c +$((off + 1)) "${HVC_LOG}" | grep -ao "genpd-sleep-${tag}-end rc=[0-9]*" || true)"
+        report="$(tail -c +$((off + 1)) "${HVC_LOG}" | grep -ao "genpd-sleep-${tag}-end rc=[0-9][0-9]*$" || true)"
         [ -z "${report}" ] || break
         [ "${i}" -lt 300 ] || die "the suspend job did not report after 300 s (case ${CASE_N})"
         sleep 1

@@ -140,7 +140,11 @@ each course (`dmesg | grep camera-popup`).
     unit. A closed |down| between 340 and 349 matters most: such a camera
     counts as seated, and `auto` must leave it without motion and with
     `error=0` (the driver no longer gives a seated camera the 320-microstep
-    settle push, which could not move it at its stop and failed).
+    settle push, which could not move it at its stop and failed). Also
+    record the reading, and whether the camera is flush, after `auto`
+    handles a camera reading |down| 340-349 that is short of its stop (for
+    example after an interrupted open): without the settle push such a
+    camera stays where it is.
 35. `status` is `-r--------`, and `pulse_up`, `restore_closed`, `open`,
     `finish_open` and `close` exist only when the module was loaded with
     `debug_knobs=1`.
