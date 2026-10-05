@@ -1,12 +1,14 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Build the Antumbra kernel for the OnePlus 7T Pro.
+# Build the Antumbra kernel for the selected device profile (ANTUMBRA_DEVICE,
+# default the OnePlus 7T Pro; qemu-virt reuses the same sources and adds a
+# virtio fragment).
 #
 # Inputs : build/cache/kernel (fetch-sources.sh), build/cache/hotdog-patches,
 #          device/oneplus-hotdog/kernel/{patches.list,patches/,antumbra.config,
-#          antumbra-dts-overrides.dtsi}
+#          antumbra-dts-overrides.dtsi}, device/<profile>/kernel/*.config
 # Outputs: build/out/kernel/Image                 raw arm64 kernel (what the ABL boots)
-#          build/out/kernel/sm8150-oneplus-hotdog.dtb
+#          build/out/kernel/sm8150-oneplus-hotdog.dtb (profiles with KERNEL_DTB)
 #          build/out/kernel/modules.tar.zst       /lib/modules/<release>, stripped
 #          build/out/kernel/config, kernel.release, mmap-rnd-bits
 #
@@ -92,13 +94,21 @@ mkdir -p "${O}"
 PORT_CONFIG="${PATCHES}/$(lock_get PORT_KERNEL_CONFIG)"
 sha256_check "${PORT_CONFIG}" "$(lock_get PORT_KERNEL_CONFIG_SHA256)"
 cp "${PORT_CONFIG}" "${O}/.config"
+# Fragments: the base device's hardening fragment, then any the selected
+# profile adds (device/<profile>/kernel/*.config, e.g. virtio for QEMU).
+FRAGMENTS=("${DEVICE_DIR}/kernel/antumbra.config")
+if [ "${PROFILE_DIR}" != "${DEVICE_DIR}" ]; then
+    for f in "${PROFILE_DIR}"/kernel/*.config; do
+        [ -f "${f}" ] && FRAGMENTS+=("${f}")
+    done
+fi
 # merge_config.sh needs to run from the source tree; -O selects the output dir.
 ( cd "${KSRC}" && env ARCH=arm64 "${MAKE_TC[@]}" \
-    scripts/kconfig/merge_config.sh -O "${O}" -m "${O}/.config" "${DEVICE_DIR}/kernel/antumbra.config" >/dev/null )
+    scripts/kconfig/merge_config.sh -O "${O}" -m "${O}/.config" "${FRAGMENTS[@]}" >/dev/null )
 make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" olddefconfig >/dev/null
 
 # Every fragment line must be honoured in the final configuration.
-check_fragment() {
+check_fragment() { # check_fragment FILE
     local line key val fail=0
     while IFS= read -r line; do
         case "${line}" in
@@ -117,17 +127,21 @@ check_fragment() {
                 fi
                 ;;
         esac
-    done < "${DEVICE_DIR}/kernel/antumbra.config"
+    done < "$1"
     return "${fail}"
 }
-if ! check_fragment; then
+FRAGMENTS_OK=1
+for f in "${FRAGMENTS[@]}"; do
+    check_fragment "${f}" || FRAGMENTS_OK=0
+done
+if [ "${FRAGMENTS_OK}" -ne 1 ]; then
     if [ "${ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT:-}" = "1" ]; then
         warn "continuing despite configuration drift (ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT=1)"
     else
         die "configuration fragment not fully applied; see warnings above"
     fi
 fi
-log "configuration merged and verified"
+log "configuration merged and verified (${#FRAGMENTS[@]} fragments)"
 
 mkdir -p "${KOUT}"
 cp "${O}/.config" "${KOUT}/config"
@@ -140,24 +154,28 @@ cp "${O}/.config" "${KOUT}/config"
 # --- Build --------------------------------------------------------------------
 export KBUILD_BUILD_TIMESTAMP KBUILD_BUILD_USER=antumbra KBUILD_BUILD_HOST=antumbra
 KBUILD_BUILD_TIMESTAMP="$(date -u -d "@${SOURCE_DATE_EPOCH}" '+%a %b %e %H:%M:%S UTC %Y')"
-log "building Image, modules and DTB with ${TOOLCHAIN} (-j${JOBS})"
-make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION=-antumbra -j"${JOBS}" Image modules dtbs
+TARGETS=(Image modules)
+[ -z "${KERNEL_DTB}" ] || TARGETS+=(dtbs)
+log "building ${TARGETS[*]} with ${TOOLCHAIN} (-j${JOBS}, LOCALVERSION ${KERNEL_LOCALVERSION})"
+make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION="${KERNEL_LOCALVERSION}" -j"${JOBS}" "${TARGETS[@]}"
 
 IMAGE="${O}/arch/arm64/boot/Image"
-DTB="${O}/arch/arm64/boot/dts/qcom/sm8150-oneplus-hotdog.dtb"
 [ -f "${IMAGE}" ] || die "Image was not produced"
-[ -f "${DTB}" ] || die "DTB was not produced"
+if [ -n "${KERNEL_DTB}" ]; then
+    DTB="${O}/arch/arm64/boot/dts/${KERNEL_DTB}"
+    [ -f "${DTB}" ] || die "DTB was not produced"
+fi
 # The ABL needs the raw arm64 Image: magic "ARM\x64" at offset 0x38.
 [ "$(dd if="${IMAGE}" bs=1 skip=56 count=4 2>/dev/null)" = "ARM$(printf '\x64')" ] || die "Image lacks the arm64 header magic"
 
 KREL="$(cat "${O}/include/config/kernel.release")"
 MODDIR="${WORK}/kernel-modules"
 rm -rf "${MODDIR}"
-make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION=-antumbra INSTALL_MOD_PATH="${MODDIR}" INSTALL_MOD_STRIP=1 modules_install >/dev/null
+make -C "${KSRC}" O="${O}" ARCH=arm64 "${MAKE_TC[@]}" LOCALVERSION="${KERNEL_LOCALVERSION}" INSTALL_MOD_PATH="${MODDIR}" INSTALL_MOD_STRIP=1 modules_install >/dev/null
 rm -f "${MODDIR}/lib/modules/${KREL}/build" "${MODDIR}/lib/modules/${KREL}/source"
 tar -C "${MODDIR}" --sort=name --mtime="@${SOURCE_DATE_EPOCH}" --owner=0 --group=0 --numeric-owner -cf - lib \
     | zstd -q -T0 -19 -o "${KOUT}/modules.tar.zst" -f
 cp "${IMAGE}" "${KOUT}/Image"
-cp "${DTB}" "${KOUT}/sm8150-oneplus-hotdog.dtb"
+[ -z "${KERNEL_DTB}" ] || cp "${DTB}" "${KOUT}/$(basename "${KERNEL_DTB}")"
 printf '%s\n' "${KREL}" > "${KOUT}/kernel.release"
 log "kernel ${KREL}: Image $(stat -c %s "${KOUT}/Image") bytes, modules $(stat -c %s "${KOUT}/modules.tar.zst") bytes"

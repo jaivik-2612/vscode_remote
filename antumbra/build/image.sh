@@ -6,17 +6,22 @@
 # empty regions are "don't care" chunks so fastboot writes only the data.
 #
 # Inputs : build/out/rootfs/filesystem.squashfs(.verity) (squashfs.sh),
-#          build/out/rootfs/packages.txt, device/oneplus-hotdog/bootimg.conf
-# Output : build/out/userdata.simg
+#          build/out/rootfs/packages.txt, device/<profile>/device.conf
+# Output : build/out/userdata.simg (phone) or build/out/<profile>/vm-disk.img (QEMU)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 
-require_tools systemd-repart mke2fs img2simg python3
+require_tools systemd-repart mke2fs python3
 ensure_dirs
-# shellcheck source=../device/oneplus-hotdog/bootimg.conf
-source "${DEVICE_DIR}/bootimg.conf"
+# USERDATA_PARTITION_SIZE and IMAGE_OUTPUT come from the profile's device.conf
+# (sourced by common.sh): "sparse" for the phone, "vmdisk" for QEMU.
+case "${IMAGE_OUTPUT}" in
+    sparse) require_tools img2simg ;;
+    vmdisk) require_tools dd ;;
+    *) die "device.conf: IMAGE_OUTPUT must be sparse or vmdisk" ;;
+esac
 ROUT="${OUT}/rootfs"
 SQ="${ROUT}/filesystem.squashfs"
 [ -f "${SQ}" ] || die "squashfs missing; run squashfs.sh"
@@ -84,13 +89,42 @@ systemd-repart --empty=create --size="${USERDATA_PARTITION_SIZE}" --sector-size=
 [ "$(stat -c %s "${RAW}")" -eq "${USERDATA_PARTITION_SIZE}" ] || die "userdata.img is not ${USERDATA_PARTITION_SIZE} bytes"
 log "GPT written: $(systemd-repart --sector-size=4096 --definitions="${REPART}" --dry-run=yes --no-pager "${RAW}" 2>/dev/null | grep -E 'ANTUMBRA_(LIVE|DATA)' | awk '{print $1, $(NF-1), $NF}' | tr '\n' ';')"
 
-# --- Android sparse image: holes become "don't care" --------------------------------
-SIMG="${OUT}/userdata.simg"
-rm -f "${SIMG}"
-img2simg -s "${RAW}" "${SIMG}" 4096
-rm -f "${RAW}"
-SIMG_SIZE="$(stat -c %s "${SIMG}")"
-LIVE_SIZE="$(stat -c %s "${LIVE_EXT4}")"
-[ "${SIMG_SIZE}" -lt $((LIVE_SIZE + 64 * 1048576)) ] || die "sparse image unexpectedly large (${SIMG_SIZE} bytes): holes were not preserved"
-sha256sum "${SIMG}" > "${SIMG}.sha256"
-log "userdata.simg: ${SIMG_SIZE} bytes (sparse; expands to ${USERDATA_PARTITION_SIZE} on the device)"
+if [ "${IMAGE_OUTPUT}" = "vmdisk" ]; then
+    # --- QEMU disk: an outer GPT whose only partition is named "userdata" ----------------
+    # and holds the nested image, exactly as the phone's UFS GPT holds it. The
+    # outer table is written by systemd-repart with 4096-byte sectors; the
+    # nested image is then copied in with holes preserved (CopyBlocks= would
+    # allocate the whole partition).
+    VMREPART="${WORK}/repart-vm.d"
+    rm -rf "${VMREPART}"; mkdir -p "${VMREPART}"
+    cat > "${VMREPART}/10-userdata.conf" <<CONF
+[Partition]
+Type=linux-generic
+Label=userdata
+UUID=$(uuid5 vm-userdata-part)
+SizeMinBytes=${USERDATA_PARTITION_SIZE}
+SizeMaxBytes=${USERDATA_PARTITION_SIZE}
+CONF
+    DISK="${OUT}/vm-disk.img"
+    rm -f "${DISK}"
+    systemd-repart --empty=create --size=$((USERDATA_PARTITION_SIZE + 4 * 1048576)) --sector-size=4096 \
+        --seed="$(uuid5 vm-disk)" --definitions="${VMREPART}" --dry-run=no --offline=yes --no-pager "${DISK}" >/dev/null
+    OFFSET="$(systemd-repart --sector-size=4096 --definitions="${VMREPART}" --dry-run=yes --offline=yes --no-pager --json=short "${DISK}" \
+        | python3 -c 'import json,sys; print([p for p in json.load(sys.stdin) if p["label"] == "userdata"][0]["offset"])')"
+    if [ "${OFFSET}" -le 0 ] || [ $((OFFSET % 4096)) -ne 0 ]; then die "unexpected userdata offset ${OFFSET}"; fi
+    dd if="${RAW}" of="${DISK}" bs=1M seek=$((OFFSET / 1048576)) conv=sparse,notrunc status=none
+    rm -f "${RAW}"
+    sha256sum "${DISK}" > "${DISK}.sha256"
+    log "vm-disk.img: $(stat -c %s "${DISK}") bytes, $(( $(stat -c %b "${DISK}") * 512 / 1048576 )) MiB allocated; userdata at offset ${OFFSET}"
+else
+    # --- Android sparse image: holes become "don't care" ----------------------------
+    SIMG="${OUT}/userdata.simg"
+    rm -f "${SIMG}"
+    img2simg -s "${RAW}" "${SIMG}" 4096
+    rm -f "${RAW}"
+    SIMG_SIZE="$(stat -c %s "${SIMG}")"
+    LIVE_SIZE="$(stat -c %s "${LIVE_EXT4}")"
+    [ "${SIMG_SIZE}" -lt $((LIVE_SIZE + 64 * 1048576)) ] || die "sparse image unexpectedly large (${SIMG_SIZE} bytes): holes were not preserved"
+    sha256sum "${SIMG}" > "${SIMG}.sha256"
+    log "userdata.simg: ${SIMG_SIZE} bytes (sparse; expands to ${USERDATA_PARTITION_SIZE} on the device)"
+fi

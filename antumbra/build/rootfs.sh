@@ -100,7 +100,7 @@ fi
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
-HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
+HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
 log "running mmdebstrap (${SUITE}, arm64) into ${ROOT}"
 # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
 mmdebstrap \

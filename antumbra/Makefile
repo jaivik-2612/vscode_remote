@@ -1,6 +1,6 @@
 # Antumbra developer entry points. See docs/building.md.
 SHELL := /bin/bash
-.PHONY: lint test check-packages build minimal clean
+.PHONY: lint test check-packages build minimal clean vm-build vm-run vm-start vm-console vm-stop vm-test
 
 lint:            ## static checks: shell, python, nftables, tor, systemd units, yaml
 	tests/lint.sh
@@ -20,3 +20,18 @@ minimal:         ## pipeline validation build without Phosh, apps or Tor Browser
 
 clean:
 	rm -rf build/out build/work
+
+# --- QEMU test target (docs/vm-testing.md) ---------------------------------
+VM_ENV = ANTUMBRA_DEVICE=qemu-virt ANTUMBRA_DEBUG=1
+vm-build:        ## build the qemu-virt profile (debug build: root shell on the VM console)
+	$(VM_ENV) build/build.sh
+vm-run:          ## boot it in QEMU on this terminal (Ctrl-A X quits)
+	$(VM_ENV) build/vm.sh run --debug
+vm-start:        ## boot it in the background (vm-console, vm-shell, vm-stop)
+	$(VM_ENV) build/vm.sh start --debug
+vm-console:      ## attach to the running VM's serial console
+	$(VM_ENV) build/vm.sh console
+vm-stop:         ## stop the background VM
+	$(VM_ENV) build/vm.sh stop
+vm-test:         ## boot in the background and run the smoke test
+	$(VM_ENV) tests/vm-smoke.sh

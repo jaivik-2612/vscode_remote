@@ -18,12 +18,32 @@ ANTUMBRA_COMMON_LOADED=1
 # ANTUMBRA_ROOT is the antumbra/ directory of the repository.
 ANTUMBRA_ROOT="${ANTUMBRA_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BUILD_DIR="${ANTUMBRA_ROOT}/build"
-CACHE="${ANTUMBRA_CACHE:-${BUILD_DIR}/cache}"   # downloaded, pinned inputs
-OUT="${ANTUMBRA_OUT:-${BUILD_DIR}/out}"         # build products
-WORK="${ANTUMBRA_WORK:-${BUILD_DIR}/work}"      # scratch space
-DEVICE_DIR="${ANTUMBRA_ROOT}/device/oneplus-hotdog"
+CACHE="${ANTUMBRA_CACHE:-${BUILD_DIR}/cache}"   # downloaded, pinned inputs (shared by all profiles)
 CONFIG_DIR="${ANTUMBRA_ROOT}/config"
 VENDOR_DIR="${ANTUMBRA_ROOT}/vendor"
+
+# Device profile. ANTUMBRA_DEVICE selects device/<name>/ (default: the phone).
+# A profile's device.conf may name a BASE_DEVICE whose sources.lock, kernel
+# patches, hardening fragment, keys and firmware list it reuses; DEVICE_DIR is
+# that base and PROFILE_DIR the selected profile (both equal for the phone).
+# Profiles other than the default build into build/out/<name> and
+# build/work/<name>, so the phone's outputs are never touched by a VM build.
+ANTUMBRA_DEVICE="${ANTUMBRA_DEVICE:-oneplus-hotdog}"
+PROFILE_DIR="${ANTUMBRA_ROOT}/device/${ANTUMBRA_DEVICE}"
+if [ ! -f "${PROFILE_DIR}/device.conf" ]; then
+    printf '[%s] error: unknown device profile %s (no %s)\n' "$(basename "${0}")" "${ANTUMBRA_DEVICE}" "${PROFILE_DIR}/device.conf" >&2
+    exit 1
+fi
+# shellcheck source=../../device/oneplus-hotdog/device.conf
+source "${PROFILE_DIR}/device.conf"
+DEVICE_DIR="${ANTUMBRA_ROOT}/device/${BASE_DEVICE:-${ANTUMBRA_DEVICE}}"
+if [ "${ANTUMBRA_DEVICE}" = "oneplus-hotdog" ]; then
+    _antumbra_profile_suffix=""
+else
+    _antumbra_profile_suffix="/${ANTUMBRA_DEVICE}"
+fi
+OUT="${ANTUMBRA_OUT:-${BUILD_DIR}/out${_antumbra_profile_suffix}}"    # build products
+WORK="${ANTUMBRA_WORK:-${BUILD_DIR}/work${_antumbra_profile_suffix}}" # scratch space
 
 # ---------------------------------------------------------------------------
 # Version and reproducibility
@@ -85,7 +105,7 @@ sha256_check() {
     [ "${actual}" = "${expected}" ] || die "SHA-256 mismatch for ${file}: got ${actual}, expected ${expected}"
 }
 
-# lock_get KEY : read a value from device/oneplus-hotdog/sources.lock
+# lock_get KEY : read a value from the base device's sources.lock
 # (format: KEY=VALUE, one per line, '#' comments).
 lock_get() {
     local key="$1" lock="${DEVICE_DIR}/sources.lock" value

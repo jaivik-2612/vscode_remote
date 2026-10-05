@@ -1,0 +1,1 @@
+boot=live live-media=/dev/antumbra/live live-media-path=/live union=overlay nopersistence antumbra.live-bus=virtio console=ttyAMA0 slab_nomerge slub_debug=FZ init_on_free=1 init_on_alloc=1 page_alloc.shuffle=1 randomize_kstack_offset=on usbcore.authorized_default=0 systemd.condition_needs_update=no

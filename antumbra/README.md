@@ -60,6 +60,7 @@ the on-device procedure with its backups and recovery paths.
 ## Documents
 
 - `docs/architecture.md`: the design, section by section, with what is validated and what is not
+- `docs/vm-testing.md`: boot-testing the system in QEMU (`make vm-build`, `make vm-test`)
 - `docs/threat-model.md`: what Antumbra protects against, what it does not
 - `docs/device-oneplus-7t-pro.md`: the hardware, the port, the variants, the partitions
 - `docs/building.md`, `docs/flashing.md`, `docs/hardware-validation.md`

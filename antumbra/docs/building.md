@@ -66,6 +66,13 @@ the package set can be pinned to a `snapshot.debian.org` timestamp
 Debian's packages when no snapshot is pinned, and the live partition's
 free-space layout if `mke2fs` changes between e2fsprogs versions.
 
+## Testing in a VM
+
+`ANTUMBRA_DEVICE=qemu-virt` builds the same system for QEMU's arm64 `virt`
+machine (`make vm-build`, `make vm-run`, `make vm-test`); see
+`docs/vm-testing.md`. Profiles live in `device/<name>/device.conf`; the VM
+profile reuses the phone's sources, patches and hardening fragment.
+
 ## Checks before a release
 
 ```sh

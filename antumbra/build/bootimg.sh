@@ -12,6 +12,7 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
+[ "${IMAGE_OUTPUT:-sparse}" = "sparse" ] || die "this step is for the phone profile only (ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} builds a QEMU disk; see docs/vm-testing.md)"
 
 require_tools python3
 ensure_dirs

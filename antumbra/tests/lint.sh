@@ -59,6 +59,15 @@ else
     echo "yamllint not installed; skipped"
 fi
 
+step "device profiles"
+for d in device/*/; do
+    [ -f "${d}device.conf" ] || { echo "${d} has no device.conf"; fail=1; }
+done
+a="$(sed -n 's/^USERDATA_PARTITION_SIZE=//p' device/oneplus-hotdog/device.conf)"
+b="$(sed -n 's/^USERDATA_PARTITION_SIZE=//p' device/oneplus-hotdog/bootimg.conf)"
+[ "${a}" = "${b}" ] || { echo "USERDATA_PARTITION_SIZE differs between device.conf (${a}) and bootimg.conf (${b})"; fail=1; }
+echo "profiles: $(printf '%s ' device/*/)"
+
 step "file modes"
 for f in config/rootfs/etc/sudoers.d/*; do [ "$(stat -c %a "$f")" = "440" ] || { echo "$f must be 0440"; fail=1; }; done
 [ "$(stat -c %a config/rootfs/etc/usbguard/rules.conf)" = "600" ] || { echo "usbguard rules.conf must be 0600"; fail=1; }

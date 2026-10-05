@@ -6,6 +6,8 @@
 # Only a partition named "userdata" on the internal UFS controller is
 # considered, and the filesystem UUID must match the one recorded at build
 # time, so no attached USB medium can be mistaken for the system.
+# "antumbra.live-bus=virtio" on the kernel command line (the QEMU profile's
+# cmdline.txt, never the phone's) accepts a virtio block device instead.
 PREREQ="udev"
 prereqs() { echo "${PREREQ}"; }
 case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
@@ -16,12 +18,22 @@ if [ -z "${EXPECTED_UUID}" ]; then
     panic "antumbra: no live filesystem UUID recorded in the initramfs"
 fi
 
+LIVE_BUS=ufs
+# shellcheck disable=SC2013  # word splitting of the command line is the point
+for arg in $(cat /proc/cmdline); do
+    case "${arg}" in antumbra.live-bus=virtio) LIVE_BUS=virtio ;; esac
+done
+
 find_userdata() {
-    # Walk block devices: partition name "userdata" whose parent is on the UFS host.
+    # Walk block devices: partition name "userdata" whose parent is on the
+    # expected bus (the UFS host; a virtio disk in the QEMU profile).
     for part in /sys/class/block/*; do
         [ -r "${part}/partition" ] || continue
         devpath="$(readlink -f "${part}")"
-        case "${devpath}" in *ufshc*|*ufs*) ;; *) continue ;; esac
+        case "${LIVE_BUS}" in
+            virtio) case "${devpath}" in *virtio*) ;; *) continue ;; esac ;;
+            *)      case "${devpath}" in *ufshc*|*ufs*) ;; *) continue ;; esac ;;
+        esac
         dev="/dev/$(basename "${part}")"
         label="$(blkid -o value -s PART_ENTRY_NAME -p "${dev}" 2>/dev/null || true)"
         if [ "${label}" = "userdata" ]; then
@@ -39,7 +51,7 @@ while [ -z "${USERDATA}" ] && [ "${i}" -lt 60 ]; do
     USERDATA="$(find_userdata || true)"
     [ -n "${USERDATA}" ] || { sleep 1; i=$((i + 1)); }
 done
-[ -n "${USERDATA}" ] || panic "antumbra: no userdata partition on the UFS storage"
+[ -n "${USERDATA}" ] || panic "antumbra: no userdata partition on the ${LIVE_BUS} storage"
 
 LOOP="$(losetup --sector-size 4096 --partscan --find --show --direct-io=on "${USERDATA}")" \
     || panic "antumbra: losetup failed on ${USERDATA}"
