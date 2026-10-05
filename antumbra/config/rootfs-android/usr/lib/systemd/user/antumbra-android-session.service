@@ -2,6 +2,9 @@
 # Waydroid's user session: asks the root container service to boot Android,
 # bridges its windows, notifications and app list to the desktop, and stops
 # the container when it ends (logout, or "waydroid session stop").
+# RemainAfterExit: Android stopped in a session stays stopped (the path unit
+# would otherwise start it again at once); the "Android" launcher, or
+# "systemctl --user restart", starts it again.
 Description=Android apps session (Waydroid)
 ConditionPathExists=/run/antumbra/android-enabled
 ConditionPathExists=/run/antumbra/android-ready
@@ -12,3 +15,4 @@ Wants=antumbra-fdroid-install.service
 [Service]
 Type=simple
 ExecStart=/usr/bin/waydroid session start
+RemainAfterExit=yes

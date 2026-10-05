@@ -9,9 +9,12 @@
 # It lets Android start only on its Tor-only network: the firewall rules
 # that redirect the container's traffic to Tor and reject everything else,
 # the bridge with its address, no route from the bridge to the host's
-# loopback, and a container configuration attached to that bridge. Any
-# doubt fails closed. Finally it switches forwarding off on the bridge
-# again, in case something switched ip_forward off and on since boot.
+# loopback, and a container configuration attached to that bridge. And only
+# without the phone's identifiers: the generic kernel command line instead
+# of the host's (which carries the serial number), every hardware serial
+# number in sysfs masked, every device but cameras. Any doubt fails
+# closed. Finally it switches forwarding off on the bridge again, in case
+# something switched ip_forward off and on since boot.
 set -u
 BRIDGE=waydroid-tor
 CONFIG="${LXC_CONFIG_FILE:-/var/lib/waydroid/lxc/waydroid/config}"
@@ -43,6 +46,25 @@ ip -4 -o addr show dev "${BRIDGE}" 2>/dev/null | grep -q ' 10\.200\.2\.1/30 ' ||
 grep -Eq '^lxc\.net\.0\.type[[:space:]]*=[[:space:]]*veth[[:space:]]*$' "${CONFIG}" || fail "the container's network is not a veth pair"
 grep -Eq "^lxc\\.net\\.0\\.link[[:space:]]*=[[:space:]]*${BRIDGE}[[:space:]]*\$" "${CONFIG}" || fail "the container is not attached to ${BRIDGE}"
 if grep -Eq '^lxc\.net\.[1-9]' "${CONFIG}"; then fail "the container has a second network interface"; fi
+
+# Identifiers (antumbra-waydroid prepares both, config_3 binds the command line)
+CMDLINE=/run/antumbra/android-cmdline
+grep -qxF "lxc.mount.entry = ${CMDLINE} proc/cmdline none bind,create=file 0 0" "${CONFIG}" \
+    || fail "the container would see the host's kernel command line"
+[ -f "${CMDLINE}" ] || fail "no generic kernel command line for the container (${CMDLINE})"
+if grep -q 'androidboot\.' "${CMDLINE}"; then fail "${CMDLINE} names androidboot values"; fi
+# LXC's device list allows nothing until an "a" rule turns it into a deny list.
+[ "$(grep -E '^lxc\.cgroup2\.devices\.' "${CONFIG}")" = "$(printf '%s\n' 'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm')" ] \
+    || fail "the container's device rules are not exactly: allow a, then deny V4L2"
+# The names antumbra-waydroid masks (SERIAL_NAMES there)
+serials="$(find /sys/devices \( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 -o -name wwid \) -type f 2>/dev/null)"
+while IFS= read -r path; do
+    [ -n "${path}" ] || continue
+    case "${path}" in *[[:space:]\\]*) fail "cannot check the mask of ${path}" ;; esac
+    grep -qxF "lxc.mount.entry = /dev/null ${path#/} none bind,ro 0 0" "${CONFIG}" || fail "${path} is not masked in the container"
+done <<EOF
+${serials}
+EOF
 
 sysctl -q "net.ipv4.conf.${BRIDGE}.forwarding=0" || fail "could not switch forwarding off on ${BRIDGE}"
 logger -t antumbra-waydroid -p daemon.info -- "Android container network checked: Tor only"

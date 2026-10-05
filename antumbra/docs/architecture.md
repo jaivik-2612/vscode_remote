@@ -790,11 +790,18 @@ RAM. `config/hooks/56-session-android.sh` then:
   container's configuration on every `init` and `upgrade`: the link moves
   from `waydroid0` to `waydroid-tor`, `sys_time` leaves the kept
   capabilities (Waydroid's seccomp profile already makes the set-time
-  calls no-ops), and `config_3` gains the start-host hook, a device-cgroup
-  deny of V4L2 (major 81) and an empty read-only tmpfs over
-  `/sys/firmware`, which otherwise shows apps the phone's device-tree
-  model through the host's sysfs. Every edit is checked; a template that
-  no longer matches fails the build;
+  calls no-ops), and `config_3` gains the start-host hook, the device
+  rules "allow everything, then deny V4L2 (major 81)" (LXC 6's device list
+  starts as "allow nothing" and only an `a` rule turns it into a deny
+  list, so a lone deny would block `/dev/null` and binder too), an empty
+  read-only tmpfs over `/sys/firmware`, which otherwise shows apps the
+  phone's device-tree model through the host's sysfs, and a bind of a
+  generic kernel command line over `/proc/cmdline`: the phone's boot
+  loader adds `androidboot.serialno` to the host's, which Android's init
+  would make `ro.serialno`, readable by every app. `config_base` gains a
+  post-stop hook ahead of Waydroid's own `/dev/null` one (which fails on
+  purpose, so that LXC turns an Android reboot into a stop). Every edit
+  is checked; a template that no longer matches fails the build;
 - applies `waydroid-no-video.diff` (dry run first, failure fails the
   build): Waydroid stops making `/dev/video*` mode 0777 and passing it
   into the container;
@@ -819,9 +826,16 @@ RAM. `config/hooks/56-session-android.sh` then:
    values from `/usr/share/antumbra/android/product.prop`; multi-window
    mode; density 480 on the phone and 320 in the VM; in a VM software
    rendering, which Waydroid turns into ANGLE on SwiftShader), runs
-   `waydroid init` and `waydroid upgrade -o`, checks the generated
-   configuration, starts the container service and writes
-   `/run/antumbra/android-ready`.
+   `waydroid init` and `waydroid upgrade -o`, copies the generic kernel
+   command line to `/run/antumbra/android-cmdline` (writable, because
+   Android's first-stage init may chmod `/proc/cmdline`), masks every
+   hardware serial number file in sysfs (`serial_number`, `serial`,
+   `vpd_pg80`, `vpd_pg83`, `wwid`: the SoC's, the UFS device's, the
+   disks') with read-only binds of `/dev/null` in the generated
+   configuration, checks it, starts the container service and writes
+   `/run/antumbra/android-ready`. The start-host hook refuses to start
+   the container if the command line bind, the device rules or a mask is
+   missing.
 3. In the session, `antumbra-android-session.path` starts `waydroid
    session start` once Android is ready: Android boots, its apps open as
    ordinary windows (app_id `waydroid.<package>`), and Waydroid writes a
@@ -838,7 +852,15 @@ because it can be mounted from an unprivileged user namespace. While
 Android runs, Waydroid opens them, the GPU render node, the DMA-BUF heaps
 and the framebuffers to every local user, because Waydroid's host-side
 session, which runs as the user, talks to Android through binder. What
-this means is in `threat-model.md`.
+this means is in `threat-model.md`. When the container stops (`waydroid
+session stop`, logout, Android shutting down), its post-stop hook starts
+`antumbra-waydroid-stopped.service`, which waits for Waydroid's own
+clean-up and stops the container service; the service's `ExecStopPost`
+puts binder and the DMA-BUF heaps back to 0600 and lets udev re-apply
+its modes to the render node and the framebuffers. The next `waydroid
+session start` (the "Android" launcher) starts the service again through
+D-Bus. The session unit has `RemainAfterExit=yes`, so Android stopped in
+a session stays stopped.
 
 ## 12. Persistent Storage
 
