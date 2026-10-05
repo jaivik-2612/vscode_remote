@@ -13,10 +13,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config",
 from antumbra.greetd import Greetd, GreetdError  # noqa: E402
 
 
-def fake_greetd(path, script, received):
+def fake_greetd(path, script, received, ready):
     srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     srv.bind(path)
     srv.listen(1)
+    # The socket file exists from bind(); a client is only accepted from
+    # listen() on, so readiness is signalled here, not by the file.
+    srv.settimeout(10)
+    ready.set()
     conn, _ = srv.accept()
     for reply in script:
         (length,) = struct.unpack("=I", conn.recv(4))
@@ -32,11 +36,11 @@ class GreetdTest(unittest.TestCase):
         d = tempfile.mkdtemp()
         path = os.path.join(d, "greetd.sock")
         received = []
-        t = threading.Thread(target=fake_greetd, args=(path, script, received))
+        ready = threading.Event()
+        t = threading.Thread(target=fake_greetd, args=(path, script, received, ready), daemon=True)
         t.start()
         try:
-            while not os.path.exists(path):
-                pass
+            self.assertTrue(ready.wait(10), "fake greetd did not start")
             os.environ["GREETD_SOCK"] = path
             Greetd().start_user_session("amnesia", ["/usr/libexec/antumbra-session"], ["A=1"])
         finally:
