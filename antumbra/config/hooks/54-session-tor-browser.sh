@@ -25,6 +25,10 @@ rm -f /usr/local/lib/tor-browser/TorBrowser/Tor/tor
 ICON="$(find /usr/local/lib/tor-browser/browser/chrome/icons/default -name 'default128.png' 2>/dev/null | head -n1 || true)"
 if [ -n "${ICON}" ]; then install -D -m 0644 "${ICON}" /usr/share/icons/hicolor/128x128/apps/tor-browser.png; fi
 chown -R root:root /usr/local/lib/tor-browser /etc/tor-browser
+# The tarball's directories are private (0700); the browser runs as the
+# session user and copies the profile skeleton, so both must be readable
+# (Tails' 10-tbb does the same).
+chmod -R a+rX /usr/local/lib/tor-browser /etc/tor-browser
 rm -rf "${TMP}"
 cat "${SRC}/version" > /usr/share/antumbra/tor-browser.version
 echo "Tor Browser $(cat /usr/share/antumbra/tor-browser.version) installed"

@@ -461,10 +461,10 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     except Exception:  # noqa: BLE001
         pass
     if tour:
-        take_tour(vm, sh, out, T)
+        take_tour(vm, rep, sh, out, T)
 
 
-def take_tour(vm, sh, out, T):
+def take_tour(vm, rep, sh, out, T):
     """Best-effort screenshots of the session (no checks)."""
     def shot(name):
         try:
@@ -483,8 +483,11 @@ def take_tour(vm, sh, out, T):
        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus XDG_SESSION_TYPE=wayland "
        "setsid -f /usr/local/bin/tor-browser >/dev/null 2>&1; echo started", timeout=60)
     time.sleep(T(150))
-    rc, o = sh("ip netns identify $(pgrep -u amnesia -f 'tor-browser.*firefox|/firefox' | head -1) 2>/dev/null; pgrep -u amnesia -fc firefox", timeout=60)
-    print(f"tour: Tor Browser namespace/process count: {o.strip()!r}", flush=True)
+    rc, o = sh("P=$(pgrep -u amnesia -f '/firefox' | head -1); echo procs=$(pgrep -u amnesia -fc '/firefox'); "
+               "echo netns=$([ -n \"$P\" ] && ip netns identify $P)", timeout=60)
+    f = dict(line.split("=", 1) for line in o.split("\n") if "=" in line)
+    rep.check("tour: Tor Browser runs inside its own network namespace (tbb)",
+              f.get("procs", "0") not in ("", "0") and f.get("netns", "").strip() == "tbb", o.replace("\n", " "))
     shot("tour-tor-browser.png")
 
 

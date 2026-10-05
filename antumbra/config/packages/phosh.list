@@ -10,3 +10,6 @@ gstreamer1.0-plugins-good
 gstreamer1.0-pipewire
 alsa-ucm-conf
 adwaita-icon-theme
+# GTK loads the (SVG) icon theme through gdk-pixbuf's SVG loader, which
+# GTK only recommends: without it every icon is a placeholder.
+librsvg2-common
