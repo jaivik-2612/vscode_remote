@@ -382,15 +382,16 @@ def smoke(vm, scale, stop_after, debug):
         rep.check("guest: selfcheck reports the firewall OK", "firewall OK" in o, o.replace("\n", " | ")[:300])
         rc, o = sh("systemctl is-active tor.service tor@default.service 2>/dev/null | tr '\\n' ' '")
         rep.check("guest: Tor running", "active" in o.split(), o)
-        rc, o = sh("ip -o link | grep -vc ': lo:' ; lsmod | grep -c '^virtio_net'; systemctl is-active NetworkManager 2>/dev/null")
+        # The veth pairs of the confined-application namespaces are expected; nothing else may exist.
+        rc, o = sh("ip -o link | grep -vcE ': (lo|veth-[a-z]+)[:@]' ; lsmod | grep -c '^virtio_net'; systemctl is-active NetworkManager 2>/dev/null")
         parts = o.split("\n")
         rep.check("guest: no network interface or driver before the Welcome decision", parts[0] == "0" and parts[1] == "0" and "inactive" in o, o.replace("\n", " "))
         rc, o = sh("grep -c virtio_net /etc/modprobe.d/all-net-blocklist.conf")
         rep.check("guest: virtio_net is in the driver blocklist", o.strip() != "0", o)
         rc, o = sh("cat /etc/resolv.conf | grep -v '^#' | tr '\\n' ' '")
         rep.check("guest: resolver is loopback only", "127.0.0.1" in o and "10.0.2" not in o, o)
-        rc, o = sh("swapon --show --noheadings | awk '{print $1}' | tr '\\n' ' '; sysctl -n kernel.dmesg_restrict; findmnt -no FSTYPE /var/log")
-        rep.check("guest: zram-only swap, dmesg restricted, volatile logs", "/dev/" not in o.replace("/dev/zram", "") and "\n1\n" in "\n" + o + "\n" and "tmpfs" in o, o.replace("\n", " "))
+        rc, o = sh("swapon --show --noheadings | awk '{print $1}' | tr '\\n' ' '; sysctl -n kernel.dmesg_restrict; grep -rhs '^Storage=' /usr/lib/systemd/journald.conf.d/ /etc/systemd/journald.conf.d/; test -d /var/log/journal && echo persistent-journal || echo no-journal-dir")
+        rep.check("guest: zram-only swap, dmesg restricted, volatile journal", "/dev/" not in o.replace("/dev/zram", "") and "\n1\n" in "\n" + o + "\n" and "Storage=volatile" in o and "no-journal-dir" in o, o.replace("\n", " "))
         rc, o = sh("blkid -o value -s TYPE $(cat /run/antumbra/loop-device)p2; echo end")
         rep.check("guest: Persistent Storage partition is untouched (no filesystem)", o.strip() == "end", o)
         rc, o = sh("systemctl is-active greetd 2>/dev/null; pgrep -c phoc; pgrep -c antumbra-welcome", timeout=60)
@@ -416,9 +417,14 @@ def smoke(vm, scale, stop_after, debug):
     rep.check("network: no packet left the guest before the Welcome decision", not leaks,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(counts.items())) or "no frames")
     if stop_after:
-        # 2. Shutdown: the power button starts the return to the initramfs, QEMU exits.
+        # 2. Shutdown: a short power-key press is ignored by design (logind
+        #    HandlePowerKey=ignore, long press powers off), so ask from inside;
+        #    without a console, send the key anyway and expect nothing.
         try:
-            vm.qmp("system_powerdown")
+            if debug:
+                sh("systemctl --no-block poweroff", timeout=30)
+            else:
+                vm.qmp("system_powerdown")
             deadline = time.monotonic() + T(300)
             while vm.alive() and time.monotonic() < deadline:
                 time.sleep(1)

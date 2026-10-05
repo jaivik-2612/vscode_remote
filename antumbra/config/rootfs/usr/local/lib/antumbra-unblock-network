@@ -29,8 +29,9 @@ udevadm control --reload
 # Load the known Wi-Fi driver explicitly, then replay add events for the
 # platform and net subsystems so anything else blocked comes up too.
 modprobe ath10k_snoc || true
+# (virtio: the QEMU test profile's network device, docs/vm-testing.md.)
 timeout --verbose 120 udevadm trigger --settle --type=devices --action=add \
-    --subsystem-match=platform --subsystem-match=net --subsystem-match=ieee80211 || true
+    --subsystem-match=platform --subsystem-match=net --subsystem-match=ieee80211 --subsystem-match=virtio || true
 udevadm settle
 
 systemctl enable NetworkManager.service NetworkManager-wait-online.service || :

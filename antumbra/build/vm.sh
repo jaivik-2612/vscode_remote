@@ -86,7 +86,8 @@ if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then
     [[ "${ROOTHASH}" =~ ^[0-9a-f]{64}$ ]] || die "malformed root hash"
     CMDLINE="${CMDLINE} dm-verity-root-hash=filesystem.squashfs:${ROOTHASH} dm-verity-oncorruption=panic"
 fi
-[ -z "${DEBUG}" ] || CMDLINE="${CMDLINE} antumbra.debug=1"
+# Debug: the hvc0 root shell (debug builds only) and the journal on the serial console.
+[ -z "${DEBUG}" ] || CMDLINE="${CMDLINE} antumbra.debug=1 systemd.journald.forward_to_console=1 systemd.journald.max_level_console=info"
 # A panic in the initramfs reboots after ten seconds; with -no-reboot QEMU
 # exits instead, which is the failure signal the harness looks for.
 CMDLINE="${CMDLINE} panic=10"
