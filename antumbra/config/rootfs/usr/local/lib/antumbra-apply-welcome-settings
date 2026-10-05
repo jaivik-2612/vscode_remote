@@ -37,7 +37,10 @@ SAVED_ON_VOLUME="${EXPORTED_PERSISTENT} antumbra.android"
 ANDROID_DIR=/usr/share/antumbra/android
 
 log() { logger -t antumbra-welcome -p daemon.info -- "$*"; echo "$*" >&2; }
-fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; exit 1; }
+# On failure the welcome-done marker goes too: the path unit would otherwise
+# start this again at once, with the settings already consumed; the Welcome
+# screen shows the error and writes everything again on the next Start.
+fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; rm -f "${TRANSIENT}/welcome-done"; exit 1; }
 cleanup() {
     if [ -f "${STAGE}/antumbra.persistence-passphrase" ]; then
         shred -u "${STAGE}/antumbra.persistence-passphrase" 2>/dev/null || true

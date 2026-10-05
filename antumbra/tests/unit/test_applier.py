@@ -213,6 +213,14 @@ def inner(spec_path, out_path):
 
     env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"}
     r = subprocess.run(["/usr/local/lib/antumbra-apply-welcome-settings"], env=env, capture_output=True, text=True, timeout=120)
+    rerun = None
+    if spec.get("rerun"):
+        # What the path unit does when the service failed and welcome-done
+        # still exists: start it again, before the greeter writes anything.
+        transient_before = sorted(os.listdir(SETTINGS + "/transient"))
+        r2 = subprocess.run(["/usr/local/lib/antumbra-apply-welcome-settings"], env=env, capture_output=True, text=True, timeout=120)
+        rerun = {"transient_before": transient_before, "rc": r2.returncode, "stderr": r2.stderr,
+                 "marker": os.path.exists("/run/antumbra/welcome-applied")}
 
     def log(name):
         try:
@@ -259,7 +267,7 @@ def inner(spec_path, out_path):
         "amnesia_hash": shadow.get("amnesia"),
         "written_hash": S.read_setting(os.path.join(tmp, "persistent", "tails.password"), "TAILS_USER_PASSWORD"),
         "persistence": log("persistence"), "systemctl": log("systemctl"), "unblock": log("unblock"),
-        "leaks": leaks, "secret_intact": secret_now == SECRET_TEXT,
+        "leaks": leaks, "secret_intact": secret_now == SECRET_TEXT, "rerun": rerun,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -367,6 +375,18 @@ class ApplierTest(unittest.TestCase):
         self.assertEqual(res["unblock"], [])
         self.assertFalse(res["stage_left"], "the staged passphrase was left behind")
         self.assertNotIn("antumbra.persistence-passphrase", res["transient"])
+
+    def test_failure_is_not_retried_with_consumed_settings(self):
+        # After a failure the welcome-done marker is gone, so the path unit
+        # does not start the applier again on settings it already consumed
+        # (which would apply an empty, offline configuration and keep the
+        # user from retrying this boot).
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": "not the passphrase"},
+                               volume={"passphrase": self.PP}, rerun=True)
+        self.assertEqual(res["rc"], 1, self.diag)
+        self.assertNotIn("welcome-done", res["rerun"]["transient_before"])
+        self.assertNotEqual(res["rerun"]["rc"], 0, res["rerun"]["stderr"])
+        self.assertFalse(res["rerun"]["marker"], "a rerun applied settings")
 
     def test_missing_admin_setting(self):
         res = self.run_applier({"user_password": "lock passphrase"}, remove=["persistent/antumbra.admin"])

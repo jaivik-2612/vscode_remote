@@ -644,7 +644,11 @@ answers once.
    "Welcome settings" feature, owned by the greeter user); sets the user's
    password with `chpasswd -e` or deletes it; installs the sudoers and
    polkit admin rules when asked; writes the marker; runs
-   `antumbra-unblock-network`. What is applied is always what the Welcome
+   `antumbra-unblock-network`. On a failure (a wrong passphrase, say) it
+   writes `/run/antumbra/welcome-failed` and removes `welcome-done`, so
+   that its path unit does not start it again on settings it has already
+   consumed; the Welcome screen shows the error and writes everything
+   again on the next Start. What is applied is always what the Welcome
    screen showed this boot: the volume is unlocked only after Start, so
    the Welcome screen cannot show the stored settings, and stored settings
    that silently replaced this boot's choice (offline mode, MAC address
