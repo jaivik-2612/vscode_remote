@@ -1,6 +1,19 @@
 #!/bin/sh
-# Tails' 05-replace_swapon: swap is only ever allowed on zram devices.
-case "$*" in
-    *zram*) exec /sbin/swapon.real "$@" ;;
-    *) echo "swapon: refusing swap outside zram on an amnesic system" >&2; exit 1 ;;
-esac
+# Tails' swapon replacement (05-replace_swapon): swap may only ever be
+# enabled on zram devices. Every device named on the command line must be a
+# zram device; enabling by fstab, label or UUID is refused; queries
+# (--show, --summary, no arguments) pass through.
+refuse() { echo "swapon: refusing swap outside zram on an amnesic system ($1)" >&2; exit 1; }
+skip=""
+for arg in "$@"; do
+    if [ -n "${skip}" ]; then skip=""; continue; fi
+    case "${arg}" in
+        -o|--options|-p|--priority) skip=1 ;;
+        -a|--all|-e|--ifexists) refuse "${arg}" ;;
+        -L|-L*|-U|-U*|LABEL=*|UUID=*|PARTUUID=*|PARTLABEL=*) refuse "${arg}" ;;
+        -*) ;;
+        /dev/zram[0-9]*) ;;
+        *) refuse "${arg}" ;;
+    esac
+done
+exec /sbin/swapon.real "$@"

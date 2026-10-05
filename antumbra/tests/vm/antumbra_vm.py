@@ -395,16 +395,19 @@ def smoke(vm, scale, stop_after, debug):
         rep.check("guest: zram-only swap, dmesg restricted, volatile journal", "/dev/" not in o.replace("/dev/zram", "") and "\n1\n" in "\n" + o + "\n" and "Storage=volatile" in o and "no-journal-dir" in o, o.replace("\n", " "))
         rc, o = sh("blkid -o value -s TYPE $(cat /run/antumbra/loop-device)p2; echo end")
         rep.check("guest: Persistent Storage partition is untouched (no filesystem)", o.strip() == "end", o)
-        rc, o = sh("systemctl is-active greetd 2>/dev/null; pgrep -c phoc; pgrep -c antumbra-welcome", timeout=60)
+        rc, o = sh("systemctl is-active greetd 2>/dev/null; pgrep -xc phoc; pgrep -fc /usr/bin/antumbra-welcome", timeout=60)
         parts = o.split("\n")
         if "active" in parts[0]:
-            rep.check("guest: greeter session (greetd + phoc) running", parts[0] == "active" and parts[1] != "0", o.replace("\n", " "))
+            rep.check("guest: greeter session (greetd + phoc) running", parts[0] == "active" and parts[1] not in ("0", ""), o.replace("\n", " "))
             # Give the Welcome screen time to draw under emulation, then capture it.
+            welcome = False
             for _ in range(int(T(60))):
-                rc, o = sh("pgrep -c antumbra-welcome", timeout=30)
+                rc, o = sh("pgrep -fc /usr/bin/antumbra-welcome", timeout=30)
                 if o.strip() not in ("0", ""):
+                    welcome = True
                     break
                 time.sleep(1)
+            rep.check("guest: Welcome screen process running", welcome, o.strip())
             time.sleep(T(20))
         else:
             print("no greetd (minimal build): skipping the session checks", flush=True)
@@ -438,8 +441,14 @@ def smoke(vm, scale, stop_after, debug):
             while vm.alive() and time.monotonic() < deadline:
                 time.sleep(1)
             rep.check("shutdown: VM powered off after the power button", not vm.alive())
-            tail = open(vm.serial.path, "rb").read().decode("utf-8", "replace")[-3000:]
-            rep.check("shutdown: returned to the initramfs", "initramfs" in tail.lower() and ("unmount" in tail.lower() or "shutdown" in tail.lower()), tail.strip().split("\n")[-1][:160])
+            tail = open(vm.serial.path, "rb").read().decode("utf-8", "replace")[-6000:]
+            # The initramfs' shutdown hook (traced with set -x) moves the medium out of the
+            # old root, unmounts it, removes the verity device, detaches the loop device and
+            # drops the page cache before systemd-shutdown powers off.
+            steps = ["umount --recursive /mnt/live/medium", "dmsetup remove_all", "losetup -D", "drop_caches"]
+            missing = [x for x in steps if x not in tail]
+            rep.check("shutdown: returned to the initramfs, unmounted the medium, dropped caches", not missing,
+                      ("missing: " + ", ".join(missing)) if missing else "; ".join(steps))
         except Exception as e:  # noqa: BLE001
             rep.check("shutdown", False, str(e))
         vm.stop()

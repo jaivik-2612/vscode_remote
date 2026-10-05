@@ -59,6 +59,12 @@ else
     echo "yamllint not installed; skipped"
 fi
 
+step "compositor configuration"
+# phoc aborts at startup on a malformed mode (the refresh rate needs "Hz").
+bad_modes="$(grep -nE '^[[:space:]]*mode[[:space:]]*=' config/rootfs/etc/antumbra/phoc.ini \
+    | grep -vE '=[[:space:]]*[0-9]+x[0-9]+(@[0-9]+(\.[0-9]+)?Hz)?[[:space:]]*$' || true)"
+if [ -n "${bad_modes}" ]; then echo "phoc.ini: malformed mode line(s): ${bad_modes}"; fail=1; else echo "phoc.ini: mode lines valid"; fi
+
 step "device profiles"
 for d in device/*/; do
     [ -f "${d}device.conf" ] || { echo "${d} has no device.conf"; fail=1; }
