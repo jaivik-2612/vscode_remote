@@ -29,6 +29,10 @@ STATUS_FILE = "/run/antumbra/selfcheck.status"
 DATA_STATE_FILE = "/run/antumbra/persistence-state"   # written by antumbra-persistence status at boot
 TOR_BROWSER_WARNING = ("Tor Browser for arm64 Linux exists only in Tor Project's alpha channel. "
                        "Tor Project advises people at risk not to rely on alpha releases.")
+# Android apps exist only in images built with ANTUMBRA_ANDROID=1 (shown in
+# --demo and --self-test too, so that the switch can be tried anywhere).
+ANDROID_AVAILABLE = os.path.isdir("/usr/share/antumbra/android") or DEMO
+ANDROID_WARNING = "A weaker sandbox than the rest of Antumbra: use only apps you trust."
 
 
 def selfcheck_failures():
@@ -53,6 +57,7 @@ class WelcomeWindow(Adw.ApplicationWindow):
         super().__init__(application=app, title="Welcome to Antumbra")
         self.set_default_size(480, 1000)
         self.model = S.WelcomeSettings()
+        self.android_row = self.android_keep_row = None
 
         view = Adw.ToolbarView()
         header = Adw.HeaderBar()
@@ -123,6 +128,22 @@ class WelcomeWindow(Adw.ApplicationWindow):
                                        subtitle="Off by default, as in Tails")
         g.add(self.admin_row)
 
+        # --- Android apps (images built with ANTUMBRA_ANDROID=1) ----------------------
+        if ANDROID_AVAILABLE:
+            g = Adw.PreferencesGroup(title="Android apps",
+                                     description="Android 13 (LineageOS) in a container, with F-Droid and no Google apps. "
+                                                 "Its traffic goes only through Tor. Off by default.")
+            page.add(g)
+            # Alt+A toggles it from a keyboard (the VM test uses that too).
+            self.android_row = Adw.SwitchRow(title="_Android apps (experimental)", use_underline=True,
+                                             subtitle=ANDROID_WARNING)
+            self.android_row.connect("notify::active", self.on_persistence_changed)
+            g.add(self.android_row)
+            self.android_keep_row = Adw.SwitchRow(title="Keep Android apps and data",
+                                                  subtitle="In Persistent Storage, with Android's own usage history")
+            self.android_keep_row.set_sensitive(False)
+            g.add(self.android_keep_row)
+
         # --- Notes ------------------------------------------------------------------------
         g = Adw.PreferencesGroup(title="Before you start")
         page.add(g)
@@ -152,6 +173,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
         choice = self.pers_choices[self.pers_combo.get_selected()]
         self.pers_pass.set_sensitive(choice != "none")
         self.pers_pass2.set_sensitive(choice == "create")
+        # Android's data can be kept only with Android on and Persistent Storage in use.
+        if self.android_keep_row is not None:
+            self.android_keep_row.set_sensitive(choice != "none" and self.android_row.get_active())
 
     def on_network_changed(self, *_):
         self.bridges_row.set_sensitive(self.net_combo.get_selected() == 1)
@@ -180,6 +204,9 @@ class WelcomeWindow(Adw.ApplicationWindow):
         m.admin = self.admin_row.get_active()
         if m.admin and not m.user_password:
             raise ValueError("Administration needs a passphrase.")
+        if self.android_row is not None:
+            m.android = self.android_row.get_active()
+            m.android_persistent = m.android and self.android_keep_row.get_active() and m.persistence != "none"
 
     def on_start(self, _button):
         self.error_label.set_text("")
@@ -264,9 +291,15 @@ class WelcomeApp(Adw.Application):
         try:
             win.pass_row.set_text("selftest-passphrase")
             win.pass2_row.set_text("selftest-passphrase")
+            if win.android_row is not None:
+                win.android_row.set_active(True)
             win.collect()
             root = tempfile.mkdtemp(prefix="antumbra-welcome-selftest-")
             win.model.write(root)
+            if win.android_row is not None:
+                android = S.read_setting(os.path.join(root, "persistent", "antumbra.android"), "ANTUMBRA_ANDROID_ENABLED")
+                if android != "true":
+                    raise RuntimeError(f"Android apps switch not written ({android})")
             print("self-test: settings written to", root)
             for d in ("persistent", "transient"):
                 for name in sorted(os.listdir(os.path.join(root, d))):

@@ -15,6 +15,8 @@ GREETER_USER=antumbra-greeter
 SUDOERS=/etc/sudoers.d/antumbra-admin
 POLKIT=/etc/polkit-1/rules.d/10-antumbra-admin.rules
 EXPORTED_PERSISTENT="tails.macspoof tails.network tails.bridges antumbra.admin"
+# Only in images built with ANTUMBRA_ANDROID=1 (antumbra.android is exported below).
+ANDROID_DIR=/usr/share/antumbra/android
 
 log() { logger -t antumbra-welcome -p daemon.info -- "$*"; echo "$*" >&2; }
 fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; exit 1; }
@@ -28,6 +30,28 @@ for d in "${PERSISTENT}" "${TRANSIENT}"; do
 done
 owned_by_greeter() { [ -e "$1" ] && [ "$(stat -c %U "$1")" = "${GREETER_USER}" ]; }
 
+# --- Android apps (images built with ANTUMBRA_ANDROID=1) -------------------------------
+# Exported before Persistent Storage is activated: activation mounts the stored
+# Welcome settings over ${PERSISTENT}, which would hide this boot's choice.
+ANDROID=false
+ANDROID_KEEP=false
+if [ -d "${ANDROID_DIR}" ] && owned_by_greeter "${PERSISTENT}/antumbra.android"; then
+    install -m 0644 -o root -g root "${PERSISTENT}/antumbra.android" "${APPLIED}/antumbra.android"
+    ANDROID="$(sed -n 's/^ANTUMBRA_ANDROID_ENABLED=//p' "${APPLIED}/antumbra.android" | tr -d "'\"")"
+    ANDROID_KEEP="$(sed -n 's/^ANTUMBRA_ANDROID_PERSISTENT=//p' "${APPLIED}/antumbra.android" | tr -d "'\"")"
+fi
+# The "android" Persistent Storage feature is mounted only in a session with
+# Android apps on and "Keep Android apps and data" chosen; its directory on
+# the volume is created the first time.
+activate_persistence() {
+    if [ "${ANDROID}" = "true" ] && [ "${ANDROID_KEEP}" = "true" ]; then
+        antumbra-persistence enable android || return 1
+        antumbra-persistence activate
+    else
+        antumbra-persistence activate --skip android
+    fi
+}
+
 # --- Persistent Storage first: persistent settings may live on it -------------------
 PERS_MODE="$(sed -n 's/^ANTUMBRA_PERSISTENCE=//p' "${TRANSIENT}/antumbra.persistence" 2>/dev/null | tr -d "'\"")"
 PP="${TRANSIENT}/antumbra.persistence-passphrase"
@@ -36,12 +60,12 @@ case "${PERS_MODE:-none}" in
         owned_by_greeter "${PP}" || fail "no passphrase for creating Persistent Storage"
         antumbra-persistence create --passphrase-file "${PP}" || fail "creating Persistent Storage failed"
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "unlocking the new Persistent Storage failed"
-        antumbra-persistence activate || fail "activating Persistent Storage failed"
+        activate_persistence || fail "activating Persistent Storage failed"
         ;;
     unlock)
         owned_by_greeter "${PP}" || fail "no passphrase for unlocking Persistent Storage"
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "wrong passphrase, or Persistent Storage is damaged"
-        antumbra-persistence activate || fail "activating Persistent Storage failed"
+        activate_persistence || fail "activating Persistent Storage failed"
         ;;
 esac
 if [ -e "${PP}" ]; then shred -u "${PP}" 2>/dev/null || rm -f "${PP}"; fi
@@ -78,6 +102,16 @@ if [ -n "${HASH}" ]; then
 else
     passwd -d "${LIVE_USERNAME}" >/dev/null
     log "no passphrase: screen lock is not protective, administration disabled"
+fi
+
+# --- Android apps on for this session -------------------------------------------------------
+# The flag gates Waydroid's container service, its DHCP and the user's
+# session units; it exists before the session starts. Preparing Android
+# takes a while, so it is not waited for.
+if [ "${ANDROID}" = "true" ]; then
+    touch /run/antumbra/android-enabled
+    systemctl --no-block start antumbra-waydroid.service || log "starting Android apps reported an error (see journal)"
+    log "Android apps enabled for this session"
 fi
 
 # --- Network: unblock drivers (MAC spoofing fires per interface) ---------------------------

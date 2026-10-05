@@ -36,3 +36,8 @@ In order of importance.
     published build attestations.
 13. **Second device**: the OnePlus 7 Pro (`guacamole`, same SoC) once its
     mainline status is comparable.
+14. **Android apps** (experimental, `ANTUMBRA_ANDROID=1`): validation on
+    the phone; Waydroid's AppArmor profiles in enforce mode; binder for
+    Android only (not every local user); `.onion` and per-app Tor
+    isolation inside Android; pinning the extracted images' hashes; newer
+    images when Waydroid publishes them.

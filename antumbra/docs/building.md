@@ -12,12 +12,13 @@ file ownership); everything else runs as a user.
 sudo apt-get install -y mmdebstrap debian-archive-keyring qemu-user-static binfmt-support arch-test \
     squashfs-tools e2fsprogs android-sdk-libsparse-utils systemd-repart zstd python3 \
     clang lld llvm make bc bison flex libssl-dev libelf-dev kmod cpio git curl gpg gpgv \
-    cryptsetup-bin fastboot shellcheck nftables tor python3-pytest yamllint
+    cryptsetup-bin fastboot shellcheck nftables tor python3-pytest yamllint unzip openssl
 arch-test arm64        # must print "arm64: ok" on an x86_64 host
 ```
 
 Disk: about 6 GB for the kernel tree and build, 4 GB for the root
-filesystem, plus the images.
+filesystem, plus the images. Android apps (`ANTUMBRA_ANDROID=1`) add about
+3.5 GB to the cache and 2.5 GB to the root filesystem.
 
 ## Steps
 
@@ -26,7 +27,7 @@ run on its own and is idempotent.
 
 | Step | Script | Produces |
 |---|---|---|
-| fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified) |
+| fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified); with `ANTUMBRA_ANDROID=1` also the Waydroid images (SHA-256, size and CRC verified, then extracted) and F-Droid (SHA-256, OpenPGP and APK certificate verified) |
 | kernel | `kernel.sh` | `build/out/kernel/`: raw arm64 `Image`, DTB, stripped modules tarball, config, kernel release, ASLR sysctl values |
 | libcamera (optional) | `libcamera.sh` (root) | only with `ANTUMBRA_LIBCAMERA_LOCAL=1`: `build/out/libcamera-repo/`, the port's patched libcamera 0.7.2 as arm64 packages in a local apt repository (`camera.md`) |
 | rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt` |
@@ -47,6 +48,7 @@ Wi-Fi or audio. See `docs/legal.md`.
 | Variable | Effect |
 |---|---|
 | `ANTUMBRA_MINIMAL=1` | base + network + amnesia package lists only, no Phosh, apps or Tor Browser: validates the pipeline in a fraction of the time |
+| `ANTUMBRA_ANDROID=1` | Android apps: Waydroid, the LineageOS 20 images of the profile's `WAYDROID_IMAGE_VARIANT` and F-Droid, off until turned on at the Welcome screen (`architecture.md`, section 11.1). Recorded in `build-flags` and the release manifest; not combinable with `ANTUMBRA_MINIMAL=1`. Without it the image has no Waydroid, Android images or Android services; the firewall's Android rules and the kernel's binder driver are there but unused (binder devices root-only) |
 | `ANTUMBRA_DEBUG=1` | debug command line; `release.sh` refuses to package such a build |
 | `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line |
 | `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware` |

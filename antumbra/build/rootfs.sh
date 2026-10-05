@@ -13,6 +13,8 @@
 # Knobs  : ANTUMBRA_MINIMAL=1  base + network + amnesia lists only (pipeline validation)
 #          ANTUMBRA_DEBUG=1    debug console/initramfs (never for releases)
 #          ANTUMBRA_LIBCAMERA_LOCAL=1  libcamera from build/out/libcamera-repo (libcamera.sh)
+#          ANTUMBRA_ANDROID=1  Android apps: android.list, config/rootfs-android/,
+#                              build/cache/waydroid/ and build/cache/f-droid/ (fetch-sources.sh)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -52,6 +54,10 @@ else
         LISTS+=(vm-debug)
     fi
 fi
+if [ -n "${ANTUMBRA_ANDROID}" ]; then
+    [ -z "${ANTUMBRA_MINIMAL}" ] || die "ANTUMBRA_ANDROID=1 needs the session (the Welcome screen turns Android on); unset ANTUMBRA_MINIMAL"
+    LISTS+=(android)
+fi
 PKGS=()
 for l in "${LISTS[@]}"; do
     f="${CONFIG_DIR}/packages/${l}.list"
@@ -76,6 +82,25 @@ python3 -c "import uuid; print(uuid.uuid5(uuid.NAMESPACE_URL, 'antumbra:${ANTUMB
 if [ -z "${ANTUMBRA_MINIMAL}" ]; then
     [ -f "${CACHE}/tor-browser/version" ] || die "Tor Browser not fetched; run fetch-sources.sh"
     cp "${CACHE}"/tor-browser/tor-browser-linux-aarch64-*.tar.xz "${CACHE}/tor-browser/version" "${INPUT}/tor-browser/"
+fi
+# Android apps: the Android-only overlay, F-Droid and the image checksums go
+# through the build input; the two images (about 2 GB) are copied straight
+# into the tree by a customize hook below instead.
+ANDROID_HOOKS=()
+if [ -n "${ANTUMBRA_ANDROID}" ]; then
+    WD="${CACHE}/waydroid/${WAYDROID_IMAGE_VARIANT}"
+    for f in "${WD}/system.img" "${WD}/vendor.img" "${WD}/images.sha256" "${CACHE}/f-droid/F-Droid.apk"; do
+        [ -f "${f}" ] || die "${f} missing; run fetch-sources.sh with ANTUMBRA_ANDROID=1"
+    done
+    mkdir -p "${INPUT}/android"
+    cp "${WD}/images.sha256" "${CACHE}/f-droid/F-Droid.apk" "${INPUT}/android/"
+    printf '%s\n' "${WAYDROID_IMAGE_VARIANT}" > "${INPUT}/android/variant"
+    lock_get FDROID_APK_SHA256 > "${INPUT}/android/F-Droid.apk.sha256"
+    # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
+    ANDROID_HOOKS=(--customize-hook="sync-in ${CONFIG_DIR}/rootfs-android /"
+                   --customize-hook='mkdir -p "$1/usr/share/waydroid-extra/images"'
+                   --customize-hook="install -m 0644 '${WD}/system.img' '${WD}/vendor.img' \"\$1/usr/share/waydroid-extra/images/\"")
+    log "Android apps: Waydroid ${WAYDROID_IMAGE_VARIANT} images and F-Droid included"
 fi
 if [ -n "${ANTUMBRA_FIRMWARE_DIR}" ]; then
     [ -d "${ANTUMBRA_FIRMWARE_DIR}" ] || die "ANTUMBRA_FIRMWARE_DIR does not exist"
@@ -146,7 +171,7 @@ fi
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
-HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
+HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} ANTUMBRA_ANDROID=${ANTUMBRA_ANDROID} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
 log "running mmdebstrap (${SUITE}, arm64) into ${ROOT}"
 # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
 mmdebstrap \
@@ -165,6 +190,7 @@ mmdebstrap \
     --setup-hook="copy-in ${PREFS} /etc/apt/preferences.d" \
     "${LIBCAMERA_HOOKS[@]}" \
     --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
+    "${ANDROID_HOOKS[@]}" \
     --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \
     --customize-hook="chroot \"\$1\" env ${HOOK_ENV} /bin/sh -e /run/antumbra-build/run-hooks.sh" \
@@ -182,8 +208,8 @@ if [ -n "${LIBCAMERA_VERSION}" ]; then
 fi
 
 # What this tree is: later steps (squashfs, image, bootimg, release) check it.
-printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nKERNEL_RELEASE=%s\n' \
-    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
+printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nKERNEL_RELEASE=%s\n' \
+    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
 
 # --- Collect the initramfs ----------------------------------------------------------------------
 KREL="$(cat "${KOUT}/kernel.release")"

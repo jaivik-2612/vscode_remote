@@ -127,6 +127,57 @@ Other limits of the theme:
 - Electrum and OnionShare (Qt) are listed in the phone's app grid but are
   not designed for a 480-pixel-wide screen.
 
+## Android apps
+
+Only in images built with `ANTUMBRA_ANDROID=1`; experimental and off until
+turned on at the Welcome screen. `threat-model.md`, "Android apps", has
+the security side. None of this has run on the phone yet
+(`hardware-validation.md`), and in the VM only under software emulation.
+
+- Android 13 (LineageOS 20, the newest image Waydroid's official channel
+  publishes), not Android 14. No Google apps or Play services, so apps
+  that need them fail or degrade; F-Droid is the app store.
+- Android's security patches are frozen at the pinned image (2026-09-27)
+  until Antumbra pins a newer one. The images are not reproducible and are
+  not signed; they are checked against the hash Waydroid publishes.
+- Android is a weaker sandbox than the rest of Antumbra and than a stock
+  phone: a privileged container where Android's root is the system's
+  root, no SELinux, and binder open to every program of the user while
+  Android runs. Use it only for apps you trust.
+- Network: TCP to the Internet only, through Tor. UDP (calls, WebRTC,
+  QUIC, many games), VPN apps, IPv6 and `.onion` addresses do not work.
+  Connections to the local network wait for a time-out instead of failing
+  at once. All apps share one Tor identity, separate from the host's and
+  unchanged by Tor Browser's "New Identity"; streams are separated per
+  destination only. Apps you log in to identify you.
+- Android checks for captive portals on its first start in a session
+  before Antumbra's provisioning turns the check off; the check goes
+  through Tor like everything else.
+- No cameras inside Android. The microphone is available, gated only by
+  Android's own permission prompt.
+- Android apps use Android's keyboard, not Phosh's on-screen keyboard.
+  There is no clipboard sharing between Android and the host (Waydroid's
+  clipboard needs `pyclip`, which Debian does not package).
+- Apps can read the kernel release, which names the SoC and this port,
+  and the CPU and GPU models (`threat-model.md`).
+- Cost (estimates, not measured on the phone): about 1.1 GB more to
+  download and flash (2.4 GB uncompressed in the root filesystem; 0.8 GB
+  for the VM's `arm64_only` images), and roughly 1 to 1.5 GB of RAM while
+  Android runs, which is tight next to Tor Browser on the 8 GB model.
+  Without Persistent Storage, installed apps and their data also live in
+  RAM.
+- Amnesic like the rest: apps and data are gone at shutdown unless "Keep
+  Android apps and data" is on, which needs Persistent Storage and keeps
+  Android's own usage history too. Turning it off later does not delete
+  what is stored; Android's data stays on the volume, unused.
+- Every session sets Android up again (`waydroid init`). Without
+  Persistent Storage, Android also boots for the first time and F-Droid
+  is installed again, which takes a while (unmeasured on the phone;
+  several minutes in the VM).
+- Waydroid's AppArmor profiles run in complain mode, and while Android
+  runs the GPU render node, DMA-BUF heaps and framebuffers are open to
+  every local user.
+
 ## Build
 
 - The kernel is validated to build with LLVM only (the port's recipe).

@@ -44,6 +44,41 @@ The interface follows Google's published Material Design 3 guidelines in
 style only. Antumbra uses no Google brand names or assets for it: no
 "Material You", Pixel or Google Sans names, fonts or logos.
 
+## Android apps
+
+Only images built with `ANTUMBRA_ANDROID=1` contain these (`building.md`).
+
+- Waydroid (Debian package `waydroid`): GPL-3.0-or-later. Antumbra
+  changes it at build time with
+  `config/rootfs-android/usr/share/antumbra/patches/waydroid-no-video.diff`
+  (GPL-3.0-or-later, like Waydroid) and edits its LXC configuration
+  templates in `config/hooks/56-session-android.sh`; both are in this
+  repository, and Waydroid's own source is Debian's source package.
+- The Android system and vendor images: LineageOS 20 builds published by
+  the Waydroid project on its update channel, fetched at build time,
+  pinned by hash and installed unmodified. They are built from LineageOS
+  (<https://github.com/LineageOS>) and Waydroid's device and vendor trees
+  (<https://github.com/waydroid>). Most of Android is Apache-2.0; the
+  images also contain components under the GPL, LGPL, BSD and MIT
+  licences, listed in Android's own legal notices inside the images.
+  Antumbra has not audited those notices, so the following is an
+  inference: whoever distributes a built image with these images in it
+  redistributes those binaries and takes on their obligations, for the
+  GPL parts the corresponding source at the matching revisions. Builders
+  who publish such images must provide it or point to it as those
+  licences allow; `release.sh` notes in the manifest that the build
+  includes them.
+- F-Droid, the app store installed into Android: GPL-3.0-or-later,
+  fetched from f-droid.org at build time and checked against F-Droid's
+  OpenPGP signature and APK signing certificate. Apps installed from
+  F-Droid later come under their own licences, which F-Droid lists.
+- No Google components: Antumbra uses only the images without Google
+  apps (`VANILLA`), installs no Google Play services or microG, and uses
+  nothing from OxygenOS. Android is a trademark of Google LLC. Antumbra is
+  not endorsed by Google, LineageOS, Waydroid or F-Droid; Android inside
+  Antumbra reports Waydroid's generic product names, which are Waydroid's
+  own.
+
 ## Firmware
 
 The phone needs proprietary firmware for its GPU, Wi-Fi, Bluetooth, DSPs,

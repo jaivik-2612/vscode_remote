@@ -9,6 +9,9 @@
 #          build/cache/tools/avbtool.py
 #          build/cache/device-assets/    dtbo.img, vbmeta-disabled.img from the port's release
 #          build/cache/tor-browser/      verified Tor Browser tarball and signature
+#          with ANTUMBRA_ANDROID=1 only:
+#          build/cache/waydroid/<variant>/ Waydroid's system and vendor zips and images
+#          build/cache/f-droid/          verified F-Droid APK and signature
 #
 # Proprietary device firmware is deliberately NOT fetched here; see
 # fetch-firmware.sh and docs/legal.md.
@@ -178,10 +181,102 @@ fetch_bootimg_tools() {
     log "mkbootimg tools verified"
 }
 
+# ---------------------------------------------------------------------------
+# Android apps (ANTUMBRA_ANDROID=1): Waydroid's images and F-Droid
+# ---------------------------------------------------------------------------
+lock_get_optional() { # lock_get_optional KEY : the value, or nothing
+    grep -E "^$1=" "${DEVICE_DIR}/sources.lock" | head -n1 | cut -d= -f2- || true
+}
+
+# Waydroid's system and vendor images for the profile's variant, extracted
+# from the pinned zips, so that "waydroid init" finds them preinstalled and
+# never downloads anything. Writes images.sha256 for the build hook, which
+# checks the copies in the root filesystem against it.
+fetch_waydroid() {
+    local variant="${WAYDROID_IMAGE_VARIANT}" key dest kind img zip entries want_crc got sha pinned
+    key="WAYDROID_$(printf '%s' "${variant}" | tr '[:lower:]' '[:upper:]')"
+    dest="${CACHE}/waydroid/${variant}"
+    require_tools unzip
+    mkdir -p "${dest}"
+    : > "${dest}/images.sha256.new"
+    for kind in SYSTEM VENDOR; do
+        img="$(printf '%s' "${kind}" | tr '[:upper:]' '[:lower:]').img"
+        zip="${dest}/${img%.img}.zip"
+        fetch_verified "$(lock_get "${key}_${kind}_URL")" "${zip}" "$(lock_get "${key}_${kind}_SHA256")"
+        [ "$(stat -c %s "${zip}")" -eq "$(lock_get "${key}_${kind}_SIZE")" ] || die "${zip} has an unexpected size"
+        # The zip holds exactly this image, with the size and CRC-32 pinned
+        # for it; unzip checks the CRC-32 again while extracting.
+        entries="$(unzip -Z1 "${zip}")" || die "${zip}: unreadable zip"
+        [ "${entries}" = "${img}" ] || die "${zip}: expected only ${img}, found: ${entries}"
+        want_crc="$(lock_get "${key}_${kind}_IMG_CRC32")"
+        got="$(unzip -lv "${zip}" | awk -v n="${img}" '$NF == n {print $1, $7}')"
+        [ "${got}" = "$(lock_get "${key}_${kind}_IMG_SIZE") ${want_crc}" ] || die "${zip}: ${img} is not the pinned image (size and CRC-32: ${got})"
+        if [ -f "${dest}/${img}" ] && [ "$(cat "${dest}/${img}.from" 2>/dev/null)" = "$(lock_get "${key}_${kind}_SHA256")" ] \
+           && [ "$(stat -c %s "${dest}/${img}")" -eq "$(lock_get "${key}_${kind}_IMG_SIZE")" ]; then
+            log "cached: ${variant}/${img}"
+        else
+            rm -f "${dest}/${img}" "${dest}/${img}.from"
+            unzip -q -o "${zip}" "${img}" -d "${dest}/extract" || die "${zip}: extraction failed (CRC error?)"
+            mv "${dest}/extract/${img}" "${dest}/${img}"
+            rmdir "${dest}/extract"
+            lock_get "${key}_${kind}_SHA256" > "${dest}/${img}.from"
+        fi
+        sha="$(sha256sum "${dest}/${img}" | cut -d' ' -f1)"
+        pinned="$(lock_get_optional "${key}_${kind}_IMG_SHA256")"
+        if [ -n "${pinned}" ]; then
+            [ "${sha}" = "${pinned}" ] || die "${variant}/${img}: SHA-256 ${sha}, pinned ${pinned}"
+        else
+            log "${variant}/${img}: SHA-256 ${sha} (pin it as ${key}_${kind}_IMG_SHA256 in sources.lock)"
+        fi
+        printf '%s  %s\n' "${sha}" "${img}" >> "${dest}/images.sha256.new"
+    done
+    mv "${dest}/images.sha256.new" "${dest}/images.sha256"
+    log "Waydroid ${variant} images verified (zip SHA-256 and size, image size and CRC-32)"
+}
+
+# F-Droid: pinned by SHA-256, F-Droid's OpenPGP signature over it, and the
+# certificate in the APK's own signature block (what Android checks updates
+# against).
+fetch_fdroid() {
+    local dest="${CACHE}/f-droid" apk fpr gnupghome sigs cert
+    require_tools gpg gpgv unzip openssl
+    apk="${dest}/F-Droid.apk"
+    mkdir -p "${dest}"
+    fetch_verified "$(lock_get FDROID_APK_URL)" "${apk}" "$(lock_get FDROID_APK_SHA256)"
+    [ "$(stat -c %s "${apk}")" -eq "$(lock_get FDROID_APK_SIZE)" ] || die "F-Droid.apk has an unexpected size"
+    [ -f "${apk}.asc" ] || fetch "$(lock_get FDROID_SIG_URL)" "${apk}.asc"
+    fpr="$(lock_get FDROID_SIGNING_KEY_FPR)"
+    if [ -f "${DEVICE_DIR}/keys/f-droid.asc" ]; then
+        cp "${DEVICE_DIR}/keys/f-droid.asc" "${dest}/signing-key.asc"
+    elif [ ! -f "${dest}/signing-key.asc" ]; then
+        fetch "$(lock_get FDROID_SIGNING_KEY_URL)" "${dest}/signing-key.asc"
+    fi
+    gnupghome="$(mktemp -d)"
+    chmod 0700 "${gnupghome}"
+    GNUPGHOME="${gnupghome}" gpg -q --batch --import "${dest}/signing-key.asc" 2>/dev/null
+    GNUPGHOME="${gnupghome}" gpg --batch --with-colons --fingerprint 2>/dev/null \
+        | grep -q "^fpr:::::::::${fpr}:" || die "F-Droid signing key fingerprint mismatch (expected ${fpr})"
+    GNUPGHOME="${gnupghome}" gpg -q --batch --export "${fpr}" > "${dest}/f-droid.keyring"
+    gpgv --keyring "${dest}/f-droid.keyring" "${apk}.asc" "${apk}" 2>/dev/null || die "F-Droid signature verification failed"
+    rm -rf "${gnupghome}"
+    sigs="$(unzip -Z1 "${apk}" | grep -E '^META-INF/[^/]+\.(RSA|DSA|EC)$' || true)"
+    if [ -z "${sigs}" ] || [ "$(printf '%s\n' "${sigs}" | wc -l)" -ne 1 ]; then
+        die "F-Droid.apk: expected one signature block, found: ${sigs:-none}"
+    fi
+    cert="$(unzip -p "${apk}" "${sigs}" | openssl pkcs7 -inform DER -print_certs | openssl x509 -outform DER | sha256sum | cut -d' ' -f1)" \
+        || die "F-Droid.apk: cannot read the signing certificate"
+    [ "${cert}" = "$(lock_get FDROID_APK_CERT_SHA256)" ] || die "F-Droid.apk is signed by an unexpected certificate (SHA-256 ${cert})"
+    log "F-Droid: SHA-256, OpenPGP signature and signing certificate verified"
+}
+
 [ -n "${SKIP_KERNEL}" ] || fetch_kernel
 fetch_port_patches
 fetch_avbtool
 fetch_bootimg_tools
 fetch_device_assets
 [ -n "${SKIP_TB}" ] || fetch_tor_browser
+if [ -n "${ANTUMBRA_ANDROID}" ]; then
+    fetch_waydroid
+    fetch_fdroid
+fi
 log "all pinned inputs present in ${CACHE}"

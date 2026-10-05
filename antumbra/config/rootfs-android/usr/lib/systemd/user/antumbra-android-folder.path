@@ -1,0 +1,14 @@
+[Unit]
+# Waydroid writes a desktop entry for each Android app into
+# ~/.local/share/applications whenever Android starts or an app is
+# installed or removed; keep the app grid's "Android" folder in step.
+Description=Watch Android's app entries for the app grid's Android folder
+ConditionPathExists=/run/antumbra/android-enabled
+PartOf=graphical-session.target
+
+[Path]
+PathChanged=%h/.local/share/applications
+Unit=antumbra-android-folder.service
+
+[Install]
+WantedBy=graphical-session.target

@@ -1,0 +1,161 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Prepare Android apps (Waydroid) for this session, as root
+(antumbra-waydroid.service, started by the Welcome screen's applier when the
+user turned Android apps on).
+
+Waydroid keeps its state in /var/lib/waydroid, which lives in the RAM
+overlay, so it is set up again at every boot from the images in the
+read-only root filesystem: "waydroid init" finds them preinstalled in
+/usr/share/waydroid-extra/images and never contacts Waydroid's update
+servers. Before that, waydroid.cfg gets Antumbra's settings:
+
+- overlays off: the root is itself an overlayfs, which cannot be the upper
+  layer of another one;
+- a generic device identity (the image's own, from product.prop), so that
+  Android does not copy the phone's model from the device tree;
+- multi-window mode, so Android apps open as ordinary windows;
+- the screen density for Phosh's scale (3 on the phone, 2 in the VM);
+- in a virtual machine, software rendering (the virtio GPU has no 3D).
+
+Then the generated LXC configuration is checked (Tor-only bridge, start-host
+hook, no camera devices, no device tree), the container service is started
+and /run/antumbra/android-ready tells the user's session it can start
+Android.
+"""
+import configparser
+import os
+import re
+import subprocess
+import sys
+
+WORK = "/var/lib/waydroid"
+CFG = os.path.join(WORK, "waydroid.cfg")
+LXC_CONFIG = os.path.join(WORK, "lxc", "waydroid", "config")
+BASE_PROP = os.path.join(WORK, "waydroid_base.prop")
+IMAGES = "/usr/share/waydroid-extra/images"
+ANDROID_DIR = "/usr/share/antumbra/android"
+LXC_PROFILE = "/etc/apparmor.d/lxc/lxc-waydroid"
+READY = "/run/antumbra/android-ready"
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def fail(msg):
+    print(f"antumbra-waydroid: {msg}", file=sys.stderr, flush=True)
+    subprocess.run(["logger", "-t", "antumbra-waydroid", "-p", "daemon.err", "--", msg], check=False)
+    sys.exit(1)
+
+
+def run(cmd):
+    log("+ " + " ".join(cmd))
+    return subprocess.run(cmd, check=False).returncode
+
+
+def in_vm():
+    return subprocess.run(["systemd-detect-virt", "--vm", "--quiet"], check=False).returncode == 0
+
+
+def properties():
+    props = {}
+    with open(os.path.join(ANDROID_DIR, "product.prop"), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                props[key] = value
+    props["persist.waydroid.multi_windows"] = "true"
+    vm = in_vm()
+    props["ro.sf.lcd_density"] = "320" if vm else "480"
+    if vm:
+        # Waydroid's vendor image turns "swiftshader" into ANGLE on the
+        # SwiftShader Vulkan driver.
+        props["ro.hardware.gralloc"] = "default"
+        props["ro.hardware.egl"] = "swiftshader"
+    return props
+
+
+def write_config(props):
+    cfg = configparser.ConfigParser()
+    cfg.read(CFG)
+    if "waydroid" not in cfg:
+        cfg["waydroid"] = {}
+    cfg["waydroid"]["mount_overlays"] = "False"
+    cfg["properties"] = props
+    os.makedirs(WORK, mode=0o755, exist_ok=True)
+    tmp = CFG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        cfg.write(f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, CFG)
+
+
+def check_config(props):
+    cfg = configparser.ConfigParser()
+    cfg.read(CFG)
+    if cfg.get("waydroid", "images_path", fallback="") != IMAGES:
+        fail(f"waydroid init did not take the preinstalled images ({cfg.get('waydroid', 'images_path', fallback='none')})")
+    if cfg.get("waydroid", "mount_overlays", fallback="") != "False":
+        fail("waydroid.cfg lost mount_overlays = False")
+    for key, value in props.items():
+        if cfg.get("properties", key, fallback=None) != value:
+            fail(f"waydroid.cfg lost the property {key}")
+    try:
+        with open(LXC_CONFIG, encoding="utf-8") as f:
+            lxc = f.read()
+        with open(BASE_PROP, encoding="utf-8") as f:
+            base = f.read().split("\n")
+    except OSError as e:
+        fail(f"waydroid init left no container configuration: {e}")
+    wanted = [r"^lxc\.net\.0\.type = veth$", r"^lxc\.net\.0\.link = waydroid-tor$",
+              r"^lxc\.hook\.start-host = /usr/local/lib/antumbra-waydroid-start-host$",
+              r"^lxc\.cgroup2\.devices\.deny = c 81:\* rwm$", r"^lxc\.mount\.entry = tmpfs sys/firmware tmpfs "]
+    for pattern in wanted:
+        if not re.search(pattern, lxc, re.M):
+            fail(f"the container configuration lacks {pattern}")
+    cap_keep = re.search(r"^lxc\.cap\.keep = (.*)$", lxc, re.M)
+    if not cap_keep or "sys_time" in cap_keep.group(1).split():
+        fail("the container would keep sys_time")
+    if "waydroid.updater.disabled=true" not in base:
+        fail("Waydroid's image updater is not disabled")
+    for key in ("ro.product.waydroid.model", "ro.product.waydroid.brand"):
+        if f"{key}={props[key]}" not in base:
+            fail(f"{key} is not the generic value")
+
+
+def main():
+    if os.geteuid() != 0:
+        fail("must run as root")
+    if not os.path.exists("/run/antumbra/android-enabled"):
+        fail("Android apps are not enabled for this session")
+    for img in ("system.img", "vendor.img"):
+        if not os.path.isfile(os.path.join(IMAGES, img)):
+            fail(f"{IMAGES}/{img} is missing")
+    # Waydroid's container profile (complain mode, as Debian ships it) sits
+    # in a subdirectory that apparmor.service does not load; load it so the
+    # container runs under it and its log shows what an enforcing profile
+    # would have to allow. Without it Waydroid runs the container unconfined.
+    if os.path.exists(LXC_PROFILE) and run(["aa-enabled", "--quiet"]) == 0:
+        if run(["apparmor_parser", "--replace", "--write-cache", LXC_PROFILE]) != 0:
+            log("warning: the lxc-waydroid AppArmor profile did not load; the container runs unconfined")
+    props = properties()
+    write_config(props)
+    if run(["waydroid", "init"]) != 0:
+        fail("waydroid init failed")
+    # "upgrade -o" (offline) regenerates the LXC configuration and the base
+    # properties from the templates and waydroid.cfg, as Debian's postinst does.
+    if run(["waydroid", "upgrade", "-o"]) != 0:
+        fail("waydroid upgrade -o failed")
+    check_config(props)
+    if run(["systemctl", "start", "waydroid-container.service"]) != 0:
+        fail("the Waydroid container service did not start")
+    with open(READY, "w", encoding="utf-8") as f:
+        f.write("1\n")
+    os.chmod(READY, 0o644)
+    log("Android apps ready for the session")
+
+
+if __name__ == "__main__":
+    main()

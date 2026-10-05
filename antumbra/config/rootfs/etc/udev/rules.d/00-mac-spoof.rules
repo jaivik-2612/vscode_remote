@@ -6,6 +6,9 @@
 SUBSYSTEM=="net", ACTION=="add", ATTR{type}=="1", DRIVERS=="ipheth", GOTO="mac_spoof_ignore"
 # veth interfaces used by network namespaces
 ENV{INTERFACE}=="veth*", ACTION=="add", GOTO="mac_spoof_ignore"
+# The Android container's bridge (antumbra-create-netns): host-only, never
+# on a network; its address never leaves the phone
+ENV{INTERFACE}=="waydroid-tor", ACTION=="add", GOTO="mac_spoof_ignore"
 
 # Perform MAC spoofing otherwise
 SUBSYSTEM=="net", ACTION=="add", ATTR{type}=="1", RUN+="/usr/bin/systemd-cat -t spoof-mac -p debug /usr/local/lib/antumbra-spoof-mac $name"
