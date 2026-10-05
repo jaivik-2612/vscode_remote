@@ -117,11 +117,33 @@ asserts, in order:
    press powers off, as on the phone), and a power-off requested from the
    console goes through the return-to-initramfs shutdown path.
 
-`--tour` adds best-effort screenshots of the session (quick settings, Tor
-Browser) without checks. `make vm-test SCALE=2` doubles every timeout.
+`--tour` adds screenshots of the session (app overview, quick settings,
+Tor Browser) and checks that Tor Browser runs inside its `tbb` network
+namespace. `make vm-test SCALE=2` doubles every timeout.
 
 Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed. `--timeout-scale 2` doubles every timeout for slow hosts.
+
+## What the first VM runs found
+
+Booting the full image and pressing Start exposed these defects, all fixed
+in the configuration. Every one except the interface rename would have
+affected the phone the same way.
+
+| Symptom in the VM | Cause | Fix |
+|---|---|---|
+| Greeter screen black, phoc aborts at startup | `phoc.ini` mode line without the `Hz` suffix | `1440x3120@60Hz`; `tests/lint.sh` validates mode lines |
+| Greeter shows only a spinner | phoc started with `-S` (waits for a Phosh shell the greeter does not run) | no shell mode in the greeter session |
+| Welcome window never drawn | fullscreen requested before the surface's first commit; phoc drops the initial configure | go fullscreen once presented |
+| Session ends at once, greeter returns | `phosh-session` runs `gnome-session`, only recommended by Phosh | `gnome-session-bin`, `gnome-session-common` |
+| Tor runs unconfined | Debian's `apparmor.service` skips live systems with an overlayfs root | unit override, Tails' alias tunables for trixie's paths, `attach_disconnected` (hook 48) |
+| Interface keeps the hardware MAC | udev passed the pre-rename name (`eth0`) to the spoofing script | look the interface up by `IFINDEX`; record and verify every Ethernet-type interface |
+| Tor Browser does not start | browser and profile directories kept the tarball's 0700 mode | `chmod -R a+rX`, as Tails' 10-tbb |
+| Every icon is a placeholder | gdk-pixbuf's SVG loader (`librsvg2-common`) only recommended by GTK | added to the package list |
+| usbguard fails at every boot | its audit-log directory is under the volatile `/var/log` | tmpfiles entry |
+| Self-check banner: sysctl errors | Tails' userfaultfd key (kernel built without userfaultfd) and bubblewrap's Debian-only key | `-` prefix; bubblewrap's file masked |
+| Self-check banner: modem radio | the check could not accept the "absent"/"unavailable" states | parse the state file's first line |
+| `swapon --show` refused | the zram-only wrapper treated every call as an activation | queries pass; every named device must be zram |
 
 ## What the VM cannot tell you
 

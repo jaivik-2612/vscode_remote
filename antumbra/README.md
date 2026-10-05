@@ -21,8 +21,12 @@ whose initramfs is proven free of network drivers, and the images come out
 in the exact format the phone's bootloader validated for the mainline
 port: the sparse userdata image expands to the full partition, its live
 partition mounts, the squashfs hash matches and dm-verity verifies, and
-the release directory passes `build/verify-release.sh`. What has **not**
-happened yet is a boot on a physical OnePlus 7T Pro. `docs/hardware-validation.md` is the checklist
+the release directory passes `build/verify-release.sh`. The same system
+also boots in QEMU (`make vm-build`, `make vm-test`, see
+`docs/vm-testing.md`): from the initramfs to the Welcome screen, through
+pressing Start to the Phosh session and Tor Browser, and back to the
+initramfs at power-off, with the privacy properties checked on the way.
+What has **not** happened yet is a boot on a physical OnePlus 7T Pro. `docs/hardware-validation.md` is the checklist
 for that first boot. Treat this as a developer preview.
 
 | Area | What you get |
