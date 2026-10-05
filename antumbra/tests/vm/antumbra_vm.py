@@ -441,14 +441,18 @@ class Report:
 
 
 QEMU_MAC = "52:54:00:a1:7b:01"   # build/vm.sh assigns it; spoofing must replace it
-ADWAITA_BLUE = (0x35, 0x84, 0xe4)  # libadwaita's default accent (suggested-action buttons)
+# The theme accent (--accent-bg-color in config/rootfs/usr/share/antumbra/theme/apps.css),
+# which fills the Welcome screen's Start button.
+WELCOME_ACCENT = (0xce, 0xbd, 0xfe)
 
 
 def welcome_phase(vm, rep, T, sh, out, tour):
     """Press "Start Antumbra" with the defaults (amnesic, MAC anonymization on,
     connect to Tor automatically) and check what happens to the network."""
     pcap_frames_before = sum(pcap_summary(os.path.join(vm.run, "net.pcap")).values())
-    target = vm.find_color(ADWAITA_BLUE, tol=45, region=(0, 1100, 720, 1440))
+    # The button is drawn in exactly the accent colour; at a tolerance of 45
+    # this light accent would also match the edges of near-white text.
+    target = vm.find_color(WELCOME_ACCENT, tol=30, region=(0, 1100, 720, 1440))
     rep.check("welcome: Start button found on the display", target is not None, str(target))
     if target is None:
         return

@@ -19,7 +19,7 @@ import gi
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
-from gi.repository import Adw, GLib, Gtk  # noqa: E402
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from antumbra import settings as S  # noqa: E402
 
@@ -230,6 +230,24 @@ class WelcomeWindow(Adw.ApplicationWindow):
 class WelcomeApp(Adw.Application):
     def __init__(self):
         super().__init__(application_id="org.antumbra.Welcome")
+
+    def do_startup(self):
+        # Chain up first: Adw.Application.do_startup initialises libadwaita
+        # and its style manager, which the theme below builds on.
+        Adw.Application.do_startup(self)
+        # Antumbra's look (docs/architecture.md, "Interface theme"). Always
+        # dark, whatever the colour scheme setting, so the stylesheet's dark
+        # surfaces never meet light text. The stylesheet sits next to this
+        # script's prefix: /usr/share/antumbra/theme in the image,
+        # config/rootfs/usr/share/antumbra/theme in a checkout (--demo).
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        css = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           os.pardir, "share", "antumbra", "theme", "welcome.css")
+        if os.path.exists(css):
+            provider = Gtk.CssProvider()
+            provider.load_from_path(os.path.normpath(css))
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
     def do_activate(self):
         win = WelcomeWindow(self)

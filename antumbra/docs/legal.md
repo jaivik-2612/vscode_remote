@@ -18,6 +18,24 @@
   which does not endorse Antumbra.
 - Debian packages: their respective licences, recorded in
   `/usr/share/doc/*/copyright` inside the image.
+- The interface theme: the stylesheets and gesture pill in
+  `config/rootfs/usr/share/antumbra/theme/` and the wallpapers in
+  `config/rootfs/usr/share/backgrounds/antumbra/` are Antumbra's own work,
+  GPL-3.0-or-later. Their colour values were computed once with Google's
+  material-color-utilities (Apache-2.0); only the resulting numbers are
+  used, the library is not distributed.
+- Roboto, the interface font (Debian package `fonts-roboto-unhinted`):
+  Apache-2.0.
+- The status icons in `config/rootfs/usr/share/icons/Antumbra/`: Material
+  Symbols by Google, Apache-2.0, taken from the npm package
+  `@material-symbols/svg-400` 0.47.6 (pinned by hash). The Apache-2.0 text
+  ships beside them, and `SOURCES` there lists every file with its upstream
+  name and hashes and marks the three that were changed (a colour class
+  added to the low-battery icons).
+
+The interface follows Google's published Material Design 3 guidelines in
+style only. Antumbra uses no Google brand names or assets for it: no
+"Material You", Pixel or Google Sans names, fonts or logos.
 
 ## Firmware
 

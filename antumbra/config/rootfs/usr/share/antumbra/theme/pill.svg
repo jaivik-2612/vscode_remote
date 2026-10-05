@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="324" height="12" viewBox="0 0 324 12">
+  <!--
+    SPDX-License-Identifier: GPL-3.0-or-later
+    Antumbra's gesture pill for phosh's home bar (shell.css, #powerbar). Drawn
+    at three times its 108x4 display size so it stays sharp at the phone's
+    scale 3; -gtk-recolor fills it with the shell's foreground colour.
+  -->
+  <rect width="324" height="12" rx="6" fill="#bebebe"/>
+</svg>

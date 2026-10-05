@@ -3,6 +3,8 @@ mesa-vulkan-drivers
 libgl1-mesa-dri
 libegl-mesa0
 fonts-cantarell
+# Roboto, the interface font (90_antumbra.gschema.override); Apache-2.0.
+fonts-roboto-unhinted
 fonts-noto-core
 fonts-noto-color-emoji
 gstreamer1.0-plugins-base

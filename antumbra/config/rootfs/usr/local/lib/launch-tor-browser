@@ -24,7 +24,11 @@ export TOR_CONTROL_COOKIE_AUTH_FILE="${HOME}/.tor/control_auth_cookie"
 export TOR_SKIP_CONTROLPORTTEST=1
 export MOZ_ENABLE_WAYLAND=1
 export GSETTINGS_BACKEND=memory
-export FONTCONFIG_PATH="${TBB_INSTALL}/fontconfig"
+# Tor Browser's own fontconfig (fonts/fonts.conf) lists only the fonts it
+# bundles (<dir prefix="cwd">fonts</dir>, hence the cd below), so fonts
+# installed in the system, such as Roboto, do not change its font set. A
+# missing directory here would make fontconfig fall back to /etc/fonts.
+export FONTCONFIG_PATH="${TBB_INSTALL}/fonts"
 export FONTCONFIG_FILE="fonts.conf"
 export __GL_SHADER_DISK_CACHE=0
 unset SESSION_MANAGER

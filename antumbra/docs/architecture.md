@@ -581,6 +581,68 @@ passphrase the Welcome screen set; without one the lock is not
 protective, and the Welcome screen says so. `antumbra-lock-watch` arms
 the auto-shutdown timer on lock and disarms it on unlock.
 
+### 10.1 Interface theme
+
+A dark interface close to Android 14's, within what Phosh 0.46 (a GTK 3
+shell) allows without code changes; what needs code is listed in
+`known-issues.md`. It has three layers.
+
+1. **Vendor GSettings defaults**,
+   `/usr/share/glib-2.0/schemas/90_antumbra.gschema.override`: dark colour
+   scheme, the purple accent (the GNOME accent nearest the palette's
+   seed), Roboto 11 (`fonts-roboto-unhinted`; `/etc/fonts/conf.d/52-antumbra-sans.conf`
+   also makes it the generic sans-serif face), battery percentage, the
+   Antumbra icon theme, and the home and lock-screen wallpapers. A schema
+   override rather than dconf, because the Welcome screen runs with
+   `GSETTINGS_BACKEND=memory` and sees only schema defaults; the session
+   sees them too. Hook 52 recompiles the schemas with `--strict`, so a bad
+   key or value fails the build.
+2. **Session behaviour in dconf**, `/etc/dconf/db/local.d/10-antumbra-shell`
+   with its locks: the apps that declare no form factor are forced into
+   the phone's app grid, the Dark Mode and Night Light tiles
+   (`phosh-plugins`) are added, and the lock screen shows no notification
+   content and runs no plugins (both locked). `00-antumbra` sets the dock:
+   Tor Browser, Files, Camera, Console.
+3. **Stylesheets** in `/usr/share/antumbra/theme/`: `shell.css` for GTK 3
+   (Phosh and squeekboard: tonal surfaces, rounded quick-setting tiles
+   filled when on, thick sliders, 24px cards, a thin gesture pill, a scrim
+   behind the open app grid, the lock clock, dialogs, and the on-screen
+   keyboard), `apps.css` for GTK 4 and libadwaita (the accent only, since
+   GTK 4.18 cannot tell light from dark in CSS), and `welcome.css`, which
+   `antumbra-welcome` loads for itself and shows always dark. GTK reads
+   them through `~/.config/gtk-3.0/gtk.css` and `~/.config/gtk-4.0/gtk.css`,
+   one-line `@import` stubs that `antumbra-session` writes only when the
+   file is absent, after Persistent Storage has linked the user's
+   dotfiles: a user's own file wins, and an empty one opts out. The stubs
+   are not shipped in `/etc/skel`, because an image-provided `~/.config`
+   would stop the Dotfiles feature from linking a persisted one. Hook 50
+   installs root-owned stubs for the greeter user, and the greeter session
+   sets `ADW_DISABLE_PORTAL=1` so libadwaita takes the scheme and accent
+   from GSettings rather than from a portal process.
+
+The palette is the Material Design 3 "tonal spot" dark scheme, computed
+once from the seed `#4d2c9e` (a deep violet) with material-color-utilities;
+only the values are kept, at the top of `shell.css` and `apps.css`
+(primary `#cebdfe` on `#35275d`, surfaces `#141218` to `#36343a`), and
+`tests/unit/test_theme.py` checks that the two files agree. The
+wallpapers (`/usr/share/backgrounds/antumbra/antumbra-{dark,light,lock}.svg`,
+1440x3120) are gradients around an annular eclipse; the light variant
+keeps dark edges because Phosh's status bar and gesture pill stay white in
+either scheme, and the lock variant is darker and plainer behind the
+clock. The icon theme (`/usr/share/icons/Antumbra`) replaces the battery,
+Wi-Fi signal, Bluetooth, Dark Mode and Night Light icons with Material
+Symbols and inherits everything else from Adwaita.
+
+Tor Browser reads the same GTK 3 stylesheet. Every selector in
+`shell.css` therefore names a Phosh or squeekboard node, and no GTK-wide
+colour is redefined, so the browser's own widgets are untouched.
+`launch-tor-browser` points fontconfig at the browser's bundled
+`fonts.conf`, so Roboto and the system fonts stay out of its font set.
+
+The VM test finds the Welcome screen's Start button by the theme's accent
+(`WELCOME_ACCENT` in `tests/vm/antumbra_vm.py`); the unit test fails if it
+and `apps.css` differ.
+
 ## 11. Applications
 
 | Role | Package or source | Notes |
