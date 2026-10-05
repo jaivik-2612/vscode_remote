@@ -35,40 +35,44 @@ cat > "${B}/run.sh" <<'RUN'
 #!/bin/sh
 # Boot this Antumbra test bundle in QEMU (arm64 "virt" machine).
 #
-#   ./run.sh            window with the display (needs a graphical QEMU build)
-#   ./run.sh --headless serial console on this terminal only (Ctrl-A X quits)
-#   ./run.sh --debug    adds antumbra.debug=1: root shell on the serial
-#                       console's sibling "hvc0" (debug builds only); in the
-#                       window, Ctrl-Alt-2 shows the hvc0 console
-#   ./run.sh --fresh    discard the previous run's disk overlay
+#   ./run.sh             display window + serial console on this terminal
+#   ./run.sh --headless  serial console only (Ctrl-A X quits QEMU)
+#   ./run.sh --debug     also antumbra.debug=1: a root shell on the virtio
+#                        console, reachable at ./hvc0.sock (the script prints how)
+#   ./run.sh --fresh     discard the previous run's disk changes
 #
-# Needs: qemu-system-aarch64, qemu-img, zstd. KVM is used when the host is
-# arm64 with /dev/kvm; otherwise TCG emulation (slow: allow a few minutes).
+# Needs qemu-system-aarch64, qemu-img and zstd. Uses KVM on arm64 Linux with
+# /dev/kvm and Apple's hypervisor on Apple-silicon Macs; anywhere else QEMU
+# emulates the CPU (TCG), which takes several minutes to reach the Welcome
+# screen.
 set -eu
 cd "$(dirname "$0")"
 HEADLESS=""; DEBUG=""; FRESH=""; EXTRA=""
 for a in "$@"; do case "$a" in --headless) HEADLESS=1 ;; --debug) DEBUG=1 ;; --fresh) FRESH=1 ;; *) EXTRA="$EXTRA $a" ;; esac; done
-for t in qemu-system-aarch64 qemu-img zstd; do command -v "$t" >/dev/null || { echo "missing $t" >&2; exit 1; }; done
-[ -f vm-disk.img ] || zstd -q -d vm-disk.img.zst -o vm-disk.img
+for t in qemu-system-aarch64 qemu-img zstd; do command -v "$t" >/dev/null || { echo "missing $t (see README.md)" >&2; exit 1; }; done
+[ -f vm-disk.img ] || { echo "decompressing the disk image (4 GiB, sparse)..."; zstd -q -d --sparse vm-disk.img.zst -o vm-disk.img; }
 [ -z "$FRESH" ] || rm -f overlay.qcow2
 [ -f overlay.qcow2 ] || qemu-img create -q -f qcow2 -b vm-disk.img -F raw overlay.qcow2
 CMDLINE="$(cat cmdline.txt)"
 [ -z "$DEBUG" ] || CMDLINE="$CMDLINE antumbra.debug=1"
-ACCEL="tcg,thread=multi"; [ -w /dev/kvm ] && [ "$(uname -m)" = "aarch64" ] && ACCEL=kvm
-set -- -M virt,gic-version=3 -cpu cortex-a72 -smp 4 -m 4096 -accel "$ACCEL" \
+ACCEL="tcg,thread=multi"; CPU=cortex-a72
+if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then ACCEL=hvf; CPU=host
+elif [ "$(uname -m)" = aarch64 ] && [ -w /dev/kvm ]; then ACCEL=kvm; CPU=host; fi
+echo "accelerator: $ACCEL"
+rm -f hvc0.sock
+set -- -M virt,gic-version=max -cpu "$CPU" -smp 4 -m 4096 -accel "$ACCEL" \
     -kernel Image -initrd initrd.img -append "$CMDLINE" \
     -drive if=none,id=userdata,file=overlay.qcow2,format=qcow2 \
     -device virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096 \
     -device virtio-rng-pci -device virtio-gpu-pci,xres=720,yres=1440 \
     -device virtio-keyboard-pci -device virtio-tablet-pci \
-    -device virtio-serial-pci -device virtconsole,chardev=hvc0 \
-    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -no-reboot
+    -device virtio-serial-pci -chardev socket,id=hvc0,path=hvc0.sock,server=on,wait=off \
+    -device virtconsole,chardev=hvc0 \
+    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 -no-reboot -serial mon:stdio
+[ -z "$DEBUG" ] || echo "debug shell (once booted): socat -,raw,echo=0 unix-connect:$PWD/hvc0.sock"
+[ -z "$HEADLESS" ] || set -- "$@" -display none
 # shellcheck disable=SC2086  # EXTRA holds several arguments on purpose
-if [ -n "$HEADLESS" ]; then
-    exec qemu-system-aarch64 "$@" -display none -serial mon:stdio -chardev file,id=hvc0,path=hvc0.log $EXTRA
-fi
-# shellcheck disable=SC2086
-exec qemu-system-aarch64 "$@" -serial stdio -chardev vc,id=hvc0 $EXTRA
+exec qemu-system-aarch64 "$@" $EXTRA
 RUN
 chmod +x "${B}/run.sh"
 cat > "${B}/README.md" <<README
@@ -76,7 +80,14 @@ cat > "${B}/README.md" <<README
 
 A test build of Antumbra for QEMU's arm64 virt machine. Not for the phone.
 
-    ./run.sh              # window; ./run.sh --headless for serial only; --debug for a root shell on hvc0
+    ./run.sh              # display window + serial console on this terminal
+    ./run.sh --headless   # serial console only; Ctrl-A X quits
+    ./run.sh --debug      # also a root shell on the virtio console (see run.sh)
+
+Install QEMU first: Debian/Ubuntu \`sudo apt install qemu-system-arm qemu-utils ipxe-qemu zstd\`,
+Fedora \`sudo dnf install qemu-system-aarch64 qemu-img zstd\`, macOS \`brew install qemu zstd\`.
+On an x86-64 PC QEMU emulates the ARM CPU: expect several minutes to the Welcome screen.
+On an Apple-silicon Mac or an arm64 Linux machine with KVM it runs at native speed.
 
 Files: Image (kernel $(cat "${KOUT}/kernel.release")), initrd.img, vm-disk.img.zst
 (GPT disk with the "userdata" partition holding the live and Persistent

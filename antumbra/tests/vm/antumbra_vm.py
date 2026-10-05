@@ -317,9 +317,10 @@ class VM:
 class Report:
     def __init__(self):
         self.results = []
+        self.t0 = time.monotonic()
 
     def check(self, name, ok, detail=""):
-        self.results.append((name, bool(ok), detail))
+        self.results.append((name, bool(ok), detail, round(time.monotonic() - self.t0, 1)))
         print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""), flush=True)
         return ok
 
@@ -471,6 +472,11 @@ def main():
             vm.stop(); raise
         failed = rep.failed()
         print(f"\n{len(rep.results) - len(failed)}/{len(rep.results)} checks passed; run directory {run_dir}", flush=True)
+        os.makedirs(os.path.join(run_dir, "smoke"), exist_ok=True)
+        with open(os.path.join(run_dir, "smoke", "report.json"), "w") as f:
+            json.dump({"version": VERSION, "debug": debug, "timeout_scale": a.timeout_scale,
+                       "cmdline": open(os.path.join(run_dir, "cmdline")).read().strip() if os.path.exists(os.path.join(run_dir, "cmdline")) else "",
+                       "checks": [{"name": n, "ok": ok, "detail": d, "t": t} for n, ok, d, t in rep.results]}, f, indent=1)
         sys.exit(1 if failed else 0)
     if a.cmd == "wait":
         m = vm.serial.wait(a.regex, a.timeout); print(m.group(0)); return
