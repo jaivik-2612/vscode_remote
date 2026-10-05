@@ -334,14 +334,16 @@ class TrafficChecksTest(unittest.TestCase):
     def phase(self, vm, fake, label, capture, peers):
         with open(os.path.join(fake.run, "net.pcap"), "wb") as f:
             f.write(pcap(capture))
-        ss = "\n".join(f'tcp   ESTAB 0 0 10.0.2.15:4{i:04d} {ip}:{port} users:(("tor",pid=812,fd={i + 10}))'
+        ss = "\n".join(f'tcp   ESTAB 0 0 10.0.2.15:4{i:04d} {ip}:{port} users:(("tor",pid=812,fd={i + 10})) uid:107 ino:{i + 4000}'
                        for i, (ip, port) in enumerate(peers))
 
         def sh(cmd, timeout=120):
-            if "ss -tunapH" in cmd:
+            if "ss -tunap" in cmd:
                 return 0, ss + "\nend"
             if "orport" in cmd:
                 return 0, "1.2.3.4 orport=443"
+            if cmd == "id -u debian-tor":
+                return 0, "107"
             return None, ""
         rep = vm.Report()
         vm.traffic_checks(fake, rep, lambda s: s, sh, label, 1)
