@@ -46,6 +46,49 @@ TORBROWSER_SHA256=4dba033e7c5fb00f8d23fb5412a0825cd13aee565d31fc84b329d0927ac6cc
 TORBROWSER_SIGNING_KEY_FPR=EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
 TORBROWSER_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
 
+# Android apps (fetched only with ANTUMBRA_ANDROID=1). Waydroid's LineageOS
+# 20.0 (Android 13) images of 2026-09-27, VANILLA system (no Google apps)
+# and MAINLINE vendor, as listed by Waydroid's OTA channel
+# (https://ota.waydro.id/system/lineage/waydroid_<variant>/VANILLA.json and
+# https://ota.waydro.id/vendor/waydroid_<variant>/MAINLINE.json; the files
+# are on SourceForge). Waydroid itself checks only the zip's SHA-256 from
+# that JSON; the build checks it, the zip's size, and the size and CRC-32
+# the zip records for each image. An optional *_IMG_SHA256 key also pins the
+# extracted image (fetch-sources.sh prints the value). The device profile
+# picks the variant (WAYDROID_IMAGE_VARIANT in device.conf).
+WAYDROID_ARM64_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64/lineage-20.0-20260927-VANILLA-waydroid_arm64-system.zip/download
+WAYDROID_ARM64_SYSTEM_SHA256=5fb8179ed4455f45919c5a2bfbfdd1591619295994ad321217f03bb1dcfc53a7
+WAYDROID_ARM64_SYSTEM_SIZE=912267974
+WAYDROID_ARM64_SYSTEM_IMG_SIZE=1994985472
+WAYDROID_ARM64_SYSTEM_IMG_CRC32=70723829
+WAYDROID_ARM64_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64/lineage-20.0-20260927-MAINLINE-waydroid_arm64-vendor.zip/download
+WAYDROID_ARM64_VENDOR_SHA256=20a49c11961a5ac7295320f578764eeab3c982b217f1bfde7473adfc22e747ae
+WAYDROID_ARM64_VENDOR_SIZE=147678746
+WAYDROID_ARM64_VENDOR_IMG_SIZE=421634048
+WAYDROID_ARM64_VENDOR_IMG_CRC32=7fac583f
+WAYDROID_ARM64_ONLY_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64_only/lineage-20.0-20260927-VANILLA-waydroid_arm64_only-system.zip/download
+WAYDROID_ARM64_ONLY_SYSTEM_SHA256=a7806741ea8ca5be917d0c66b031d97a60abb7a95031ca5b35c40620b6273ccd
+WAYDROID_ARM64_ONLY_SYSTEM_SIZE=733009660
+WAYDROID_ARM64_ONLY_SYSTEM_IMG_SIZE=1633239040
+WAYDROID_ARM64_ONLY_SYSTEM_IMG_CRC32=9a76ad02
+WAYDROID_ARM64_ONLY_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64_only/lineage-20.0-20260927-MAINLINE-waydroid_arm64_only-vendor.zip/download
+WAYDROID_ARM64_ONLY_VENDOR_SHA256=bd502c53ada5019e0fad3beb6feb248ce45c9ea500870f4725e0d12624baef0a
+WAYDROID_ARM64_ONLY_VENDOR_SIZE=77357342
+WAYDROID_ARM64_ONLY_VENDOR_IMG_SIZE=235610112
+WAYDROID_ARM64_ONLY_VENDOR_IMG_CRC32=565ba6b5
+
+# F-Droid 2.0.1 (versionCode 2000051), installed into Android on its first
+# start in a session. Verified by SHA-256, by F-Droid's OpenPGP signature
+# (key vendored in keys/f-droid.asc; the URL is only a fallback) and by the
+# SHA-256 of the certificate in the APK's signature block.
+FDROID_APK_URL=https://f-droid.org/repo/org.fdroid.fdroid_2000051.apk
+FDROID_APK_SHA256=83d3fe522281c3cb89fce3bc05038f81b3c3b32c108536941f184c5f9bb53778
+FDROID_APK_SIZE=12537183
+FDROID_SIG_URL=https://f-droid.org/repo/org.fdroid.fdroid_2000051.apk.asc
+FDROID_SIGNING_KEY_FPR=37D2C98789D8311948394E3E41E7044E1DBA2E89
+FDROID_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/37D2C98789D8311948394E3E41E7044E1DBA2E89
+FDROID_APK_CERT_SHA256=43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab
+
 # Debian base
 DEBIAN_SUITE=trixie
 DEBIAN_MIRROR=https://deb.debian.org/debian

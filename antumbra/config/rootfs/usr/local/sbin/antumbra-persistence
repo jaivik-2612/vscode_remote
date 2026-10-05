@@ -7,7 +7,12 @@
 #  antumbra-persistence status [--quiet]       # writes /run/antumbra/persistence-state
 #  antumbra-persistence create --passphrase-file F
 #  antumbra-persistence unlock --passphrase-file F
-#  antumbra-persistence activate | deactivate | lock
+#  antumbra-persistence activate [--skip FEATURE]... | deactivate | lock
+#  antumbra-persistence enable FEATURE         # create an off-by-default feature's directory
+#
+# A feature marked "off" in the features file is not created with the
+# volume; "enable" creates it on the unlocked volume, and from then on
+# "activate" mounts it like the others unless told to skip it.
 set -euo pipefail
 PART=/dev/disk/by-partlabel/ANTUMBRA_DATA
 MAPPER=antumbra_data
@@ -50,8 +55,9 @@ cmd_create() {
     mkfs.ext4 -q -L "${LUKS_LABEL}" "/dev/mapper/${MAPPER}"
     mkdir -p "${MNT}"
     mount "/dev/mapper/${MAPPER}" "${MNT}"
-    while IFS='|' read -r name src dest owner mode; do
+    while IFS='|' read -r name src dest owner mode default; do
         case "${name}" in ''|'#'*) continue ;; esac
+        [ "${default}" != "off" ] || continue
         mkdir -p "${MNT}/${src}"
         chown "${owner}" "${MNT}/${src}"
         chmod "${mode}" "${MNT}/${src}"
@@ -72,11 +78,35 @@ cmd_unlock() {
     echo "Persistent Storage unlocked"
 }
 
+cmd_enable() {
+    local feature="$1" found=""
+    mountpoint -q "${MNT}" || die "Persistent Storage is not unlocked"
+    while IFS='|' read -r name src dest owner mode default; do
+        [ "${name}" = "${feature}" ] || continue
+        found=1
+        if [ ! -d "${MNT}/${src}" ]; then
+            mkdir -p "${MNT}/${src}"
+            chown "${owner}" "${MNT}/${src}"
+            chmod "${mode}" "${MNT}/${src}"
+            echo "feature ${name}: created"
+        fi
+    done < "${FEATURES}"
+    [ -n "${found}" ] || die "no feature named ${feature}"
+}
+
 cmd_activate() {
     mountpoint -q "${MNT}" || die "Persistent Storage is not unlocked"
-    while IFS='|' read -r name src dest owner mode; do
+    while IFS='|' read -r name src dest owner mode default; do
         case "${name}" in ''|'#'*) continue ;; esac
-        [ -d "${MNT}/${src}" ] || { echo "feature ${name}: missing on the volume, skipped" >&2; continue; }
+        case " ${SKIP} " in *" ${name} "*) continue ;; esac
+        if [ ! -d "${MNT}/${src}" ]; then
+            # an off-by-default feature that was never enabled is not news
+            [ "${default}" = "off" ] || echo "feature ${name}: missing on the volume, skipped" >&2
+            continue
+        fi
+        # Missing parents of a mount point in the home directory belong to
+        # the user (root-owned ones, such as ~/.local, would break the session).
+        case "${dest}" in /home/amnesia/*) runuser -u amnesia -- mkdir -p "$(dirname "${dest}")" ;; esac
         mkdir -p "${dest}"
         chown "${owner}" "${dest}"; chmod "${mode}" "${dest}"
         mountpoint -q "${dest}" || mount --bind -o nodev,nosuid "${MNT}/${src}" "${dest}"
@@ -91,7 +121,7 @@ cmd_activate() {
 }
 
 cmd_deactivate() {
-    while IFS='|' read -r name src dest owner mode; do
+    while IFS='|' read -r name src dest owner mode default; do
         case "${name}" in ''|'#'*) continue ;; esac
         mountpoint -q "${dest}" && umount "${dest}"
     done < <(tac "${FEATURES}")
@@ -106,11 +136,16 @@ cmd_lock() {
 
 cmd="${1:-}"; shift || true
 PF=""
+SKIP=""
+FEATURE=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --passphrase-file) PF="$2"; shift ;;
         --quiet) QUIET=--quiet ;;
-        *) die "unknown argument $1" ;;
+        --skip) SKIP="${SKIP} $2"; shift ;;
+        -*) die "unknown argument $1" ;;
+        *) if [ "${cmd}" != enable ] || [ -n "${FEATURE}" ]; then die "unknown argument $1"; fi
+           FEATURE="$1" ;;
     esac
     shift
 done
@@ -118,8 +153,9 @@ case "${cmd}" in
     status) cmd_status "${QUIET:-}" ;;
     create) [ -n "${PF}" ] || die "--passphrase-file required"; cmd_create "${PF}" ;;
     unlock) [ -n "${PF}" ] || die "--passphrase-file required"; cmd_unlock "${PF}" ;;
+    enable) [ -n "${FEATURE}" ] || die "enable needs a feature name"; cmd_enable "${FEATURE}" ;;
     activate) cmd_activate ;;
     deactivate) cmd_deactivate ;;
     lock) cmd_lock ;;
-    *) die "usage: antumbra-persistence status|create|unlock|activate|deactivate|lock" ;;
+    *) die "usage: antumbra-persistence status|create|unlock|enable FEATURE|activate [--skip FEATURE]|deactivate|lock" ;;
 esac

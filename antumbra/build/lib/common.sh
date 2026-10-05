@@ -66,6 +66,19 @@ ANTUMBRA_DEBUG="${ANTUMBRA_DEBUG:-}"        # debug initramfs and console; never
 ANTUMBRA_MINIMAL="${ANTUMBRA_MINIMAL:-}"    # small root filesystem for pipeline validation
 ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"      # dm-verity on the root filesystem (experimental)
 ANTUMBRA_FIRMWARE_DIR="${ANTUMBRA_FIRMWARE_DIR:-}"  # builder-provided firmware tree
+# Android apps (Waydroid, docs/architecture.md "Android apps"): 1 adds the
+# Waydroid packages, the pinned Android images and F-Droid, and the Android
+# build hook; the user still turns Android on per session at the Welcome
+# screen. Unset (or 0) builds an image without any of it.
+ANTUMBRA_ANDROID="${ANTUMBRA_ANDROID:-}"
+case "${ANTUMBRA_ANDROID}" in
+    1) ;;
+    ''|0) ANTUMBRA_ANDROID="" ;;
+    *) printf '[%s] error: ANTUMBRA_ANDROID must be 1, 0 or empty\n' "$(basename "${0}")" >&2; exit 1 ;;
+esac
+# Which Waydroid image build the profile uses (device.conf): arm64 carries
+# the 32-bit ABI too; arm64_only runs without AArch32 (KVM or HVF hosts).
+WAYDROID_IMAGE_VARIANT="${WAYDROID_IMAGE_VARIANT:-arm64}"
 
 # ---------------------------------------------------------------------------
 # Logging

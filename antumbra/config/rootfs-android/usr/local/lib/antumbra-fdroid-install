@@ -1,0 +1,31 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Install F-Droid into Android once Android answers (user service
+# antumbra-fdroid-install.service), unless it is already installed, which
+# is the case when Android's data is kept in Persistent Storage. The APK in
+# the image is pinned by SHA-256 and checked against F-Droid's OpenPGP
+# signature and signing certificate at build time (build/fetch-sources.sh).
+set -u
+APK=/usr/share/antumbra/android/F-Droid.apk
+PKG=org.fdroid.fdroid
+DEADLINE=$(( $(date +%s) + 2400 ))
+# "waydroid app list" waits (up to about 15 minutes) for Android's platform
+# service, so it answers once Android has booted.
+apps() { timeout 1200 waydroid app list 2>/dev/null; }
+installed() { apps | grep -qx "packageName: ${PKG}"; }
+
+until apps | grep -q '^packageName: '; do
+    [ "$(date +%s)" -lt "${DEADLINE}" ] || { echo "Android did not start; F-Droid not installed" >&2; exit 1; }
+    sleep 15
+done
+if installed; then
+    echo "F-Droid is already installed"
+    exit 0
+fi
+waydroid app install "${APK}"
+for _ in $(seq 1 24); do
+    if installed; then echo "F-Droid installed"; exit 0; fi
+    sleep 5
+done
+echo "F-Droid could not be installed" >&2
+exit 1

@@ -51,7 +51,13 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     # shellcheck disable=SC2016
     printf -- '- `%s-dtbo.img`, `%s-vbmeta-disabled.img`: unchanged copies of the hotdog-linux-bringup release assets (%s), pinned by SHA-256 in device/oneplus-hotdog/sources.lock.\n\n' "${NAME}" "${NAME}" "$(lock_get PORT_TAG)"
     printf 'The images contain no proprietary device firmware. See INSTALL.md.\n\n'
-    printf '## Pinned inputs\n\n```\n'; grep -v '^#' "${DEVICE_DIR}/sources.lock" | grep -v '^$'; printf '```\n'
+    # Android apps (ANTUMBRA_ANDROID=1): say so, and list their pins only then.
+    pin_filter='^(WAYDROID|FDROID)_'
+    if [ "$(stamp_value "${OUT}/rootfs/build-flags" ANTUMBRA_ANDROID)" = "1" ]; then
+        printf '%s\n\n' "This build includes Android apps (Waydroid; off until turned on at the Welcome screen): the LineageOS 20 images from Waydroid's update channel and F-Droid, unmodified and pinned below. Their licences and sources: docs/legal.md, \"Android apps\"."
+        pin_filter='^$'
+    fi
+    printf '## Pinned inputs\n\n```\n'; grep -v '^#' "${DEVICE_DIR}/sources.lock" | grep -v '^$' | grep -v -E "${pin_filter}"; printf '```\n'
     if [ -f "${OUT}/rootfs/packages.txt" ]; then
         printf '\n## Packages (%s)\n\n```\n' "$(wc -l < "${OUT}/rootfs/packages.txt")"; cat "${OUT}/rootfs/packages.txt"; printf '```\n'
     fi
