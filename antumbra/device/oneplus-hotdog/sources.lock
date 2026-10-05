@@ -49,6 +49,9 @@ TORBROWSER_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/EF6E28
 # Debian base
 DEBIAN_SUITE=trixie
 DEBIAN_MIRROR=https://deb.debian.org/debian
+# Packages pinned in config/rootfs/etc/apt/preferences.d/antumbra-backports
+# (the camera stack, Android support) come from this suite.
+DEBIAN_BACKPORTS=trixie-backports
 # Set to a snapshot.debian.org timestamp (YYYYMMDDTHHMMSSZ) for a
 # reproducible package set; empty uses the live mirror.
 DEBIAN_SNAPSHOT=

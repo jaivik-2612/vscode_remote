@@ -91,11 +91,20 @@ done
 RUNHOOKS
 
 # --- apt sources -------------------------------------------------------------------
+# trixie, plus trixie-backports for the few packages pinned in
+# config/rootfs/etc/apt/preferences.d/antumbra-backports (backports' own
+# priority is 100, so nothing else is taken from it).
+BACKPORTS="$(lock_get DEBIAN_BACKPORTS)"
 if [ -n "${SNAPSHOT}" ]; then
-    APT_SOURCE="deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${SNAPSHOT}/ ${SUITE} main contrib non-free-firmware"
+    SNAP="https://snapshot.debian.org/archive/debian/${SNAPSHOT}/"
+    APT_SOURCES=("deb [check-valid-until=no] ${SNAP} ${SUITE} main contrib non-free-firmware"
+                 "deb [check-valid-until=no] ${SNAP} ${BACKPORTS} main")
 else
-    APT_SOURCE="deb ${MIRROR} ${SUITE} main contrib non-free-firmware"
+    APT_SOURCES=("deb ${MIRROR} ${SUITE} main contrib non-free-firmware"
+                 "deb ${MIRROR} ${BACKPORTS} main")
 fi
+PREFS="${CONFIG_DIR}/rootfs/etc/apt/preferences.d/antumbra-backports"
+[ -f "${PREFS}" ] || die "missing ${PREFS}"
 
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
@@ -115,13 +124,15 @@ mmdebstrap \
     --dpkgopt='path-exclude=/usr/share/doc/*' \
     --dpkgopt='path-include=/usr/share/doc/*/copyright' \
     --dpkgopt='path-exclude=/usr/share/info/*' \
+    --setup-hook='mkdir -p "$1/etc/apt/preferences.d"' \
+    --setup-hook="copy-in ${PREFS} /etc/apt/preferences.d" \
     --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
     --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \
     --customize-hook="chroot \"\$1\" env ${HOOK_ENV} /bin/sh -e /run/antumbra-build/run-hooks.sh" \
     --customize-hook='chroot "$1" dpkg-query -W -f "\${Package} \${Version}\n" > '"${ROUT}/packages.txt" \
     --customize-hook='rm -rf "$1/run/antumbra-build"' \
-    "${SUITE}" "${ROOT}" "${APT_SOURCE}"
+    "${SUITE}" "${ROOT}" "${APT_SOURCES[@]}"
 
 # mmdebstrap removes the resolv.conf and hostname it placed in the chroot;
 # Antumbra ships its own, so put them back from the overlay.

@@ -4,7 +4,8 @@
 # Debian suite/architecture the build targets.
 # usage: tests/check-packages.sh [PACKAGES_INDEX_FILE...]
 # Without arguments the trixie arm64 indexes (main, contrib,
-# non-free-firmware) are downloaded into build/cache/debian-index/.
+# non-free-firmware) and trixie-backports main are downloaded into
+# build/cache/debian-index/.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=../build/lib/common.sh
@@ -23,6 +24,15 @@ if [ "${#INDEXES[@]}" -eq 0 ]; then
         fi
         INDEXES+=("${f}")
     done
+    # trixie-backports main, for the packages pinned to it
+    # (config/rootfs/etc/apt/preferences.d/antumbra-backports).
+    BACKPORTS="$(lock_get DEBIAN_BACKPORTS)"
+    f="${IDX}/Packages-backports-main"
+    if [ ! -s "${f}" ]; then
+        log "downloading ${BACKPORTS}/main arm64 index"
+        curl -fsSL "${MIRROR}/dists/${BACKPORTS}/main/binary-arm64/Packages.xz" | xz -d > "${f}"
+    fi
+    INDEXES+=("${f}")
 fi
 
 AVAILABLE="$(mktemp)"
