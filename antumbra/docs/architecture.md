@@ -766,7 +766,8 @@ image Android stays off until the user turns on "Android apps
 **Build.** `fetch-sources.sh` downloads the two image zips and F-Droid
 pinned in `sources.lock`: each zip by SHA-256 and size, as listed in
 Waydroid's update channel, and each image inside by its size and CRC-32
-(an optional `*_IMG_SHA256` key also pins the extracted image); F-Droid by
+and the extracted image's SHA-256 (`*_IMG_SHA256`), checked on every run,
+cached or not (a cached image that changed is extracted again); F-Droid by
 SHA-256, F-Droid's OpenPGP signature (key vendored in
 `device/oneplus-hotdog/keys/f-droid.asc`) and the SHA-256 of the
 certificate in its signature block. `rootfs.sh` adds `android.list`,
