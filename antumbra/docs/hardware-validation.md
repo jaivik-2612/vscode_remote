@@ -119,7 +119,11 @@ each course (`dmesg | grep camera-popup`).
     stopped … endpoint=1 error=0`; the camera is down while the phone
     sleeps; after `Restarting tasks`, `raising the camera again for a
     stream held across sleep` and an `open stopped … endpoint=1`. `auto`
-    then retracts it.
+    then retracts it. If the retract before sleep fails (`could not
+    retract the camera at system sleep` or `cannot read the Hall sensors
+    at system sleep`) while no stream holds the camera, the retract is
+    retried after resume: `camera not closed at resume` and a `close
+    stopped … endpoint=1`. Record any such run.
 32. Power-off and reboot with the camera up (`on`, then `systemctl
     poweroff`; again with `systemctl reboot`): the camera retracts before
     the phone goes off (`camera not closed at reboot or power-off` on a
@@ -133,7 +137,10 @@ each course (`dmesg | grep camera-popup`).
     one HD1913: closed needs |up| < 50 and |down| >= 340 (that unit read
     about -13 and -369), fully open needs |up| >= 300 and |down| <= 50.
     Readings near a limit mean refused courses or false endpoints on this
-    unit.
+    unit. A closed |down| between 340 and 349 matters most: such a camera
+    counts as seated, and `auto` must leave it without motion and with
+    `error=0` (the driver no longer gives a seated camera the 320-microstep
+    settle push, which could not move it at its stop and failed).
 35. `status` is `-r--------`, and `pulse_up`, `restore_closed`, `open`,
     `finish_open` and `close` exist only when the module was loaded with
     `debug_knobs=1`.

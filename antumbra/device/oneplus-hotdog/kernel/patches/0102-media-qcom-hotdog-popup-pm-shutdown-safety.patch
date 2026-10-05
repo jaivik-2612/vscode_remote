@@ -1,4 +1,4 @@
-From 490864c0cf5c70c1c815c622924cb8f84faadf2f Mon Sep 17 00:00:00 2001
+From af619fe80de30633634c3b51a299fd351644dd66 Mon Sep 17 00:00:00 2001
 From: Antumbra build <antumbra@localhost>
 Date: Mon, 5 Oct 2026 11:21:22 +0000
 Subject: [PATCH] media: qcom: hotdog-popup: retract before sleep and shutdown,
@@ -21,6 +21,24 @@ resume, a reconcile work item raises the camera again when the domain is
 on and a consumer was active when genpd powered it back on, so a stream
 held across sleep runs with the camera up again. power_off on a camera
 the Halls show as seated stays a no-op success.
+
+Whether a consumer holds the camera is tracked apart from genpd's view
+of the domain: a successful power_on sets it, every power_off clears it
+(genpd powers the domain off only once every consumer is suspended, so a
+close that fails leaves the domain on with no consumer), and a gated
+power_on reads it from the consumers' runtime state. The reconcile, and
+the reopen request recorded at PM_SUSPEND_PREPARE, follow the consumer,
+not the domain: after a failed close followed by a suspend aborted
+before the noirq phases (a wakeup during freezing, a later PM notifier
+refusing), the camera is no longer raised with no stream. A retract at
+PM_SUSPEND_PREPARE that fails, or whose Hall read fails, is retried by
+the reconcile after resume when no consumer wants the camera up; the
+gated noirq callbacks would otherwise record the domain off and leave
+the camera raised. An ungated power_on or power_off, or the final
+retract, supersedes the retry. A close course that takes no step, the
+Halls already reading the camera seated, no longer gets the settle push:
+at a stop that reads |down| 340-349 that push could not raise the
+reading, and power_off failed with -EPROTO and kept the domain on.
 
 Shutdown. A reboot notifier, which runs before device_shutdown() with
 every bus up, and a .shutdown fallback retract a camera that is not
@@ -68,8 +86,8 @@ Carried by the Antumbra project; not upstream. Needs validation on the
 phone (Antumbra docs/hardware-validation.md).
 ---
  .../media/oneplus,hotdog-popup-motor.yaml     |   4 +-
- .../media/platform/qcom/hotdog-popup-motor.c  | 601 +++++++++++++++++-
- 2 files changed, 572 insertions(+), 33 deletions(-)
+ .../media/platform/qcom/hotdog-popup-motor.c  | 656 +++++++++++++++++-
+ 2 files changed, 626 insertions(+), 34 deletions(-)
 
 diff --git a/Documentation/devicetree/bindings/media/oneplus,hotdog-popup-motor.yaml b/Documentation/devicetree/bindings/media/oneplus,hotdog-popup-motor.yaml
 index 1dfdd24f8..2aabeeb6c 100644
@@ -94,7 +112,7 @@ index 1dfdd24f8..2aabeeb6c 100644
          pinctrl-1 = <&motor_pwm>;
      };
 diff --git a/drivers/media/platform/qcom/hotdog-popup-motor.c b/drivers/media/platform/qcom/hotdog-popup-motor.c
-index b88b10a5d..d74f9ea2d 100644
+index b88b10a5d..969efdd6b 100644
 --- a/drivers/media/platform/qcom/hotdog-popup-motor.c
 +++ b/drivers/media/platform/qcom/hotdog-popup-motor.c
 @@ -5,16 +5,23 @@
@@ -157,7 +175,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  struct hotdog_popup {
  	struct device *dev;
-@@ -75,6 +111,36 @@ struct hotdog_popup {
+@@ -75,6 +111,43 @@ struct hotdog_popup {
  	int last_error;
  	unsigned int automatic_open_count;
  	unsigned int automatic_close_count;
@@ -180,21 +198,28 @@ index b88b10a5d..d74f9ea2d 100644
 +	ktime_t watchdog_deadline;
 +	bool watchdog_fired;
 +	/*
-+	 * System sleep and shutdown. domain_on mirrors genpd's view while the
-+	 * callbacks only record state; reopen_pending asks the post-resume
-+	 * reconcile to raise the camera for a stream held across sleep.
++	 * System sleep and shutdown, all under lock. domain_on mirrors genpd's
++	 * view while the callbacks only record state; it stays true after a
++	 * failed power_off. consumer_on tells whether a consumer holds the
++	 * camera: set by a successful power_on (while sleeping, from the
++	 * consumers' runtime state), cleared by every power_off.
++	 * reopen_pending asks the post-resume reconcile to raise the camera
++	 * for a stream held across sleep; retract_pending asks it to retry a
++	 * retract that failed before sleep when no consumer wants the camera.
 +	 */
 +	struct notifier_block pm_nb;
 +	struct notifier_block reboot_nb;
 +	struct work_struct reconcile_work;
 +	bool domain_on;
++	bool consumer_on;
 +	bool reopen_pending;
++	bool retract_pending;
 +	bool sleeping;
 +	bool shutdown;
  };
  
  static bool hotdog_popup_is_closed(int up, int down)
-@@ -106,7 +172,13 @@ static void hotdog_popup_pwm_disable(struct hotdog_popup *popup)
+@@ -106,7 +179,13 @@ static void hotdog_popup_pwm_disable(struct hotdog_popup *popup)
  		gpiod_set_value_cansleep(popup->step, 0);
  }
  
@@ -209,7 +234,7 @@ index b88b10a5d..d74f9ea2d 100644
  {
  	struct pwm_state state;
  	int ret;
-@@ -130,6 +202,21 @@ static int hotdog_popup_pwm_enable(struct hotdog_popup *popup, u64 period)
+@@ -130,6 +209,21 @@ static int hotdog_popup_pwm_enable(struct hotdog_popup *popup, u64 period)
  	if (ret)
  		goto err_disable;
  
@@ -231,7 +256,7 @@ index b88b10a5d..d74f9ea2d 100644
  	return 0;
  
  err_disable:
-@@ -137,6 +224,59 @@ static int hotdog_popup_pwm_enable(struct hotdog_popup *popup, u64 period)
+@@ -137,6 +231,59 @@ static int hotdog_popup_pwm_enable(struct hotdog_popup *popup, u64 period)
  	return ret;
  }
  
@@ -291,7 +316,7 @@ index b88b10a5d..d74f9ea2d 100644
  static bool hotdog_popup_halls_plausible(int up, int down)
  {
  	/* Both endpoint sensors are naturally weak around mid-travel. */
-@@ -182,18 +322,28 @@ static int hotdog_popup_drive_exact(struct hotdog_popup *popup, bool upward,
+@@ -182,18 +329,28 @@ static int hotdog_popup_drive_exact(struct hotdog_popup *popup, bool upward,
  				    unsigned int microsteps)
  {
  	u64 duration_us;
@@ -323,7 +348,7 @@ index b88b10a5d..d74f9ea2d 100644
  	hotdog_popup_stop(popup);
  	return ret;
  }
-@@ -282,12 +432,73 @@ static bool hotdog_popup_motion_endpoint(bool upward, int up, int down)
+@@ -282,12 +439,73 @@ static bool hotdog_popup_motion_endpoint(bool upward, int up, int down)
  			 hotdog_popup_is_closed(up, down);
  }
  
@@ -398,7 +423,7 @@ index b88b10a5d..d74f9ea2d 100644
  	u64 sleep_us;
  	int ret;
  
-@@ -313,9 +524,24 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -313,9 +531,24 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  
  	popup->endpoint_reached = false;
  	popup->last_steps = 0;
@@ -424,7 +449,7 @@ index b88b10a5d..d74f9ea2d 100644
  	if (ret)
  		goto out_stop;
  
-@@ -326,9 +552,8 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -326,9 +559,8 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  	 * extended camera.
  	 */
  	sleep_us = DIV_ROUND_UP_ULL((u64)HOTDOG_RAMP_MICROSTEPS *
@@ -435,7 +460,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	ret = hotdog_popup_read_halls(popup, &current_up, &current_down);
  	if (ret)
-@@ -341,10 +566,23 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -341,10 +573,23 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  			HOTDOG_PROGRESS_MIN_COUNTS ||
  		abs(popup->before_up) - abs(current_up) >=
  			HOTDOG_PROGRESS_MIN_COUNTS;
@@ -460,7 +485,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	/*
  	 * Both Hall sensors are flat at the mechanical endpoints.  The stock
-@@ -355,9 +593,8 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -355,9 +600,8 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  	if (!progress) {
  		sleep_us = DIV_ROUND_UP_ULL(
  			(u64)HOTDOG_PROGRESS_PROBE_MICROSTEPS *
@@ -471,7 +496,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  		ret = hotdog_popup_read_halls(popup, &current_up, &current_down);
  		if (ret)
-@@ -371,23 +608,28 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -371,23 +615,28 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  				HOTDOG_PROGRESS_MIN_COUNTS ||
  			abs(popup->before_up) - abs(current_up) >=
  				HOTDOG_PROGRESS_MIN_COUNTS;
@@ -508,7 +533,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  		ret = hotdog_popup_read_halls(popup, &current_up, &current_down);
  		if (ret)
-@@ -406,10 +648,18 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -406,10 +655,18 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  		}
  	}
  
@@ -528,7 +553,7 @@ index b88b10a5d..d74f9ea2d 100644
  	msleep(20);
  	if (!hotdog_popup_read_halls(popup, &current_up, &current_down)) {
  		popup->after_up = current_up;
-@@ -417,9 +667,10 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
+@@ -417,9 +674,10 @@ static int hotdog_popup_move_profile(struct hotdog_popup *popup, bool upward)
  	}
  
  	dev_info(popup->dev,
@@ -541,7 +566,22 @@ index b88b10a5d..d74f9ea2d 100644
  		 popup->before_up, popup->after_up, popup->before_down,
  		 popup->after_down);
  
-@@ -501,14 +752,27 @@ static int hotdog_popup_close_with_retry(struct hotdog_popup *popup)
+@@ -474,8 +732,13 @@ static int hotdog_popup_close(struct hotdog_popup *popup)
+ 	unsigned int close_steps;
+ 	int ret;
+ 
++	/*
++	 * The course takes no step only when the Halls already show the
++	 * camera seated; a settle push would drive it into the bottom stop.
++	 */
+ 	ret = hotdog_popup_move_profile(popup, false);
+-	if (ret || abs(popup->after_down) >= HOTDOG_SETTLED_DOWN_MIN)
++	if (ret || popup->last_steps == 0 ||
++	    abs(popup->after_down) >= HOTDOG_SETTLED_DOWN_MIN)
+ 		return ret;
+ 
+ 	close_steps = popup->last_steps;
+@@ -501,14 +764,27 @@ static int hotdog_popup_close_with_retry(struct hotdog_popup *popup)
  	return hotdog_popup_close(popup);
  }
  
@@ -573,7 +613,7 @@ index b88b10a5d..d74f9ea2d 100644
  	popup->automatic_open_count++;
  	ret = hotdog_popup_open(popup);
  	if (ret) {
-@@ -525,6 +789,34 @@ static int hotdog_popup_domain_power_on(struct generic_pm_domain *domain)
+@@ -525,6 +801,39 @@ static int hotdog_popup_domain_power_on(struct generic_pm_domain *domain)
  	return ret;
  }
  
@@ -592,26 +632,37 @@ index b88b10a5d..d74f9ea2d 100644
 +		 * genpd powers a domain that was off back on in resume_noirq,
 +		 * before I2C works, and ignores the result. Record the state and
 +		 * let the reconcile work raise the camera after resume if a
-+		 * consumer is still streaming.
++		 * consumer is still streaming. suspend_noirq powers the domain
++		 * off even under an active stream, so ask the consumers again.
 +		 */
 +		popup->domain_on = true;
-+		popup->reopen_pending = hotdog_popup_consumer_active(domain);
++		popup->consumer_on = hotdog_popup_consumer_active(domain);
++		popup->reopen_pending = popup->consumer_on;
 +		return 0;
 +	}
 +
++	/* This course supersedes anything left pending across sleep. */
 +	popup->reopen_pending = false;
++	popup->retract_pending = false;
 +	ret = hotdog_popup_auto_open(popup);
 +	popup->domain_on = !ret;
++	popup->consumer_on = !ret;
 +	return ret;
 +}
 +
  static int hotdog_popup_domain_power_off(struct generic_pm_domain *domain)
  {
  	struct hotdog_popup *popup =
-@@ -532,13 +824,180 @@ static int hotdog_popup_domain_power_off(struct generic_pm_domain *domain)
+@@ -532,13 +841,216 @@ static int hotdog_popup_domain_power_off(struct generic_pm_domain *domain)
  	int ret;
  
  	guard(mutex)(&popup->lock);
++	/*
++	 * genpd powers the domain off only once every consumer is suspended,
++	 * or in suspend_noirq; a failed close below leaves the domain on but
++	 * no consumer holding the camera.
++	 */
++	popup->consumer_on = false;
 +	popup->reopen_pending = false;
 +	if (popup->sleeping || popup->shutdown) {
 +		/*
@@ -623,19 +674,22 @@ index b88b10a5d..d74f9ea2d 100644
 +		return 0;
 +	}
 +
++	/* This close supersedes a retract left pending before sleep. */
++	popup->retract_pending = false;
++
 +	/*
 +	 * A camera the Halls show as seated ends here without motion: the
 +	 * course finds its endpoint before stepping and no restore is needed.
 +	 */
- 	popup->automatic_close_count++;
- 	ret = hotdog_popup_close_with_retry(popup);
- 	hotdog_popup_stop(popup);
- 	popup->last_error = ret;
++	popup->automatic_close_count++;
++	ret = hotdog_popup_close_with_retry(popup);
++	hotdog_popup_stop(popup);
++	popup->last_error = ret;
 +	/* genpd keeps the domain on when power_off fails. */
 +	popup->domain_on = ret != 0;
- 	return ret;
- }
- 
++	return ret;
++}
++
 +/*
 + * Close a camera that is not closed, with popup->lock held. @raised, if
 + * given, tells whether it was found out of its closed position.
@@ -663,17 +717,17 @@ index b88b10a5d..d74f9ea2d 100644
 +	dev_info(popup->dev,
 +		 "camera not closed at %s (Hall up %d, down %d), retracting\n",
 +		 why, up, down);
-+	popup->automatic_close_count++;
-+	ret = hotdog_popup_close_with_retry(popup);
-+	hotdog_popup_stop(popup);
-+	popup->last_error = ret;
+ 	popup->automatic_close_count++;
+ 	ret = hotdog_popup_close_with_retry(popup);
+ 	hotdog_popup_stop(popup);
+ 	popup->last_error = ret;
 +	if (ret)
 +		dev_err(popup->dev, "could not retract the camera at %s (%d)\n",
 +			why, ret);
 +
-+	return ret;
-+}
-+
+ 	return ret;
+ }
+ 
 +static void hotdog_popup_sleep_prepare(struct hotdog_popup *popup)
 +{
 +	bool raised;
@@ -685,11 +739,13 @@ index b88b10a5d..d74f9ea2d 100644
 +	/*
 +	 * Tasks still run and I2C works here, unlike in the noirq phases where
 +	 * genpd would otherwise drive the motor. A camera raised for a stream
-+	 * is wanted back after resume.
++	 * is wanted back after resume; one that could not be retracted, or
++	 * whose Halls could not be read, is retried after resume.
 +	 */
-+	hotdog_popup_retract(popup, "system sleep", &raised);
++	popup->retract_pending =
++		hotdog_popup_retract(popup, "system sleep", &raised) != 0;
 +	if (raised)
-+		popup->reopen_pending = popup->domain_on;
++		popup->reopen_pending = popup->consumer_on;
 +	popup->sleeping = true;
 +}
 +
@@ -701,12 +757,36 @@ index b88b10a5d..d74f9ea2d 100644
 +	int down;
 +	int ret;
 +
++	/*
++	 * power_on and power_off take the same lock, so a stream that starts
++	 * or stops meanwhile runs before or after this, never during it.
++	 */
 +	guard(mutex)(&popup->lock);
-+	if (popup->sleeping || popup->shutdown || !popup->reopen_pending)
++	if (popup->sleeping || popup->shutdown)
 +		return;
 +
++	/*
++	 * The retract before sleep failed, and the gated noirq callbacks
++	 * never moved the motor: retry it now that I2C works, unless a
++	 * consumer wants the camera up.
++	 */
++	if (popup->retract_pending) {
++		popup->retract_pending = false;
++		if (!popup->consumer_on) {
++			hotdog_popup_retract(popup, "resume", NULL);
++			return;
++		}
++	}
++
++	if (!popup->reopen_pending)
++		return;
++
++	/*
++	 * Only for a consumer that holds the camera now: domain_on alone stays
++	 * set after a failed power_off with every consumer suspended.
++	 */
 +	popup->reopen_pending = false;
-+	if (!popup->domain_on)
++	if (!popup->domain_on || !popup->consumer_on)
 +		return;
 +
 +	/* A stream may only run with the camera raised. */
@@ -748,7 +828,7 @@ index b88b10a5d..d74f9ea2d 100644
 +		break;
 +	}
 +
-+	/* Never veto sleep: a camera that cannot close stays put either way. */
++	/* Never veto sleep: a camera that could not close is retried after it. */
 +	return NOTIFY_DONE;
 +}
 +
@@ -767,6 +847,7 @@ index b88b10a5d..d74f9ea2d 100644
 +	hotdog_popup_retract(popup, why, NULL);
 +	popup->shutdown = true;
 +	popup->reopen_pending = false;
++	popup->retract_pending = false;
 +}
 +
 +static int hotdog_popup_reboot_notify(struct notifier_block *nb,
@@ -789,7 +870,7 @@ index b88b10a5d..d74f9ea2d 100644
  static ssize_t status_show(struct device *dev,
  			   struct device_attribute *attr, char *buf)
  {
-@@ -553,16 +1012,27 @@ static ssize_t status_show(struct device *dev,
+@@ -553,16 +1065,27 @@ static ssize_t status_show(struct device *dev,
  		return ret;
  
  	return sysfs_emit(buf,
@@ -820,7 +901,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  static ssize_t pulse_up_store(struct device *dev,
  			      struct device_attribute *attr,
-@@ -581,6 +1051,8 @@ static ssize_t pulse_up_store(struct device *dev,
+@@ -581,6 +1104,8 @@ static ssize_t pulse_up_store(struct device *dev,
  	guard(mutex)(&popup->lock);
  	if (popup->preflight_used)
  		return -EALREADY;
@@ -829,7 +910,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	popup->preflight_used = true;
  	ret = hotdog_popup_preflight_up(popup);
-@@ -611,6 +1083,8 @@ static ssize_t restore_closed_store(struct device *dev,
+@@ -611,6 +1136,8 @@ static ssize_t restore_closed_store(struct device *dev,
  	guard(mutex)(&popup->lock);
  	if (popup->restore_used)
  		return -EALREADY;
@@ -838,7 +919,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	popup->restore_used = true;
  	ret = hotdog_popup_restore_closed(popup, microsteps);
-@@ -640,6 +1114,8 @@ static ssize_t open_store(struct device *dev,
+@@ -640,6 +1167,8 @@ static ssize_t open_store(struct device *dev,
  	guard(mutex)(&popup->lock);
  	if (popup->open_used)
  		return -EALREADY;
@@ -847,7 +928,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	popup->open_used = true;
  	ret = hotdog_popup_open(popup);
-@@ -669,6 +1145,8 @@ static ssize_t finish_open_store(struct device *dev,
+@@ -669,6 +1198,8 @@ static ssize_t finish_open_store(struct device *dev,
  	guard(mutex)(&popup->lock);
  	if (popup->finish_open_used)
  		return -EALREADY;
@@ -856,7 +937,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	popup->finish_open_used = true;
  	ret = hotdog_popup_finish_open(popup);
-@@ -698,6 +1176,8 @@ static ssize_t close_store(struct device *dev,
+@@ -698,6 +1229,8 @@ static ssize_t close_store(struct device *dev,
  	guard(mutex)(&popup->lock);
  	if (popup->close_used)
  		return -EALREADY;
@@ -865,7 +946,7 @@ index b88b10a5d..d74f9ea2d 100644
  
  	popup->close_used = true;
  	ret = hotdog_popup_close(popup);
-@@ -719,7 +1199,24 @@ static struct attribute *hotdog_popup_attrs[] = {
+@@ -719,7 +1252,24 @@ static struct attribute *hotdog_popup_attrs[] = {
  	&dev_attr_close.attr,
  	NULL,
  };
@@ -891,19 +972,19 @@ index b88b10a5d..d74f9ea2d 100644
  
  static int hotdog_popup_probe(struct platform_device *pdev)
  {
-@@ -733,6 +1230,11 @@ static int hotdog_popup_probe(struct platform_device *pdev)
+@@ -733,6 +1283,11 @@ static int hotdog_popup_probe(struct platform_device *pdev)
  
  	popup->dev = dev;
  	mutex_init(&popup->lock);
 +	hrtimer_setup(&popup->watchdog, hotdog_popup_watchdog_fn,
 +		      CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
 +	INIT_WORK(&popup->watchdog_work, hotdog_popup_watchdog_work);
-+	/* pm_genpd_init() below starts the domain on. */
++	/* pm_genpd_init() below starts the domain on, with no consumer yet. */
 +	popup->domain_on = true;
  	platform_set_drvdata(pdev, popup);
  
  	/* OxygenOS keeps the motor boost converter on across movements. */
-@@ -783,6 +1285,36 @@ static int hotdog_popup_probe(struct platform_device *pdev)
+@@ -783,6 +1338,36 @@ static int hotdog_popup_probe(struct platform_device *pdev)
  				     "failed to get lower Hall channel\n");
  
  	hotdog_popup_stop(popup);
@@ -940,7 +1021,7 @@ index b88b10a5d..d74f9ea2d 100644
  	popup->genpd.name = "hotdog-camera-popup";
  	popup->genpd.power_on = hotdog_popup_domain_power_on;
  	popup->genpd.power_off = hotdog_popup_domain_power_off;
-@@ -803,7 +1335,7 @@ static int hotdog_popup_probe(struct platform_device *pdev)
+@@ -803,7 +1388,7 @@ static int hotdog_popup_probe(struct platform_device *pdev)
  				     "failed to register power domain\n");
  	}
  
@@ -949,7 +1030,7 @@ index b88b10a5d..d74f9ea2d 100644
  	if (ret) {
  		of_genpd_del_provider(dev->of_node);
  		pm_genpd_remove(&popup->genpd);
-@@ -818,12 +1350,18 @@ static void hotdog_popup_remove(struct platform_device *pdev)
+@@ -818,12 +1403,18 @@ static void hotdog_popup_remove(struct platform_device *pdev)
  {
  	struct hotdog_popup *popup = platform_get_drvdata(pdev);
  
@@ -968,7 +1049,7 @@ index b88b10a5d..d74f9ea2d 100644
  static const struct of_device_id hotdog_popup_of_match[] = {
  	{ .compatible = "oneplus,hotdog-popup-motor" },
  	{ }
-@@ -833,6 +1371,7 @@ MODULE_DEVICE_TABLE(of, hotdog_popup_of_match);
+@@ -833,6 +1424,7 @@ MODULE_DEVICE_TABLE(of, hotdog_popup_of_match);
  static struct platform_driver hotdog_popup_driver = {
  	.probe = hotdog_popup_probe,
  	.remove = hotdog_popup_remove,
