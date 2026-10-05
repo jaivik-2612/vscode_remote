@@ -463,16 +463,19 @@ def take_tour(vm, sh, out, T):
             print(f"tour: {name}", flush=True)
         except Exception as e:  # noqa: BLE001
             print(f"tour: {name} failed: {e}", flush=True)
-    # Phosh's top bar opens the quick settings when pulled down.
-    vm.swipe(360, 4, 360, 900); time.sleep(T(8)); shot("tour-quick-settings.png")
-    vm.swipe(360, 1300, 360, 200); time.sleep(T(6))
-    # Tor Browser, started as the session user the way its launcher does.
+    # Phosh: a swipe up from the home bar opens the app overview, a pull
+    # down from the top bar opens the quick settings.
+    vm.swipe(360, 1425, 360, 500); time.sleep(T(15)); shot("tour-apps.png")
+    vm.swipe(360, 500, 360, 1425); time.sleep(T(10))
+    vm.swipe(360, 4, 360, 1000); time.sleep(T(15)); shot("tour-quick-settings.png")
+    vm.swipe(360, 1000, 360, 4); time.sleep(T(10))
+    # Tor Browser through its normal launcher chain (sudo helper, tbb namespace).
     sh("runuser -u amnesia -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 "
-       "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus setsid -f /usr/local/bin/tor-browser >/dev/null 2>&1; echo started", timeout=60)
-    for i in range(int(T(120) / 15)):
-        time.sleep(15)
-        rc, o = sh("pgrep -fc 'firefox|tor-browser' ; echo", timeout=30)
-    time.sleep(T(30))
+       "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus XDG_SESSION_TYPE=wayland "
+       "setsid -f /usr/local/bin/tor-browser >/dev/null 2>&1; echo started", timeout=60)
+    time.sleep(T(150))
+    rc, o = sh("ip netns identify $(pgrep -u amnesia -f 'tor-browser.*firefox|/firefox' | head -1) 2>/dev/null; pgrep -u amnesia -fc firefox", timeout=60)
+    print(f"tour: Tor Browser namespace/process count: {o.strip()!r}", flush=True)
     shot("tour-tor-browser.png")
 
 
