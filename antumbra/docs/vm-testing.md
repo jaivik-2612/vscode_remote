@@ -234,10 +234,25 @@ running.
 ## Kernel test modules
 
 `tests/kernel/genpd-sleep-vm.sh` loads a small genpd test module into a
-running debug VM and runs suspend-to-idle cycles with an RTC wake-up. It
-shows that genpd calls a power domain's callbacks in the noirq phases and
-that the pop-up motor patch's sleep gate keeps them from driving the
-motor (`tests/kernel/README.md`).
+running debug VM and runs suspend-to-idle cycles with an RTC wake-up, two
+of them refused at `PM_SUSPEND_PREPARE` on purpose. It shows that genpd
+calls a power domain's callbacks in the noirq phases (power_on in
+resume_noirq, power_off in suspend_noirq), and that a model of the pop-up
+motor patch's sleep gate, a copy of its logic in the test module rather
+than the driver, keeps those calls from moving the motor. It also runs
+that model through a suspend aborted while a failed close keeps the domain
+on, and through a retract that fails before sleep, and shows that the
+gate as the patch first had it fails both (`tests/kernel/README.md`).
+`tests/lint.sh` replays the same failure sequences against a Python model
+of the driver's flags (`tests/kernel/popup_gate_model.py`).
+
+Not covered: the driver itself. `hotdog-popup-motor.c` is never built or
+loaded in the VM, so a regression in its gate passes these tests unless
+the models change with it. Exercising it would need the module built for
+the VM with simulated GPIOs (`GPIO_SIM`), a GPIO-driven PWM for STEP
+(`PWM_GPIO`) and a fake IIO provider for the Hall channels; until then the
+driver is checked by review and on the phone
+(`docs/hardware-validation.md`).
 
 ## What the first VM runs found
 
