@@ -7,6 +7,7 @@ node; the GTK 3 and GTK 4 copies of the palette must agree; the VM test
 must look for the accent the Welcome screen actually uses.
 """
 import ast
+import hashlib
 import os
 import re
 import unittest
@@ -164,6 +165,36 @@ class SvgTest(unittest.TestCase):
 
     def test_pill(self):
         self.check_svg(os.path.join(THEME, "pill.svg"), ("324", "12"), 2048)
+
+
+class IconThemeTest(unittest.TestCase):
+    ICONS = os.path.join(OVERLAY, "usr", "share", "icons", "Antumbra")
+
+    def test_selected_by_the_override(self):
+        self.assertIn("icon-theme='Antumbra'\n", read(OVERRIDE))
+        index = read(os.path.join(self.ICONS, "index.theme"))
+        self.assertIn("Name=Antumbra\n", index)
+        self.assertIn("Inherits=Adwaita,hicolor\n", index)
+        self.assertTrue(os.path.isfile(os.path.join(self.ICONS, "LICENSE")))
+
+    def test_every_icon_matches_its_recorded_hash(self):
+        listed = set()
+        for line in read(os.path.join(self.ICONS, "SOURCES")).splitlines():
+            if not line or line.startswith("#"):
+                continue
+            installed, upstream, upstream_sha, installed_sha, *change = line.split()
+            self.assertTrue(upstream.startswith("rounded/"), line)
+            if not change:
+                self.assertEqual(upstream_sha, installed_sha, f"{installed} changed but not marked")
+            with open(os.path.join(self.ICONS, installed), "rb") as f:
+                data = f.read()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), installed_sha, installed)
+            self.assertIn(b"<svg", data[:256], installed)
+            listed.add(installed)
+        on_disk = {os.path.join("symbolic", "status", n)
+                   for n in os.listdir(os.path.join(self.ICONS, "symbolic", "status"))}
+        self.assertEqual(on_disk, listed)
+        self.assertGreaterEqual(len(listed), 30)
 
 
 if __name__ == "__main__":

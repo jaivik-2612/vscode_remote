@@ -17,6 +17,8 @@ accent-color='purple'
 font-name='Roboto 11'
 document-font-name='Roboto 11'
 show-battery-percentage=true
+# Material Symbols status icons over Adwaita (/usr/share/icons/Antumbra).
+icon-theme='Antumbra'
 
 [org.gnome.desktop.background]
 # Project-authored wallpapers; picture-uri-dark is used while color-scheme

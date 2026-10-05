@@ -9,3 +9,6 @@ build/work/
 __pycache__/
 *.pyc
 .pytest_cache/
+# The repository root ignores every icons/ directory (the web app's build
+# output); the image's icon themes are source.
+!/config/rootfs/usr/share/icons/
