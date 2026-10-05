@@ -102,10 +102,23 @@ asserts, in order:
    and phoc running;
 3. a screenshot of the display (`build/work/qemu-virt/vm-run/smoke/display.png`);
 4. from the packet capture of the VM's network (`net.pcap`): no IP packet
-   left the guest before the Welcome decision;
-5. a short press of the virtual power button is ignored (only a long
+   left the guest before the Welcome decision, and the display shows the
+   drawn Welcome screen rather than a text console;
+5. with `--through-welcome` (what `make vm-test` runs): the harness finds
+   the "Start Antumbra" button on the display and presses it with the
+   defaults (amnesic session, MAC address anonymization, Tor connected
+   automatically), then checks that the settings were applied and Phosh
+   started, that the network driver loaded only now and the interface got
+   an address, that the interface's MAC address is not the one QEMU gave
+   the hardware, that every network socket in the system belongs to Tor,
+   and, from the packet capture, that no DNS, NTP, IPv6 or other UDP left
+   the guest and no frame carried the hardware MAC address;
+6. a short press of the virtual power button is ignored (only a long
    press powers off, as on the phone), and a power-off requested from the
    console goes through the return-to-initramfs shutdown path.
+
+`--tour` adds best-effort screenshots of the session (quick settings, Tor
+Browser) without checks. `make vm-test SCALE=2` doubles every timeout.
 
 Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed. `--timeout-scale 2` doubles every timeout for slow hosts.

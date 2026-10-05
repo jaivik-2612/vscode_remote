@@ -34,6 +34,6 @@ vm-console:      ## attach to the running VM's serial console
 vm-stop:         ## stop the background VM
 	$(VM_ENV) build/vm.sh stop
 vm-test:         ## boot in the background and run the smoke test
-	$(VM_ENV) tests/vm-smoke.sh
+	$(VM_ENV) tests/vm-smoke.sh --through-welcome --timeout-scale $(or $(SCALE),1)
 vm-bundle:       ## package the qemu-virt build as a self-contained test bundle (.tar)
 	$(VM_ENV) build/vm-bundle.sh

@@ -5,7 +5,8 @@ commands over the debug console (hvc0), QMP (screenshots, power button),
 packet-capture summaries, and the smoke test. Standard library only.
 
 usage: antumbra_vm.py [--run-dir DIR] COMMAND ...
-  smoke [--timeout-scale F] [--no-stop]   boot, check, power down; exit 1 on any failure
+  smoke [--timeout-scale F] [--no-stop] [--through-welcome [--tour]]
+                                          boot, check, power down; exit 1 on any failure
   wait REGEX [--timeout S]                wait for REGEX in the serial log
   shell CMD...                            run a command on the debug console, print its output
   screenshot FILE.png                     dump the display
@@ -310,6 +311,70 @@ class VM:
     def stop(self):
         subprocess.run([os.path.join(ROOT, "build", "vm.sh"), "stop"], check=False)
 
+    # Input through QMP: the virtio tablet takes absolute coordinates (0..32767),
+    # given here in display pixels (720x1440 unless vm.sh is changed).
+    DISPLAY_W, DISPLAY_H = 720, 1440
+
+    def _abs(self, x, y):
+        return [{"type": "abs", "data": {"axis": "x", "value": int(x * 32767 / (self.DISPLAY_W - 1))}},
+                {"type": "abs", "data": {"axis": "y", "value": int(y * 32767 / (self.DISPLAY_H - 1))}}]
+
+    def tap(self, x, y):
+        self.qmp("input-send-event", events=self._abs(x, y))
+        time.sleep(0.2)
+        self.qmp("input-send-event", events=[{"type": "btn", "data": {"down": True, "button": "left"}}])
+        time.sleep(0.15)
+        self.qmp("input-send-event", events=[{"type": "btn", "data": {"down": False, "button": "left"}}])
+
+    def swipe(self, x1, y1, x2, y2, steps=12):
+        self.qmp("input-send-event", events=self._abs(x1, y1))
+        self.qmp("input-send-event", events=[{"type": "btn", "data": {"down": True, "button": "left"}}])
+        for i in range(1, steps + 1):
+            time.sleep(0.04)
+            self.qmp("input-send-event", events=self._abs(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps))
+        self.qmp("input-send-event", events=[{"type": "btn", "data": {"down": False, "button": "left"}}])
+
+    def pixels(self):
+        """(width, height, rgb bytes) of the current display."""
+        ppm = os.path.join(self.run, "screendump.ppm")
+        if os.path.exists(ppm):
+            os.unlink(ppm)
+        self.qmp("screendump", filename=ppm)
+        for _ in range(50):
+            if os.path.exists(ppm) and os.path.getsize(ppm) > 64:
+                break
+            time.sleep(0.2)
+        data = open(ppm, "rb").read()
+        m = re.match(rb"P6\s+(\d+)\s+(\d+)\s+(\d+)\s", data)
+        return int(m.group(1)), int(m.group(2)), data[m.end():]
+
+    def find_color(self, rgb, tol=40, region=None, min_pixels=200):
+        """Centre of the pixels within TOL of RGB (optionally inside region
+        (x0, y0, x1, y1)), or None if fewer than MIN_PIXELS match."""
+        w, h, px = self.pixels()
+        x0, y0, x1, y1 = region or (0, 0, w, h)
+        xs = ys = n = 0
+        for y in range(y0, min(y1, h), 2):
+            row = y * w * 3
+            for x in range(x0, min(x1, w), 2):
+                i = row + x * 3
+                if abs(px[i] - rgb[0]) <= tol and abs(px[i + 1] - rgb[1]) <= tol and abs(px[i + 2] - rgb[2]) <= tol:
+                    xs += x; ys += y; n += 1
+        if n * 4 < min_pixels:
+            return None
+        return xs // n, ys // n
+
+    def distinct_colors(self, step=8):
+        """How many distinct (coarsely quantised) colours the display shows:
+        a black or text-console screen has few, a rendered UI many."""
+        w, h, px = self.pixels()
+        seen = set()
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                i = (y * w + x) * 3
+                seen.add((px[i] >> 4, px[i + 1] >> 4, px[i + 2] >> 4))
+        return len(seen)
+
 
 # ---------------------------------------------------------------------------
 # Smoke test
@@ -328,7 +393,90 @@ class Report:
         return [r for r in self.results if not r[1]]
 
 
-def smoke(vm, scale, stop_after, debug):
+QEMU_MAC = "52:54:00:a1:7b:01"   # build/vm.sh assigns it; spoofing must replace it
+ADWAITA_BLUE = (0x35, 0x84, 0xe4)  # libadwaita's default accent (suggested-action buttons)
+
+
+def welcome_phase(vm, rep, T, sh, out, tour):
+    """Press "Start Antumbra" with the defaults (amnesic, MAC anonymization on,
+    connect to Tor automatically) and check what happens to the network."""
+    pcap_frames_before = sum(pcap_summary(os.path.join(vm.run, "net.pcap")).values())
+    target = vm.find_color(ADWAITA_BLUE, tol=45, region=(0, 1100, 720, 1440))
+    rep.check("welcome: Start button found on the display", target is not None, str(target))
+    if target is None:
+        return
+    vm.tap(*target)
+    # The session starts once the root-side applier has consumed the settings.
+    session = False
+    deadline = time.monotonic() + T(420)
+    while time.monotonic() < deadline:
+        rc, o = sh("pgrep -xc phosh; test -e /var/lib/antumbra/settings/applied/tails.network && echo applied", timeout=60)
+        if o.split("\n")[0] not in ("0", "") and "applied" in o:
+            session = True
+            break
+        time.sleep(5)
+    rep.check("welcome: settings applied and the Phosh session started", session, o.replace("\n", " "))
+    # Network: the driver loads only now, behind the spoofed address.
+    up = False
+    deadline = time.monotonic() + T(300)
+    while time.monotonic() < deadline:
+        rc, o = sh("ip -o -4 addr show scope global | awk '{print $2, $4}'", timeout=60)
+        if o.strip():
+            up = True
+            break
+        time.sleep(5)
+    rc, links = sh("ip -o link | grep -vE ': (lo|veth-[a-z]+)[:@]' | sed -E 's/^[0-9]+: ([^:@]+).* link\\/ether ([0-9a-f:]+).*/\\1 \\2/'; lsmod | grep -c '^virtio_net'", timeout=60)
+    rep.check("after Welcome: the network driver loaded and the interface got an address", up, (o.strip() + " | " + links.replace("\n", " ")).strip(" |"))
+    macs = re.findall(r"([0-9a-f]{2}(?::[0-9a-f]{2}){5})", links)
+    rep.check("after Welcome: the interface's MAC address is not the hardware one", bool(macs) and QEMU_MAC not in macs,
+              f"hardware {QEMU_MAC}, interface {', '.join(macs) or 'none'}")
+    # Give Tor time to try (it cannot bootstrap from the build host's network).
+    time.sleep(T(90))
+    rc, o = sh("ss -tunapH | grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.' | grep -vE 'LISTEN|UNCONN' ; echo end", timeout=60)
+    socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"]
+    non_tor = [l for l in socks if '(("tor"' not in l]
+    rep.check("after Welcome: every connection to the network belongs to Tor", not non_tor,
+              f"{len(socks)} sockets" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
+    counts = pcap_summary(os.path.join(vm.run, "net.pcap"))
+    after = sum(counts.values()) - pcap_frames_before
+    bad = {k: v for k, v in counts.items()
+           if k[0] == "ipv6" or (k[0] == "udp" and k[2] not in (67,)) or k[0].startswith("ip-proto")}
+    from_hw = {k: v for k, v in counts.items() if k[3] == QEMU_MAC}
+    tcp = sorted({f"{k[1]}:{k[2]}" for k in counts if k[0] == "tcp"})
+    rep.check("packet capture: no DNS, NTP, IPv6 or other UDP left the guest", not bad,
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items())) or f"{after} frames after Welcome; TCP to {len(tcp)} addresses: {', '.join(tcp[:8])}")
+    rep.check("packet capture: no frame carried the hardware MAC address", not from_hw,
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"sources: {', '.join(sorted({k[3] for k in counts}))}")
+    try:
+        vm.screenshot(os.path.join(out, "session.png"))
+    except Exception:  # noqa: BLE001
+        pass
+    if tour:
+        take_tour(vm, sh, out, T)
+
+
+def take_tour(vm, sh, out, T):
+    """Best-effort screenshots of the session (no checks)."""
+    def shot(name):
+        try:
+            vm.screenshot(os.path.join(out, name))
+            print(f"tour: {name}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"tour: {name} failed: {e}", flush=True)
+    # Phosh's top bar opens the quick settings when pulled down.
+    vm.swipe(360, 4, 360, 900); time.sleep(T(8)); shot("tour-quick-settings.png")
+    vm.swipe(360, 1300, 360, 200); time.sleep(T(6))
+    # Tor Browser, started as the session user the way its launcher does.
+    sh("runuser -u amnesia -- env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 "
+       "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus setsid -f /usr/local/bin/tor-browser >/dev/null 2>&1; echo started", timeout=60)
+    for i in range(int(T(120) / 15)):
+        time.sleep(15)
+        rc, o = sh("pgrep -fc 'firefox|tor-browser' ; echo", timeout=30)
+    time.sleep(T(30))
+    shot("tour-tor-browser.png")
+
+
+def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
     rep = Report()
     T = lambda s: s * scale  # noqa: E731
     out = os.path.join(vm.run, "smoke")
@@ -413,13 +561,16 @@ def smoke(vm, scale, stop_after, debug):
             print("no greetd (minimal build): skipping the session checks", flush=True)
     try:
         w, h = vm.screenshot(os.path.join(out, "display.png"))
-        rep.check("display: screenshot captured", True, f"{w}x{h} -> {out}/display.png")
+        colors = vm.distinct_colors()
+        rep.check("display: the Welcome screen is drawn (not a text console)", colors > 24, f"{w}x{h}, {colors} distinct colours -> {out}/display.png")
     except Exception as e:  # noqa: BLE001
-        rep.check("display: screenshot captured", False, str(e))
+        rep.check("display: the Welcome screen is drawn (not a text console)", False, str(e))
     counts = pcap_summary(os.path.join(vm.run, "net.pcap"))
     leaks = {k: v for k, v in counts.items() if k[0] in ("tcp", "udp", "ipv6") or k[0].startswith("ip-proto")}
     rep.check("network: no packet left the guest before the Welcome decision", not leaks,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(counts.items())) or "no frames")
+    if through_welcome and debug:
+        welcome_phase(vm, rep, T, sh, out, tour)
     if stop_after:
         # 2. A short power-key press must be ignored (logind HandlePowerKey=ignore,
         #    only a long press powers off): QEMU's system_powerdown is a short press.
@@ -459,7 +610,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-dir", default=None)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    s = sub.add_parser("smoke"); s.add_argument("--timeout-scale", type=float, default=1.0); s.add_argument("--no-stop", action="store_true"); s.add_argument("--no-debug", action="store_true"); s.add_argument("vm_args", nargs="*")
+    s = sub.add_parser("smoke"); s.add_argument("--timeout-scale", type=float, default=1.0); s.add_argument("--no-stop", action="store_true"); s.add_argument("--no-debug", action="store_true")
+    s.add_argument("--through-welcome", action="store_true", help="press Start on the Welcome screen and check the network afterwards")
+    s.add_argument("--tour", action="store_true", help="with --through-welcome: extra screenshots of the session (best effort)")
+    s.add_argument("vm_args", nargs="*")
     w = sub.add_parser("wait"); w.add_argument("regex"); w.add_argument("--timeout", type=float, default=300)
     sh = sub.add_parser("shell"); sh.add_argument("command", nargs="+"); sh.add_argument("--timeout", type=float, default=120)
     sc = sub.add_parser("screenshot"); sc.add_argument("file")
@@ -476,7 +630,7 @@ def main():
             args.append("--debug")
         vm.start(args)
         try:
-            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug)
+            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome, a.tour)
         except KeyboardInterrupt:
             vm.stop(); raise
         failed = rep.failed()
