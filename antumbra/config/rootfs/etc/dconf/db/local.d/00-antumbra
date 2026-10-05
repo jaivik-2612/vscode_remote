@@ -23,4 +23,6 @@ enabled=false
 disable-external=true
 
 [sm/puri/phosh]
-favorites=['tor-browser.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Snapshot.desktop', 'org.gnome.Console.desktop']
+# Both camera apps are listed: phosh drops a favourite that is not installed,
+# so the dock shows whichever camera app the image carries.
+favorites=['tor-browser.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Snapshot.desktop', 'org.postmarketos.Megapixels.desktop', 'org.gnome.Console.desktop']
