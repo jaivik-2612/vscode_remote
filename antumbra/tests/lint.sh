@@ -21,6 +21,9 @@ python3 -m py_compile "${PYS[@]}" || fail=1
 find config tests -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 echo "${#PYS[@]} python files compiled"
 
+step "pop-up motor sleep flags (userspace model)"
+python3 tests/kernel/popup_gate_model.py || fail=1
+
 step "nftables ruleset (nft -c)"
 # The ruleset names system users that only exist in the image; map them to
 # numeric ids for the host-side syntax check.
