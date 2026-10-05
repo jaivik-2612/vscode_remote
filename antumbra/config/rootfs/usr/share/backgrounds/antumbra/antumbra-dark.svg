@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Antumbra wallpaper, dark variant (org.gnome.desktop.background
+  picture-uri-dark). An annular eclipse in a violet night: the moon's disc
+  sits slightly off-centre inside the sun's, so the ring of light, the
+  antumbra's view, is thicker on its warm lower-left side.
+  Colours are tones of the theme palette (seed #4d2c9e, see
+  /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
+  #ffb347 harmonised toward the seed. Gradients only, no raster data.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="3120" viewBox="0 0 1440 3120">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f0d13"/>
+      <stop offset="0.34" stop-color="#151122"/>
+      <stop offset="0.72" stop-color="#201047"/>
+      <stop offset="1" stop-color="#2f2056"/>
+    </linearGradient>
+    <radialGradient id="nebula" cx="720" cy="1180" r="1500" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4c3e76" stop-opacity="0.62"/>
+      <stop offset="0.45" stop-color="#3e3067" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#3e3067" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ember" cx="260" cy="3120" r="1650" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#633b49" stop-opacity="0.55"/>
+      <stop offset="0.6" stop-color="#542e3b" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#542e3b" stop-opacity="0"/>
+    </radialGradient>
+    <!-- light scattered around the eclipse; its centre is hidden by the moon -->
+    <radialGradient id="corona" cx="712" cy="1188" r="860" gradientUnits="userSpaceOnUse">
+      <stop offset="0.3" stop-color="#ffdcc4" stop-opacity="0.6"/>
+      <stop offset="0.345" stop-color="#ffdcc4" stop-opacity="0.42"/>
+      <stop offset="0.42" stop-color="#cebdfe" stop-opacity="0.18"/>
+      <stop offset="0.62" stop-color="#7d6eaa" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#7d6eaa" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sun" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffcaa3"/>
+      <stop offset="0.45" stop-color="#fff3ea"/>
+      <stop offset="1" stop-color="#e8ddff"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="0.62" cy="0.36" r="0.75">
+      <stop offset="0" stop-color="#211e26"/>
+      <stop offset="1" stop-color="#0f0d15"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1440" height="3120" fill="url(#sky)"/>
+  <rect width="1440" height="3120" fill="url(#nebula)"/>
+  <rect width="1440" height="3120" fill="url(#ember)"/>
+
+  <g>
+    <circle cx="308" cy="147" r="2.6" fill="#e8ddff" opacity="0.57"/>
+    <circle cx="864" cy="143" r="2.2" fill="#e8ddff" opacity="0.48"/>
+    <circle cx="137" cy="155" r="3.4" fill="#e8ddff" opacity="0.55"/>
+    <circle cx="325" cy="160" r="1.6" fill="#e8ddff" opacity="0.59"/>
+    <circle cx="262" cy="163" r="3.0" fill="#ffdcc4" opacity="0.32"/>
+    <circle cx="180" cy="168" r="3.4" fill="#ffdcc4" opacity="0.23"/>
+    <circle cx="1224" cy="171" r="2.0" fill="#e8ddff" opacity="0.7"/>
+    <circle cx="956" cy="185" r="1.6" fill="#e8ddff" opacity="0.28"/>
+    <circle cx="497" cy="256" r="2.0" fill="#e8ddff" opacity="0.34"/>
+    <circle cx="1319" cy="273" r="3.0" fill="#e8ddff" opacity="0.45"/>
+    <circle cx="324" cy="308" r="2.2" fill="#e8ddff" opacity="0.62"/>
+    <circle cx="252" cy="311" r="2.0" fill="#ffdcc4" opacity="0.38"/>
+    <circle cx="1150" cy="330" r="2.6" fill="#e8ddff" opacity="0.62"/>
+    <circle cx="181" cy="337" r="3.4" fill="#ffdcc4" opacity="0.33"/>
+    <circle cx="451" cy="397" r="3.0" fill="#e8ddff" opacity="0.57"/>
+    <circle cx="360" cy="412" r="2.2" fill="#e8ddff" opacity="0.32"/>
+    <circle cx="1383" cy="446" r="1.8" fill="#ffdcc4" opacity="0.34"/>
+    <circle cx="930" cy="467" r="1.6" fill="#ffdcc4" opacity="0.67"/>
+    <circle cx="969" cy="493" r="3.4" fill="#e8ddff" opacity="0.33"/>
+    <circle cx="916" cy="503" r="2.0" fill="#e8ddff" opacity="0.7"/>
+    <circle cx="88" cy="529" r="3.0" fill="#e8ddff" opacity="0.5"/>
+    <circle cx="385" cy="553" r="1.6" fill="#ffdcc4" opacity="0.35"/>
+    <circle cx="420" cy="566" r="3.4" fill="#e8ddff" opacity="0.66"/>
+    <circle cx="885" cy="587" r="1.6" fill="#e8ddff" opacity="0.44"/>
+    <circle cx="632" cy="604" r="2.2" fill="#e8ddff" opacity="0.5"/>
+    <circle cx="269" cy="627" r="2.6" fill="#e8ddff" opacity="0.65"/>
+    <circle cx="900" cy="639" r="1.6" fill="#ffdcc4" opacity="0.43"/>
+    <circle cx="1153" cy="639" r="3.4" fill="#e8ddff" opacity="0.43"/>
+    <circle cx="449" cy="705" r="3.0" fill="#e8ddff" opacity="0.57"/>
+    <circle cx="184" cy="937" r="2.6" fill="#e8ddff" opacity="0.52"/>
+    <circle cx="1311" cy="986" r="1.6" fill="#ffdcc4" opacity="0.4"/>
+    <circle cx="98" cy="1069" r="2.0" fill="#e8ddff" opacity="0.23"/>
+  </g>
+
+  <circle cx="712" cy="1188" r="860" fill="url(#corona)"/>
+  <circle cx="712" cy="1188" r="290" fill="url(#sun)"/>
+  <circle cx="721" cy="1181" r="274" fill="url(#moon)"/>
+</svg>

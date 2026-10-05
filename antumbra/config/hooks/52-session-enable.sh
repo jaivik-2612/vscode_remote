@@ -4,6 +4,10 @@ set -eu
 if [ -n "${ANTUMBRA_MINIMAL:-}" ]; then echo "minimal build: no session"; exit 0; fi
 systemctl enable greetd.service antumbra-apply-welcome-settings.path antumbra-persistence-probe.service
 systemctl mask phosh.service 2>/dev/null || true
+# The overlay (with 90_antumbra.gschema.override) is synced after dpkg's
+# schema trigger has run, so compile again. --strict turns an unknown key,
+# schema or value in any override into a build failure.
+glib-compile-schemas --strict /usr/share/glib-2.0/schemas
 dconf update
 # The live user: no password until the Welcome screen sets one.
 passwd -d amnesia >/dev/null 2>&1 || true

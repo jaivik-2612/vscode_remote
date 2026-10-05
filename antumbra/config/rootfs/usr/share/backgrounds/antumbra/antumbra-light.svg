@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Antumbra wallpaper, light variant (org.gnome.desktop.background
+  picture-uri, shown when the Dark Mode tile switches color-scheme off).
+  The same annular eclipse at dawn. Phosh keeps its shell dark and its
+  status bar and gesture pill white in either scheme, so the top and bottom
+  edges stay mid-dark violet; only the middle of the sky turns light.
+  Colours are tones of the theme palette (seed #4d2c9e, see
+  /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
+  #ffb347 harmonised toward the seed. Gradients only, no raster data.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="3120" viewBox="0 0 1440 3120">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4c3e76"/>
+      <stop offset="0.16" stop-color="#7d6eaa"/>
+      <stop offset="0.36" stop-color="#b3a2e1"/>
+      <stop offset="0.52" stop-color="#e8ddff"/>
+      <stop offset="0.64" stop-color="#ffdcc4"/>
+      <stop offset="0.8" stop-color="#d19dad"/>
+      <stop offset="1" stop-color="#7d5260"/>
+    </linearGradient>
+    <radialGradient id="haze" cx="720" cy="1700" r="1300" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff3ea" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fff3ea" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="corona" cx="712" cy="1188" r="820" gradientUnits="userSpaceOnUse">
+      <stop offset="0.35" stop-color="#fff3ea" stop-opacity="0.6"/>
+      <stop offset="0.4" stop-color="#f5eeff" stop-opacity="0.32"/>
+      <stop offset="0.6" stop-color="#e8ddff" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#e8ddff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sun" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffb77f"/>
+      <stop offset="0.45" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f5eeff"/>
+    </linearGradient>
+    <radialGradient id="moon" cx="0.62" cy="0.36" r="0.75">
+      <stop offset="0" stop-color="#4c3e76"/>
+      <stop offset="1" stop-color="#2f2056"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1440" height="3120" fill="url(#sky)"/>
+  <rect width="1440" height="3120" fill="url(#haze)"/>
+
+  <circle cx="712" cy="1188" r="820" fill="url(#corona)"/>
+  <circle cx="712" cy="1188" r="290" fill="url(#sun)"/>
+  <circle cx="721" cy="1181" r="274" fill="url(#moon)"/>
+</svg>

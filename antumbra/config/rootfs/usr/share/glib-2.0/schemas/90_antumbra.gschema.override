@@ -1,0 +1,35 @@
+# Antumbra's look, as vendor defaults. A schema override (rather than the
+# dconf database in /etc/dconf/db/local.d) is the one place both the
+# Welcome screen, which runs with GSETTINGS_BACKEND=memory and sees only
+# schema defaults, and the user's session read. Priority 90 wins over
+# Debian's 10_gsettings-desktop-schemas override (Cantarell). Hook 52
+# compiles it with glib-compile-schemas --strict, so an unknown key or a
+# bad value fails the build. GKeyFile has no trailing comments: comments
+# go on their own lines only. See docs/architecture.md, "Interface theme".
+
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+# The GNOME accent nearest to the theme's seed (#4d2c9e, HCT hue 298):
+# purple is #9141ac, hue 322; blue, the next nearest, is hue 261.
+accent-color='purple'
+# Roboto (fonts-roboto-unhinted, Apache-2.0) is the sans-serif face of
+# Android's system font set.
+font-name='Roboto 11'
+document-font-name='Roboto 11'
+show-battery-percentage=true
+
+[org.gnome.desktop.background]
+# Project-authored wallpapers; picture-uri-dark is used while color-scheme
+# is prefer-dark, picture-uri after the Dark Mode tile turns it off.
+picture-uri='file:///usr/share/backgrounds/antumbra/antumbra-light.svg'
+picture-uri-dark='file:///usr/share/backgrounds/antumbra/antumbra-dark.svg'
+picture-options='zoom'
+primary-color='#141218'
+
+[org.gnome.desktop.screensaver]
+# Phosh shows this behind the lock screen whenever picture-options is not
+# 'none'. The schema default points at a GNOME wallpaper the image does not
+# ship, which phosh logs as a load failure on every lock.
+picture-uri='file:///usr/share/backgrounds/antumbra/antumbra-lock.svg'
+picture-options='zoom'
+primary-color='#0f0d13'

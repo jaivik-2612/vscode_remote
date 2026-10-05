@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPDX-License-Identifier: GPL-3.0-or-later
+  Antumbra lock-screen wallpaper (org.gnome.desktop.screensaver
+  picture-uri). Darker and plainer than the home wallpaper so the clock,
+  the unlock prompt and the keypad stay legible: no stars, and a smaller,
+  dimmer eclipse below the clock and date.
+  Colours are tones of the theme palette (seed #4d2c9e, see
+  /usr/share/antumbra/theme/shell.css). Gradients only, no raster data.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="3120" viewBox="0 0 1440 3120">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0f0d13"/>
+      <stop offset="0.55" stop-color="#151122"/>
+      <stop offset="1" stop-color="#201047"/>
+    </linearGradient>
+    <radialGradient id="corona" cx="716" cy="1004" r="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0.28" stop-color="#ffdcc4" stop-opacity="0.32"/>
+      <stop offset="0.33" stop-color="#cebdfe" stop-opacity="0.16"/>
+      <stop offset="0.55" stop-color="#4c3e76" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#4c3e76" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="sun" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffcaa3"/>
+      <stop offset="0.45" stop-color="#fff3ea"/>
+      <stop offset="1" stop-color="#e8ddff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1440" height="3120" fill="url(#sky)"/>
+  <circle cx="716" cy="1004" r="640" fill="url(#corona)"/>
+  <!-- the ring at half strength: bright enough to read, never brighter than the clock -->
+  <circle cx="716" cy="1004" r="180" fill="url(#sun)" opacity="0.55"/>
+  <circle cx="722" cy="999" r="170" fill="#0f0d15"/>
+</svg>
