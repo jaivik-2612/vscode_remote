@@ -55,6 +55,29 @@ forbid_incoming() {
     ns_nft "$ns" add rule ip antumbra input iifname "lo" accept
 }
 
+# Antumbra: the bridge the Android container (Waydroid, images built with
+# ANTUMBRA_ANDROID=1) is attached to. Nothing on it is forwarded or NAT-ed:
+# the firewall redirects the container's TCP and DNS to Tor listeners bound
+# to 10.200.2.1 (torrc) and rejects the rest. It exists from boot, Android
+# on or off, because Tor binds those listeners when it is told to connect
+# and refuses to connect at all if the address is missing. Created after
+# expose_all: switching ip_forward from 0 to 1 sets every interface's
+# forwarding to 1 and new interfaces inherit it from conf.default, so it is
+# turned off here for the bridge explicitly.
+ANDROID_DIR=/usr/share/antumbra/android
+ANDROID_BRIDGE=waydroid-tor
+create_android_bridge() {
+    modprobe bridge
+    ip link add "${ANDROID_BRIDGE}" type bridge
+    ip addr add 10.200.2.1/30 dev "${ANDROID_BRIDGE}"
+    ip link set dev "${ANDROID_BRIDGE}" up
+    sysctl -q "net.ipv4.conf.${ANDROID_BRIDGE}.forwarding=0" "net.ipv4.conf.${ANDROID_BRIDGE}.route_localnet=0"
+    # IPv6 is off by default (sysctl.d/disable_ipv6.conf); say so explicitly.
+    if [ -d "/proc/sys/net/ipv6/conf/${ANDROID_BRIDGE}" ]; then
+        sysctl -q "net.ipv6.conf.${ANDROID_BRIDGE}.disable_ipv6=1"
+    fi
+}
+
 delete_netns() {
     basename="$1"
     ip link del "veth-${basename}" 2>/dev/null || true
@@ -97,6 +120,7 @@ create_netns() { # create_netns NAME FIRST_ADDRESS (implies /30)
 
 if [ "$1" = stop ]; then
     for ns in tbb onioncircs tca onionshare clearnet; do delete_netns "$ns"; done
+    ip link del "${ANDROID_BRIDGE}" 2>/dev/null || true
     exit 0
 fi
 
@@ -118,6 +142,7 @@ if [ "$1" = start ]; then
     # Applications in the clearnet namespace are the least trusted: they
     # may not receive any external connection either.
     forbid_incoming clearnet
+    if [ -d "${ANDROID_DIR}" ]; then create_android_bridge; fi
     exit 0
 fi
 echo "Usage: $0 start|stop" >&2; exit 2
