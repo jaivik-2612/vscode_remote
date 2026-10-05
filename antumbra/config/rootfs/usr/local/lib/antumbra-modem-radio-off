@@ -15,6 +15,12 @@ if ! command -v qmicli >/dev/null 2>&1 || ! command -v qrtr-lookup >/dev/null 2>
     exit 0
 fi
 
+# No remote processor at all (a virtual machine): nothing to switch off.
+if ! ls -d /sys/class/remoteproc/remoteproc* >/dev/null 2>&1; then
+    printf 'absent: no remote processors\n' > "${STATE}"
+    exit 0
+fi
+
 # Wait for the DMS service (QMI service id 2) to appear on the QRTR bus.
 i=0
 until qrtr-lookup 2>/dev/null | grep -q -E '^\s*2\b|Device Management Service'; do
