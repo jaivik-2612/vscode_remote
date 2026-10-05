@@ -539,8 +539,14 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
         rep.check("guest: virtio_net is in the driver blocklist", o.strip() != "0", o)
         rc, o = sh("cat /etc/resolv.conf | grep -v '^#' | tr '\\n' ' '")
         rep.check("guest: resolver is loopback only", "127.0.0.1" in o and "10.0.2" not in o, o)
-        rc, o = sh("swapon --show --noheadings | awk '{print $1}' | tr '\\n' ' '; sysctl -n kernel.dmesg_restrict; grep -rhs '^Storage=' /usr/lib/systemd/journald.conf.d/ /etc/systemd/journald.conf.d/; test -d /var/log/journal && echo persistent-journal || echo no-journal-dir")
-        rep.check("guest: zram-only swap, dmesg restricted, volatile journal", "/dev/" not in o.replace("/dev/zram", "") and "\n1\n" in "\n" + o + "\n" and "Storage=volatile" in o and "no-journal-dir" in o, o.replace("\n", " "))
+        rc, o = sh("echo swap=$(swapon --show=NAME --noheadings | tr '\\n' ' '); echo dmesg=$(sysctl -n kernel.dmesg_restrict); "
+                   "echo journal=$(grep -rhs '^Storage=' /usr/lib/systemd/journald.conf.d/ /etc/systemd/journald.conf.d/ | tail -n1); "
+                   "test -d /var/log/journal && echo journal-dir=yes || echo journal-dir=no")
+        f = dict(line.split("=", 1) for line in o.split("\n") if "=" in line)
+        swaps = f.get("swap", "").split()
+        rep.check("guest: zram-only swap, dmesg restricted, volatile journal",
+                  all(x.startswith("/dev/zram") for x in swaps) and f.get("dmesg") == "1"
+                  and f.get("journal") == "Storage=volatile" and f.get("journal-dir") == "no", o.replace("\n", " "))
         rc, o = sh("blkid -o value -s TYPE $(cat /run/antumbra/loop-device)p2; echo end")
         rep.check("guest: Persistent Storage partition is untouched (no filesystem)", o.strip() == "end", o)
         rc, o = sh("systemctl is-active greetd 2>/dev/null; pgrep -xc phoc; pgrep -fc /usr/bin/antumbra-welcome", timeout=60)
