@@ -23,4 +23,4 @@ enabled=false
 disable-external=true
 
 [sm/puri/phosh]
-favorites=['tor-browser.desktop', 'org.gnome.Console.desktop', 'org.gnome.Nautilus.desktop', 'mobi.phosh.MobileSettings.desktop']
+favorites=['tor-browser.desktop', 'org.gnome.Nautilus.desktop', 'org.gnome.Snapshot.desktop', 'org.gnome.Console.desktop']

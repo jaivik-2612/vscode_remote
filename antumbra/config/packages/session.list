@@ -7,6 +7,11 @@ phosh
 gnome-session-bin
 gnome-session-common
 squeekboard
+# Dark Mode and Night Light quick-setting tiles (phosh only recommends the
+# package). It also brings the evince libraries for its ticket-box
+# lock-screen plugin, which stays off: the lock-screen plugin list is empty
+# and locked (/etc/dconf/db/local.d/10-antumbra-shell).
+phosh-plugins
 phosh-mobile-settings
 feedbackd
 gnome-settings-daemon
