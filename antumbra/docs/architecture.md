@@ -477,11 +477,14 @@ firmware has not been measured.
 | NFC | off | `nfc`, `nci`, `nxp_nci`, `nxp_nci_i2c` blocklisted |
 | GNSS | off | lives in the modem (QMI LOC) and only tracks between an explicit `Start` and `Stop`; nothing sends `Start`, and the QRTR gate keeps applications away |
 | Motion, light, proximity sensors | unavailable | the sensor DSP (SLPI) is disabled in the device tree by Antumbra's override; no sensor daemon is installed; the ultrasonic proximity path that depends on it is not shipped either (no calls, so no need) |
-| Cameras | available, no indicator | libcamera via PipeWire and the portal permission prompts |
+| Cameras | available; the pop-up shows when the front camera is in use, the rear cameras have no indicator | libcamera inside PipeWire, Snapshot through the camera portal (`camera.md`). The portal prompt is not an access control for programs installed in the system: the session user can open the camera devices and PipeWire's camera nodes directly, so any program running as `amnesia`, Tor Browser included, can use the cameras without a prompt. Confining Tor Browser away from them is planned |
 | Microphones | available | PipeWire; a per-session mute switch is on the roadmap |
 
 Cameras and microphones have no hardware kill switch on this phone;
-software policy is the only control, as on every phone.
+software policy is the only control, as on every phone. The front camera
+is raised by the kernel whenever its sensor streams and retracted when the
+stream stops, which makes it a physical indicator for that camera only,
+not a boundary against root.
 
 ### 9.4 USB
 
@@ -654,7 +657,7 @@ and `apps.css` differ.
 | Metadata | Metadata Cleaner (`mat2`) | adaptive |
 | Files, images, documents, text, calculator, clocks | Nautilus, Loupe, Papers, GNOME Text Editor, GNOME Console, Calculator, Clocks | adaptive GTK4 |
 | Crypto wallet | Electrum (as Tails ships) | |
-| Camera | Megapixels | raw capture quality only |
+| Camera | GNOME Snapshot, through the camera portal and PipeWire's libcamera node; libcamera 0.7 and PipeWire 1.6 from trixie-backports | software-ISP image quality; front camera 1748x1748 only; no OnePlus camera app, for licence and technical reasons (`camera.md`) |
 | Encryption | GnuPG, `gnome-keyring` | |
 
 APT reaches the network only through Tor (`socks5h://127.0.0.1:9050`, user
@@ -746,6 +749,7 @@ build/build.sh                      orchestrates; every step is idempotent and r
   fetch-sources.sh                  kernel tree + port patches + avbtool + DTBO/vbmeta + Tor Browser, all pinned and verified
   fetch-firmware.sh                 (separate, explicit) the builder's own device firmware
   kernel.sh                         patches, DTS overrides, fragment merge and check, Image + modules + DTB
+  libcamera.sh (root, optional)     ANTUMBRA_LIBCAMERA_LOCAL=1: the port's patched libcamera 0.7.2 as a local apt repository
   rootfs.sh (root)                  mmdebstrap (arm64, trixie) + overlay + hooks inside the chroot → tree, initramfs, package list
   squashfs.sh (root)                mksquashfs xz/arm BCJ with fixed times; dm-verity hash tree and root hash
   image.sh                          ext4 live partition (mke2fs -d), GPT at the physical size (systemd-repart), img2simg -s
@@ -793,7 +797,7 @@ with `qbootctl`, and marks success only after the first successful boot.
 | Tor over Wi-Fi, firewall, DNS | expected to work | verified by the self-check at boot |
 | Suspend, charging | expected to work | Warp charging unsupported; USB-host charging may be limited to the default |
 | Speakers, handset microphone | expected to work | earpiece and headset unsupported; generic UCM profiles |
-| Cameras | preview and raw capture | no production image quality |
+| Cameras | preview and capture in Snapshot expected | software-ISP quality, front camera 1748x1748 only, a CAMSS failure can need a reboot (`camera.md`) |
 | Bluetooth | off, roadmap | driver stack works on the 6.17 line |
 | Calls, SMS, mobile data | out of scope | |
 | Fingerprint | never | |
@@ -805,12 +809,14 @@ with `qbootctl`, and marks success only after the first successful boot.
 antumbra/
   README.md, VERSION, LICENSE (GPL-3.0-or-later), Makefile
   docs/                      this document, threat model, device, building, flashing, legal,
-                             roadmap, known issues, porting map, research notes, validation checklist
+                             roadmap, known issues, porting map, research notes, validation checklist,
+                             cameras
   build/                     build and flash scripts (bash), build/lib/common.sh
   device/oneplus-hotdog/     sources.lock, cmdline.txt, bootimg.conf, keys/, firmware/*.sha256,
-                             kernel/{antumbra.config, patches.list, port-patches.sha256, patches/, antumbra-dts-overrides.dtsi}
+                             kernel/{antumbra.config, patches.list, port-patches.sha256, patches/, antumbra-dts-overrides.dtsi},
+                             libcamera/ (the optional libcamera rebuild's pins)
   config/rootfs/             files installed over the Debian root filesystem (the overlay)
-  config/packages/           package lists (base, amnesia, network, session, phosh, apps)
+  config/packages/           package lists (base, amnesia, network, session, phosh, apps; vm-debug for VM debug builds)
   config/hooks/              scripts run inside the chroot at build time, in numeric order
   config/squashfs-excludes
   tests/                     lint.sh, check-packages.sh, unit/

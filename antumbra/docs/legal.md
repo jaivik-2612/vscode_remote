@@ -18,6 +18,13 @@
   which does not endorse Antumbra.
 - Debian packages: their respective licences, recorded in
   `/usr/share/doc/*/copyright` inside the image.
+- The optional libcamera rebuild (`ANTUMBRA_LIBCAMERA_LOCAL=1`,
+  `camera.md`): libcamera is LGPL-2.1-or-later (its tools GPL-2.0-or-later),
+  rebuilt from Debian's source package with the hotdog-linux-bringup
+  libcamera patches and tuning files. Debian does not publish that
+  modified source, so whoever distributes an image built with it must also
+  offer the source: the files in `build/cache/libcamera/` and
+  `device/oneplus-hotdog/libcamera/`. Default images do not contain it.
 - The interface theme: the stylesheets and gesture pill in
   `config/rootfs/usr/share/antumbra/theme/` and the wallpapers in
   `config/rootfs/usr/share/backgrounds/antumbra/` are Antumbra's own work,
@@ -56,6 +63,16 @@ redistribution. Consequently:
   firmware or obtain a licence.
 - The sensor DSP firmware and the per-unit calibration data from the
   phone's `persist` partition are not used at all.
+
+## OnePlus software
+
+Antumbra contains, downloads and installs no OxygenOS component, in
+particular not the OnePlus camera app: the OxygenOS licence allows its use
+only on a OnePlus device and forbids making it available to anyone
+(sections 2.2(a) and 3(g)), and the app bundles other companies'
+proprietary libraries. It would not work on mainline Linux anyway
+(`camera.md`). `tests/no-oneplus-camera.py` checks the source tree and the
+image for it.
 
 ## No warranty
 

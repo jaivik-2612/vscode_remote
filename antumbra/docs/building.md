@@ -28,6 +28,7 @@ run on its own and is idempotent.
 |---|---|---|
 | fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified) |
 | kernel | `kernel.sh` | `build/out/kernel/`: raw arm64 `Image`, DTB, stripped modules tarball, config, kernel release, ASLR sysctl values |
+| libcamera (optional) | `libcamera.sh` (root) | only with `ANTUMBRA_LIBCAMERA_LOCAL=1`: `build/out/libcamera-repo/`, the port's patched libcamera 0.7.2 as arm64 packages in a local apt repository (`camera.md`) |
 | rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt` |
 | squashfs | `squashfs.sh` (root) | `filesystem.squashfs` (xz, arm BCJ), `.verity` hash tree, `.roothash` |
 | image | `image.sh` | `userdata.simg`: 4096-byte-sector GPT sized to the physical partition, live partition + empty Persistent Storage partition, as an Android sparse image |
@@ -51,6 +52,7 @@ Wi-Fi or audio. See `docs/legal.md`.
 | `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware` |
 | `ANTUMBRA_KERNEL_TOOLCHAIN=gcc` | Debian cross GCC instead of LLVM (the port validates only LLVM) |
 | `ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT=1` | warn instead of fail when the config fragment is not fully honoured |
+| `ANTUMBRA_LIBCAMERA_LOCAL=1` | build the port's patched libcamera 0.7.2 (`libcamera.sh`, about five minutes as a cross build on a 4-core x86-64 host) and install it instead of trixie-backports' 0.7.1; off by default (`camera.md`) |
 | `ANTUMBRA_SIGNING_KEY=FILE` | minisign secret key for `release.sh` |
 | `SOURCE_DATE_EPOCH` | build timestamp (default: the last git commit) |
 | `ANTUMBRA_CACHE`, `ANTUMBRA_OUT`, `ANTUMBRA_WORK` | relocate the cache, output and scratch directories |

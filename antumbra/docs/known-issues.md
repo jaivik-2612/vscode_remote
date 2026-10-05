@@ -19,6 +19,14 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   500 mA) because Antumbra configures no USB gadget; dedicated chargers
   are unaffected. Warp charging is unsupported by the port.
 - Bluetooth is off by default and has no opt-in flow yet.
+- Cameras (`camera.md`): the front camera has a single 1748x1748 mode;
+  pictures come from libcamera's software ISP with generic parameters
+  (the default libcamera 0.7.1 also lacks sensor data for these sensors;
+  `ANTUMBRA_LIBCAMERA_LOCAL=1` builds the port's patched 0.7.2); no flash
+  control or touch focus, video recording untested; a CAMSS failure can
+  need a reboot. PipeWire as the only user of CAMSS, the preview's
+  orientation and the WirePlumber rule that hides CAMSS's raw nodes are
+  untested on the phone (`hardware-validation.md` items 36-45).
 - Sensors (rotation, light, proximity) are not available: the sensor DSP
   is disabled. There is no automatic screen rotation.
 - The pop-up front camera has no drop protection. OxygenOS retracts it
@@ -43,6 +51,11 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   Linux arm64 build. Tor Project advises people at risk not to rely on
   alphas. It runs without an AppArmor profile (network isolation comes
   from its namespace and the firewall, as before).
+- The camera permission prompt does not protect against installed
+  programs: any program running as `amnesia`, Tor Browser included, can
+  use the cameras without a prompt until Tor Browser gets a confinement
+  profile that denies the camera devices and the PipeWire socket
+  (`camera.md`). There is no OnePlus camera app, and there will not be.
 - Tor Browser is a desktop browser on a phone screen: usable with the
   compositor's 3x scale, not adapted.
 - No Unsafe Browser (captive portals cannot be handled from the device

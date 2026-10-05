@@ -10,9 +10,12 @@ be exercised without the phone. It is a test target, not a release target:
 - The kernel comes from the same sources, the same port patches and the
   same hardening fragment (`device/oneplus-hotdog/kernel/antumbra.config`),
   built with the same toolchain; `device/qemu-virt/kernel/virt.config`
-  only adds the virtio display, input, RTC, power button and sound, and
-  builds the virtio network driver as a module so that the driver blocklist
-  and the MAC-spoofing path are exercised as on the phone.
+  only adds the virtio display, input, RTC, power button and sound, builds
+  the virtio network driver as a module so that the driver blocklist
+  and the MAC-spoofing path are exercised as on the phone, and builds
+  `vimc`, the kernel's virtual camera, as a module (four symbols in all:
+  `MEDIA_TEST_SUPPORT`, `V4L_TEST_DRIVERS`, `VIDEO_VIMC` and the test
+  pattern generator it selects).
 - The root filesystem is built by the same hooks from the same overlay and
   package lists; the squashfs, its dm-verity tree and the initramfs are
   built by the same steps.
@@ -46,6 +49,11 @@ be exercised without the phone. It is a test target, not a release target:
   and active only with `antumbra.debug=1` on the command line. The journal
   is forwarded to the serial console in such builds. Release builds and
   phone builds never contain it.
+- Debug builds only, for the camera checks: hook `72-vm-camera.sh` loads
+  `vimc` at boot and adds a WirePlumber rule that hides its raw V4L2 nodes
+  by card name (the VM's counterpart of the CAMSS rule), and
+  `config/packages/vm-debug.list` adds `libcamera-tools` (`cam`). The phone
+  has neither, and its kernel does not build `vimc`.
 - The display is a virtio GPU rendered in software; expect the Welcome
   screen to take a minute or two to appear under emulation.
 
@@ -133,6 +141,24 @@ asserts, in order:
 Tor Browser) and checks that Tor Browser runs inside its `tbb` network
 namespace. `make vm-test SCALE=2` doubles every timeout.
 
+`--camera` checks the camera path on `vimc` (`camera.md`): the driver is
+loaded and udev names its video nodes by card name (`ID_V4L_PRODUCT`, the
+key the WirePlumber rules match); `cam -l` lists the camera; Snapshot,
+libcamera 0.7 with its IPA modules from the same build and PipeWire's
+libcamera plugin at PipeWire's version are installed, and Megapixels is
+not; no OnePlus camera software or Qualcomm camera HAL file is anywhere in
+the image (`tests/no-oneplus-camera.py`, run in the guest). With
+`--through-welcome` it goes on in the amnesia session: PipeWire offers the
+camera as a libcamera node and has no V4L2 camera device or node; the first
+Snapshot start makes the camera portal ask through Phosh's Access dialog
+(seen on the session bus) and gets no stream meanwhile; once the decision
+is stored as "allow", Snapshot streams, the preview shows `vimc`'s colour
+bars, the shortcut `t` saves a JPEG to `~/Pictures/Camera`, and the stream
+stops when Snapshot quits and when it is killed. Screenshots:
+`camera-portal-prompt.png`, `camera-after-prompt.png`,
+`camera-preview.png`. The full run is
+`tests/vm-smoke.sh --through-welcome --camera`.
+
 Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed; a command that fails on the debug console is a FAIL of its own,
 never output for a check to read. `--timeout-scale 2` doubles every timeout for slow hosts.
@@ -170,5 +196,7 @@ affected the phone the same way.
 
 Anything that needs the phone's hardware: the display panel, touch, the
 modem policy (`antumbra-modem-radio-off`), the Wi-Fi driver and its
-firmware, audio routing, the bootloader (slot B, AVB), battery and thermal
-behaviour. `docs/hardware-validation.md` keeps that list.
+firmware, audio routing, the cameras themselves (CAMSS, the sensors, the
+pop-up motor, image quality, whether PipeWire can hold the CAMSS graph),
+the bootloader (slot B, AVB), battery and thermal behaviour.
+`docs/hardware-validation.md` keeps that list.
