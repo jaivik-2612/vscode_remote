@@ -153,7 +153,9 @@ camera as a libcamera node and has no V4L2 camera device or node; the first
 Snapshot start makes the camera portal ask through Phosh's Access dialog
 (seen on the session bus) and gets no stream meanwhile; once the decision
 is stored as "allow", Snapshot streams, the preview shows `vimc`'s colour
-bars, the shortcut `t` saves a JPEG to `~/Pictures/Camera`, and the stream
+bars (under full emulation the first frame takes a few minutes: Snapshot
+draws 1920x1080 frames in software and drops most as late, so the harness
+polls the display for up to five minutes times the timeout scale), the shortcut `t` saves a JPEG to `~/Pictures/Camera`, and the stream
 stops when Snapshot quits and when it is killed. Screenshots:
 `camera-portal-prompt.png`, `camera-after-prompt.png`,
 `camera-preview.png`. The full run is

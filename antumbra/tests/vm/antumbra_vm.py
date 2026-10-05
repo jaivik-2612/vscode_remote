@@ -939,10 +939,18 @@ def camera_phase(vm, rep, T, sh, out):
     ok, st = wait_states(lambda s: "running" in s, 180)
     rep.check("camera: with access granted, Snapshot streams from vimc through PipeWire's libcamera node", ok,
               ", ".join(st or []) or "no libcamera node")
-    time.sleep(T(15))
-    shot("camera-preview.png")
+    # Under full emulation the first preview frame takes minutes: Snapshot's
+    # GTK sink draws 1920x1080 frames in software and drops most of them as
+    # late (seen at 60 s: spinner; at 300 s: the bars). Poll the display.
+    t0 = time.monotonic()
+    deadline = t0 + T(300)
     hues, detail = bars("preview")
-    rep.check("camera: the preview shows vimc's colour bars", hues >= 4, f"{detail}; {first_detail}")
+    while hues < 4 and time.monotonic() < deadline:
+        time.sleep(15)
+        hues, detail = bars("preview")
+    shot("camera-preview.png")
+    rep.check("camera: the preview shows vimc's colour bars", hues >= 4,
+              f"{detail} after {time.monotonic() - t0:.0f} s; {first_detail}")
 
     # 10. A picture: Snapshot's shortcut "t" (its window action is not
     #     exported on D-Bus), saved under the user's Pictures directory.
