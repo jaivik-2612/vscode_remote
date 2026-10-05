@@ -26,6 +26,7 @@ log "building squashfs (xz, arm BCJ, 1 MiB blocks)"
 # squashfs-tools >= 4.6 reads SOURCE_DATE_EPOCH itself and refuses the
 # explicit -mkfs-time/-all-time we pass for older versions; keep the flags.
 env -u SOURCE_DATE_EPOCH mksquashfs "${ROOT}" "${SQ}" \
+    -mem "${ANTUMBRA_SQUASHFS_MEM:-1G}" \
     -comp xz -Xbcj arm -Xdict-size 1M -b 1M \
     -noappend -no-recovery -no-progress \
     -xattrs \
