@@ -10,13 +10,13 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1" >&2; exit 
 need shellcheck; need python3; need nft; need tor
 
 step "shell scripts (shellcheck)"
-mapfile -t SHELLS < <(grep -rlE '^#!/(usr/)?bin/(ba)?sh' build config/hooks config/rootfs tests --exclude-dir=cache --exclude-dir=out --exclude-dir=work 2>/dev/null | sort)
+mapfile -t SHELLS < <(grep -rlE '^#!/(usr/)?bin/(ba)?sh' build config/hooks config/rootfs config/rootfs-android tests --exclude-dir=cache --exclude-dir=out --exclude-dir=work --exclude-dir=__pycache__ 2>/dev/null | sort)
 # SC3037/SC3043/SC2094: vendored Tails scripts use echo -n and local (fine under dash)
 shellcheck -x -e SC1091,SC3037,SC3043,SC2094 "${SHELLS[@]}" || fail=1
 echo "${#SHELLS[@]} scripts checked"
 
 step "python (byte-compile)"
-mapfile -t PYS < <(grep -rlE '^#!/usr/bin/python3' config/rootfs tests 2>/dev/null; find config/rootfs tests -name '*.py' 2>/dev/null)
+mapfile -t PYS < <(grep -rlE '^#!/usr/bin/python3' config/rootfs config/rootfs-android tests 2>/dev/null; find config/rootfs config/rootfs-android tests -name '*.py' 2>/dev/null)
 python3 -m py_compile "${PYS[@]}" || fail=1
 find config tests -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 echo "${#PYS[@]} python files compiled"
@@ -34,6 +34,9 @@ step "tor configuration (tor --verify-config)"
 TMPTOR="$(mktemp -d)"
 { printf 'DataDirectory %s\nUser %s\n' "${TMPTOR}" "$(id -un)"; grep -v '^User ' config/rootfs/etc/tor/torrc; } > "${TMPTOR}/torrc"
 if tor --verify-config -f "${TMPTOR}/torrc" --hush >/dev/null 2>"${TMPTOR}/err"; then echo "torrc: valid"; else cat "${TMPTOR}/err"; fail=1; fi
+# Images with Android apps: the same plus the listeners hook 56 appends.
+cat config/rootfs-android/usr/share/antumbra/android/torrc >> "${TMPTOR}/torrc"
+if tor --verify-config -f "${TMPTOR}/torrc" --hush >/dev/null 2>"${TMPTOR}/err"; then echo "torrc with Android: valid"; else cat "${TMPTOR}/err"; fail=1; fi
 rm -rf "${TMPTOR}"
 
 step "systemd units (systemd-analyze verify)"
@@ -41,6 +44,13 @@ if command -v systemd-analyze >/dev/null 2>&1; then
     # Units reference binaries that only exist in the image; only hard
     # syntax errors are fatal here.
     out="$(systemd-analyze verify --root=config/rootfs config/rootfs/usr/lib/systemd/system/*.service config/rootfs/usr/lib/systemd/system/*.timer config/rootfs/usr/lib/systemd/system/*.path config/rootfs/usr/lib/systemd/system/*.mount 2>&1 || true)"
+    # Android apps: system units, and the user units in the user scope.
+    XDGTMP="$(mktemp -d)"
+    out="${out}
+$(systemd-analyze verify --root=config/rootfs-android config/rootfs-android/usr/lib/systemd/system/*.service 2>&1 || true)
+$(XDG_RUNTIME_DIR="${XDGTMP}" systemd-analyze --user verify config/rootfs-android/usr/lib/systemd/user/*.service \
+        config/rootfs-android/usr/lib/systemd/user/*.path 2>&1 || true)"
+    rm -rf "${XDGTMP}"
     echo "${out}" | grep -v -E 'not found|not executable|Failed to create|Failed to prepare|Cannot find unit|Unit .* has no' | grep -E 'Unknown|Failed to parse|Invalid|syntax' && fail=1 || echo "units: no syntax errors"
 fi
 
@@ -78,7 +88,7 @@ echo "profiles: $(printf '%s ' device/*/)"
 step "file modes"
 for f in config/rootfs/etc/sudoers.d/*; do [ "$(stat -c %a "$f")" = "440" ] || { echo "$f must be 0440"; fail=1; }; done
 [ "$(stat -c %a config/rootfs/etc/usbguard/rules.conf)" = "600" ] || { echo "usbguard rules.conf must be 0600"; fail=1; }
-for f in config/hooks/*.sh build/*.sh; do [ -x "$f" ] || { echo "$f not executable"; fail=1; }; done
+for f in config/hooks/*.sh build/*.sh config/rootfs-android/usr/local/lib/*; do [ -x "$f" ] || { echo "$f not executable"; fail=1; }; done
 
 if [ "${fail}" -ne 0 ]; then echo; echo "LINT FAILED"; exit 1; fi
 echo; echo "lint passed"

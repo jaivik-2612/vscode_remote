@@ -60,6 +60,8 @@ class WelcomeSettings:
         self.admin = False             # sudo for the user with that passphrase
         self.persistence = "none"      # none | unlock | create
         self.persistence_passphrase = ""
+        self.android = False           # Android apps (Waydroid) this session; images built with ANTUMBRA_ANDROID=1
+        self.android_persistent = False  # keep Android's data in Persistent Storage (the "android" feature)
 
     def write(self, root=SETTINGS_ROOT):
         persistent = os.path.join(root, "persistent")
@@ -82,6 +84,11 @@ class WelcomeSettings:
                 pass
         write_setting(os.path.join(persistent, "antumbra.admin"),
                       {"ANTUMBRA_ADMIN_ENABLED": "true" if self.admin else "false"})
+        # Keeping Android's data needs Android on and Persistent Storage in use.
+        keep_android = self.android and self.android_persistent and self.persistence in ("unlock", "create")
+        write_setting(os.path.join(persistent, "antumbra.android"),
+                      {"ANTUMBRA_ANDROID_ENABLED": "true" if self.android else "false",
+                       "ANTUMBRA_ANDROID_PERSISTENT": "true" if keep_android else "false"})
         write_setting(os.path.join(transient, "tails.create-persistence"),
                       {"CREATE_PERSISTENT_STORAGE": "true" if self.persistence == "create" else "false"})
         write_setting(os.path.join(transient, "antumbra.persistence"),

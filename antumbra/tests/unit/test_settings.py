@@ -58,6 +58,28 @@ class SettingsTest(unittest.TestCase):
         out = subprocess.run(["sh", "-c", f". {f}; printf %s \"$ANTUMBRA_BRIDGES\""], capture_output=True, text=True, check=True).stdout
         self.assertEqual(out, m.bridges)
 
+    def android(self, **kw):
+        m = S.WelcomeSettings()
+        for k, v in kw.items():
+            setattr(m, k, v)
+        m.write(self.root)
+        f = os.path.join(self.root, "persistent", "antumbra.android")
+        return (S.read_setting(f, "ANTUMBRA_ANDROID_ENABLED"), S.read_setting(f, "ANTUMBRA_ANDROID_PERSISTENT"))
+
+    def test_android_off_by_default(self):
+        self.assertEqual(self.android(), ("false", "false"))
+
+    def test_android_on_amnesic(self):
+        self.assertEqual(self.android(android=True), ("true", "false"))
+
+    def test_android_kept_only_with_persistent_storage(self):
+        # Keeping Android's data needs Android on and Persistent Storage in use.
+        self.assertEqual(self.android(android=True, android_persistent=True, persistence="none"), ("true", "false"))
+        self.assertEqual(self.android(android=True, android_persistent=True, persistence="unlock"), ("true", "true"))
+        self.assertEqual(self.android(android=True, android_persistent=True, persistence="create",
+                                      persistence_passphrase="a long passphrase"), ("true", "true"))
+        self.assertEqual(self.android(android=False, android_persistent=True, persistence="unlock"), ("false", "false"))
+
     def test_persistence_passphrase_file_mode(self):
         m = S.WelcomeSettings()
         m.persistence = "unlock"
