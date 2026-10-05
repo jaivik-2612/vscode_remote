@@ -420,7 +420,7 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     up = False
     deadline = time.monotonic() + T(300)
     while time.monotonic() < deadline:
-        rc, o = sh("ip -o -4 addr show scope global | awk '{print $2, $4}'", timeout=60)
+        rc, o = sh("ip -o -4 addr show scope global | grep -vE ': veth-' | awk '{print $2, $4}'", timeout=60)
         if o.strip():
             up = True
             break
@@ -434,19 +434,28 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     time.sleep(T(90))
     rc, o = sh("ss -tunapH | grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.' | grep -vE 'LISTEN|UNCONN' ; echo end", timeout=60)
     socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"]
-    non_tor = [l for l in socks if '(("tor"' not in l]
-    rep.check("after Welcome: every connection to the network belongs to Tor", not non_tor,
-              f"{len(socks)} sockets" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
+    # NetworkManager's DHCP client (udp :68 -> :67) is the one non-Tor flow
+    # the firewall allows, as in Tails.
+    dhcp = [l for l in socks if l.startswith("udp") and '(("NetworkManager"' in l and re.search(r":68\s+\S+:67\s", l)]
+    non_tor = [l for l in socks if '(("tor"' not in l and l not in dhcp]
+    tor_n = sum(1 for l in socks if '(("tor"' in l)
+    rep.check("after Welcome: every connection to the network belongs to Tor (DHCP aside)", not non_tor,
+              f"{tor_n} Tor sockets, {len(dhcp)} DHCP client" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
     counts = pcap_summary(os.path.join(vm.run, "net.pcap"))
-    after = sum(counts.values()) - pcap_frames_before
-    bad = {k: v for k, v in counts.items()
-           if k[0] == "ipv6" or (k[0] == "udp" and k[2] not in (67,)) or k[0].startswith("ip-proto")}
-    from_hw = {k: v for k, v in counts.items() if k[3] == QEMU_MAC}
-    tcp = sorted({f"{k[1]}:{k[2]}" for k in counts if k[0] == "tcp"})
-    rep.check("packet capture: no DNS, NTP, IPv6 or other UDP left the guest", not bad,
-              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items())) or f"{after} frames after Welcome; TCP to {len(tcp)} addresses: {', '.join(tcp[:8])}")
+    # The capture holds both directions; judge what the guest sent (its
+    # hardware MAC or the address it shows now), not QEMU's replies.
+    guest_macs = set(macs) | {QEMU_MAC}
+    sent = {k: v for k, v in counts.items() if k[3] in guest_macs}
+    bad = {k: v for k, v in sent.items()
+           if k[0] == "ipv6" or (k[0] == "udp" and k[2] != 67) or k[0].startswith("ip-proto") or k[0].startswith("ethertype")}
+    from_hw = {k: v for k, v in sent.items() if k[3] == QEMU_MAC}
+    tcp = sorted({f"{k[1]}:{k[2]}" for k in sent if k[0] == "tcp"})
+    udp67 = sum(v for k, v in sent.items() if k[0] == "udp" and k[2] == 67)
+    rep.check("packet capture: the guest sent no DNS, NTP, IPv6 or other UDP (DHCP aside)", not bad,
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items()))
+              or f"{sum(sent.values())} frames sent: {udp67} DHCP, TCP to {len(tcp)} Tor relays ({', '.join(tcp[:6])}{', ...' if len(tcp) > 6 else ''})")
     rep.check("packet capture: no frame carried the hardware MAC address", not from_hw,
-              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"sources: {', '.join(sorted({k[3] for k in counts}))}")
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"guest frames came from {', '.join(sorted({k[3] for k in sent}))} only")
     try:
         vm.screenshot(os.path.join(out, "session.png"))
     except Exception:  # noqa: BLE001
