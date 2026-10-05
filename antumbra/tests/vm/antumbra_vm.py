@@ -5,7 +5,7 @@ commands over the debug console (hvc0), QMP (screenshots, power button),
 packet-capture summaries, and the smoke test. Standard library only.
 
 usage: antumbra_vm.py [--run-dir DIR] COMMAND ...
-  smoke [--timeout-scale F] [--no-stop] [--through-welcome [--tour]]
+  smoke [--timeout-scale F] [--no-stop] [--through-welcome [--tour]] [--camera]
                                           boot, check, power down; exit 1 on any failure
   wait REGEX [--timeout S]                wait for REGEX in the serial log
   shell CMD...                            run a command on the debug console, print its output
@@ -15,6 +15,8 @@ usage: antumbra_vm.py [--run-dir DIR] COMMAND ...
   console                                 attach to the serial console (raw, Ctrl-] detaches)
 """
 import argparse
+import base64
+import hashlib
 import json
 import os
 import re
@@ -560,7 +562,363 @@ def take_tour(vm, rep, sh, out, T):
     shot("tour-tor-browser.png")
 
 
-def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh_disk=True):
+# ---------------------------------------------------------------------------
+# Camera (--camera): the camera path on the VM's virtual camera, vimc
+# (config/hooks/72-vm-camera.sh, docs/camera.md, docs/vm-testing.md)
+# ---------------------------------------------------------------------------
+AS_AMNESIA = ("runuser -u amnesia -- env XDG_RUNTIME_DIR=/run/user/1000 "
+              "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus ")
+AS_AMNESIA_GUI = AS_AMNESIA + "WAYLAND_DISPLAY=wayland-0 XDG_SESSION_TYPE=wayland "
+
+# Runs in the guest on pw-dump's output and prints one line per camera object:
+#   device API PRODUCT-NAME-AS-JSON DEVICE-NAME
+#   node API STATE NODE-NAME
+# A node's API is its own (device.api, api.libcamera.*, api.v4l2.*) or else
+# its device's.
+PW_CAMERAS = r'''
+import json, sys
+objs = json.load(open(sys.argv[1]))
+def props(o):
+    return (o.get("info") or {}).get("props") or {}
+def api_of(p):
+    if p.get("device.api"):
+        return p["device.api"]
+    for prefix, api in (("api.libcamera.", "libcamera"), ("api.v4l2.", "v4l2")):
+        if any(k.startswith(prefix) for k in p):
+            return api
+    return None
+devices = {}
+for o in objs:
+    p = props(o)
+    if o.get("type", "").endswith(":Device") and p.get("media.class") == "Video/Device":
+        devices[o.get("id")] = api_of(p) or "?"
+        print("device", devices[o.get("id")], json.dumps(p.get("device.product.name")), p.get("device.name"))
+for o in objs:
+    p = props(o)
+    if o.get("type", "").endswith(":Node") and str(p.get("media.class", "")).startswith("Video/Source"):
+        api = api_of(p) or devices.get(p.get("device.id")) or "?"
+        print("node", api, (o.get("info") or {}).get("state"), p.get("node.name"))
+'''
+
+# Records every call of the Access dialog (the camera portal's prompt) on the
+# session bus, one JSON object per line.
+ACCESS_MONITOR = """#!/bin/sh
+exec timeout 900 stdbuf -oL busctl --user --json=short monitor \\
+    --match "type='method_call',interface='org.freedesktop.impl.portal.Access',member='AccessDialog'"
+"""
+
+# vimc's sensors draw the 75% colour bars by default. A pixel counts as one
+# of the bars' hues by which channels are high (>= 120) and low (<= 80).
+BAR_HUES = {("h", "h", "l"): "yellow", ("l", "h", "h"): "cyan", ("l", "h", "l"): "green",
+            ("h", "l", "h"): "magenta", ("h", "l", "l"): "red", ("l", "l", "h"): "blue"}
+
+
+def colour_bars(vm):
+    """{hue: share of the display} for the colour-bar hues on the display."""
+    w, h, px = vm.pixels()
+    counts = dict.fromkeys(BAR_HUES.values(), 0)
+    n = 0
+    for y in range(0, h, 4):
+        row = y * w * 3
+        for x in range(0, w, 4):
+            i = row + x * 3
+            key = tuple("h" if v >= 120 else "l" if v <= 80 else "m" for v in px[i:i + 3])
+            n += 1
+            if key in BAR_HUES:
+                counts[BAR_HUES[key]] += 1
+    return {k: v / max(n, 1) for k, v in counts.items()}
+
+
+def put_file(sh, path, data):
+    """Write DATA (bytes) to PATH in the guest in console-sized base64 pieces;
+    True only if every step worked and the copy has the right SHA-256."""
+    b64 = base64.b64encode(data).decode()
+    rc, _ = sh(f"rm -f {path} {path}.b64 && : > {path}.b64")
+    if rc != 0:
+        return False
+    for i in range(0, len(b64), 1500):
+        rc, _ = sh(f"printf %s '{b64[i:i + 1500]}' >> {path}.b64")
+        if rc != 0:
+            return False
+    rc, o = sh(f"base64 -d {path}.b64 > {path} && rm -f {path}.b64 && chmod 0644 {path} && sha256sum {path}")
+    return rc == 0 and o.split()[:1] == [hashlib.sha256(data).hexdigest()]
+
+
+def pw_cameras(sh):
+    """[(kind, api, state-or-product, name)] from pw-dump run as amnesia, or
+    None if pw-dump or the parser failed or printed anything unexpected."""
+    rc, o = sh(AS_AMNESIA + "timeout 20 pw-dump > /tmp/antumbra-pw.json && "
+               "python3 /tmp/antumbra-pw-cameras.py /tmp/antumbra-pw.json", timeout=90)
+    if rc != 0:
+        return None
+    rows = []
+    for line in o.split("\n"):
+        f = line.split(" ", 3)
+        if len(f) == 4 and f[0] in ("device", "node"):
+            rows.append(tuple(f))
+        elif line.strip():
+            return None
+    return rows
+
+
+def camera_phase(vm, rep, T, sh, out):
+    """The camera path on vimc. Without a session: the driver, udev's names
+    for its nodes, libcamera's camera list, the packages, no OnePlus camera
+    software in the image. In the amnesia session (--through-welcome):
+    PipeWire's libcamera node and no raw V4L2 camera, the camera portal's
+    prompt, Snapshot streaming once access is granted (the preview shows
+    vimc's colour bars), a picture saved, the stream stopped when Snapshot
+    quits and when it is killed."""
+    def shot(name):
+        try:
+            vm.screenshot(os.path.join(out, name))
+            print(f"camera: screenshot {name}", flush=True)
+        except Exception as e:  # noqa: BLE001
+            print(f"camera: screenshot {name} failed: {e}", flush=True)
+
+    def flat(o, n=300):
+        return o.strip().replace("\n", " | ")[:n]
+
+    def key(qcode):
+        """Press and release a key on the virtio keyboard; False if QMP failed."""
+        try:
+            for down in (True, False):
+                vm.qmp("input-send-event", events=[{"type": "key", "data": {"down": down, "key": {"type": "qcode", "data": qcode}}}])
+                time.sleep(0.1)
+            return True
+        except Exception as e:  # noqa: BLE001
+            print(f"camera: key {qcode} failed: {e}", flush=True)
+            return False
+
+    # 1. The kernel: vimc is loaded (hook 72, VM debug builds only) and has
+    #    registered its capture nodes.
+    rc, o = sh("cat /sys/module/vimc/initstate; ls /sys/bus/platform/devices/vimc.0/video4linux | grep -c '^video'")
+    lines = o.strip().split("\n")
+    rep.check("camera: the vimc virtual camera is loaded and has video nodes (modules-load.d, VM debug build)",
+              rc == 0 and len(lines) == 2 and lines[0] == "live" and lines[1].isdigit() and int(lines[1]) > 0, flat(o))
+    # 2. udev's name for those nodes: v4l_id's ID_V4L_PRODUCT (the card name)
+    #    is what PipeWire's udev monitor reports as device.product.name, the
+    #    key the WirePlumber rules match (CAMSS's card on the phone, vimc's here).
+    rc, o = sh("for d in /sys/bus/platform/devices/vimc.0/video4linux/video*; do "
+               "udevadm info -q property -n \"/dev/${d##*/}\" | grep '^ID_V4L_PRODUCT='; done")
+    products = o.strip().split("\n") if rc == 0 and o.strip() else []
+    rep.check("camera: udev names vimc's video nodes by card name (ID_V4L_PRODUCT=vimc)",
+              bool(products) and all(p == "ID_V4L_PRODUCT=vimc" for p in products), flat(o))
+    # 3. libcamera's own list (cam, from libcamera-tools: VM debug builds only).
+    rc, o = sh("LIBCAMERA_LOG_LEVELS='*:ERROR' timeout 60 cam -l 2>&1", timeout=120)
+    listed = (rc == 0 and re.search(r"^Available cameras:$", o, re.M) is not None
+              and re.search(r"^\d+: .*\bvimc\b", o, re.M) is not None)
+    rep.check("camera: libcamera lists the vimc camera (cam -l)", listed, flat(o))
+    # 4. The packages: Snapshot; libcamera 0.7 and its IPA modules from the
+    #    same build (the modules are signed with that build's key); PipeWire's
+    #    libcamera plugin at the version of the rest of PipeWire; no Megapixels.
+    want = ["gnome-snapshot", "libcamera0.7", "libcamera-ipa", "libspa-0.2-libcamera",
+            "libspa-0.2-modules", "pipewire", "wireplumber"]
+    rc, o = sh("dpkg-query -W -f '${Package} ${Version} ${db:Status-Abbrev}\\n' " + " ".join(want))
+    pk = {}
+    for line in o.split("\n"):
+        f = line.split()
+        if len(f) == 3 and f[2] == "ii":
+            pk[f[0]] = f[1]
+    rc2, o2 = sh("if dpkg-query -W -f '${db:Status-Abbrev}' megapixels 2>/dev/null | grep -q '^ii'; "
+                 "then echo installed; else echo absent; fi")
+    ok = (rc == 0 and set(pk) == set(want) and rc2 == 0 and o2.strip() == "absent"
+          and pk["libcamera0.7"].startswith("0.7.") and pk["libcamera-ipa"] == pk["libcamera0.7"]
+          and pk["libspa-0.2-libcamera"] == pk["libspa-0.2-modules"] == pk["pipewire"])
+    rep.check("camera: Snapshot, libcamera 0.7 with its IPA modules from one build, PipeWire's libcamera plugin "
+              "at PipeWire's version; no Megapixels",
+              ok, ", ".join(f"{k} {v}" for k, v in sorted(pk.items())) + f"; megapixels {o2.strip() or '?'}")
+    # 5. No OnePlus camera software anywhere in the image (the same scanner
+    #    tests/lint.sh runs over the source tree).
+    name = "camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image"
+    scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
+    if put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner):
+        rc, o = sh("python3 /tmp/antumbra-no-oneplus-camera.py --xdev /", timeout=900)
+        rep.check(name, rc == 0 and not o.strip(), flat(o) or "none found")
+    else:
+        rep.check(name, False, "could not copy the scanner to the guest")
+
+    # --- In the amnesia session ------------------------------------------------
+    rc, o = sh("pgrep -u amnesia -xc phosh", timeout=30)
+    if not (rc == 0 and o.strip().isdigit() and int(o.strip()) > 0):
+        rep.check("camera: an amnesia session runs (the PipeWire and Snapshot checks need --through-welcome)", False, o.strip())
+        return
+    if not (put_file(sh, "/tmp/antumbra-pw-cameras.py", PW_CAMERAS.encode())
+            and put_file(sh, "/tmp/antumbra-access-monitor.sh", ACCESS_MONITOR.encode())):
+        rep.check("camera: helper scripts copied to the guest", False, "")
+        return
+
+    # 6. PipeWire offers vimc through libcamera only: the WirePlumber rule
+    #    removed the V4L2 devices (WirePlumber's own deduplication would only
+    #    drop the V4L2 nodes libcamera uses, never the devices).
+    cams = None
+    deadline = time.monotonic() + T(120)
+    while time.monotonic() < deadline:
+        cams = pw_cameras(sh)
+        if cams and any(c[0] == "node" and c[1] == "libcamera" for c in cams):
+            break
+        time.sleep(5)
+    listing = "; ".join(" ".join(c) for c in cams or []) or ("no camera objects" if cams is not None else "pw-dump failed")
+    rep.check("camera: PipeWire (as amnesia) offers the vimc camera as a libcamera node",
+              any(c[0] == "node" and c[1] == "libcamera" for c in cams or []), listing)
+    rep.check("camera: no V4L2 camera device or node in PipeWire (the WirePlumber rule matched device.product.name)",
+              cams is not None and not [c for c in cams if c[1] == "v4l2"], listing)
+    rc, o = sh("journalctl -b -o cat --no-pager _COMM=wireplumber | grep -E 'V4L2 device .* disabled' | head -n 5", timeout=60)
+    print(f"camera: WirePlumber's own log of disabled V4L2 devices: {flat(o) or 'none logged'}", flush=True)
+
+    def states():
+        rows = pw_cameras(sh)
+        return None if rows is None else [c[2] for c in rows if c[0] == "node" and c[1] == "libcamera"]
+
+    def wait_states(pred, secs):
+        st = None
+        deadline = time.monotonic() + T(secs)
+        while True:
+            st = states()
+            if st is not None and pred(st):
+                return True, st
+            if time.monotonic() >= deadline:
+                return False, st
+            time.sleep(5)
+
+    def snapshots():
+        rc, o = sh("pgrep -u amnesia -xc snapshot", timeout=30)
+        return int(o.strip()) if rc in (0, 1) and o.strip().isdigit() else None
+
+    def start_snapshot():
+        rc, o = sh(AS_AMNESIA_GUI + "setsid -f snapshot >/dev/null 2>&1; echo started", timeout=60)
+        return rc == 0 and o.strip() == "started"
+
+    def portal_decision():
+        """The stored camera decision for host programs (app id ""), or None."""
+        rc, o = sh(AS_AMNESIA + "busctl --user --json=short call org.freedesktop.impl.portal.PermissionStore "
+                   "/org/freedesktop/impl/portal/PermissionStore org.freedesktop.impl.portal.PermissionStore "
+                   "Lookup ss devices camera 2>&1", timeout=60)
+        if rc != 0:
+            return None, flat(o)
+        try:
+            perms = json.loads(o.strip().split("\n")[-1])["data"][0]
+            return perms.get("", [None])[0], json.dumps(perms)
+        except (ValueError, KeyError, IndexError, TypeError, AttributeError):
+            return None, flat(o)
+
+    def bars(label):
+        try:
+            b = colour_bars(vm)
+        except Exception as e:  # noqa: BLE001
+            return 0, f"{label}: {e}"
+        seen = sorted(k for k, v in b.items() if v >= 0.005)
+        return len(seen), f"{label}: " + ", ".join(f"{k} {v:.1%}" for k, v in sorted(b.items()))
+
+    # 7. First start in a fresh session: no decision is stored, so the camera
+    #    portal asks through Phosh's Access dialog and Snapshot gets no stream.
+    before, before_detail = portal_decision()
+    sh("pkill -u amnesia -x busctl; rm -f /tmp/antumbra-access.log", timeout=30)
+    rc, o = sh(AS_AMNESIA + "setsid -f sh -c 'sh /tmp/antumbra-access-monitor.sh > /tmp/antumbra-access.log 2>&1'; echo started", timeout=60)
+    monitoring = rc == 0 and o.strip() == "started"
+    time.sleep(T(5))
+    sh("rm -rf /home/amnesia/Pictures/Camera", timeout=30)
+    started = start_snapshot()
+    asked = []
+    deadline = time.monotonic() + T(180)
+    while monitoring and time.monotonic() < deadline:
+        rc, o = sh("cat /tmp/antumbra-access.log", timeout=60)
+        asked = []
+        for line in o.split("\n") if rc == 0 else []:
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(m, dict) and m.get("member") == "AccessDialog":
+                asked.append(m)
+        if asked:
+            break
+        time.sleep(5)
+    n = snapshots()
+    rep.check("camera: Snapshot starts", started and n is not None and n > 0, f"{n} snapshot processes")
+    time.sleep(T(10))
+    shot("camera-portal-prompt.png")
+    dest = asked[0].get("destination", "") if asked else ""
+    comm = ""
+    if re.fullmatch(r":\d+\.\d+", dest or ""):
+        rc, o = sh(AS_AMNESIA + f"busctl --user status {dest} 2>/dev/null | sed -n 's/^Comm=//p'", timeout=60)
+        comm = o.strip() if rc == 0 else ""
+    try:
+        title = asked[0]["payload"]["data"][3] if asked else ""
+    except (KeyError, IndexError, TypeError):
+        title = "?"
+    rep.check("camera: with no stored decision the camera portal asks, through Phosh's Access dialog",
+              before is None and bool(asked) and comm == "phosh",
+              f"stored before: {before_detail}; dialog: {title!r} handled by {comm or dest or 'nobody'}")
+    ok, st = wait_states(lambda s: bool(s), 30)
+    rep.check("camera: while the portal waits for an answer, Snapshot gets no stream", ok and "running" not in st,
+              ", ".join(st or []) or "no libcamera node")
+    first_bars, first_detail = bars("before streaming")
+
+    # 8. Answer for the user: stop Snapshot (which withdraws the request),
+    #    dismiss what is left of the dialog, then store the decision the
+    #    "Allow" button stores, and check it is in place before the restart.
+    sh("pkill -u amnesia -x snapshot; sleep 5; pkill -9 -u amnesia -x snapshot; true", timeout=60)
+    key("esc")
+    time.sleep(T(30))
+    sh(AS_AMNESIA + "busctl --user call org.freedesktop.impl.portal.PermissionStore /org/freedesktop/impl/portal/PermissionStore "
+       "org.freedesktop.impl.portal.PermissionStore SetPermission sbssas devices true camera '' 1 yes", timeout=60)
+    decision, decision_detail = portal_decision()
+    rep.check("camera: the camera decision for host programs is stored as yes", decision == "yes", decision_detail)
+    shot("camera-after-prompt.png")
+
+    # 9. Second start: the portal grants access without asking, Snapshot
+    #    streams, and the preview shows vimc's colour bars.
+    start_snapshot()
+    ok, st = wait_states(lambda s: "running" in s, 180)
+    rep.check("camera: with access granted, Snapshot streams from vimc through PipeWire's libcamera node", ok,
+              ", ".join(st or []) or "no libcamera node")
+    time.sleep(T(15))
+    shot("camera-preview.png")
+    hues, detail = bars("preview")
+    rep.check("camera: the preview shows vimc's colour bars", hues >= 4, f"{detail}; {first_detail}")
+
+    # 10. A picture: Snapshot's shortcut "t" (its window action is not
+    #     exported on D-Bus), saved under the user's Pictures directory.
+    rc, o = sh(AS_AMNESIA + "xdg-user-dir PICTURES", timeout=30)
+    pictures = o.strip() if rc == 0 else ""
+    if not pictures.startswith("/home/amnesia/") or "\n" in pictures:
+        rep.check("camera: the session has an XDG Pictures directory (Snapshot saves there)", False, o.strip())
+    else:
+        pressed = key("t")
+        saved = ""
+        deadline = time.monotonic() + T(90)
+        while time.monotonic() < deadline:
+            rc, o = sh(f"for f in '{pictures}'/Camera/*.jpeg '{pictures}'/Camera/*.jpg; do [ -s \"$f\" ] || continue; "
+                       "printf '%s %s\\n' \"$(head -c 3 \"$f\" | od -An -tx1 | tr -d ' ')\" \"$f\"; done", timeout=60)
+            if rc == 0 and re.search(r"^ffd8ff /.+\.jpe?g$", o, re.M):
+                saved = o.strip()
+                break
+            time.sleep(5)
+        rep.check("camera: Snapshot saves a JPEG picture to ~/Pictures/Camera", bool(saved),
+                  saved or ("nothing saved" if pressed else "could not press t"))
+
+    # 11. The stream stops when Snapshot quits (its quit action), and when it
+    #     is killed: on the phone that is what retracts the pop-up camera.
+    rc, o = sh(AS_AMNESIA + "busctl --user call org.gnome.Snapshot /org/gnome/Snapshot org.gtk.Actions "
+               "Activate 'sava{sv}' quit 0 0 2>&1", timeout=60)
+    how = "quit action" if rc == 0 else f"quit action failed ({flat(o, 120)}), SIGTERM"
+    if rc != 0:
+        sh("pkill -u amnesia -x snapshot; true", timeout=30)
+    ok, st = wait_states(lambda s: bool(s) and "running" not in s, 60)
+    rep.check("camera: the stream stops when Snapshot quits", ok and snapshots() == 0,
+              f"{how}; " + (", ".join(st or []) or "no libcamera node"))
+    start_snapshot()
+    ok, st = wait_states(lambda s: "running" in s, 180)
+    if ok:
+        sh("pkill -9 -u amnesia -x snapshot; true", timeout=30)
+        ok, st = wait_states(lambda s: bool(s) and "running" not in s, 60)
+    rep.check("camera: the stream stops when Snapshot is killed (SIGKILL)", ok and snapshots() == 0,
+              ", ".join(st or []) or "no libcamera node")
+    sh("pkill -u amnesia -x snapshot; pkill -u amnesia -x busctl; true", timeout=30)
+
+
+def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh_disk=True, camera=False):
     rep = Report()
     T = lambda s: s * scale  # noqa: E731
     out = os.path.join(vm.run, "smoke")
@@ -689,6 +1047,8 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
               or (f"no guest frames ({sum(counts.values())} from QEMU's user network)" if counts else "no frames"))
     if through_welcome and debug:
         welcome_phase(vm, rep, T, sh, out, tour)
+    if camera and debug:
+        camera_phase(vm, rep, T, sh, out)
     if stop_after:
         # 2. A short power-key press must be ignored (logind HandlePowerKey=ignore,
         #    only a long press powers off): QEMU's system_powerdown is a short press.
@@ -744,6 +1104,7 @@ def main():
     s = sub.add_parser("smoke"); s.add_argument("--timeout-scale", type=float, default=1.0); s.add_argument("--no-stop", action="store_true"); s.add_argument("--no-debug", action="store_true")
     s.add_argument("--through-welcome", action="store_true", help="press Start on the Welcome screen and check the network afterwards")
     s.add_argument("--tour", action="store_true", help="with --through-welcome: extra screenshots of the session (best effort)")
+    s.add_argument("--camera", action="store_true", help="camera checks on the VM's virtual camera (vimc); the session ones need --through-welcome")
     s.add_argument("vm_args", nargs="*")
     w = sub.add_parser("wait"); w.add_argument("regex"); w.add_argument("--timeout", type=float, default=300)
     sh = sub.add_parser("shell"); sh.add_argument("command", nargs="+"); sh.add_argument("--timeout", type=float, default=120)
@@ -762,7 +1123,7 @@ def main():
         vm.start(args)
         try:
             rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome, a.tour,
-                        fresh_disk="--keep-disk" not in args)
+                        fresh_disk="--keep-disk" not in args, camera=a.camera)
         except KeyboardInterrupt:
             vm.stop(); raise
         failed = rep.failed()

@@ -1,0 +1,4 @@
+# Test tools added only to debug builds of the qemu-virt profile
+# (build/rootfs.sh); phone and release images never contain them.
+# cam -l: libcamera's own camera list, for the --camera VM checks.
+libcamera-tools

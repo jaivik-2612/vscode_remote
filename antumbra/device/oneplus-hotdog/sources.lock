@@ -14,6 +14,18 @@ PORT_PATCH_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup
 PORT_KERNEL_CONFIG=config-oneplus-hotdog-mainline617-clean.aarch64
 PORT_KERNEL_CONFIG_SHA256=3d6b53abc795b7fff07fb87c7f1ca2da43d0401809a358366f5225cde09dc72e
 
+# Optional patched libcamera (build/libcamera.sh, only with
+# ANTUMBRA_LIBCAMERA_LOCAL=1; the default image uses trixie-backports' 0.7.1).
+# Debian's 0.7.2-1 source package, the release the port's patches target,
+# pinned by its .dsc, which pins the two tarballs by SHA-256. The Debian pool
+# drops it once unstable moves on; snapshot.debian.org keeps it.
+LIBCAMERA_DSC_URL=https://deb.debian.org/debian/pool/main/libc/libcamera/libcamera_0.7.2-1.dsc
+LIBCAMERA_DSC_SNAPSHOT_URL=https://snapshot.debian.org/archive/debian/20260711T022200Z/pool/main/libc/libcamera/libcamera_0.7.2-1.dsc
+LIBCAMERA_DSC_SHA256=b162125bb8d26641b3b71ed32d344a06ae7fb4e732043db7a081615ffd039983
+LIBCAMERA_LOCAL_VERSION=0.7.2-1~antumbra1
+# The port's libcamera patches and tuning files (hashes in libcamera/patches.sha256)
+PORT_LIBCAMERA_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/temp/libcamera
+
 # Hardware-validated slot-B companions from the port's release (not rebuilt here)
 DTBO_URL=https://github.com/Sr-0w/hotdog-linux-bringup/releases/download/v0.2.0-alpha.2/oneplus-7t-pro-hotdog-v0.2.0-alpha.2-dtbo.img
 DTBO_SHA256=d23564d42c989c2b86f760937cb6ea8d570074b20b74bd8c0bc0b94d2ba0d8cd

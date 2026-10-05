@@ -19,7 +19,10 @@ In order of importance.
 5. **Tor Connection assistant** on the phone: bridge QR codes, Moat,
    the pre-Tor clock fix with user consent, as in Tails.
 6. **Tor Browser confinement**: an AppArmor profile for the launcher and
-   the browser, and Tails' Flatpak-based sandbox when it is portable.
+   the browser, and Tails' Flatpak-based sandbox when it is portable. The
+   profile must deny the camera devices (`/dev/video*`, `/dev/media*`,
+   `/dev/v4l-subdev*`) and the PipeWire socket: until then the browser
+   can use the cameras without a prompt (`camera.md`).
 7. **Unsafe Browser** for captive portals, in the clearnet namespace.
 8. **Bluetooth opt-in session** with a random address before power-on
    (the driver stack works on the 6.17 line).

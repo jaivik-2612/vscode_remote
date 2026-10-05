@@ -137,3 +137,57 @@ each course (`dmesg | grep camera-popup`).
 35. `status` is `-r--------`, and `pulse_up`, `restore_closed`, `open`,
     `finish_open` and `close` exist only when the module was loaded with
     `debug_knobs=1`.
+
+## Camera userspace
+
+GNOME Snapshot through the camera portal and PipeWire's libcamera node
+(`camera.md`). The commands run as `amnesia` in the session; `cam` is not
+in the phone image, so the cameras are listed through PipeWire.
+
+36. `dpkg-query -W gnome-snapshot libcamera0.7 libcamera-ipa
+    libspa-0.2-libcamera pipewire wireplumber`: libcamera 0.7.1 from
+    trixie-backports (or `0.7.2-1~antumbra1` from a build with
+    `ANTUMBRA_LIBCAMERA_LOCAL=1`, both libcamera packages at the same
+    version), PipeWire 1.6.9, WirePlumber 0.5.12; `megapixels` is not
+    installed.
+37. `wpctl status` lists four cameras under the video sources, all created
+    by libcamera (`pw-dump` shows `"device.api": "libcamera"` for each).
+38. The WirePlumber rule: `udevadm info -q property -n /dev/video0` shows
+    `ID_V4L_PRODUCT=Qualcomm Camera Subsystem`, and `pw-dump` has no
+    device or node with `"device.api": "v4l2"`. If CAMSS's raw nodes do
+    appear, record their `device.product.name` and `device.sysfs.path`.
+39. First start of Snapshot: Phosh asks "Allow app to Use the Camera?".
+    Deny: Snapshot shows no camera and the front camera stays down. The
+    answer is remembered for the session; reset it with `busctl --user
+    call org.freedesktop.impl.portal.PermissionStore
+    /org/freedesktop/impl/portal/PermissionStore
+    org.freedesktop.impl.portal.PermissionStore DeletePermission sss
+    devices camera ''`, start Snapshot again and allow: the preview
+    appears.
+40. Front camera in Snapshot: the camera rises before the first preview
+    frame and retracts when Snapshot switches to a rear camera, when it
+    quits and when it is killed (`pkill -9 snapshot`); `dmesg | grep
+    camera-popup` shows one `open stopped` and one `close stopped` per
+    course, each with `endpoint=1 error=0`. This is item 29 with a real
+    application.
+41. Orientation and mirroring: with the phone held upright, the front
+    preview is upright and mirrored, and the saved picture is upright.
+    Record what Snapshot does with each of the four cameras.
+42. Each rear camera previews and saves a picture to `~/Pictures/Camera/`;
+    the front camera saves a 1748x1748 picture. Nothing shows that a rear
+    camera is in use.
+43. Exposure and white balance settle within a few seconds indoors and in
+    daylight on all four cameras. With a local libcamera build, compare
+    against the default build, and check that libcamera no longer warns
+    about a missing camera sensor helper for the four sensors
+    (`journalctl -b --user | grep -i helper`).
+44. PipeWire as the only user of CAMSS: start and stop the front camera 20
+    times and switch between all four cameras 20 times; `dmesg | grep -i
+    -E 'camss|csid|vfe'` shows no reset timeout and the cameras keep
+    working. If a camera stops working, record the messages and whether
+    only a reboot recovers it.
+45. Suspend while Snapshot streams from the front camera (power button,
+    wake after a minute): the camera retracts before the phone sleeps
+    (items 30 and 31); after resume Snapshot streams again with the camera
+    raised, or shows an error with the camera down. The camera is never
+    left raised without a stream.

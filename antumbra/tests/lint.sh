@@ -66,6 +66,22 @@ bad_modes="$(grep -nE '^[[:space:]]*mode[[:space:]]*=' config/rootfs/etc/antumbr
     | grep -vE '=[[:space:]]*[0-9]+x[0-9]+(@[0-9]+(\.[0-9]+)?Hz)?[[:space:]]*$' || true)"
 if [ -n "${bad_modes}" ]; then echo "phoc.ini: malformed mode line(s): ${bad_modes}"; fail=1; else echo "phoc.ini: mode lines valid"; fi
 
+step "camera"
+# Antumbra never ships the OnePlus (OxygenOS) camera app or Qualcomm's camera
+# HAL blobs (docs/camera.md); the VM checks scan the image the same way.
+if python3 tests/no-oneplus-camera.py --skip build/cache --skip build/out --skip build/work .; then
+    echo "no OnePlus/OxygenOS camera software in the tree"
+else
+    fail=1
+fi
+# The optional patched libcamera (build/libcamera.sh): every input pinned.
+grep -qE '^LIBCAMERA_DSC_SHA256=[0-9a-f]{64}$' device/oneplus-hotdog/sources.lock || { echo "bad LIBCAMERA_DSC_SHA256"; fail=1; }
+while read -r name; do
+    [ -n "${name}" ] || continue
+    grep -qE "^[0-9a-f]{64}  ${name}$" device/oneplus-hotdog/libcamera/patches.sha256 || { echo "libcamera patch ${name} has no hash"; fail=1; }
+done < device/oneplus-hotdog/libcamera/patches.list
+echo "libcamera inputs pinned: $(wc -l < device/oneplus-hotdog/libcamera/patches.sha256) files"
+
 step "device profiles"
 for d in device/*/; do
     [ -f "${d}device.conf" ] || { echo "${d} has no device.conf"; fail=1; }

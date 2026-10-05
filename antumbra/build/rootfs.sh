@@ -12,6 +12,7 @@
 #
 # Knobs  : ANTUMBRA_MINIMAL=1  base + network + amnesia lists only (pipeline validation)
 #          ANTUMBRA_DEBUG=1    debug console/initramfs (never for releases)
+#          ANTUMBRA_LIBCAMERA_LOCAL=1  libcamera from build/out/libcamera-repo (libcamera.sh)
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -46,6 +47,10 @@ if [ -n "${ANTUMBRA_MINIMAL}" ]; then
     LISTS=(base network amnesia)
 else
     LISTS=(base network amnesia session phosh apps)
+    # Test tools for the qemu-virt debug build only (docs/vm-testing.md).
+    if [ -n "${ANTUMBRA_DEBUG}" ] && [ "${ANTUMBRA_DEVICE}" = "qemu-virt" ]; then
+        LISTS+=(vm-debug)
+    fi
 fi
 PKGS=()
 for l in "${LISTS[@]}"; do
@@ -107,6 +112,37 @@ fi
 PREFS="${CONFIG_DIR}/rootfs/etc/apt/preferences.d/antumbra-backports"
 [ -f "${PREFS}" ] || die "missing ${PREFS}"
 
+# Optional patched libcamera (build/libcamera.sh, ANTUMBRA_LIBCAMERA_LOCAL=1):
+# its local repository is added for the installation only, every libcamera
+# package pinned to it above trixie-backports (libcamera0.7 and libcamera-ipa
+# must come from the same build), and both files are removed again before the
+# hooks run, so the image's apt configuration is the same as without it.
+# copy:// rather than file:// because apt runs outside the chroot and dpkg
+# inside it would not see the host path.
+LIBCAMERA_HOOKS=()
+LIBCAMERA_VERSION=''
+if [ -n "${ANTUMBRA_LIBCAMERA_LOCAL:-}" ] && [ -z "${ANTUMBRA_MINIMAL}" ]; then
+    LCREPO="${OUT}/libcamera-repo"
+    [ -f "${LCREPO}/Packages" ] || die "ANTUMBRA_LIBCAMERA_LOCAL=1 but ${LCREPO} holds no packages; run build/libcamera.sh"
+    LIBCAMERA_VERSION="$(lock_get LIBCAMERA_LOCAL_VERSION)"
+    LCAPT="${WORK}/libcamera-apt"
+    rm -rf "${LCAPT}"; mkdir -p "${LCAPT}"
+    printf 'deb [trusted=yes] copy://%s ./\n' "${LCREPO}" > "${LCAPT}/antumbra-libcamera-local.list"
+    cat > "${LCAPT}/antumbra-libcamera-local" <<'PIN'
+Package: libcamera* gstreamer1.0-libcamera
+Pin: release o=Antumbra,l=antumbra-libcamera
+Pin-Priority: 990
+PIN
+    # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap
+    LIBCAMERA_HOOKS=(
+        --setup-hook='mkdir -p "$1/etc/apt/sources.list.d"'
+        --setup-hook="copy-in ${LCAPT}/antumbra-libcamera-local.list /etc/apt/sources.list.d"
+        --setup-hook="copy-in ${LCAPT}/antumbra-libcamera-local /etc/apt/preferences.d"
+        --customize-hook='rm -f "$1/etc/apt/sources.list.d/antumbra-libcamera-local.list" "$1/etc/apt/preferences.d/antumbra-libcamera-local"'
+    )
+    log "libcamera ${LIBCAMERA_VERSION} from the local repository ${LCREPO}"
+fi
+
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
@@ -127,6 +163,7 @@ mmdebstrap \
     --dpkgopt='path-exclude=/usr/share/info/*' \
     --setup-hook='mkdir -p "$1/etc/apt/preferences.d"' \
     --setup-hook="copy-in ${PREFS} /etc/apt/preferences.d" \
+    "${LIBCAMERA_HOOKS[@]}" \
     --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
     --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \
@@ -139,6 +176,10 @@ mmdebstrap \
 # Antumbra ships its own, so put them back from the overlay.
 install -m 0644 "${CONFIG_DIR}/rootfs/etc/resolv.conf" "${ROOT}/etc/resolv.conf"
 install -m 0644 "${CONFIG_DIR}/rootfs/etc/hostname" "${ROOT}/etc/hostname"
+if [ -n "${LIBCAMERA_VERSION}" ]; then
+    grep -qxF "libcamera0.7 ${LIBCAMERA_VERSION}" "${ROUT}/packages.txt" \
+        || die "libcamera0.7 ${LIBCAMERA_VERSION} was not installed from the local repository"
+fi
 
 # What this tree is: later steps (squashfs, image, bootimg, release) check it.
 printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nKERNEL_RELEASE=%s\n' \

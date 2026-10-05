@@ -22,7 +22,7 @@ compromised.
 | Same | links sessions by MAC address | `macchanger` on every interface at session start (on this port the firmware address is random anyway); random MAC in scans; no hostname or client identifier in DHCP | shipped; MAC survival across suspend to be validated |
 | Same | finds hidden networks the phone probes for | hidden-network profiles are refused | shipped |
 | Mobile network operator, IMSI catcher | tracks the phone by IMSI/IMEI, locates it by cell | the modem radio is pinned to low-power mode (no IMSI attach, RF off); no ModemManager; the control channel is capability-gated so no app can turn the radio on | shipped; behaviour of this firmware in low-power mode without a SIM is unmeasured |
-| Application exploit (browser) | reads files, reaches the network directly, uses the camera | Tor Browser runs in its own network namespace reaching only Tor; the firewall rejects everything else; no camera access without the portal prompt | partly: no AppArmor profile for the browser yet |
+| Application exploit (browser) | reads files, reaches the network directly, uses the camera | Tor Browser runs in its own network namespace reaching only Tor; the firewall rejects everything else. Camera: nothing yet. The browser runs as the session user, who can open the camera devices (logind access) and PipeWire's camera nodes (PipeWire's default for programs outside Flatpak) directly, and the camera portal maps every program installed in the system to one shared decision, so its prompt is no barrier. The raised front camera shows front-camera use; the rear cameras show nothing (`camera.md`) | partly: network isolation shipped; an AppArmor profile for the browser that denies the camera devices and the PipeWire socket is planned |
 | Application exploit | escalates to root | no setuid helpers beyond sudo; sudo only for the Tor Browser launcher (argument-filtered) and, if enabled, the user's own passphrase; QRTR, ptrace, BPF, kexec and debugfs restricted | shipped |
 | Malware in the session | persists across reboots | read-only verity-covered root, RAM overlay, no writable flash except the unlocked Persistent Storage | shipped |
 | Someone who takes the powered-off phone | reads what was in RAM or on flash | memory zeroed on free and flushed at shutdown; nothing on flash except the LUKS2 volume (argon2id) | shipped; LPDDR4X remanence unmeasured |
@@ -43,7 +43,8 @@ compromised.
 - It does not protect against an adversary who had the phone before you
   flashed it.
 - It does not protect against microphone or camera use by an application
-  you granted access to; the phone has no kill switch.
+  running in your session, prompt or not; the phone has no kill switch,
+  and only the front camera shows when it is in use (it rises).
 - It has not been reviewed by Tails, Tor Project or anyone else, and has
   not run on hardware.
 
