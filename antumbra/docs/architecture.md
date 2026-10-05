@@ -616,7 +616,8 @@ OS updates currently erase the volume because they re-flash `userdata`.
 
 Source: `gitlab.com/sm8150-mainline/linux` at `v6.17.0-sm8150` with the
 27-patch series from the port applied in order, then Antumbra's own
-patch (`0101`, the QRTR capability gate), then the device-tree overrides
+patches (`0101`, the QRTR capability gate; `0102`, pop-up camera motor
+safety across sleep, power-off and boot), then the device-tree overrides
 appended to the hotdog DTS (`antumbra-dts-overrides.dtsi`: SLPI remote
 processor disabled, ramoops node deleted), then the configuration
 fragment merged over the port's config with `merge_config.sh`.
