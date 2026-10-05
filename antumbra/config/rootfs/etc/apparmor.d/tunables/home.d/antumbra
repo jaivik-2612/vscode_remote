@@ -1,0 +1,2 @@
+# Ported from Tails' tunables/home.d/tails (trixie live-boot paths).
+@{HOMEDIRS}+=/run/live/overlay/rw/home/

@@ -71,6 +71,19 @@ if ! mac_spoof_is_enabled; then
     exit 0
 fi
 
+# udev can expand $name before systemd's net-setup-link renames the device
+# (eth0 -> enp0s7 for a PCI NIC); the event's IFINDEX does not change, so
+# find the interface by its index if the name is gone.
+if ! nic_exists "${NIC}" && [ -n "${IFINDEX:-}" ]; then
+    for d in /sys/class/net/*; do
+        if [ "$(cat "${d}/ifindex" 2>/dev/null)" = "${IFINDEX}" ]; then
+            log "NIC ${NIC} was renamed to $(basename "${d}")"
+            NIC="$(basename "${d}")"
+            break
+        fi
+    done
+fi
+
 log "Trying to spoof MAC address of NIC ${NIC}..."
 if ! nic_exists "${NIC}"; then
     log "NIC ${NIC} doesn't exist, skipping"
@@ -99,3 +112,7 @@ if [ -z "${OLD_MAC}" ] || [ -z "${NEW_MAC}" ] || [ "${OLD_MAC}" = "${NEW_MAC}" ]
     exit 1
 fi
 log "Successfully spoofed MAC address of NIC ${NIC}"
+# Evidence for antumbra-selfcheck --late: the interface index with the old
+# and the new address.
+mkdir -p "${FAILED_STATE_DIR}/mac-spoof"
+printf '%s %s %s\n' "${NIC}" "${OLD_MAC}" "${NEW_MAC}" > "${FAILED_STATE_DIR}/mac-spoof/$(cat "/sys/class/net/${NIC}/ifindex")"

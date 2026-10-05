@@ -2,6 +2,10 @@
 greetd
 phoc
 phosh
+# phosh-session runs gnome-session (Phosh only recommends it, and the
+# build installs without recommends): without it the session exits at once.
+gnome-session-bin
+gnome-session-common
 squeekboard
 phosh-mobile-settings
 feedbackd

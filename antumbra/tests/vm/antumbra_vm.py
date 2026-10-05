@@ -534,6 +534,12 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
         rep.check("guest: selfcheck reports the firewall OK", "firewall OK" in o, o.replace("\n", " | ")[:300])
         rc, o = sh("systemctl is-active tor.service tor@default.service 2>/dev/null | tr '\\n' ' '")
         rep.check("guest: Tor running", "active" in o.split(), o)
+        rc, o = sh("echo profiles=$(wc -l < /sys/kernel/security/apparmor/profiles 2>/dev/null); "
+                   "echo tor=$(cat /proc/$(pgrep -xo tor)/attr/apparmor/current 2>/dev/null || cat /proc/$(pgrep -xo tor)/attr/current)")
+        f = dict(line.split("=", 1) for line in o.split("\n") if "=" in line)
+        rep.check("guest: AppArmor profiles loaded and Tor confined (enforce)",
+                  f.get("profiles", "0").strip() not in ("", "0") and f.get("tor", "").startswith("system_tor") and "enforce" in f.get("tor", ""),
+                  o.replace("\n", " "))
         # The veth pairs of the confined-application namespaces are expected; nothing else may exist.
         rc, o = sh("ip -o link | grep -vcE ': (lo|veth-[a-z]+)[:@]' ; lsmod | grep -c '^virtio_net'; systemctl is-active NetworkManager 2>/dev/null")
         parts = o.split("\n")

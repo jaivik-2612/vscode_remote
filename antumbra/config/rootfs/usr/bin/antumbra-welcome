@@ -52,7 +52,6 @@ class WelcomeWindow(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Welcome to Antumbra")
         self.set_default_size(480, 1000)
-        self.fullscreen()
         self.model = S.WelcomeSettings()
 
         view = Adw.ToolbarView()
@@ -235,6 +234,11 @@ class WelcomeApp(Adw.Application):
     def do_activate(self):
         win = WelcomeWindow(self)
         win.present()
+        # Fullscreen only once the window exists on the compositor's side: a
+        # fullscreen request sent before the surface's first commit makes
+        # phoc (wlroots 0.18) drop the initial configure, and the window
+        # then never draws.
+        GLib.idle_add(lambda: win.fullscreen() and False)
         if SELF_TEST:
             GLib.timeout_add(500, self.self_test, win)
 

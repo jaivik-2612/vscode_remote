@@ -325,6 +325,18 @@ chosen how to connect. The `tor@default.service` drop-ins (writable
 `NoNewPrivileges` for the transports) and Tails' AppArmor adjustments to
 Debian's Tor profile are carried over.
 
+AppArmor profiles are loaded at boot only because Antumbra overrides
+Debian's `apparmor.service`, which skips itself on live systems with an
+overlayfs root (`ConditionPathExists=!/run/live/overlay/work`; Tails'
+patched live-boot keeps the overlay elsewhere and is not affected). The
+override, Tails' alias tunables ported to trixie's live-boot paths
+(`/run/live/rootfs/*.squashfs/` and `/run/live/overlay/rw/`) and Tails'
+`attach_disconnected` flag on every profile (`config/hooks/48-network-apparmor.sh`)
+make the profiles apply on the overlay root; the VM smoke test checks
+that Tor runs as `system_tor (enforce)`. Profiles this AppArmor version
+cannot parse are moved out of the load path at build time, and the build
+fails if Tor's is one of them.
+
 The control port is never exposed to applications directly. Tails'
 `onion-grater` (Python, stem) listens on 951 and applies per-application
 YAML allow-lists. It is installed unchanged, as are the units that raise

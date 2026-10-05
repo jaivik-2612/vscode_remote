@@ -76,17 +76,27 @@ if [ -n "${LATE}" ]; then
     else
         bad modem-radio "no modem state recorded"
     fi
-    for nic in /sys/class/net/wl*; do
-        [ -e "${nic}" ] || continue
+    # Every Ethernet-type interface (Wi-Fi included) except the namespace
+    # veths must carry the address antumbra-spoof-mac gave it, unless the
+    # user turned MAC anonymization off on the Welcome screen.
+    spoof_off=""
+    # shellcheck source=../lib/tails-shell-library/tails-greeter.sh
+    . /usr/local/lib/tails-shell-library/tails-greeter.sh
+    mac_spoof_is_enabled || spoof_off=1
+    for nic in /sys/class/net/*; do
         n="$(basename "${nic}")"
+        case "${n}" in lo|veth*) continue ;; esac
+        [ "$(cat "${nic}/type" 2>/dev/null)" = "1" ] || continue
+        if [ -n "${spoof_off}" ]; then ok "mac-${n} (anonymization off by choice)"; continue; fi
         cur="$(cat "${nic}/address")"
+        rec="${STATE_DIR}/mac-spoof/$(cat "${nic}/ifindex")"
         perm="$(ethtool -P "${n}" 2>/dev/null | sed -n 's/^Permanent address: //p')"
-        second_hex="$(printf '%s' "${cur}" | cut -c2)"
-        case "${second_hex}" in 2|6|a|e|A|E) la=1 ;; *) la=0 ;; esac
         if [ -n "${perm}" ] && [ "${perm}" != "00:00:00:00:00:00" ] && [ "${perm}" = "${cur}" ]; then
             bad "mac-${n}" "address equals the permanent address"
-        elif [ "${la}" -ne 1 ]; then
-            bad "mac-${n}" "address is not locally administered"
+        elif [ ! -r "${rec}" ]; then
+            bad "mac-${n}" "no record of spoofing this interface"
+        elif [ "$(cut -d' ' -f3 "${rec}")" != "${cur}" ] || [ "$(cut -d' ' -f2 "${rec}")" = "${cur}" ]; then
+            bad "mac-${n}" "address changed since it was spoofed"
         else
             ok "mac-${n}"
         fi
