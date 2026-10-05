@@ -242,10 +242,11 @@ phosh-notification-content .actions-area button:only-child {
 /* ---- Home: gesture pill, search, app grid -------------------------------- */
 
 /* A thin gesture pill (108x4, as Android's) in place of phosh's wide bar.
- * -gtk-recolor paints it in the foreground colour. Phosh's position,
+ * -gtk-recolor paints it in the foreground colour; GTK 3 recolours only
+ * files named *-symbolic.svg, hence the name. Phosh's position,
  * repeat and its shake animation on a failed gesture still apply. */
 phosh-home #powerbar {
-  background-image: -gtk-recolor(url("file:///usr/share/antumbra/theme/pill.svg"));
+  background-image: -gtk-recolor(url("file:///usr/share/antumbra/theme/pill-symbolic.svg"));
   background-size: 108px 4px;
 }
 

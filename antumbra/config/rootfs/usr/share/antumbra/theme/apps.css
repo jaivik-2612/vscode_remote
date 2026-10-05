@@ -51,3 +51,13 @@
 switch:checked > slider {
   background: var(--accent-fg-color);
 }
+
+/* GTK's own theme, which plain GTK 4 programs without libadwaita use, draws
+ * the checked track in literal blue and ignores the accent variables; give
+ * the track the accent here so the knob above never sits on blue. Same
+ * values as libadwaita 1.7's own rule. */
+switch:checked {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+  border-color: transparent;
+}

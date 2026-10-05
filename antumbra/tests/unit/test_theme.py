@@ -71,11 +71,17 @@ class StylesheetTest(unittest.TestCase):
     def test_shell_selectors_are_scoped(self):
         scoped = re.compile(r"(?<![\w-])[.#]?(phosh-[\w-]+|sq_\w+)")
         found = 0
-        for head, _ in rules(read(os.path.join(THEME, "shell.css"))):
+        shell = read(os.path.join(THEME, "shell.css"))
+        # rules() keeps only rule heads, so an @import would escape this check.
+        self.assertNotRegex(strip_comments(shell), r"@import\b")
+        for head, _ in rules(shell):
             self.assertFalse(head.startswith("@"), head)
             for sel in head.split(","):
                 found += 1
-                self.assertRegex(sel.strip(), scoped,
+                # A node named only inside :not() scopes nothing: button:not(.phosh-x)
+                # matches every button in Tor Browser's chrome.
+                bare = re.sub(r":not\((?:[^()]|\([^()]*\))*\)", "", sel.strip())
+                self.assertRegex(bare, scoped,
                                  f"shell.css selector {sel.strip()!r} names no phosh or squeekboard node")
         self.assertGreater(found, 40)
 
@@ -164,7 +170,7 @@ class SvgTest(unittest.TestCase):
             self.check_svg(os.path.join(BACKGROUNDS, name), ("1440", "3120"), 16384)
 
     def test_pill(self):
-        self.check_svg(os.path.join(THEME, "pill.svg"), ("324", "12"), 2048)
+        self.check_svg(os.path.join(THEME, "pill-symbolic.svg"), ("324", "12"), 2048)
 
 
 class IconThemeTest(unittest.TestCase):
