@@ -541,28 +541,44 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     peers, and anything else that talks to the network), then judge the
     packet capture: only Tor may have reached the network, DHCP aside.
     LABEL names the phase in the check names."""
-    rc, o = sh(f"for i in $(seq {polls}); do ss -tunapH state all; sleep 1; done | "
-               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 3 + 120)
-    socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"] if rc is not None else []
-    # NetworkManager's DHCP client (udp :68 -> :67) is the one non-Tor flow
-    # the firewall allows, as in Tails. (Sockets on 10.200.1.0/24 and
-    # 10.200.2.0/30 are the confined applications' and Android's connections
-    # to Tor's own listeners on this machine.)
-    dhcp = [l for l in socks if l.startswith("udp") and '(("NetworkManager"' in l and re.search(r":68\s+\S+:67\s", l)]
-    non_tor = [l for l in socks if '(("tor"' not in l and l not in dhcp]
-    tor_peers = set()
-    for l in socks:
-        if '(("tor"' in l:
-            m = re.search(r"\s(\d+\.\d+\.\d+\.\d+):(\d+)\s+users:", l)
-            if m:
-                tor_peers.add((m.group(1), int(m.group(2))))
-    rep.check(f"{label}: every connection to the network belongs to Tor (DHCP aside)", rc is not None and not non_tor,
-              f"{len(tor_peers)} Tor peers, {len(dhcp)} DHCP client sockets" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
     # Before it has a consensus Tor only knows the addresses built into it; read
     # them from the guest's own binary.
     rc, o = sh("grep -aoE '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+ orport=[0-9]+|orport=[0-9]+[[:print:]]{0,200} "
                "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+:[0-9]+ ' \"$(readlink -f /usr/bin/tor)\" | sort -u", timeout=120)
     builtin = tor_builtin_addresses(o) if rc == 0 else set()
+    rc, o = sh("id -u debian-tor")
+    tor_uid = o.strip() if rc == 0 and o.strip().isdigit() else None
+    rep.check(f"{label}: Tor's user ID could be read from the guest", tor_uid is not None, o.strip())
+    # ss -e reports each socket's owner UID from the kernel (inet_diag). The
+    # process names of -p come from a /proc scan made before the socket dump,
+    # so a socket opened in between has none: with Tor opening and dropping
+    # connections every second, a 90-second poll always hits that gap. -O keeps
+    # each socket on one line.
+    rc, o = sh(f"for i in $(seq {polls}); do ss -tunapeHO state all; sleep 1; done | "
+               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 3 + 120)
+    socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"] if rc is not None else []
+
+    def peer(line):
+        f = line.split()
+        m = re.fullmatch(r"(\d+\.\d+\.\d+\.\d+):(\d+)", f[5]) if len(f) > 5 else None
+        return (m.group(1), int(m.group(2))) if m else None
+
+    def tor_owned(line):
+        return '(("tor"' in line or (tor_uid is not None and re.search(rf"\buid:{tor_uid}\b", line) is not None)
+
+    # NetworkManager's DHCP client (udp :68 -> :67, root) is the one non-Tor
+    # flow the firewall allows, as in Tails. (Sockets on 10.200.1.0/24 and
+    # 10.200.2.0/30 are the confined applications' and Android's connections
+    # to Tor's own listeners on this machine.)
+    dhcp = [l for l in socks if l.startswith("udp") and re.search(r":68\s+\S+:67\s", l)
+            and ('(("NetworkManager"' in l or re.search(r"\buid:0\b", l))]
+    tor_peers = {peer(l) for l in socks if tor_owned(l)} - {None}
+    # A TIME-WAIT socket has no owner left; it is Tor's if its peer is.
+    timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin)]
+    non_tor = [l for l in socks if not tor_owned(l) and l not in dhcp and l not in timewait]
+    rep.check(f"{label}: every connection to the network belongs to Tor (DHCP aside)", rc is not None and tor_uid is not None and not non_tor,
+              f"{len(tor_peers)} Tor peers, {len(dhcp)} DHCP client sockets, {len(timewait)} closed Tor sockets in TIME-WAIT"
+              + ((": " + " | ".join(re.sub(r"\s+", " ", x)[:160] for x in non_tor[:4])) if non_tor else ""))
     cap = "packet capture" if label == "after Welcome" else f"{label}, packet capture"
     if label == "after Welcome":
         rep.check("Tor: its built-in directory addresses could be read from the guest", len(builtin) > 20, f"{len(builtin)} addresses")
