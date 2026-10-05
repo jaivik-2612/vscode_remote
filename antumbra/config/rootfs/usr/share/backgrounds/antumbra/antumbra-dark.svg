@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  SPDX-License-Identifier: GPL-3.0-or-later
-  Antumbra wallpaper, dark variant (org.gnome.desktop.background
-  picture-uri-dark). An annular eclipse in a violet night: the moon's disc
-  sits slightly off-centre inside the sun's, so the ring of light, the
-  antumbra's view, is thicker on its warm lower-left side.
-  Colours are tones of the theme palette (seed #4d2c9e, see
-  /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
-  #ffb347 harmonised toward the seed. Gradients only, no raster data.
--->
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="3120" viewBox="0 0 1440 3120">
+  <!--
+    SPDX-License-Identifier: GPL-3.0-or-later
+    Antumbra wallpaper, dark variant (org.gnome.desktop.background
+    picture-uri-dark). An annular eclipse in a violet night: the moon's disc
+    sits slightly off-centre inside the sun's, so the ring of light, the
+    antumbra's view, is thicker on its warm lower-left side.
+    Colours are tones of the theme palette (seed #4d2c9e, see
+    /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
+    #ffb347 harmonised toward the seed. Gradients only, no raster data.
+  -->
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#0f0d13"/>

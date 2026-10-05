@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  SPDX-License-Identifier: GPL-3.0-or-later
-  Antumbra wallpaper, light variant (org.gnome.desktop.background
-  picture-uri, shown when the Dark Mode tile switches color-scheme off).
-  The same annular eclipse at dawn. Phosh keeps its shell dark and its
-  status bar and gesture pill white in either scheme, so the top and bottom
-  edges stay mid-dark violet; only the middle of the sky turns light.
-  Colours are tones of the theme palette (seed #4d2c9e, see
-  /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
-  #ffb347 harmonised toward the seed. Gradients only, no raster data.
--->
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="3120" viewBox="0 0 1440 3120">
+  <!--
+    SPDX-License-Identifier: GPL-3.0-or-later
+    Antumbra wallpaper, light variant (org.gnome.desktop.background
+    picture-uri, shown when the Dark Mode tile switches color-scheme off).
+    The same annular eclipse at dawn. Phosh keeps its shell dark and its
+    status bar and gesture pill white in either scheme, so the top and bottom
+    edges stay mid-dark violet; only the middle of the sky turns light.
+    Colours are tones of the theme palette (seed #4d2c9e, see
+    /usr/share/antumbra/theme/shell.css); the warm "corona" tones are amber
+    #ffb347 harmonised toward the seed. Gradients only, no raster data.
+  -->
   <defs>
     <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#4c3e76"/>

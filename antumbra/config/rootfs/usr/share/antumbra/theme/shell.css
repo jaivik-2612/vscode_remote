@@ -63,6 +63,16 @@
 @define-color phosh_splash_bg_color @antumbra_light_surface;
 @define-color phosh_splash_fg_color @antumbra_light_on_surface;
 
+/* Phosh rings a focused button, which a tap also makes, in GNOME's accent
+ * colour; use the primary colour in phosh's surfaces instead. More
+ * specific rules below (quick-setting tiles) set their own. */
+phosh-top-panel button:focus,
+phosh-home button:focus,
+phosh-lockscreen button:focus,
+.phosh-system-modal button:focus {
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
 
 /* ---- Top bar ------------------------------------------------------------ */
 
@@ -103,8 +113,10 @@ phosh-quick-setting:active {
   color: @antumbra_on_primary;
 }
 
+/* Phosh's horizontal padding: at 360px wide (the VM) two tiles per row
+ * leave just enough room for "Bluetooth" next to its arrow. */
 phosh-quick-setting button {
-  padding: 0 16px;
+  padding: 0 12px;
 }
 
 phosh-quick-setting button:first-child {
@@ -332,6 +344,10 @@ phosh-keypad label.digit {
 .phosh-system-modal-dialog button.suggested-action {
   background: @antumbra_primary;
   color: @antumbra_on_primary;
+}
+
+.phosh-system-modal-dialog button.suggested-action:focus {
+  box-shadow: inset 0 0 0 2px alpha(@antumbra_on_primary, 0.4);
 }
 
 .phosh-system-modal-dialog entry:focus {

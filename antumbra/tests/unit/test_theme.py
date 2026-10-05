@@ -142,6 +142,11 @@ class SvgTest(unittest.TestCase):
     def check_svg(self, path, size, max_bytes):
         data = read(path)
         self.assertLess(len(data.encode()), max_bytes, path)
+        # gdk-pixbuf recognises SVG by "<svg" in the first 256 bytes, and
+        # phosh loads its wallpapers from a stream, without a file name to
+        # fall back on: a long comment before the element makes the image
+        # "Unrecognized image file format". Comments go inside <svg>.
+        self.assertIn(b"<svg", data.encode()[:256], f"{path}: <svg not in the first 256 bytes")
         self.assertNotIn("data:", data, f"{path}: embedded data")
         self.assertIn("SPDX-License-Identifier: GPL-3.0-or-later", data, path)
         root = ET.fromstring(data)
