@@ -22,8 +22,12 @@ install -m 0755 "${PT}/lyrebird" /usr/bin/obfs4proxy
 if [ -f "${PT}/conjure-client" ]; then install -m 0755 "${PT}/conjure-client" /usr/bin/conjure-client; fi
 # The bundled tor daemon is not used (the system tor is).
 rm -f /usr/local/lib/tor-browser/TorBrowser/Tor/tor
-ICON="$(find /usr/local/lib/tor-browser/browser/chrome/icons/default -name 'default128.png' 2>/dev/null | head -n1 || true)"
-if [ -n "${ICON}" ]; then install -D -m 0644 "${ICON}" /usr/share/icons/hicolor/128x128/apps/tor-browser.png; fi
+for size in 16 32 48 64 128; do
+    ICON="/usr/local/lib/tor-browser/browser/chrome/icons/default/default${size}.png"
+    [ -f "${ICON}" ] && install -D -m 0644 "${ICON}" "/usr/share/icons/hicolor/${size}x${size}/apps/tor-browser.png"
+done
+# GTK looks icons up through the theme's cache, which predates these files.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then gtk-update-icon-cache -q -f -t /usr/share/icons/hicolor; fi
 chown -R root:root /usr/local/lib/tor-browser /etc/tor-browser
 # The tarball's directories are private (0700); the browser runs as the
 # session user and copies the profile skeleton, so both must be readable
