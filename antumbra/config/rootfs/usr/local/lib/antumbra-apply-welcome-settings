@@ -4,10 +4,24 @@
 # as a systemd unit). Runs once per boot, triggered by the greeter user's
 # welcome-done marker; refuses anything not owned by the greeter user and
 # anything after /run/antumbra/welcome-applied exists.
+#
+# The greeter user's files are untrusted input. Each one is first moved
+# (a rename, which never follows a symbolic link) into ${STAGE}, a directory
+# only root can enter, and used only if what arrived there is a regular file
+# owned by the greeter user; the greeter can no longer swap it afterwards.
+# Everything below reads these staged copies. Staging before Persistent
+# Storage is activated also keeps this boot's choices: activation mounts the
+# volume's stored Welcome settings over ${PERSISTENT}.
 set -euo pipefail
-export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# /usr/local/sbin: antumbra-persistence
+export PATH=/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 ROOT=/var/lib/antumbra/settings
 PERSISTENT="${ROOT}/persistent"; TRANSIENT="${ROOT}/transient"; APPLIED="${ROOT}/applied"
+# Root only (0700), on the file system of the greeter's directories, so that
+# staging is a rename; removed when this script exits.
+STAGE="${ROOT}/staged"
+# The "Welcome settings" feature's directory on the unlocked volume.
+VOLUME_SETTINGS=/var/lib/antumbra/persistence/welcome-settings
 MARKER=/run/antumbra/welcome-applied
 FAILED=/run/antumbra/welcome-failed
 LIVE_USERNAME=amnesia
@@ -15,11 +29,40 @@ GREETER_USER=antumbra-greeter
 SUDOERS=/etc/sudoers.d/antumbra-admin
 POLKIT=/etc/polkit-1/rules.d/10-antumbra-admin.rules
 EXPORTED_PERSISTENT="tails.macspoof tails.network tails.bridges antumbra.admin"
+# What the volume keeps of this boot's choices. Never tails.password: the
+# Welcome screen asks for the screen-lock passphrase at every boot and
+# nothing reads a stored hash back, so it is not kept at rest.
+SAVED_ON_VOLUME="${EXPORTED_PERSISTENT} antumbra.android"
 # Only in images built with ANTUMBRA_ANDROID=1 (antumbra.android is exported below).
 ANDROID_DIR=/usr/share/antumbra/android
 
 log() { logger -t antumbra-welcome -p daemon.info -- "$*"; echo "$*" >&2; }
 fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; exit 1; }
+cleanup() {
+    if [ -f "${STAGE}/antumbra.persistence-passphrase" ]; then
+        shred -u "${STAGE}/antumbra.persistence-passphrase" 2>/dev/null || true
+    fi
+    rm -rf -- "${STAGE}" || true
+}
+
+# owned_by_greeter FILE: a regular file, not a symbolic link, owned by the greeter user.
+owned_by_greeter() { [ -f "$1" ] && [ ! -L "$1" ] && [ "$(stat -c %U -- "$1")" = "${GREETER_USER}" ]; }
+# stage DIR NAME: move DIR/NAME into ${STAGE}; false (and nothing staged)
+# unless it is a regular file owned by the greeter user.
+stage() {
+    local src="$1/$2" dst="${STAGE}/$2"
+    [ -e "${src}" ] || [ -L "${src}" ] || return 1
+    mv -fT -- "${src}" "${dst}" || return 1
+    owned_by_greeter "${dst}" && return 0
+    log "ignored $1/$2: not a regular file owned by ${GREETER_USER}"
+    rm -rf -- "${dst}"
+    return 1
+}
+# setting NAME KEY: KEY's value in the staged file NAME (quotes removed), or nothing.
+setting() {
+    [ -f "${STAGE}/$1" ] || return 0
+    sed -n "s/^$2=//p" "${STAGE}/$1" | tail -n 1 | tr -d "'\""
+}
 
 mkdir -p /run/antumbra "${APPLIED}"
 rm -f "${FAILED}"
@@ -28,21 +71,29 @@ rm -f "${FAILED}"
 for d in "${PERSISTENT}" "${TRANSIENT}"; do
     [ "$(stat -c %U "${d}")" = "${GREETER_USER}" ] || fail "${d} is not owned by ${GREETER_USER}"
 done
-owned_by_greeter() { [ -e "$1" ] && [ "$(stat -c %U "$1")" = "${GREETER_USER}" ]; }
 
-# --- Android apps (images built with ANTUMBRA_ANDROID=1) -------------------------------
-# Exported before Persistent Storage is activated: activation mounts the stored
-# Welcome settings over ${PERSISTENT}, which would hide this boot's choice.
+# --- This boot's choices, staged ----------------------------------------------------------
+rm -rf -- "${STAGE}"
+install -d -m 0700 -o root -g root "${STAGE}"
+trap cleanup EXIT
+for f in ${EXPORTED_PERSISTENT} antumbra.android tails.password; do stage "${PERSISTENT}" "${f}" || true; done
+for f in antumbra.persistence antumbra.persistence-passphrase; do stage "${TRANSIENT}" "${f}" || true; done
+PERS_MODE="$(setting antumbra.persistence ANTUMBRA_PERSISTENCE)"
+PP="${STAGE}/antumbra.persistence-passphrase"
+HASH="$(setting tails.password TAILS_USER_PASSWORD)"
+ADMIN="$(setting antumbra.admin ANTUMBRA_ADMIN_ENABLED)"
+# Android apps (images built with ANTUMBRA_ANDROID=1)
 ANDROID=false
 ANDROID_KEEP=false
-if [ -d "${ANDROID_DIR}" ] && owned_by_greeter "${PERSISTENT}/antumbra.android"; then
-    install -m 0644 -o root -g root "${PERSISTENT}/antumbra.android" "${APPLIED}/antumbra.android"
-    ANDROID="$(sed -n 's/^ANTUMBRA_ANDROID_ENABLED=//p' "${APPLIED}/antumbra.android" | tr -d "'\"")"
-    ANDROID_KEEP="$(sed -n 's/^ANTUMBRA_ANDROID_PERSISTENT=//p' "${APPLIED}/antumbra.android" | tr -d "'\"")"
+if [ -d "${ANDROID_DIR}" ]; then
+    ANDROID="$(setting antumbra.android ANTUMBRA_ANDROID_ENABLED)"
+    ANDROID_KEEP="$(setting antumbra.android ANTUMBRA_ANDROID_PERSISTENT)"
 fi
-# The "android" Persistent Storage feature is mounted only in a session with
-# Android apps on and "Keep Android apps and data" chosen; its directory on
-# the volume is created the first time.
+
+# --- Persistent Storage first: its features are in place before the session -------------
+# The "android" feature is mounted only in a session with Android apps on and
+# "Keep Android apps and data" chosen; its directory on the volume is
+# created the first time.
 activate_persistence() {
     if [ "${ANDROID}" = "true" ] && [ "${ANDROID_KEEP}" = "true" ]; then
         antumbra-persistence enable android || return 1
@@ -51,44 +102,48 @@ activate_persistence() {
         antumbra-persistence activate --skip android
     fi
 }
-
-# --- Persistent Storage first: persistent settings may live on it -------------------
-PERS_MODE="$(sed -n 's/^ANTUMBRA_PERSISTENCE=//p' "${TRANSIENT}/antumbra.persistence" 2>/dev/null | tr -d "'\"")"
-PP="${TRANSIENT}/antumbra.persistence-passphrase"
 case "${PERS_MODE:-none}" in
     create)
-        owned_by_greeter "${PP}" || fail "no passphrase for creating Persistent Storage"
+        [ -f "${PP}" ] || fail "no passphrase for creating Persistent Storage"
         antumbra-persistence create --passphrase-file "${PP}" || fail "creating Persistent Storage failed"
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "unlocking the new Persistent Storage failed"
         activate_persistence || fail "activating Persistent Storage failed"
         ;;
     unlock)
-        owned_by_greeter "${PP}" || fail "no passphrase for unlocking Persistent Storage"
+        [ -f "${PP}" ] || fail "no passphrase for unlocking Persistent Storage"
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "wrong passphrase, or Persistent Storage is damaged"
         activate_persistence || fail "activating Persistent Storage failed"
         ;;
 esac
-if [ -e "${PP}" ]; then shred -u "${PP}" 2>/dev/null || rm -f "${PP}"; fi
+if [ -f "${PP}" ]; then shred -u "${PP}" 2>/dev/null || rm -f "${PP}"; fi
 
 # --- Export the settings (root-owned copies) -----------------------------------------
-for setting in ${EXPORTED_PERSISTENT}; do
-    src="${PERSISTENT}/${setting}"
-    owned_by_greeter "${src}" || continue
-    install -m 0640 -o root -g root "${src}" "${APPLIED}/${setting}"
+for f in ${EXPORTED_PERSISTENT} antumbra.android; do
+    rm -f "${APPLIED:?}/${f}"
+    [ -f "${STAGE}/${f}" ] || continue
+    [ "${f}" != antumbra.android ] || [ -d "${ANDROID_DIR}" ] || continue
+    install -m 0640 -o root -g root "${STAGE}/${f}" "${APPLIED}/${f}"
 done
-# tca and the shell read the network setting as the user
-[ -e "${APPLIED}/tails.network" ] && chmod 0644 "${APPLIED}/tails.network"
-# Persistent-settings feature: keep the greeter's persistent files on the volume
-if antumbra-persistence status --quiet 2>/dev/null && [ -d /var/lib/antumbra/persistence/welcome-settings ]; then
-    cp -a "${PERSISTENT}/." /var/lib/antumbra/persistence/welcome-settings/ 2>/dev/null || true
+# tca and the shell read the network setting as the user; the Android choice
+# is readable too
+for f in tails.network antumbra.android; do
+    if [ -e "${APPLIED}/${f}" ]; then chmod 0644 "${APPLIED}/${f}"; fi
+done
+# "Welcome settings" feature: this boot's settings replace the stored ones.
+# install(1) replaces a file or link the greeter left there, never writes through it.
+if antumbra-persistence status --quiet 2>/dev/null && [ -d "${VOLUME_SETTINGS}" ]; then
+    for f in ${SAVED_ON_VOLUME}; do
+        if [ -f "${STAGE}/${f}" ]; then
+            install -m 0640 -o "${GREETER_USER}" -g "${GREETER_USER}" "${STAGE}/${f}" "${VOLUME_SETTINGS}/${f}" \
+                || log "could not save ${f} on Persistent Storage"
+        else
+            rm -f -- "${VOLUME_SETTINGS:?}/${f}"
+        fi
+    done
+    rm -f -- "${VOLUME_SETTINGS:?}/tails.password"
 fi
 
 # --- Passphrase, administration -------------------------------------------------------------
-HASH=""
-if owned_by_greeter "${PERSISTENT}/tails.password"; then
-    HASH="$(sed -n "s/^TAILS_USER_PASSWORD=//p" "${PERSISTENT}/tails.password" | tr -d "'\"")"
-fi
-ADMIN="$(sed -n 's/^ANTUMBRA_ADMIN_ENABLED=//p' "${APPLIED}/antumbra.admin" 2>/dev/null | tr -d "'\"")"
 rm -f "${SUDOERS}" "${POLKIT}"
 if [ -n "${HASH}" ]; then
     echo "${LIVE_USERNAME}:${HASH}" | chpasswd -e

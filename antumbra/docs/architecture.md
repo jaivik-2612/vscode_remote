@@ -633,15 +633,29 @@ answers once.
    by the greeter user, then touches `welcome-done`.
 3. `antumbra-apply-welcome-settings.path` wakes the root one-shot of the
    same name, Tails' `PostLogin/Default` as a unit. It refuses to run if
-   `/run/antumbra/welcome-applied` exists or if any input is not owned by
-   the greeter user; unlocks or creates Persistent Storage and activates
-   its features (so persistent settings come from the volume); copies the
-   settings to `settings/applied/` (root-owned); sets the user's password
-   with `chpasswd -e` or deletes it; installs the sudoers and polkit admin
-   rules when asked; writes the marker; runs `antumbra-unblock-network`.
-   The Persistent Storage passphrase travels in a 0600 file in the
-   greeter's tmpfs directory that the applier shreds; a D-Bus service as in
-   Tails' `tps` is on the roadmap.
+   `/run/antumbra/welcome-applied` exists. It first moves each of the
+   greeter's files into `settings/staged/`, a root-only directory (a
+   rename, which never follows a symbolic link), and uses a file only if
+   what arrived there is a regular file the greeter user owns: the greeter
+   can neither point root at another file nor swap one after the check.
+   Then it unlocks or creates Persistent Storage and activates its
+   features; copies this boot's settings to `settings/applied/`
+   (root-owned); with Persistent Storage, saves them on the volume (the
+   "Welcome settings" feature, owned by the greeter user); sets the user's
+   password with `chpasswd -e` or deletes it; installs the sudoers and
+   polkit admin rules when asked; writes the marker; runs
+   `antumbra-unblock-network`. What is applied is always what the Welcome
+   screen showed this boot: the volume is unlocked only after Start, so
+   the Welcome screen cannot show the stored settings, and stored settings
+   that silently replaced this boot's choice (offline mode, MAC address
+   anonymization) would be worse. The stored copy is for a Welcome screen
+   that unlocks first, as Tails' does (roadmap). Unlike Tails, the
+   screen-lock passphrase's hash (`tails.password`) is never saved: the
+   Welcome screen asks for it at every boot and nothing would read it
+   back. The Persistent Storage passphrase travels in a 0600 file in the
+   greeter's tmpfs directory, which the applier moves away and shreds,
+   also when it fails; a D-Bus service as in Tails' `tps` is on the
+   roadmap.
 4. The Welcome screen waits for the marker, then uses greetd's IPC to
    create a session for `amnesia` (greetd's PAM stack for IPC sessions,
    `/etc/pam.d/greetd`, lets that user in without a password, since the
