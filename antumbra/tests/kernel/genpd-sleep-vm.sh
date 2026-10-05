@@ -74,12 +74,27 @@ check() { # check NAME OK DETAIL
     if [ "$2" = 1 ]; then printf 'PASS  %s\n' "$1"; else printf 'FAIL  %s (%s)\n' "$1" "$3"; fail=1; fi
 }
 
+HVC_LOG="${WORK}/vm-run/hvc0.log"
+CASE_N=0
+
+# Console input that is still queued when the guest freezes is lost (a command
+# sent on the same tty would hang its caller), so the freeze runs from a
+# detached job, the host sends nothing until that job reports the resume in
+# hvc0.log, and only then are the results read.
 run_case() { # run_case GATE ACTIVE -> sets P_<name> from the module's result parameters
-    local out
-    out="$(vmsh "insmod /tmp/genpd_sleep_test.ko gate=$1 active=$2 && \
-if command -v rtcwake >/dev/null; then rtcwake -m freeze -s ${SLEEP_S} >/dev/null; \
+    local out tag i
+    CASE_N=$((CASE_N + 1))
+    tag="resumed-${CASE_N}-$$"
+    vmsh "insmod /tmp/genpd_sleep_test.ko gate=$1 active=$2 && \
+setsid sh -c 'sleep 2; if command -v rtcwake >/dev/null; then rtcwake -m freeze -s ${SLEEP_S}; \
 else echo 0 > /sys/class/rtc/rtc0/wakealarm; echo +${SLEEP_S} > /sys/class/rtc/rtc0/wakealarm; echo freeze > /sys/power/state; fi; \
-sleep 3; cd /sys/module/genpd_sleep_test/parameters && for p in *; do printf 'P_%s=%s\\n' \"\$p\" \"\$(cat \"\$p\")\"; done; \
+printf \"genpd-sleep-%s\\n\" ${tag}' </dev/null >/dev/hvc0 2>&1 &" >/dev/null
+    for i in $(seq 300); do
+        grep -qa "genpd-sleep-${tag}" "${HVC_LOG}" && break
+        [ "${i}" -lt 300 ] || die "no resume reported after 300 s (case ${CASE_N})"
+        sleep 1
+    done
+    out="$(vmsh "cd /sys/module/genpd_sleep_test/parameters && for p in *; do printf 'P_%s=%s\\n' \"\$p\" \"\$(cat \"\$p\")\"; done; \
 dmesg | grep 'antumbra-genpd-sleep-test' | tail -n 12; cd /; rmmod genpd_sleep_test")"
     printf '%s\n' "${out}" | grep -v '^P_' | sed 's/^/      /'
     unset P_noirq_power_on P_noirq_power_off P_noirq_moves P_gated_calls P_prepare_retracts P_reconcile_raises P_raised P_domain_on
