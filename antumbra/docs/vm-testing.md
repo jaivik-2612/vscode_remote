@@ -92,37 +92,49 @@ asserts, in order:
    partition (bus check, partition name, filesystem UUID), and systemd
    reached `multi-user.target`;
 2. on the debug console: the release file, an overlay root on the
-   loop-mounted live partition whose UUID equals the recorded one, dm-verity
-   active when the command line asks for it, the nftables ruleset with a
-   dropping output chain, `selfcheck` reporting the firewall OK, Tor running,
+   loop-mounted live partition whose UUID equals the recorded one, the live
+   medium mounted read-only, dm-verity active when the command line asks
+   for it, the nftables ruleset with a
+   dropping output chain, `selfcheck` reporting the firewall OK,
+   `tor@default.service` active,
    no network interface, no network driver and NetworkManager inactive
    before the Welcome decision, `virtio_net` in the driver blocklist, a
-   loopback-only resolver, zram-only swap with `dmesg_restrict` and volatile
-   logs, an untouched Persistent Storage partition, and (full builds) greetd
-   and phoc running;
+   resolver whose only nameserver is 127.0.0.1, zram-only swap with
+   `dmesg_restrict` and volatile logs, a Persistent Storage partition with
+   no filesystem signature, and (full builds) greetd and phoc running;
 3. a screenshot of the display (`build/work/qemu-virt/vm-run/smoke/display.png`);
-4. from the packet capture of the VM's network (`net.pcap`): no IP packet
-   left the guest before the Welcome decision, and the display shows the
-   drawn Welcome screen rather than a text console;
+4. from the packet capture of the VM's network (`net.pcap`): no frame of
+   any kind (ARP included) left the guest before the Welcome decision, judged
+   by source MAC address (only QEMU's own user network, `52:55:`/`52:56:`,
+   may appear), and the display shows the drawn Welcome screen rather than
+   a text console;
 5. with `--through-welcome` (what `make vm-test` runs): the harness finds
    the "Start Antumbra" button on the display and presses it with the
    defaults (amnesic session, MAC address anonymization, Tor connected
    automatically), then checks that the settings were applied and Phosh
    started, that the network driver loaded only now and the interface got
    an address, that the interface's MAC address is not the one QEMU gave
-   the hardware, that every network socket in the system belongs to Tor,
-   and, from the packet capture, that no DNS, NTP, IPv6 or other UDP left
-   the guest and no frame carried the hardware MAC address;
+   the hardware, and, polling every socket in the system once a second for
+   90 seconds, that every connection to the network belongs to Tor (DHCP
+   aside); from the packet capture, that no DNS, NTP, IPv6 or other UDP
+   left the guest, that every TCP connection the guest opened went to one
+   of the directory addresses built into the image's Tor or to a peer seen
+   on Tor's sockets, and that no frame carried the hardware MAC address;
 6. a short press of the virtual power button is ignored (only a long
-   press powers off, as on the phone), and a power-off requested from the
-   console goes through the return-to-initramfs shutdown path.
+   press powers off, as on the phone), a power-off requested from the
+   console goes through the return-to-initramfs shutdown path (the hook
+   reports the old root and the medium unmounted, the verity device
+   removed, the loop devices detached and the caches dropped), and, on a
+   run that started from a fresh overlay, `qemu-img map` shows that the
+   guest wrote not one block to its disk.
 
 `--tour` adds screenshots of the session (app overview, quick settings,
 Tor Browser) and checks that Tor Browser runs inside its `tbb` network
 namespace. `make vm-test SCALE=2` doubles every timeout.
 
 Every check is reported as PASS or FAIL and the exit status is non-zero if
-any failed. `--timeout-scale 2` doubles every timeout for slow hosts.
+any failed; a command that fails on the debug console is a FAIL of its own,
+never output for a check to read. `--timeout-scale 2` doubles every timeout for slow hosts.
 
 ## What the first VM runs found
 

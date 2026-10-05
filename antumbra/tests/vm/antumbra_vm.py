@@ -263,6 +263,51 @@ def pcap_summary(path):
     return counts
 
 
+SLIRP_MAC_PREFIXES = ("52:55:", "52:56:")   # QEMU's user network: 52:55:<IPv4>, 52:56:<IPv6>
+
+
+def pcap_tcp_syns(path):
+    """{(source MAC, destination IP, destination port)} of every TCP SYN
+    (without ACK) in the capture: the connections something tried to open."""
+    syns = set()
+    try:
+        data = open(path, "rb").read()
+    except FileNotFoundError:
+        return syns
+    if len(data) < 24:
+        return syns
+    endian = "<" if struct.unpack("<I", data[:4])[0] in (0xA1B2C3D4, 0xA1B23C4D) else ">"
+    pos = 24
+    while pos + 16 <= len(data):
+        _, _, incl, _ = struct.unpack(endian + "IIII", data[pos:pos + 16])
+        frame = data[pos + 16:pos + 16 + incl]
+        pos += 16 + incl
+        if len(frame) < 34 or struct.unpack(">H", frame[12:14])[0] != 0x0800 or frame[23] != 6:
+            continue
+        l4 = frame[14 + (frame[14] & 0x0F) * 4:]
+        if len(l4) >= 14 and (l4[13] & 0x12) == 0x02:
+            syns.add((":".join(f"{b:02x}" for b in frame[6:12]),
+                      ".".join(str(b) for b in frame[30:34]), struct.unpack(">H", l4[2:4])[0]))
+    return syns
+
+
+def tor_builtin_addresses(text):
+    """{(IP, port)} of the directory authorities and fallback directories compiled
+    into Tor: the only places it connects to before it has a consensus."""
+    addrs = {(ip, int(op)) for ip, op in re.findall(r"(\d+\.\d+\.\d+\.\d+) orport=(\d+)", text)}
+    for op, ip, dp in re.findall(r"orport=(\d+)\S*(?: \S+)*? (\d+\.\d+\.\d+\.\d+):(\d+)(?: |$)", text, re.M):
+        addrs |= {(ip, int(op)), (ip, int(dp))}
+    return addrs
+
+
+def ints(o, n):
+    """Exactly N integers, one per line, or ValueError."""
+    v = [int(x) for x in o.strip().split("\n")]
+    if len(v) != n:
+        raise ValueError(o)
+    return v
+
+
 # ---------------------------------------------------------------------------
 # VM
 # ---------------------------------------------------------------------------
@@ -283,12 +328,14 @@ class VM:
             return None
 
     def alive(self):
+        """True only for a live process whose command line names this run's
+        QMP socket (a reused PID is not our VM)."""
         pid = self.pid()
         if pid is None:
             return False
         try:
             os.kill(pid, 0)
-            return True
+            return f"unix:{self.run}/qmp.sock".encode() in open(f"/proc/{pid}/cmdline", "rb").read()
         except OSError:
             return False
 
@@ -411,7 +458,8 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     deadline = time.monotonic() + T(420)
     while time.monotonic() < deadline:
         rc, o = sh("pgrep -xc phosh; test -e /var/lib/antumbra/settings/applied/tails.network && echo applied", timeout=60)
-        if o.split("\n")[0] not in ("0", "") and "applied" in o:
+        lines = o.strip().split("\n")
+        if rc == 0 and len(lines) == 2 and lines[0].isdigit() and int(lines[0]) > 0 and lines[1] == "applied":
             session = True
             break
         time.sleep(5)
@@ -421,7 +469,7 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     deadline = time.monotonic() + T(300)
     while time.monotonic() < deadline:
         rc, o = sh("ip -o -4 addr show scope global | grep -vE ': veth-' | awk '{print $2, $4}'", timeout=60)
-        if o.strip():
+        if rc == 0 and re.search(r"^\S+ \d+\.\d+\.\d+\.\d+/\d+$", o, re.M):
             up = True
             break
         time.sleep(5)
@@ -430,30 +478,47 @@ def welcome_phase(vm, rep, T, sh, out, tour):
     macs = re.findall(r"([0-9a-f]{2}(?::[0-9a-f]{2}){5})", links)
     rep.check("after Welcome: the interface's MAC address is not the hardware one", bool(macs) and QEMU_MAC not in macs,
               f"hardware {QEMU_MAC}, interface {', '.join(macs) or 'none'}")
-    # Give Tor time to try (it cannot bootstrap from the build host's network).
-    time.sleep(T(90))
-    rc, o = sh("ss -tunapH | grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.' | grep -vE 'LISTEN|UNCONN' ; echo end", timeout=60)
-    socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"]
+    # Give Tor time to try (it cannot bootstrap from the build host's network),
+    # recording every socket in the system once a second: Tor's peers, and
+    # anything else that talks to the network.
+    polls = int(T(90))
+    rc, o = sh(f"for i in $(seq {polls}); do ss -tunapH state all; sleep 1; done | "
+               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 3 + 120)
+    socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"] if rc is not None else []
     # NetworkManager's DHCP client (udp :68 -> :67) is the one non-Tor flow
     # the firewall allows, as in Tails.
     dhcp = [l for l in socks if l.startswith("udp") and '(("NetworkManager"' in l and re.search(r":68\s+\S+:67\s", l)]
     non_tor = [l for l in socks if '(("tor"' not in l and l not in dhcp]
-    tor_n = sum(1 for l in socks if '(("tor"' in l)
-    rep.check("after Welcome: every connection to the network belongs to Tor (DHCP aside)", not non_tor,
-              f"{tor_n} Tor sockets, {len(dhcp)} DHCP client" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
-    counts = pcap_summary(os.path.join(vm.run, "net.pcap"))
-    # The capture holds both directions; judge what the guest sent (its
-    # hardware MAC or the address it shows now), not QEMU's replies.
-    guest_macs = set(macs) | {QEMU_MAC}
-    sent = {k: v for k, v in counts.items() if k[3] in guest_macs}
+    tor_peers = set()
+    for l in socks:
+        if '(("tor"' in l:
+            m = re.search(r"\s(\d+\.\d+\.\d+\.\d+):(\d+)\s+users:", l)
+            if m:
+                tor_peers.add((m.group(1), int(m.group(2))))
+    rep.check("after Welcome: every connection to the network belongs to Tor (DHCP aside)", rc is not None and not non_tor,
+              f"{len(tor_peers)} Tor peers, {len(dhcp)} DHCP client sockets" + ((": " + " | ".join(x[:120] for x in non_tor[:4])) if non_tor else ""))
+    # Before it has a consensus Tor only knows the addresses built into it; read
+    # them from the guest's own binary.
+    rc, o = sh("grep -aoE '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+ orport=[0-9]+|orport=[0-9]+[[:print:]]{0,200} "
+               "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+:[0-9]+ ' \"$(readlink -f /usr/bin/tor)\" | sort -u", timeout=120)
+    builtin = tor_builtin_addresses(o) if rc == 0 else set()
+    rep.check("Tor: its built-in directory addresses could be read from the guest", len(builtin) > 20, f"{len(builtin)} addresses")
+    capture = os.path.join(vm.run, "net.pcap")
+    counts = pcap_summary(capture)
+    # The capture holds both directions: judge every frame QEMU's user
+    # network did not generate, whatever source MAC it carries.
+    sent = {k: v for k, v in counts.items() if not k[3].startswith(SLIRP_MAC_PREFIXES)}
     bad = {k: v for k, v in sent.items()
            if k[0] == "ipv6" or (k[0] == "udp" and k[2] != 67) or k[0].startswith("ip-proto") or k[0].startswith("ethertype")}
     from_hw = {k: v for k, v in sent.items() if k[3] == QEMU_MAC}
-    tcp = sorted({f"{k[1]}:{k[2]}" for k in sent if k[0] == "tcp"})
     udp67 = sum(v for k, v in sent.items() if k[0] == "udp" and k[2] == 67)
     rep.check("packet capture: the guest sent no DNS, NTP, IPv6 or other UDP (DHCP aside)", not bad,
-              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items()))
-              or f"{sum(sent.values())} frames sent: {udp67} DHCP, TCP to {len(tcp)} Tor relays ({', '.join(tcp[:6])}{', ...' if len(tcp) > 6 else ''})")
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items())) or f"{sum(sent.values())} frames sent, {udp67} of them DHCP")
+    syns = {(dst, port) for src, dst, port in pcap_tcp_syns(capture) if not src.startswith(SLIRP_MAC_PREFIXES)}
+    stray = sorted(syns - tor_peers - builtin)
+    rep.check("packet capture: every TCP connection the guest opened went to a Tor directory or relay", bool(syns) and not stray,
+              (("not Tor's: " + ", ".join(f"{d}:{p}" for d, p in stray[:8])) if stray else
+               f"{len(syns)} destinations: {len(syns & builtin)} built into Tor, {len(syns - builtin)} seen on Tor's sockets"))
     rep.check("packet capture: no frame carried the hardware MAC address", not from_hw,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"guest frames came from {', '.join(sorted({k[3] for k in sent}))} only")
     try:
@@ -491,17 +556,20 @@ def take_tour(vm, rep, sh, out, T):
     shot("tour-tor-browser.png")
 
 
-def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
+def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh_disk=True):
     rep = Report()
     T = lambda s: s * scale  # noqa: E731
     out = os.path.join(vm.run, "smoke")
     os.makedirs(out, exist_ok=True)
 
     def sh(cmd, timeout=120):
+        """(exit code, output); on a console failure (None, "") and a FAIL of its own,
+        so that no check can mistake an error message for output."""
         try:
             return vm.console.run(cmd, timeout=timeout)
         except Exception as e:  # noqa: BLE001
-            return 255, f"<console error: {e}>"
+            rep.check(f"console: {cmd[:60]}", False, str(e)[:300])
+            return None, ""
 
     # 1. Initramfs: the medium is found by bus and UUID, verity and the overlay come up.
     try:
@@ -539,13 +607,25 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
         lines = o.split("\n")
         rep.check("guest: live partition UUID equals the recorded one", len(lines) >= 2 and lines[0] == lines[1], o.replace("\n", " = "))
         rc, o = sh("dmsetup table 2>/dev/null | grep -c verity; cat /proc/cmdline | tr ' ' '\\n' | grep -c dm-verity-root-hash")
-        rep.check("guest: dm-verity active when requested", o.split("\n")[0] == o.split("\n")[-1] or o.startswith("1"), o.replace("\n", " "))
+        try:
+            active, requested = ints(o, 2)
+            verity_ok = requested == 0 or active >= 1
+        except ValueError:
+            verity_ok = False
+        rep.check("guest: dm-verity active when requested", verity_ok, o.replace("\n", " "))
+        rc, o = sh("findmnt -no OPTIONS /run/live/medium")
+        rep.check("guest: the live medium is mounted read-only", rc == 0 and "ro" in o.strip().split(","), o.strip())
         rc, o = sh("nft list ruleset 2>/dev/null | grep -c 'table inet antumbra'; nft list chain inet antumbra output 2>/dev/null | grep -c 'policy drop'")
-        rep.check("guest: nftables firewall loaded with a dropping output chain", o.split("\n")[0] != "0" and o.split("\n")[-1] != "0", o.replace("\n", " "))
+        try:
+            tables, drops = ints(o, 2)
+            nft_ok = tables >= 1 and drops >= 1
+        except ValueError:
+            nft_ok = False
+        rep.check("guest: nftables firewall loaded with a dropping output chain", nft_ok, o.replace("\n", " "))
         rc, o = sh("cat /run/antumbra/selfcheck.status 2>/dev/null")
         rep.check("guest: selfcheck reports the firewall OK", "firewall OK" in o, o.replace("\n", " | ")[:300])
-        rc, o = sh("systemctl is-active tor.service tor@default.service 2>/dev/null | tr '\\n' ' '")
-        rep.check("guest: Tor running", "active" in o.split(), o)
+        rc, o = sh("systemctl is-active tor@default.service")
+        rep.check("guest: Tor running (tor@default.service)", rc == 0 and o.strip() == "active", o.strip())
         rc, o = sh("echo profiles=$(wc -l < /sys/kernel/security/apparmor/profiles 2>/dev/null); "
                    "echo tor=$(cat /proc/$(pgrep -xo tor)/attr/apparmor/current 2>/dev/null || cat /proc/$(pgrep -xo tor)/attr/current)")
         f = dict(line.split("=", 1) for line in o.split("\n") if "=" in line)
@@ -554,12 +634,14 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
                   o.replace("\n", " "))
         # The veth pairs of the confined-application namespaces are expected; nothing else may exist.
         rc, o = sh("ip -o link | grep -vcE ': (lo|veth-[a-z]+)[:@]' ; lsmod | grep -c '^virtio_net'; systemctl is-active NetworkManager 2>/dev/null")
-        parts = o.split("\n")
-        rep.check("guest: no network interface or driver before the Welcome decision", parts[0] == "0" and parts[1] == "0" and "inactive" in o, o.replace("\n", " "))
+        parts = o.strip().split("\n")
+        rep.check("guest: no network interface or driver before the Welcome decision",
+                  len(parts) == 3 and parts[0] == "0" and parts[1] == "0" and parts[2] == "inactive", o.replace("\n", " "))
         rc, o = sh("grep -c virtio_net /etc/modprobe.d/all-net-blocklist.conf")
-        rep.check("guest: virtio_net is in the driver blocklist", o.strip() != "0", o)
-        rc, o = sh("cat /etc/resolv.conf | grep -v '^#' | tr '\\n' ' '")
-        rep.check("guest: resolver is loopback only", "127.0.0.1" in o and "10.0.2" not in o, o)
+        rep.check("guest: virtio_net is in the driver blocklist", rc == 0 and o.strip().isdigit() and int(o.strip()) > 0, o.strip())
+        rc, o = sh("grep -E '^[[:space:]]*nameserver' /etc/resolv.conf")
+        servers = [l.split()[1] for l in o.strip().split("\n") if len(l.split()) >= 2]
+        rep.check("guest: resolver is loopback only", rc == 0 and servers == ["127.0.0.1"], " ".join(servers) or o)
         rc, o = sh("echo swap=$(swapon --show=NAME --noheadings | tr '\\n' ' '); echo dmesg=$(sysctl -n kernel.dmesg_restrict); "
                    "echo journal=$(grep -rhs '^Storage=' /usr/lib/systemd/journald.conf.d/ /etc/systemd/journald.conf.d/ | tail -n1); "
                    "test -d /var/log/journal && echo journal-dir=yes || echo journal-dir=no")
@@ -569,23 +651,25 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
                   all(x.startswith("/dev/zram") for x in swaps) and f.get("dmesg") == "1"
                   and f.get("journal") == "Storage=volatile" and f.get("journal-dir") == "no", o.replace("\n", " "))
         rc, o = sh("blkid -o value -s TYPE $(cat /run/antumbra/loop-device)p2; echo end")
-        rep.check("guest: Persistent Storage partition is untouched (no filesystem)", o.strip() == "end", o)
-        rc, o = sh("systemctl is-active greetd 2>/dev/null; pgrep -xc phoc; pgrep -fc /usr/bin/antumbra-welcome", timeout=60)
-        parts = o.split("\n")
-        if "active" in parts[0]:
-            rep.check("guest: greeter session (greetd + phoc) running", parts[0] == "active" and parts[1] not in ("0", ""), o.replace("\n", " "))
+        rep.check("guest: Persistent Storage partition has no filesystem signature", rc == 0 and o.strip() == "end", o)
+        rc, o = sh("grep -c '^ANTUMBRA_MINIMAL=1' /etc/antumbra-release; systemctl is-active greetd; pgrep -xc phoc", timeout=60)
+        parts = o.strip().split("\n")
+        minimal = len(parts) >= 1 and parts[0] == "1"
+        if not minimal:
+            rep.check("guest: greeter session (greetd + phoc) running",
+                      len(parts) == 3 and parts[1] == "active" and parts[2].isdigit() and int(parts[2]) > 0, o.replace("\n", " "))
             # Give the Welcome screen time to draw under emulation, then capture it.
             welcome = False
             for _ in range(int(T(60))):
                 rc, o = sh("pgrep -fc /usr/bin/antumbra-welcome", timeout=30)
-                if o.strip() not in ("0", ""):
+                if rc == 0 and o.strip().isdigit() and int(o.strip()) > 0:
                     welcome = True
                     break
                 time.sleep(1)
             rep.check("guest: Welcome screen process running", welcome, o.strip())
             time.sleep(T(20))
         else:
-            print("no greetd (minimal build): skipping the session checks", flush=True)
+            print("minimal build: skipping the session checks", flush=True)
     try:
         w, h = vm.screenshot(os.path.join(out, "display.png"))
         colors = vm.distinct_colors()
@@ -593,9 +677,12 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
     except Exception as e:  # noqa: BLE001
         rep.check("display: the Welcome screen is drawn (not a text console)", False, str(e))
     counts = pcap_summary(os.path.join(vm.run, "net.pcap"))
-    leaks = {k: v for k, v in counts.items() if k[0] in ("tcp", "udp", "ipv6") or k[0].startswith("ip-proto")}
-    rep.check("network: no packet left the guest before the Welcome decision", not leaks,
-              "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(counts.items())) or "no frames")
+    # Before the decision the guest has no network interface: every frame QEMU's
+    # user network did not generate is a leak, whatever its ethertype (ARP too).
+    from_guest = {k: v for k, v in counts.items() if not k[3].startswith(SLIRP_MAC_PREFIXES)}
+    rep.check("network: no frame of any kind left the guest before the Welcome decision", not from_guest,
+              "; ".join(f"{k[0]} {k[1]}:{k[2]} from {k[3]} x{v}" for k, v in sorted(from_guest.items()))
+              or (f"no guest frames ({sum(counts.values())} from QEMU's user network)" if counts else "no frames"))
     if through_welcome and debug:
         welcome_phase(vm, rep, T, sh, out, tour)
     if stop_after:
@@ -619,17 +706,30 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False):
             while vm.alive() and time.monotonic() < deadline:
                 time.sleep(1)
             rep.check("shutdown: VM powered off after the power button", not vm.alive())
-            tail = open(vm.serial.path, "rb").read().decode("utf-8", "replace")[-6000:]
-            # The initramfs' shutdown hook (traced with set -x) moves the medium out of the
-            # old root, unmounts it, removes the verity device, detaches the loop device and
-            # drops the page cache before systemd-shutdown powers off.
-            steps = ["umount --recursive /mnt/live/medium", "dmsetup remove_all", "losetup -D", "drop_caches"]
-            missing = [x for x in steps if x not in tail]
-            rep.check("shutdown: returned to the initramfs, unmounted the medium, dropped caches", not missing,
-                      ("missing: " + ", ".join(missing)) if missing else "; ".join(steps))
+            tail = open(vm.serial.path, "rb").read().decode("utf-8", "replace")[-8000:]
+            # The initramfs' shutdown hook states the end result of each step.
+            markers = ["antumbra-shutdown: oldroot unmounted", "antumbra-shutdown: medium unmounted",
+                       "antumbra-shutdown: verity removed", "antumbra-shutdown: loops detached",
+                       "antumbra-shutdown: caches dropped"]
+            missing = [x for x in markers if x not in tail]
+            still = re.findall(r"antumbra-shutdown: [a-z]+ STILL [A-Z]+", tail)
+            rep.check("shutdown: returned to the initramfs, unmounted everything, dropped caches", not missing and not still,
+                      ("; ".join(still + ["missing: " + x for x in missing])) or "; ".join(m.split(": ", 1)[1] for m in markers))
         except Exception as e:  # noqa: BLE001
             rep.check("shutdown", False, str(e))
         vm.stop()
+        # 4. Amnesia on disk: the copy-on-write overlay holds every block the
+        #    guest wrote; on a run that started from a fresh overlay it must
+        #    hold none (no Persistent Storage was created in this test).
+        if fresh_disk:
+            try:
+                mp = json.loads(subprocess.run(["qemu-img", "map", "--output=json", os.path.join(vm.run, "overlay.qcow2")],
+                                               capture_output=True, text=True, check=True).stdout)
+                written = [e for e in mp if e.get("depth") == 0 and (e.get("data") or e.get("zero"))]
+                rep.check("storage: the guest wrote nothing to the disk", not written,
+                          "; ".join(f"{e['start']}+{e['length']}" for e in written[:10]) or "no block written to the overlay")
+            except Exception as e:  # noqa: BLE001
+                rep.check("storage: the guest wrote nothing to the disk", False, str(e)[:300])
     return rep
 
 
@@ -657,7 +757,8 @@ def main():
             args.append("--debug")
         vm.start(args)
         try:
-            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome, a.tour)
+            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome, a.tour,
+                        fresh_disk="--keep-disk" not in args)
         except KeyboardInterrupt:
             vm.stop(); raise
         failed = rep.failed()
