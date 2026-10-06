@@ -22,10 +22,12 @@ if installed; then
     echo "F-Droid is already installed"
     exit 0
 fi
-waydroid app install "${APK}"
-for _ in $(seq 1 24); do
-    if installed; then echo "F-Droid installed"; exit 0; fi
-    sleep 5
+# Android installs and compiles the app after "waydroid app install"
+# returns: seconds on the phone, minutes under emulation.
+waydroid app install "${APK}" || echo "waydroid app install exited with status $?" >&2
+INSTALL_DEADLINE=$(( $(date +%s) + 900 ))
+until installed; do
+    [ "$(date +%s)" -lt "${INSTALL_DEADLINE}" ] || { echo "F-Droid could not be installed" >&2; exit 1; }
+    sleep 10
 done
-echo "F-Droid could not be installed" >&2
-exit 1
+echo "F-Droid installed"

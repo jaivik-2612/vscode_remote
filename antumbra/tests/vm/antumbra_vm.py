@@ -1670,6 +1670,11 @@ def android_phase(vm, rep, T, sh, out):
     got = sorted(l for l in parts[1].strip().split("\n") if l.startswith("ro.product.waydroid.")) if len(parts) == 2 else ["?"]
     rep.check("android: Android reports the generic Waydroid identity, not the device's", rc == 0 and len(want) == 5 and want == got and "OnePlus" not in o,
               o.replace("\n", " ")[-300:])
+    # In a virtual machine antumbra-waydroid scales Android's timeouts: at
+    # the default, the Watchdog's 2-second native stack dumps outlast
+    # themselves under emulation and kill vold, which reboots Android.
+    rc, o = sh(f"echo $({in_android('/system/bin/getprop ro.hw_timeout_multiplier')})", timeout=120)
+    rep.check("android: Android's timeouts scaled for software emulation (ro.hw_timeout_multiplier=10)", rc == 0 and o.strip() == "10", o.strip())
     rc, o = sh(f"{in_android('/system/bin/ls -A /sys/firmware')} | wc -l; "
                f"{in_android('/system/bin/cat /proc/device-tree/model')} >/dev/null && echo model-readable || echo model-hidden")
     rep.check("android: /sys/firmware and /proc/device-tree are hidden from Android", rc == 0 and o.strip().split("\n") == ["0", "model-hidden"], o.replace("\n", " "))
@@ -1710,6 +1715,9 @@ def android_phase(vm, rep, T, sh, out):
             break
         time.sleep(20)
     rep.check("android: F-Droid installed on first start (antumbra-fdroid-install)", fdroid, o.strip())
+    if not fdroid:
+        rc, o = sh("journalctl -b --no-pager -o short-precise _SYSTEMD_USER_UNIT=antumbra-fdroid-install.service | tail -n 60", timeout=180)
+        save_text(out, "android-fdroid-install.txt", o)
     rc, o = sh("test -e /home/amnesia/.local/share/applications/waydroid.org.fdroid.fdroid.desktop && echo desktop; "
                f"runuser -u amnesia -- env {AMNESIA_ENV} gsettings get org.gnome.desktop.app-folders folder-children; "
                f"runuser -u amnesia -- env {AMNESIA_ENV} gsettings get org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/Android/ apps", timeout=120)

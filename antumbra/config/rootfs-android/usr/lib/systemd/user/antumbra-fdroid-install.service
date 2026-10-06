@@ -10,4 +10,5 @@ After=antumbra-android-session.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/lib/antumbra-fdroid-install
-TimeoutStartSec=45min
+# Android's start (up to 40 minutes) and the installation (up to 15).
+TimeoutStartSec=60min
