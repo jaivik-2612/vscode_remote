@@ -108,7 +108,10 @@ sections 8.5 and 11.1). While they are on:
     from Linux and should count from its first power-up, so its reading
     minus the real time would be a constant of the phone. These masks
     cover the devices present when the container starts; the container
-    refuses to start with one unmasked, but something plugged in while
+    refuses to start with one unmasked, in its configuration or in what
+    it would see (a mask LXC failed to mount, which it skips: the
+    start-host hook reads each identifier through the container's own
+    root after LXC's mounts), but something plugged in while
     Android runs (a USB device's serial number) is readable until Android
     is next started. The container's sysfs belongs to its own network
     namespace, so the host's network interfaces and Wi-Fi radio (their

@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import os
 import re
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -165,6 +166,24 @@ def start_host_identifiers(root):
     return sorted({(kind, path[len(root):]) for kind, path in pairs})
 
 
+def start_host_view_check(identifiers, config, view):
+    """The start-host hook's check of each identifier's mask (from its
+    hidden= line to the end of its loop), run by dash on IDENTIFIERS
+    ((kind, path) pairs, as its own scan lists them) with the container
+    configuration text CONFIG and VIEW as the container's root (in the hook,
+    /proc/LXC_PID/root): (exit status, output)."""
+    m = re.search(r'^(hidden="\$\(.*?^done <<EOF\n\$\{identifiers\}\nEOF\n)', read(*START_HOST), re.M | re.S)
+    with tempfile.NamedTemporaryFile("w", suffix=".conf") as conf:
+        conf.write(config)
+        conf.flush()
+        script = ('fail() { echo "refused: $*"; exit 1; }\n'
+                  f"CONFIG='{conf.name}'\nVIEW='{view}'\n"
+                  "identifiers='" + "".join(f"{kind} {path}\n" for kind, path in identifiers) + "'\n"
+                  + m.group(1) + 'echo "checked ${count}"\n')
+        r = subprocess.run(["dash", "-c", script], capture_output=True, text=True)
+    return r.returncode, (r.stdout + r.stderr).strip()
+
+
 class IdentifiersTest(unittest.TestCase):
     def setUp(self):
         self.m = load_antumbra_waydroid()
@@ -238,6 +257,62 @@ class IdentifiersTest(unittest.TestCase):
             self.assertEqual(sorted(re.findall(r"-name (\S+)", names)), sorted(want))
         self.assertEqual(re.findall(r"if \[ -f (/proc/\S+) \]; then printf 'file %s\\n' \1; fi", hook),
                          ["/proc/" + p for p in self.m.MASKED_PROC])
+
+    def test_start_host_hook_checks_the_masks_in_the_containers_view(self):
+        # LXC skips an optional mask it fails to mount and starts the
+        # container anyway: the hook looks at what the container sees
+        # (its root, after LXC's mounts) and refuses an identifier there.
+        rtc = "/sys/devices/platform/rtc/rtc0"
+        files = ["/sys/devices/soc0/serial_number", "/sys/devices/virtio1/block/vda/serial", "/proc/driver/rtc",
+                 f"{rtc}/cmos/serial"]                               # inside a hidden directory
+        dirs = [rtc, f"{rtc}/nvram0",                                # nested: under rtc0's empty tmpfs
+                "/sys/devices/platform/qfprom0"]
+        identifiers = [("file", f) for f in files] + [("dir", d) for d in dirs]
+        config = generated_config(self.m, self.m.mask_entries(files, dirs))
+
+        def view(root, leave=(), absent=()):
+            """The container's root as LXC leaves it: the masks in place
+            (an empty file, an empty directory) but for LEAVE (the real
+            contents), nothing inside a hidden directory, ABSENT gone."""
+            for path in files + dirs:
+                if path in absent or any(path.startswith(d + "/") for d in dirs):
+                    continue
+                full = root + path
+                if path in dirs:
+                    os.makedirs(full, exist_ok=True)
+                    if path in leave:
+                        with open(os.path.join(full, "since_epoch"), "w") as f:
+                            f.write("1700000000\n")
+                    continue
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                with open(full, "w") as f:
+                    f.write("ANTUMBRATEST\n" if path in leave else "")
+            return root
+
+        cases = (("all masked", {}, 0, "checked 7"),
+                 ("a file's mask not in place", {"leave": [files[1]]}, 1,
+                  f"refused: {files[1]} is readable in the container: its mask did not take effect"),
+                 ("/proc/driver/rtc's mask not in place", {"leave": [files[2]]}, 1,
+                  f"refused: {files[2]} is readable in the container: its mask did not take effect"),
+                 ("a directory's mask not in place", {"leave": [dirs[2]]}, 1,
+                  f"refused: {dirs[2]} is readable in the container: its mask did not take effect"),
+                 ("the hidden RTC's mask not in place", {"leave": [rtc]}, 1,
+                  f"refused: {rtc} is readable in the container: its mask did not take effect"),
+                 ("an identifier the container cannot see is not taken for masked", {"absent": [files[0]]}, 1,
+                  f"refused: {files[0]} is readable in the container: its mask did not take effect"))
+        for name, kw, rc, says in cases:
+            with self.subTest(name), tempfile.TemporaryDirectory() as root:
+                got = start_host_view_check(identifiers, config, view(root, **kw))
+                self.assertEqual(got[0], rc, got[1])
+                self.assertEqual(got[1].splitlines()[-1], says)
+        if os.geteuid() == 0:
+            # /dev/null itself, as LXC binds it, passes; another character device does not.
+            for name, dev, rc in (("/dev/null", (1, 3), 0), ("/dev/zero", (1, 5), 1)):
+                with self.subTest(name), tempfile.TemporaryDirectory() as root:
+                    view(root, absent=[files[0]])
+                    os.makedirs(os.path.dirname(root + files[0]), exist_ok=True)
+                    os.mknod(root + files[0], 0o644 | stat.S_IFCHR, os.makedev(*dev))
+                    self.assertEqual(start_host_view_check(identifiers, config, root)[0], rc, name)
 
     def test_masks_are_optional_and_replaced_not_stacked(self):
         with tempfile.TemporaryDirectory() as d:

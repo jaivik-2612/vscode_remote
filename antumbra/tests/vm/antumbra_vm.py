@@ -1603,6 +1603,13 @@ def android_phase(vm, rep, T, sh, out):
             break
         time.sleep(10)
     rep.check("android: the container runs (started by the session's waydroid session)", running, o.strip())
+    # The start-host hook passed for it, having found each identifier's
+    # mask in place in the container's own view (its root, after LXC's
+    # mounts): LXC skips an optional mask it fails to mount.
+    rc, o = sh("journalctl -b --no-pager -t antumbra-waydroid -o cat | "
+               "sed -n 's/^Android container checked: Tor only, \\([0-9]*\\) hardware identifiers hidden in its view$/\\1/p' | tail -n 1")
+    rep.check("android: the start-host hook found every hardware identifier masked in the container's own view",
+              running and rc == 0 and o.strip().isdigit() and int(o.strip()) > 0, o.strip() or "no such journal line")
     booted = False
     if running:
         deadline = time.monotonic() + T(2400)
@@ -1808,7 +1815,8 @@ def android_net_phase(vm, rep, T, sh, out):
     rc, o = sh("ip -4 -o addr show scope global | grep -vE ': (veth|waydroid-tor|lo)' | awk '{print $4}' | cut -d/ -f1 | head -n1")
     uplink = o.strip() if rc == 0 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", o.strip()) else "10.0.2.15"
     try:
-        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, "/run/antumbra-udhcpc.sh", ANDROID_UDHCPC_SH)
+        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, "/run/antumbra-udhcpc.sh", ANDROID_UDHCPC_SH) \
+            and guest_write(sh, "/run/antumbra-hooktest-ct.sh", HOOKTEST_STAND_IN_SH, "0644")
         rc, o = sh("ip netns add android-sim && ip link add vethandsim type veth peer name eth0 netns android-sim && "
                    "ip link set vethandsim master waydroid-tor && ip link set vethandsim up && ip -n android-sim link set lo up && "
                    f"ip -n android-sim link set eth0 address {ANDROID_MAC} && ip -n android-sim link set eth0 up && "
@@ -1827,10 +1835,11 @@ def android_net_phase(vm, rep, T, sh, out):
                       and lease == ["LEASE ip=10.200.2.2 subnet=255.255.255.252 router=10.200.2.1 dns=10.200.2.1 ntpsrv="],
                       " | ".join(lease) if lease else o.replace("\n", " | ")[-400:])
         # The start-host hook as LXC runs it for the container, LXC_PID a
-        # process in the stand-in's network namespace: it puts its .onion
-        # block there, as it does in Android's.
+        # process in the stand-in's network namespace (its mount namespace
+        # with the identifier masks): it puts its .onion block there, as it
+        # does in Android's.
         rc, o = sh(HOOKTEST_CONF +
-                   "P=$(ip netns exec android-sim sh -c 'sleep 1800 </dev/null >/dev/null 2>&1 & echo $!'); "
+                   "P=$(ip netns exec android-sim sh /run/antumbra-hooktest-ct.sh); "
                    "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; "
                    "echo hook=$?; ip netns exec android-sim nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'")
         rep.check("android-net: the start-host hook, run for the stand-in container, rejects .onion virtual addresses (127.192.0.0/10) in its network namespace",
@@ -1870,23 +1879,33 @@ def android_net_phase(vm, rep, T, sh, out):
            "rm -f /run/antumbra/android-enabled /var/lib/misc/dnsmasq.waydroid0.leases /run/antumbra-hooktest.conf; echo cleaned")
     # The start-host hook, run as LXC runs it, with the network in place and
     # with each piece of it missing. LXC_PID is a process in a network
-    # namespace of its own, where the hook puts its .onion block.
+    # namespace of its own, where the hook puts its .onion block, and a
+    # mount namespace with the identifier masks; a second stand-in lacks
+    # the mask of one identifier in sysfs, as when LXC fails to mount it.
     hook = "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; echo $?"
     good_conf = HOOKTEST_CONF
-    rc, o = sh("P=$(unshare -n sh -c 'sleep 600 </dev/null >/dev/null 2>&1 & echo $!'); " + good_conf +
+    stand_in = "unshare -n --mount --propagation private sh /run/antumbra-hooktest-ct.sh"
+    rc, o = sh(good_conf + f"P=$({stand_in}); "
                "sysctl -qw net.ipv4.conf.waydroid-tor.forwarding=1; "
                f"{hook}; cat /proc/sys/net/ipv4/conf/waydroid-tor/forwarding; "
                "echo onion=$(nsenter --target $P --net nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'); "
+               "M=$(awk '/^lxc\\.mount\\.entry = \\/dev\\/null sys\\/.*,optional 0 0$/ { print \"/\" $4; exit }' /run/antumbra-hooktest.conf); "
+               f"Q=$({stand_in} \"$M\"); echo left=${{M:+sysfs}}; "
+               + hook.replace("LXC_PID=$P", "LXC_PID=$Q").replace(">/dev/null 2>&1", "2>/run/antumbra-hooktest.err >/dev/null")
+               + "; grep -c 'its mask did not take effect' /run/antumbra-hooktest.err; kill $Q; "
                f"nft flush chain ip antumbra-nat android; {hook}; nft -f /etc/nftables.conf; "
                f"nft delete rule inet antumbra forward handle $(nft -a list chain inet antumbra forward | sed -n 's/.*iifname \"waydroid-tor\" jump android_reject # handle //p'); {hook}; nft -f /etc/nftables.conf; "
                f"sysctl -qw net.ipv4.conf.waydroid-tor.route_localnet=1; {hook}; sysctl -qw net.ipv4.conf.waydroid-tor.route_localnet=0; "
                f"sed -i 's/waydroid-tor/waydroid0/' /run/antumbra-hooktest.conf; {hook}; "
                "printf 'lxc.net.0.type = none\\n' > /run/antumbra-hooktest.conf; "
                f"{hook}; rm -f /run/antumbra-hooktest.conf; {hook}; " + good_conf +
-               f"{hook.replace('LXC_PID=$P', 'LXC_PID=')}; kill $P; sleep 1; {hook}; rm -f /run/antumbra-hooktest.conf", timeout=120)
+               f"{hook.replace('LXC_PID=$P', 'LXC_PID=')}; kill $P; sleep 1; {hook}; "
+               "rm -f /run/antumbra-hooktest.conf /run/antumbra-hooktest.err /run/antumbra-hooktest-ct.sh", timeout=120)
     rep.check("android-net: start-host hook passes with the network in place (switches forwarding off, blocks .onion addresses in the container), "
-              "fails closed without each part of it and without the container's PID",
-              rc == 0 and o.strip().split("\n") == ["0", "0", "onion=1", "1", "1", "1", "1", "1", "1", "1", "1"], o.replace("\n", " "))
+              "fails closed where an identifier's mask did not take effect in the container, without each part of the network "
+              "and without the container's PID",
+              rc == 0 and o.strip().split("\n") == ["0", "0", "onion=1", "left=sysfs", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1"],
+              o.replace("\n", " "))
     rc, o = sh("nft list chain ip antumbra-nat android | grep -c 'redirect to :9041'; nft list chain inet antumbra forward | grep -c 'jump android_reject'")
     rep.check("android-net: the firewall is whole again after the hook tests", rc == 0 and o.strip().split("\n") == ["1", "2"], o.replace("\n", " "))
     # Tor binds its listeners for Android when it is told to connect, and must
@@ -1938,6 +1957,26 @@ HOOKTEST_CONF = ("{ printf '%s\\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = way
                  "/usr/local/lib/antumbra-waydroid --print-masks; } "
                  "> /run/antumbra-hooktest.conf; "
                  "[ -f /run/antumbra/android-cmdline ] || install -D -m 0644 /usr/share/antumbra/android/cmdline /run/antumbra/android-cmdline; ")
+# The stand-in container itself (run as /run/antumbra-hooktest-ct.sh in a
+# mount namespace of its own: ip netns exec, unshare --mount), as LXC
+# leaves the container's before the start-host hook, which looks at the
+# identifiers through its root: the masks of /run/antumbra-hooktest.conf
+# mounted (an optional one whose target is not there skipped), but those of
+# the paths given as arguments, as when LXC fails to mount one. It starts
+# the process for LXC_PID and prints its PID.
+HOOKTEST_STAND_IN_SH = r'''set -eu
+masks="$(awk '/^lxc\.mount\.entry = .*,optional 0 0$/ { print $3, $4, $6 }' /run/antumbra-hooktest.conf)"
+while read -r src dst opts; do
+    [ -n "${dst}" ] || continue
+    for leave in "$@"; do [ "/${dst}" != "${leave}" ] || continue 2; done
+    [ -e "/${dst}" ] || continue
+    if [ "${src}" = tmpfs ]; then mount -t tmpfs -o "${opts%,optional}" tmpfs "/${dst}"; else mount --bind /dev/null "/${dst}"; fi
+done <<EOF
+${masks}
+EOF
+sleep 1800 </dev/null >/dev/null 2>&1 &
+echo $!
+'''
 DEVICE_MODES = ("for n in /dev/binder /dev/hwbinder /dev/vndbinder /dev/dri/renderD* /dev/fb* /dev/dma_heap/*; do "
                 "if [ -e \"$n\" ]; then stat -c '%n %a %U %G' \"$n\"; fi; done; echo end")
 

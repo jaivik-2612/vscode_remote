@@ -225,14 +225,20 @@ start-host hook, run for the stand-in with `LXC_PID`, rejects `.onion`
 virtual addresses in its namespace (a `.onion` name's address is refused
 while a listener on that port there works), that NTP, QUIC, ping and IPv6
 get no answer, the firewall's redirect counters, the start-host hook
-failing closed without each part of the network or the container's PID
-(and passing with it), that Tor refuses to connect while the bridge is
+failing closed without each part of the network or the container's PID,
+or for a stand-in whose mount namespace lacks one identifier's mask (and
+passing with it: the stand-ins get the masks in a mount namespace of
+their own, as LXC mounts them), that Tor refuses to connect while the bridge is
 missing, and from the packet capture that nothing of the stand-in left the
 guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
 firewall, the hook and these probes in network namespaces on the build
-host. Where the build host lacks something the lab itself needs (network
-or mount namespaces, a tmpfs, the bridge or veth driver, nftables or the
-reject expression the hook loads), the lab says what and is skipped
+host, the stand-in container's identifier masks mounted in its mount
+namespace (the hook must refuse a stand-in where a file's mask is
+missing, or a directory's if the build host has one to hide). Where the
+build host lacks something the
+lab itself needs (network or mount namespaces, a tmpfs, the bridge or
+veth driver, nftables or the reject expression the hook loads), the lab
+says what and is skipped
 (exit 0); only its checks fail.
 It takes a few minutes longer than `--through-welcome`.
 
@@ -246,7 +252,9 @@ its serial number) and the disk given the serial number
 `antumbra-waydroid.service` prepared Waydroid from the images in the
 system without touching the network, the generated container
 configuration, that Waydroid's own `waydroid-net.sh` does nothing, that
-the container runs and Android reports `sys.boot_completed=1` (the
+the container runs, its start-host hook having found every hardware
+identifier masked in the container's own view (its journal line), and
+Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
 slow), the generic Waydroid identity,
 `/sys/firmware` hidden, that Android's `/proc/cmdline` is the generic one

@@ -877,7 +877,14 @@ RAM. `config/hooks/56-session-android.sh` then:
    (`ExecStartPre=antumbra-waydroid --masks`), and stops with the
    container. The start-host hook looks for the same identifiers on its
    own and refuses to start the container if one that exists has no mask,
-   or if the command line bind or the device rules are missing. The
+   or if the command line bind or the device rules are missing. LXC skips
+   an optional mask it fails to mount and starts the container anyway, so
+   the hook also looks at each identifier as the container will see it,
+   through the container's root (`/proc/LXC_PID/root`: LXC has made its
+   mounts and switched to that root before it runs the hook), and refuses
+   the start unless each file there is `/dev/null` or reads empty and
+   each hidden directory is empty (an identifier inside a hidden
+   directory is not there at all). The
    container mounts a sysfs of its own network namespace, which has none
    of the host's network interfaces or Wi-Fi radios.
 3. In the session, `antumbra-android-session.path` starts `waydroid
