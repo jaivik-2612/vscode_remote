@@ -5,6 +5,7 @@ Written by the Welcome screen as the greeter user into
 /var/lib/antumbra/settings/{persistent,transient}; copied and applied by
 root (antumbra-apply-welcome-settings) into .../applied."""
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -18,6 +19,69 @@ APPLIED_MARKER = "/run/antumbra/welcome-applied"
 # The applier's report of a failure, with its message; it stays until the
 # applier runs again (root's, in a directory the greeter cannot write).
 FAILED_MARKER = "/run/antumbra/welcome-failed"
+
+# Bridges Tor can use here, besides plain ones (an IPv4 address first): the
+# transports tor-pt-configuration-helper names in Tor's ClientTransportPlugin
+# line, all run by lyrebird from Tor Browser (/usr/bin/obfs4proxy). The
+# Welcome screen and antumbra-tor-connect accept exactly these
+# (tests/unit/test_tor_connect.py checks them against the helper).
+BRIDGE_TRANSPORTS = ("obfs2", "obfs3", "obfs4", "webtunnel", "meek_lite")
+# lyrebird has snowflake too, but the firewall lets Tor's user make only TCP
+# connections and DNS queries, and snowflake needs UDP.
+SNOWFLAKE_REFUSED = ("Snowflake bridges do not work in Antumbra: snowflake reaches its proxies through "
+                     "WebRTC over UDP, and the firewall lets Tor make only TCP connections and DNS queries. "
+                     "Use obfs4 or webtunnel bridges.")
+# The transports that connect to the bridge line's address, as Tor does for
+# a plain bridge. IPv6 is off (/etc/sysctl.d/disable_ipv6.conf) and the
+# firewall lets Tor's user connect only over IPv4, so such an address must
+# be IPv4. webtunnel and meek_lite connect to the server their arguments
+# name (url=, front=) instead, and their address is a placeholder, often an
+# IPv6 one.
+ADDRESSED_TRANSPORTS = ("obfs2", "obfs3", "obfs4")
+IPV6_REFUSED = ("{address} is an IPv6 address. IPv6 bridges do not work in Antumbra: IPv6 is off, and the "
+                "firewall lets Tor connect only over IPv4. Use bridges with IPv4 addresses.")
+
+
+def normalise_bridges(text):
+    """TEXT (bridges as typed or pasted: one per line, or separated by ';')
+    as the Welcome screen stores it: on one line, with ';' between bridges,
+    each trimmed and empty ones left out. The NetworkManager dispatcher
+    splits the stored value at ';' and reads only its first line."""
+    return ";".join(b.strip() for b in re.split(r"[\r\n;]", text) if b.strip())
+
+
+def bridge_lines(lines):
+    """LINES (bridge lines) as Tor takes them: trimmed, without empty lines,
+    '#' comments or a leading "Bridge". Raises ValueError, saying why, for a
+    bridge Tor cannot use here: snowflake, an unknown transport, or an IPv6
+    address that Tor or lyrebird would connect to."""
+    out = []
+    for line in lines:
+        line = line.strip()
+        words = line.split(None, 1)
+        if words and words[0].lower() == "bridge":
+            line = words[1] if len(words) > 1 else ""
+        if not line or line.startswith("#"):
+            continue
+        words = line.split()
+        kind = words[0]
+        if kind.lower() == "snowflake":
+            raise ValueError(SNOWFLAKE_REFUSED)
+        if kind not in BRIDGE_TRANSPORTS and "." not in kind and ":" not in kind:
+            raise ValueError(f"Unsupported bridge type: {kind}. Antumbra takes obfs4, webtunnel, "
+                             "meek_lite, obfs2, obfs3 and plain bridges.")
+        if kind not in BRIDGE_TRANSPORTS:
+            address = kind              # a plain bridge
+        elif kind in ADDRESSED_TRANSPORTS and len(words) > 1:
+            address = words[1]
+        else:
+            address = ""
+        # "[2001:db8::5]:443", or "2001:db8::5" without a port, which Tor
+        # also takes; an IPv4 address has at most one ':'.
+        if address.startswith("[") or address.count(":") > 1:
+            raise ValueError(IPV6_REFUSED.format(address=address))
+        out.append(line)
+    return out
 
 
 def failure_report_id(path=FAILED_MARKER):
