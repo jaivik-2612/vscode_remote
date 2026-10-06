@@ -65,6 +65,61 @@ esac
 RECORDER = """#!/bin/sh
 echo "$*" >> /run/test/{name}.log
 """
+# The greeter user winning a race (an LD_PRELOAD shim for the applier and
+# everything it runs): just before root changes the mode or owner of a path
+# in a directory the greeter user owns, the greeter renames a link to
+# ANTUMBRA_RACE_TARGET over that path, as it can at any moment. Each swap is
+# logged to /run/test/race.log.
+RACE_SHIM = r"""
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+static void greeter_wins(int dirfd, const char *path)
+{
+    const char *target = getenv("ANTUMBRA_RACE_TARGET"), *uid = getenv("ANTUMBRA_RACE_UID");
+    char full[PATH_MAX], dir[PATH_MAX], link[PATH_MAX + 32];
+    struct stat st;
+    char *slash;
+    FILE *log;
+
+    if (!target || !uid || !path || !path[0])
+        return;
+    if (path[0] == '/' || dirfd == AT_FDCWD)
+        snprintf(full, sizeof full, "%s", path);
+    else
+        snprintf(full, sizeof full, "/proc/self/fd/%d/%s", dirfd, path);
+    snprintf(dir, sizeof dir, "%s", full);
+    slash = strrchr(dir, '/');
+    if (!slash)
+        snprintf(dir, sizeof dir, ".");
+    else if (slash == dir)
+        dir[1] = '\0';
+    else
+        *slash = '\0';
+    if (stat(dir, &st) != 0 || st.st_uid != (uid_t)atol(uid))
+        return;
+    snprintf(link, sizeof link, "%s/.greeter-race.%d", dir, (int)getpid());
+    unlink(link);
+    if (symlink(target, link) == 0 && rename(link, full) == 0 && (log = fopen("/run/test/race.log", "a"))) {
+        fprintf(log, "%s\n", full);
+        fclose(log);
+    }
+}
+
+#define REAL(name) static __typeof__(name) *real; if (!real) real = dlsym(RTLD_NEXT, #name)
+int fchmodat(int fd, const char *p, mode_t m, int f) { REAL(fchmodat); greeter_wins(fd, p); return real(fd, p, m, f); }
+int chmod(const char *p, mode_t m) { REAL(chmod); greeter_wins(AT_FDCWD, p); return real(p, m); }
+int fchownat(int fd, const char *p, uid_t o, gid_t g, int f) { REAL(fchownat); greeter_wins(fd, p); return real(fd, p, o, g, f); }
+int chown(const char *p, uid_t o, gid_t g) { REAL(chown); greeter_wins(AT_FDCWD, p); return real(p, o, g); }
+int lchown(const char *p, uid_t o, gid_t g) { REAL(lchown); greeter_wins(AT_FDCWD, p); return real(p, o, g); }
+"""
 
 
 def android_feature_line():
@@ -162,6 +217,9 @@ def inner(spec_path, out_path):
     write("/usr/local/lib/antumbra-unblock-network", RECORDER.format(name="unblock"), 0o755)
     write("/usr/bin/systemctl", RECORDER.format(name="systemctl"), 0o755)
     write("/usr/bin/logger", RECORDER.format(name="logger"), 0o755)
+    # Commands that fail where they never should (first in the applier's PATH)
+    for name, text in spec.get("stubs", {}).items():
+        write(f"/usr/local/sbin/{name}", text, 0o755)
     features = sources["features"]
     if spec.get("android_image"):
         mkdir("/usr/share/antumbra/android", 0o755)
@@ -190,6 +248,10 @@ def inner(spec_path, out_path):
             mkdir(os.path.join(vol, src), int(mode, 8), uid, uid)
         for name, text in v.get("stored", {}).items():
             write(os.path.join(vol, "welcome-settings", name), text, 0o640, greeter, greeter)
+        # Directories the greeter left under the names of settings
+        for name in v.get("stored_dirs", []):
+            write(os.path.join(vol, "welcome-settings", name, "inside"), "x\n", 0o640, greeter, greeter)
+            os.chown(os.path.join(vol, "welcome-settings", name), greeter, greeter)
 
     # What the Welcome screen writes, as the greeter user
     m = S.WelcomeSettings()
@@ -212,7 +274,10 @@ def inner(spec_path, out_path):
         os.lchown(p, greeter, greeter)
 
     env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8"}
+    if spec.get("race_shim"):
+        env.update(LD_PRELOAD=spec["race_shim"], ANTUMBRA_RACE_TARGET=SECRET, ANTUMBRA_RACE_UID=str(greeter))
     r = subprocess.run(["/usr/local/lib/antumbra-apply-welcome-settings"], env=env, capture_output=True, text=True, timeout=120)
+    env.pop("LD_PRELOAD", None)
     rerun = None
     if spec.get("rerun"):
         # What the path unit does when the service failed and welcome-done
@@ -268,6 +333,8 @@ def inner(spec_path, out_path):
         "written_hash": S.read_setting(os.path.join(tmp, "persistent", "tails.password"), "TAILS_USER_PASSWORD"),
         "persistence": log("persistence"), "systemctl": log("systemctl"), "unblock": log("unblock"),
         "leaks": leaks, "secret_intact": secret_now == SECRET_TEXT, "rerun": rerun,
+        "secret_mode": stat.S_IMODE(os.stat(SECRET).st_mode), "race": log("race"),
+        "volume_stage_left": os.path.lexists(os.path.join(vol, ".antumbra-welcome-staging")),
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -279,10 +346,19 @@ def inner(spec_path, out_path):
 class ApplierTest(unittest.TestCase):
     PP = "correct horse battery staple"
 
-    def run_applier(self, settings, **spec):
+    def run_applier(self, settings, race=False, **spec):
         d = tempfile.mkdtemp(prefix="antumbra-applier-")
         try:
             spec["settings"] = settings
+            if race:
+                cc = shutil.which("cc") or shutil.which("gcc")
+                if not cc:
+                    self.skipTest("needs a C compiler for the greeter's race stand-in")
+                os.chmod(d, 0o755)   # the shim is loaded by programs run as the session user too
+                with open(os.path.join(d, "race.c"), "w", encoding="utf-8") as f:
+                    f.write(RACE_SHIM)
+                spec["race_shim"] = os.path.join(d, "race.so")
+                subprocess.run([cc, "-shared", "-fPIC", "-O2", "-o", spec["race_shim"], os.path.join(d, "race.c"), "-ldl"], check=True)
             with open(os.path.join(d, "spec.json"), "w", encoding="utf-8") as f:
                 json.dump(spec, f)
             out = os.path.join(d, "out.json")
@@ -365,6 +441,50 @@ class ApplierTest(unittest.TestCase):
             self.assertEqual(v[name]["text"], a[name]["text"], name)
         self.assertEqual(res["amnesia_hash"], "")
         self.assertFalse(res["sudoers"])
+
+    def test_volume_save_cannot_be_redirected(self):
+        # The volume's welcome-settings directory is the greeter user's: it
+        # can swap anything in it for a link at any moment, here just before
+        # root would change a mode or an owner there (install(1) as root did,
+        # following the link: a root-only file elsewhere became 0640).
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": self.PP},
+                               volume={"passphrase": self.PP}, race=True)
+        self.assertApplied(res)
+        self.assertEqual(res["race"], [], "root changed a mode or owner in a directory of the greeter's")
+        self.assertEqual(res["secret_mode"], 0o600)
+        self.assertTrue(res["secret_intact"])
+        v = res["volume_settings"]
+        self.assertEqual(sorted(v), ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"])
+        for name, f in v.items():
+            self.assertEqual((f["link"], f["uid"], f["mode"]), (False, USERS["antumbra-greeter"], 0o640), name)
+        self.assertEqual(v["tails.network"]["text"], res["applied"]["tails.network"]["text"])
+        self.assertFalse(res["volume_stage_left"], "the staging directory on the volume was left behind")
+
+    def test_directories_left_on_the_volume(self):
+        # Directories the greeter left under the names the applier saves or
+        # removes on the volume: they go, the settings are saved, and the
+        # boot goes on (rm -f on a directory stopped the applier, unlocked,
+        # with no error shown and no network, at every later boot).
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": self.PP, "user_password": "lock passphrase"},
+                               volume={"passphrase": self.PP, "stored_dirs": ["tails.password", "tails.network", "antumbra.admin"]})
+        self.assertApplied(res)
+        v = res["volume_settings"]
+        self.assertNotIn("tails.password", v)
+        for name in ("tails.network", "antumbra.admin"):
+            self.assertFalse(v[name]["link"], name)
+            self.assertEqual(v[name].get("text"), res["applied"][name]["text"], name)
+        self.assertEqual(res["amnesia_hash"], res["written_hash"])
+
+    def test_unexpected_failure_is_reported(self):
+        # Any command failing where it should not: the Welcome screen learns
+        # of it (welcome-failed) and can start again (no welcome-done left).
+        res = self.run_applier({"user_password": "lock passphrase"}, stubs={"chpasswd": "#!/bin/sh\nexit 3\n"})
+        self.assertEqual(res["rc"], 1, self.diag)
+        self.assertRegex(res["failed"] or "", r"^unexpected error \(line \d+, exit status 3\)$")
+        self.assertNotIn("welcome-done", res["transient"])
+        self.assertFalse(res["marker"])
+        self.assertEqual(res["unblock"], [])
+        self.assertFalse(res["stage_left"], "the staging directory was left behind")
 
     def test_unlock_wrong_passphrase(self):
         res = self.run_applier({"persistence": "unlock", "persistence_passphrase": "not the passphrase"},
