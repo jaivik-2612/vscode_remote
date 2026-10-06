@@ -111,6 +111,9 @@ the pop-up motor, the cameras and Android apps.
   wired to a user prompt.
 - Screen lock without a passphrase is not protective; the Welcome screen
   says so but does not force one.
+- Files (Nautilus) searches file names only, not file contents: the file
+  indexer, localsearch, is off, because it would rebuild its index in RAM
+  at every boot (`architecture.md`, section 11).
 
 ## Interface
 

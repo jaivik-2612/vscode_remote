@@ -830,6 +830,12 @@ and `apps.css` differ.
 | Camera | GNOME Snapshot, through the camera portal and PipeWire's libcamera node; libcamera 0.7.1 and PipeWire 1.6 from trixie-backports, or the port's patched libcamera 0.7.2 in builds with `ANTUMBRA_LIBCAMERA_LOCAL=1` | software-ISP image quality; front camera 1748x1748 only; no OnePlus camera app, for licence and technical reasons; `tests/no-oneplus-camera.py` looks for one in the source tree and, in the VM, in the image (`camera.md`) |
 | Encryption | GnuPG, `gnome-keyring` | |
 
+The file indexer is off: localsearch (package `tracker-extract`, which
+Nautilus depends on) would rebuild its index in RAM at every boot, at a
+cost in CPU and battery. Hook 52 masks its user units and tinysparql's
+portal unit, so D-Bus cannot activate them either, and Nautilus finds
+files by name only, not by content.
+
 APT reaches the network only through Tor (`socks5h://127.0.0.1:9050`, user
 `_apt`). No app store or Flatpak on the host; images built with Android
 apps have F-Droid inside Android (section 11.1).
