@@ -172,10 +172,21 @@ Technical:
   pop-up with it anyway.
 
 None of it is needed: the kernel raises the pop-up for any application.
-`tests/no-oneplus-camera.py` looks for OnePlus camera software (by file
-name, and by package name inside any Android package) and for Qualcomm's
-camera HAL files. `tests/lint.sh` runs it over the source tree and the VM
-camera checks run it over the image.
+`tests/no-oneplus-camera.py` looks for OnePlus camera software and
+Qualcomm's camera HAL files by file name (also with a compression suffix),
+and for OnePlus Android packages by package name, whatever their file
+name. It looks inside everything that can hold them, without mounting or
+extracting anything, recursively: APKs, APEXes, XAPK, APKS and APKM
+bundles and their split APKs, app bundles, zip, tar and cpio archives (the
+initramfs), gzip, xz, bzip2 and zstd files, and ext2/3/4, EROFS and
+Android sparse images, Waydroid's `system.img` and `vendor.img` among
+them. A file in one of those formats that it cannot read entirely (an
+EROFS image with compressed files, an Android super image or OTA payload,
+an encrypted zip member, nesting deeper than eight levels) is reported,
+so the check fails closed. `tests/lint.sh` runs it over the source tree;
+the VM camera checks run it in the guest over the root file system, then
+over a small fixture it must flag (a OnePlus camera APK inside an ext4
+image and inside a zstd-compressed XAPK).
 
 ## Optional: the port's patched libcamera
 
