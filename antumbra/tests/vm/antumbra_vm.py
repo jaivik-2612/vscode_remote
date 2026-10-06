@@ -1795,9 +1795,15 @@ def android_phase(vm, rep, T, sh, out):
             pass
         # Android's own view: F-Droid's window has the focus (Phosh's app grid
         # also differs from the session's screen, so pixels cannot tell).
-        rc, o = sh(f"{in_android('/system/bin/dumpsys window')} | grep -m1 'mCurrentFocus='", timeout=T(180))
-        rep.check("android: F-Droid's window shown (Android's focused window)", rc == 0 and "org.fdroid.fdroid" in o,
-                  o.strip()[:200] + f" -> {out}/android-fdroid.png")
+        # On its first start F-Droid asks for the notification permission:
+        # Android's prompt then has the focus, over F-Droid's window.
+        rc, o = sh(f"{in_android('/system/bin/dumpsys window')} | grep -m1 'mCurrentFocus='; "
+                   f"echo pid=$({in_android('/system/bin/pidof org.fdroid.fdroid')})", timeout=T(180))
+        focus = o.split("\n")[0] if rc == 0 else ""
+        running = re.search(r"^pid=\d+", o, re.M) is not None
+        rep.check("android: F-Droid's window shown (Android's focused window: F-Droid's, or its permission prompt while F-Droid runs)",
+                  rc == 0 and ("org.fdroid.fdroid" in focus or ("GrantPermissionsActivity" in focus and running)),
+                  o.strip().replace("\n", " ")[:220] + f" -> {out}/android-fdroid.png")
         after = android_counters(sh)
         # Tor cannot bootstrap where these runs are made, so F-Droid's
         # lookups get no address and it opens no connection: its lookups
