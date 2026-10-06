@@ -35,11 +35,17 @@ def set_sandbox(enabled: bool):
     subprocess.run([PT_HELPER, "1" if enabled else "0"], check=True)
 
 
+# Settings go to Tor with SETCONF only, never SAVECONF: Tor (debian-tor)
+# cannot write /etc/tor, so SAVECONF always failed after the settings had
+# taken effect, and an amnesic system keeps no Tor configuration anyway.
+# The NetworkManager dispatcher applies the Welcome screen's choice on
+# every connection, and bridges persist through the tor-bridges feature.
+
+
 def cmd_direct():
     set_sandbox(True)
     with controller() as c:
         c.set_options({"UseBridges": "0", "Bridge": [], "DisableNetwork": "0"})
-        c.save_conf()
     print("connecting directly")
 
 
@@ -57,7 +63,6 @@ def cmd_bridges(path):
     set_sandbox(not needs_pt)
     with controller() as c:
         c.set_options({"UseBridges": "1", "Bridge": lines, "DisableNetwork": "0"})
-        c.save_conf()
     print(f"connecting through {len(lines)} bridge(s)")
 
 
