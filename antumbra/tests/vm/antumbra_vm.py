@@ -458,6 +458,15 @@ class VM:
             return None
         return xs // n, ys // n
 
+    def android_nav_bar(self):
+        """Whether Android's three-button navigation bar is on screen: its
+        home circle and recents square, white, in the band above Phosh's
+        home bar where Phosh draws nothing (a 720x1440 display at Android's
+        density 320, as the VM has)."""
+        home = self.find_color((255, 255, 255), tol=40, region=(320, 1330, 400, 1395), min_pixels=120)
+        recents = self.find_color((255, 255, 255), tol=40, region=(495, 1330, 570, 1395), min_pixels=120)
+        return home is not None and recents is not None
+
     @staticmethod
     def changed_fraction(before, after, step=8, tol=48):
         """Share of sampled pixels that differ by more than TOL between two
@@ -1698,10 +1707,13 @@ def android_phase(vm, rep, T, sh, out):
         rc, o = sh(in_android("/system/bin/logcat -d -t 400", errors=True), timeout=T(180))
         save_text(out, "android-logcat.txt", o)
         return
+    # The session as it looks right after Android's boot, before any of
+    # Android's windows: what the full-UI and F-Droid checks compare with.
     try:
         vm.screenshot(os.path.join(out, "android-session.png"))
+        session_screen = vm.pixels()
     except Exception:  # noqa: BLE001
-        pass
+        session_screen = None
     rc, o = sh(f"cat /usr/share/antumbra/android/product.prop; echo ---; for p in brand manufacturer model device name; do echo ro.product.waydroid.$p=$({in_android('/system/bin/getprop ro.product.waydroid.$p')}); done; "
                f"echo model=$({in_android('/system/bin/getprop ro.product.model')})", timeout=T(180))
     parts = o.split("---")
@@ -1743,20 +1755,18 @@ def android_phase(vm, rep, T, sh, out):
               done and rc == 0 and o.strip().split("\n") == ["captive_portal_mode=0", "private_dns_mode=off", "auto_time=0", "auto_time_zone=0"], o.replace("\n", " "))
     # Android's window must cover most of the screen: the session alone
     # (wallpaper, app grid) has plenty of colours too, so the screen is
-    # compared with what it showed just before.
-    try:
-        session_screen = vm.pixels()
-    except Exception:  # noqa: BLE001
-        session_screen = None
+    # compared with the session's after Android's boot (Android may have
+    # opened a window of its own since).
     sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid show-full-ui >/dev/null 2>&1; echo started", timeout=T(60))
     time.sleep(T(90))
     try:
         vm.screenshot(os.path.join(out, "android-full-ui.png"))
-        changed = vm.changed_fraction(session_screen, vm.pixels()) if session_screen else 0.0
-        rep.check("android: full UI drawn (Android's window covers most of the screen)", changed > 0.5,
-                  f"{changed:.0%} of the screen changed -> {out}/android-full-ui.png")
+        nav = vm.android_nav_bar()
+        changed = vm.changed_fraction(session_screen, vm.pixels(), tol=16) if session_screen else 0.0
+        rep.check("android: full UI drawn (Android's navigation bar on screen, most of the screen changed)", nav and changed > 0.5,
+                  f"navigation bar {'shown' if nav else 'missing'}, {changed:.0%} of the screen changed -> {out}/android-full-ui.png")
     except Exception as e:  # noqa: BLE001
-        rep.check("android: full UI drawn (Android's window covers most of the screen)", False, str(e)[:300])
+        rep.check("android: full UI drawn (Android's navigation bar on screen, most of the screen changed)", False, str(e)[:300])
     fdroid = False
     deadline = time.monotonic() + T(1200)
     while time.monotonic() < deadline:
@@ -1781,11 +1791,13 @@ def android_phase(vm, rep, T, sh, out):
         time.sleep(T(120))
         try:
             vm.screenshot(os.path.join(out, "android-fdroid.png"))
-            changed = vm.changed_fraction(session_screen, vm.pixels()) if session_screen else 0.0
-            rep.check("android: F-Droid's window shown (most of the screen differs from the session's)", changed > 0.5,
-                      f"{changed:.0%} of the screen differs -> {out}/android-fdroid.png")
-        except Exception as e:  # noqa: BLE001
-            rep.check("android: F-Droid's window shown (most of the screen differs from the session's)", False, str(e)[:300])
+        except Exception:  # noqa: BLE001
+            pass
+        # Android's own view: F-Droid's window has the focus (Phosh's app grid
+        # also differs from the session's screen, so pixels cannot tell).
+        rc, o = sh(f"{in_android('/system/bin/dumpsys window')} | grep -m1 'mCurrentFocus='", timeout=T(180))
+        rep.check("android: F-Droid's window shown (Android's focused window)", rc == 0 and "org.fdroid.fdroid" in o,
+                  o.strip()[:200] + f" -> {out}/android-fdroid.png")
         after = android_counters(sh)
         rep.check("android: F-Droid's index fetch went to Tor's TransPort for Android (firewall counter)",
                   before is not None and after is not None and after[1] > before[1], f"TCP redirects {before and before[1]} -> {after and after[1]}")
