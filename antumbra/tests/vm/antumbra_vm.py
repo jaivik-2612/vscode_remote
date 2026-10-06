@@ -1709,11 +1709,15 @@ def android_phase(vm, rep, T, sh, out):
     got = sorted(l for l in parts[1].strip().split("\n") if l.startswith("ro.product.waydroid.")) if len(parts) == 2 else ["?"]
     rep.check("android: Android reports the generic Waydroid identity, not the device's", rc == 0 and len(want) == 5 and want == got and "OnePlus" not in o,
               o.replace("\n", " ")[-300:])
-    # In a virtual machine antumbra-waydroid scales Android's timeouts: at
+    # In a virtual machine antumbra-waydroid scales Android's timeouts (at
     # the default, the Watchdog's 2-second native stack dumps outlast
-    # themselves under emulation and kill vold, which reboots Android.
-    rc, o = sh(f"echo $({in_android('/system/bin/getprop ro.hw_timeout_multiplier')})", timeout=T(120))
-    rep.check("android: Android's timeouts scaled for software emulation (ro.hw_timeout_multiplier=10)", rc == 0 and o.strip() == "10", o.strip())
+    # themselves under emulation and kill vold, which reboots Android) and
+    # keeps Waydroid from freezing Android when its display sleeps (frozen
+    # before its user is unlocked, Android never finishes setting up).
+    rc, o = sh(f"echo $({in_android('/system/bin/getprop ro.hw_timeout_multiplier')}) "
+               f"$({in_android('/system/bin/getprop persist.waydroid.suspend')})", timeout=T(120))
+    rep.check("android: set up for software emulation (ro.hw_timeout_multiplier=10, persist.waydroid.suspend=false)",
+              rc == 0 and o.strip() == "10 false", o.strip())
     rc, o = sh(f"{in_android('/system/bin/ls -A /sys/firmware')} | wc -l; "
                f"{in_android('/system/bin/cat /proc/device-tree/model')} >/dev/null && echo model-readable || echo model-hidden")
     rep.check("android: /sys/firmware and /proc/device-tree are hidden from Android", rc == 0 and o.strip().split("\n") == ["0", "model-hidden"], o.replace("\n", " "))

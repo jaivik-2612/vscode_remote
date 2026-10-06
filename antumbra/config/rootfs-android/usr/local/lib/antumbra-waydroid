@@ -145,6 +145,12 @@ def properties():
         # SIGPIPE when the requester gives up, and vold's death reboots
         # Android (reboot_on_failure), which stops the container.
         props["ro.hw_timeout_multiplier"] = str(VM_TIMEOUT_MULTIPLIER)
+        # When Android's display sleeps, Waydroid freezes the container
+        # (suspend_action = freeze). Under emulation that happens before
+        # Android has finished unlocking its user: frozen, Android never
+        # tells the session it is ready (no app entries), draws no window
+        # and answers no lxc-attach. The phone keeps Waydroid's default.
+        props["persist.waydroid.suspend"] = "false"
     return props
 
 

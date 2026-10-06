@@ -351,6 +351,7 @@ class PropertiesTest(unittest.TestCase):
     def test_phone_keeps_androids_own_timeouts(self):
         props = self.props(False)
         self.assertNotIn("ro.hw_timeout_multiplier", props)
+        self.assertNotIn("persist.waydroid.suspend", props)  # Waydroid freezes an idle Android
         self.assertNotIn("ro.hardware.egl", props)
         self.assertEqual(props["ro.product.waydroid.brand"], "waydroid")
 
@@ -360,6 +361,9 @@ class PropertiesTest(unittest.TestCase):
         props = self.props(True)
         self.assertGreaterEqual(int(props["ro.hw_timeout_multiplier"]), 5)
         self.assertEqual(props["ro.hardware.egl"], "swiftshader")
+        # Frozen before its user is unlocked, Android would never finish
+        # setting up under emulation.
+        self.assertEqual(props["persist.waydroid.suspend"], "false")
 
 
 class AndroidStopTest(unittest.TestCase):
