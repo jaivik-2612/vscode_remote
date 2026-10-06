@@ -358,8 +358,9 @@ turns the seccomp sandbox off only when a transport is in use. Antumbra's
 copy of the helper adds meek_lite to Tails' obfs2, obfs3, obfs4 and
 webtunnel in that line, so Tor has a transport for every bridge Antumbra
 accepts: plain bridges (an address first) and obfs2, obfs3, obfs4,
-webtunnel and meek_lite bridges. No webtunnel or meek_lite bridge has
-connected on the phone yet (`hardware-validation.md`, item 17).
+webtunnel and meek_lite bridges. No bridge of any type has connected
+through Antumbra yet, in the VM or on the phone
+(`hardware-validation.md`, item 17).
 `BRIDGE_TRANSPORTS` in `antumbra.settings`, the Welcome screen's settings
 module, names the same transports, and `tests/unit/test_tor_connect.py`
 checks that they match. Plain, obfs2, obfs3 and obfs4 bridges must have

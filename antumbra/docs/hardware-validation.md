@@ -73,10 +73,10 @@ libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
     screen and confirm `obfs4proxy` (lyrebird) runs as `debian-tor` and
     Tor bootstraps (`antumbra-tor-connect status`). Do the same with a
     webtunnel line and with a meek_lite line (from the Welcome screen of
-    a new session, or as root with `antumbra-tor-connect bridges -`): no
-    webtunnel or meek_lite bridge has connected on the phone yet. Start
-    refuses, saying why, a snowflake line and an obfs4 line whose address
-    is IPv6 (`[2001:db8::5]:443`).
+    a new session, or as root with `antumbra-tor-connect bridges -`). No
+    bridge of any type has connected through Antumbra yet, in the VM or
+    on the phone. Start refuses, saying why, a snowflake line and an
+    obfs4 line whose address is IPv6 (`[2001:db8::5]:443`).
 
 ## Amnesia
 
