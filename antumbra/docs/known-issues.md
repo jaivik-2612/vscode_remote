@@ -35,8 +35,8 @@ the pop-up motor, the cameras and Android apps.
   disables; mainline offers no free-fall sensor either. Do not keep the
   selfie camera open while walking, and do not push a raised camera down
   by hand: the driver reads the Hall sensors only for a course, for its
-  `status` file, around sleep, at boot and at power-off, so it does not
-  follow a push, and the push loads the idle gear train.
+  `status` file, around sleep, at boot and at power-off or reboot, so it
+  does not follow a push, and the push loads the idle gear train.
 - The front camera rises whenever the front sensor is powered, which makes
   it a physical indicator for that camera only. It is not a boundary
   against root, it can lag a few hundred milliseconds behind around
@@ -71,22 +71,31 @@ the pop-up motor, the cameras and Android apps.
   yet).
 - No Tor Connection assistant: bridges are entered on the Welcome screen
   or with `antumbra-tor-connect`; no QR code or Moat. What
-  `antumbra-tor-connect` sets lasts until the next network connection
-  comes up, when the Welcome screen's choice is applied again, or until
-  Tor restarts; it is not saved anywhere.
+  `antumbra-tor-connect` sets lasts until Tor restarts or, unless the
+  Welcome screen chose offline mode, until the next network connection
+  comes up, when the Welcome screen's choice is applied again; it is not
+  saved anywhere.
+- Bridges: plain, obfs4, webtunnel, meek_lite, obfs2 and obfs3 bridges
+  work. Snowflake bridges do not: snowflake needs UDP, and the firewall
+  lets Tor make only TCP connections and DNS queries. The Welcome screen
+  refuses a snowflake line at Start, saying so, and any other bridge type
+  as unsupported. Its bridge field is a single line, but bridges pasted
+  one per line are all kept; bridges typed there go separated by `;`.
+  They are entered again at every boot (next item).
 - The Welcome screen does not show the settings saved in Persistent
   Storage: the volume is unlocked only after Start, so every question,
   bridges included, is answered again at each boot. The volume keeps
   this boot's choices (never the screen-lock passphrase's hash) for a
-  Welcome screen that unlocks first, which does not exist yet. The "Tor
-  bridges" feature (`/var/lib/tca`) is mounted, but nothing stores
-  bridges in it.
+  Welcome screen that unlocks first, which does not exist yet.
 - The Welcome screen passes the Persistent Storage passphrase to the
   root-side applier through a 0600 file in the greeter user's directory
   in RAM (on the root overlay's tmpfs), which the applier moves into a
   root-only directory and shreds, not over D-Bus as Tails' `tps` does.
 - Persistent Storage features are bind mounts without Tails' `nosymfollow`
   protection, and OS updates erase the volume (full re-flash).
+- Persistent Storage has none of Tails' features for Tor Browser
+  bookmarks, Electrum wallets (`~/.electrum`) or software installed with
+  APT, so these are lost at every restart (`architecture.md`, section 12).
 - When applying the Welcome screen's settings fails after Persistent
   Storage was created or unlocked, the applier locks it again before the
   Welcome screen can start again, and the volume's stored Welcome
@@ -105,6 +114,9 @@ the pop-up motor, the cameras and Android apps.
   wired to a user prompt.
 - Screen lock without a passphrase is not protective; the Welcome screen
   says so but does not force one.
+- Files (Nautilus) searches file names only, not file contents: the file
+  indexer, localsearch, is off, because it would rebuild its index in RAM
+  at every boot (`architecture.md`, section 11).
 
 ## Interface
 
@@ -237,9 +249,8 @@ the security side. None of this has run on the phone yet
   cannot yet regenerate them.
 - Without the builder's own firmware tree the image has no display
   acceleration, Wi-Fi or audio. With it, the firmware is in the image and
-  in the release `release.sh` makes from it, which does not check for it
-  (its manifest says the images contain no proprietary device firmware):
-  such a release is for the builder's own phone only (`legal.md`).
+  in the release `release.sh` makes from it: such a release is for the
+  builder's own phone only, as its manifest says (`legal.md`).
 - Images built with `ANTUMBRA_LIBCAMERA_LOCAL=1` are not reproducible:
   libcamera signs its IPA modules with a key generated at each build
   (`camera.md`).

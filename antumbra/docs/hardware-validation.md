@@ -37,9 +37,10 @@ libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
 8. "Start Antumbra" leads to the Phosh session as `amnesia` (check
    `loginctl` for the session and `journalctl -t antumbra-welcome`). The
    Welcome screen and the shell show Antumbra's dark theme (purple
-   accent, Roboto, the eclipse wallpaper); record whether the top bar's
-   items clear the display's rounded corners (`known-issues.md`,
-   "Interface").
+   accent, Roboto); the shell and its lock screen show the eclipse
+   wallpaper (the Welcome screen's window is opaque); record whether the
+   top bar's items clear the display's rounded corners
+   (`known-issues.md`, "Interface").
 9. The screen locks on the power button when a passphrase was set and
    unlocks with it; `antumbra-auto-shutdown.timer` is active while locked
    (`systemctl list-timers`) and fires from suspend (set a short

@@ -147,7 +147,13 @@ asserts, in order:
    socket polls). Destinations are matched by address and port, so another
    program's connection to an address and port Tor also used would pass
    this capture check; the socket check catches it only while it is open.
-   And that no frame carried the hardware MAC address;
+   And that no frame carried the hardware MAC address. Then, in the
+   session, that no file indexer runs (hook 52 switches it off,
+   `architecture.md` section 11): `localsearch-3`, its control and
+   writeback services and `tinysparql-xdg-portal-3` are masked user units,
+   a D-Bus call to `org.freedesktop.LocalSearch3` is refused rather than
+   activating it, and no localsearch process runs for any user. Every
+   mode below that starts a session runs this check too;
 6. a short press of the virtual power button is ignored (only a long
    press powers off, as on the phone), a power-off requested from the
    console goes through the return-to-initramfs shutdown path (the hook
@@ -227,11 +233,12 @@ container service not started at boot, Waydroid's templates edited
 cameras: `allow = a` before the V4L2 deny, `/sys/firmware` hidden, the
 generic kernel command line, Antumbra's post-stop hook before
 Waydroid's) and its code passing no video device, the images and F-Droid
-in the read-only system, `pkexec` not setuid, Tor's listeners for Android
-and the `android` Persistent Storage feature configured; and they record
-the modes of the binder devices, the render node, the framebuffers and
-the DMA-BUF heaps. The usual checks of a session then run too, with the
-Android listeners excluded from "everything goes to Tor".
+in the read-only system, `pkexec` not setuid, Tor's TransPort and DNSPort
+for Android and the `android` Persistent Storage feature configured; and
+they record the modes of the binder devices, the render node, the
+framebuffers and the DMA-BUF heaps. The usual checks of a session then
+run too, with the Android listeners excluded from "everything goes to
+Tor".
 
 `tests/vm-smoke.sh --android-net` presses Start without turning Android
 on, and tests the network Android would use without booting Android: a
@@ -357,8 +364,8 @@ and network checks.
 The first run (fresh disk) checks that the partition had no volume,
 chooses "Create" with a screen-lock passphrase and administration on,
 and checks that the volume is LUKS2 with argon2id, unlocked and mounted,
-with `~/Persistent`, the Welcome settings, the network connections and
-`/var/lib/tca` bound from it; that this boot's settings were applied and
+with `~/Persistent`, the Welcome settings and the network connections
+bound from it; that this boot's settings were applied and
 saved on the volume, owned by the greeter user, without the passphrase's
 hash; that no Persistent Storage passphrase was left behind, and no
 staging directory of the applier's (`settings/staged`, and

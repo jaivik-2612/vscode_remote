@@ -44,7 +44,7 @@ A release directory contains:
 | `antumbra-<v>-dtbo.img` (25165824 bytes) | `dtbo_b` | hotdog-linux-bringup release, hash-pinned |
 | `antumbra-<v>-vbmeta-disabled.img` (65536 bytes) | `vbmeta_b` | hotdog-linux-bringup release, hash-pinned |
 | `SHA256SUMS`, optionally `SHA256SUMS.minisig` | | |
-| `MANIFEST.md` (the build, its pinned inputs and packages), `INSTALL.md` (this document) | | built by Antumbra |
+| `MANIFEST.md` (the build, its pinned inputs and packages, and whether the userdata image holds device firmware, listing the files if it does), `INSTALL.md` (this document) | | built by Antumbra |
 
 A compressed userdata image larger than 1900 MiB comes in pieces,
 `antumbra-<v>-userdata.simg.zst.part000`, `.part001` and so on;

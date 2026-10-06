@@ -15,7 +15,7 @@ saying what changed; "re-implemented" means rewritten for the phone.
 | Tor unit drop-ins | `tor@default.service.d/*` | verbatim | verbatim |
 | Control-port filter | `onion-grater` + `etc/onion-grater.d/*.yml` | verbatim | verbatim |
 | Tor bootstrap flag | `tails-wait-until-tor-has-bootstrapped`, `tails-tor-has-bootstrapped*`, `tor_wait_until_bootstrapped`, `tor_variable` | verbatim | verbatim |
-| Pluggable transports | from the Tor Browser tarball; `tor-pt-configuration-helper` | lyrebird from the aarch64 tarball as `/usr/bin/obfs4proxy`; helper verbatim | adapted |
+| Pluggable transports | from the Tor Browser tarball; `tor-pt-configuration-helper` | lyrebird from the aarch64 tarball as `/usr/bin/obfs4proxy`; helper adapted (meek_lite added to its transports); snowflake refused: it needs UDP, which the firewall allows Tor only for DNS | adapted |
 | Tor Connection assistant (tca) | `tca`, `tca-portal` | not ported; `antumbra-tor-connect` (direct/bridges/status/disconnect) and the Welcome screen's bridge field | re-implemented, reduced |
 | Time sync | `htpdate` (Perl), `htpdate.service`, pools, tmpfiles | verbatim | verbatim |
 | Pre-Tor clock fix | `tails-get-network-time` as `clearnet` | user `clearnet` and firewall rules kept; the script is not wired to a prompt yet | pending |
@@ -32,7 +32,7 @@ saying what changed; "re-implemented" means rewritten for the phone.
 | Memory erasure | `initramfs-pre-shutdown-hook`, `initramfs-restore`, `initramfs-shutdown.service`, `run-initramfs.mount`, hook `shutdown`, `tails-remove-overlayfs-dirs.service`, `system-shutdown/tails` | all adapted: initrd from `/boot`, no removable medium or random-seed sector, loop device detached | adapted |
 | Emergency shutdown on medium removal | `udev-watchdog`, `tails-shutdown-on-media-removal` | dropped (no removable medium); replaced by long-press power-off and the lock-triggered auto-shutdown timer | re-implemented |
 | Swap | `05-replace_swapon`, zramswap | swapon diverted to a zram-only wrapper; `systemd-zram-generator` | adapted |
-| Welcome Screen | `tails-greeter` (GDM extension, as `Debian-gdm`), `PostLogin/Default` | `antumbra-welcome` (GTK4) as `antumbra-greeter` under greetd, `antumbra-apply-welcome-settings` as root; same settings file format, and Tails' files and keys for the settings Tails has; Antumbra's own for bridges, administration, Android apps and Persistent Storage | re-implemented |
+| Welcome Screen | `tails-greeter` (GDM extension, as `Debian-gdm`), `PostLogin/Default` | `antumbra-welcome` (GTK4) as `antumbra-greeter` under greetd, `antumbra-apply-welcome-settings` as root; same settings file format. Tails' files and keys: `tails.macspoof`, `tails.network` (which also carries Antumbra's `ANTUMBRA_TOR_MODE`), `tails.password` (Tails' administration password, here the screen-lock passphrase) and `tails.create-persistence`. Antumbra's: `tails.bridges` (a file Tails does not have, with the key `ANTUMBRA_BRIDGES`), `antumbra.admin` (administration on or off), `antumbra.android`, `antumbra.persistence` and `antumbra.persistence-passphrase` | re-implemented |
 | Settings library | `tails-shell-library/tails-greeter.sh` | adapted (paths) | adapted |
 | Admin password, sudo, polkit | `PostLogin/Default` | in the applier: `chpasswd -e`, sudoers, polkit admin rule | adapted |
 | Persistent Storage | `tps` (D-Bus service, Python) | `antumbra-persistence` (bash: LUKS2/argon2id with tps' parameters, features file, bind mounts) | re-implemented, reduced |
