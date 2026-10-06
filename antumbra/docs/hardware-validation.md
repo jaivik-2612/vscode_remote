@@ -310,4 +310,8 @@ section 11.1). The VM covers the network and the setup
     installed within the installer's limits (Android answering within 40
     minutes, the installation within 15): `journalctl
     _SYSTEMD_USER_UNIT=antumbra-fdroid-install.service` says "F-Droid
-    installed"; record how long after Android's boot.
+    installed"; record how long after Android's boot. `waydroid shell
+    getprop persist.waydroid.suspend` prints nothing (Waydroid's freeze
+    stays on); with no Android app open for a few minutes, `lxc-info -P
+    /var/lib/waydroid/lxc -n waydroid -sH` says FROZEN, and opening an
+    app from the "Android" folder brings it back within seconds.

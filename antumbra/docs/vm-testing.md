@@ -303,8 +303,9 @@ Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
 slow, see below; if Android does not boot, the run saves Waydroid's log
 and the units' journals as `android-boot-failure.txt` and Android's log
-as `android-logcat.txt`), the generic Waydroid identity, Android's
-timeouts scaled for emulation (`ro.hw_timeout_multiplier=10`),
+as `android-logcat.txt`), the generic Waydroid identity, Android set up
+for emulation (`ro.hw_timeout_multiplier=10` and
+`persist.waydroid.suspend=false`),
 `/sys/firmware` and `/proc/device-tree` hidden, that Android's
 `/proc/cmdline` is the generic one and neither it nor `ro.serialno` or
 `ro.boot.serialno` shows the test serial, that every hardware identifier
@@ -316,11 +317,14 @@ none of the host's MAC addresses and no Wi-Fi radio shows in Android's
 sysfs, that the container can open `/dev/null` but not a V4L2 device node
 it creates, the DHCP lease
 and route, the provisioning
-(captive-portal checks, Private DNS and network time off), a screenshot
-of Android's full UI (`android-full-ui.png`), F-Droid installed (the
+(captive-portal checks, Private DNS and network time off), Android's
+full UI drawn (`android-full-ui.png`: more than half of the screen must
+differ from what it showed just before, since the session alone has
+plenty of colours), F-Droid installed (the
 harness waits 20 minutes times the timeout scale, and saves the
 installer's journal as `android-fdroid-install.txt` if F-Droid is
-missing) and listed in the app grid's "Android" folder, F-Droid's index
+missing) and listed in the app grid's "Android" folder, F-Droid's
+window shown (`android-fdroid.png`, the same comparison), its index
 fetch counted
 at Tor's TransPort for Android, Android's resolver mapping a `.onion` name
 into 127.192.0.0/10 with no answer to a ping there (Android's own
@@ -338,7 +342,9 @@ that Android stays stopped for 30 seconds; and the start-host hook
 refusing to start the container without the firewall's Android rules,
 after which Android starts again with a device plugged in meanwhile (a
 device-mapper device with a UUID: its mask is in the configuration and
-Android reads it empty), and once more after Android has stopped and the
+Android reads it empty, `cat` succeeding; the read is repeated until
+`lxc-attach` gets in, so that an error message is never taken for the
+file), and once more after Android has stopped and the
 device has gone. The harness runs commands inside the
 container with `lxc-attach` with no standard descriptor on the console's
 tty (`in_android`): given a tty, lxc-attach switches to a terminal proxy
@@ -356,15 +362,24 @@ Yama's `ptrace_scope=2` is not the cause: `debuggerd -b` of a HAL, run
 by hand, succeeded and the HAL survived. So in a virtual machine
 `antumbra-waydroid` sets `ro.hw_timeout_multiplier=10`, as emulators do,
 and the run checks it once Android has booted; the phone keeps Android's
-own timeouts (`known-issues.md`, "Android apps"). In the run that found
-this, the multiplier was set by hand about 9 minutes into Android's boot,
-after HALs had died of SIGPIPE and Android's framework had restarted
-twice, and the framework was then restarted; Android reported
-`sys.boot_completed=1` about 22 minutes after its init started (the
-guest had been up for about 1960 seconds). How long Android takes to
-boot with `antumbra-waydroid` setting the multiplier from the start has
-not been measured yet. The file indexer's restart loop, since switched
-off (hook 52), slowed those runs too.
+own timeouts (`known-issues.md`, "Android apps"). With the multiplier
+set from the start, Android's init reached `sys.boot_completed=1` in
+about 15 minutes (666 to 1557 seconds of the guest's uptime), with no
+service dying on the way.
+
+Booted is not set up, though. Unlocking Android's user, which makes
+Waydroid write the apps' desktop entries, takes minutes more under
+emulation, and before it finished Android's display went to sleep and
+Waydroid froze the container (`suspend_action = freeze`, its default).
+Frozen, Android never told the session it was ready (no app entries in
+the app grid), drew no window, never ran F-Droid, and every `lxc-attach`
+blocked, which made console commands time out. So in a virtual machine
+`antumbra-waydroid` also sets `persist.waydroid.suspend=false`. Set by
+hand in a running VM, the container stayed running, the 13 apps'
+entries appeared within 8 minutes, and `waydroid show-full-ui` drew
+Android's interface. On the phone Waydroid keeps freezing an Android
+nobody is using, to save power; there the unlock comes seconds after the
+boot.
 Installing F-Droid then takes minutes more: `antumbra-fdroid-install`
 waits up to 15 minutes after `waydroid app install` for Android to list
 the package.
@@ -473,6 +488,26 @@ affected the phone the same way.
 | Self-check banner: sysctl errors | Tails' userfaultfd key (kernel built without userfaultfd) and bubblewrap's Debian-only key | `-` prefix; bubblewrap's file masked |
 | Self-check banner: modem radio | the check could not accept the "absent"/"unavailable" states | parse the state file's first line |
 | `swapon --show` refused | the zram-only wrapper treated every call as an activation | queries pass; every named device must be zram |
+
+## What the later VM runs found
+
+The runs of the images with Android apps, the camera and Persistent
+Storage found these in the system (S) and in the harness (H):
+
+| Symptom in the VM | Cause | Fix |
+|---|---|---|
+| S: `antumbra-tor-connect direct` and `bridges` always ended in an error | it asked Tor to save its configuration, which Tor may not write | settings applied without SAVECONF |
+| S: the applier's private copy of the Welcome settings (passphrase hash included) lived until the network was up | removed only at exit | removed as soon as it has been used |
+| S: an error at power-off from Android's post-stop hook | it asked for a unit systemd refuses during shutdown | skipped while the system stops |
+| S: Android never finished booting | system_server's Watchdog gave native stack dumps 2 seconds; under emulation each outlasted that and the dumped process died of SIGPIPE, vold's death rebooting Android | `ro.hw_timeout_multiplier=10` in a VM |
+| S: no Android app entries, no Android window, F-Droid never ran, `lxc-attach` blocked | Waydroid froze the container when Android's display slept, before Android had unlocked its user | `persist.waydroid.suspend=false` in a VM |
+| S: F-Droid's installer gave up | it waited 2 minutes after `waydroid app install`; under emulation the installation takes longer | waits up to 15 minutes |
+| S: `/dev/fb0` and the render node stayed open to every user after Android stopped | udev's change events restore no mode for framebuffers and did not restore the render node's | modes recorded before the boot's first container start and put back at stop |
+| S: the file indexer restarted every 3 seconds for the whole session | its first start outlasted systemd's timeout under load, leaving a database every later start refused | the indexer is off (hook 52) |
+| H: Snapshot's preview was not ready after 30 seconds | the first frame takes about three minutes under emulation | the check waits for the picture |
+| H: one slow command made every later check time out | the console's shell kept running it | a timed-out command is interrupted; console timeouts follow `--timeout-scale` |
+| H: the full-UI check passed on a picture of the wallpaper | it counted colours | most of the screen must change |
+| H: the hot-plugged device's UUID check failed on 133 bytes | it counted the bytes of an `lxc-attach` error | it reads until Android answers and judges the content |
 
 ## What the VM cannot tell you
 

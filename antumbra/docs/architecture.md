@@ -928,9 +928,11 @@ RAM. `config/hooks/56-session-android.sh` then:
    values from `/usr/share/antumbra/android/product.prop`; multi-window
    mode; density 480 on the phone and 320 in the VM; in a VM also
    software rendering, which Waydroid turns into ANGLE on SwiftShader,
-   and Android's timeouts scaled tenfold, `ro.hw_timeout_multiplier=10`,
+   Android's timeouts scaled tenfold, `ro.hw_timeout_multiplier=10`,
    as emulators set it, without which Android does not boot under full
-   emulation, as `vm-testing.md` explains), runs `waydroid init` and
+   emulation, and `persist.waydroid.suspend=false`, without which
+   Waydroid freezes Android before it has set up its user, as
+   `vm-testing.md` explains), runs `waydroid init` and
    `waydroid upgrade -o`, copies the generic kernel command line to
    `/run/antumbra/android-cmdline` (writable, because Android's
    first-stage init may chmod `/proc/cmdline`), masks the
