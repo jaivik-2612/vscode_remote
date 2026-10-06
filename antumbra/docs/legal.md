@@ -25,7 +25,8 @@
   libcamera patches and tuning files. Debian does not publish that
   modified source, so whoever distributes an image built with it must also
   offer the source: the files in `build/cache/libcamera/` and
-  `device/oneplus-hotdog/libcamera/`. Default images do not contain it.
+  `device/oneplus-hotdog/libcamera/`. The manifest `release.sh` writes for
+  such a build says so. Default images do not contain it.
 - The interface theme: the stylesheets and gesture pill in
   `config/rootfs/usr/share/antumbra/theme/` and the wallpapers in
   `config/rootfs/usr/share/backgrounds/antumbra/` are Antumbra's own work,
@@ -91,9 +92,11 @@ redistribution. Consequently:
   produced plus two hash-pinned device-tree/vbmeta assets from the port's
   public release. An image built with `ANTUMBRA_FIRMWARE_DIR` carries the
   builder's firmware in its root filesystem, and `release.sh` packages it
-  all the same, with a manifest that still says the images contain no
-  proprietary device firmware: such a release is for the builder's own
-  phone.
+  all the same: its manifest then says that the userdata image contains
+  proprietary device firmware which Qualcomm and OnePlus do not license
+  for redistribution, that the release is for the builder's own phone
+  only and must not be published, and lists the firmware files with their
+  SHA-256, and `release.sh` warns about it when it finishes.
 - `build/fetch-firmware.sh` assembles the firmware for the builder's own
   device from a community mirror that the mainline port also uses. It
   prints a notice and requires `ANTUMBRA_ACCEPT_PROPRIETARY_FIRMWARE=1`.

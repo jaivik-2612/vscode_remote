@@ -1075,7 +1075,11 @@ needs. Therefore:
   (`ANTUMBRA_FIRMWARE_DIR`), populated by `build/fetch-firmware.sh` from
   the community mirror the port uses, pinned by commit and per-file
   SHA-256, for the user's own device, after an explicit acknowledgement
-  (`docs/legal.md`).
+  (`docs/legal.md`). An image built with it is for the builder's own
+  phone: `rootfs.sh` records the firmware in `build-flags` and
+  `firmware.sha256`, and the manifest `release.sh` writes says that the
+  images contain it, lists every file with its SHA-256 and says that the
+  release must not be published.
 - Files installed: `qcom/a630_sqe.fw`, `qcom/a640_gmu.bin` and
   `qcom/sm8150/oneplus/hotdog/a640_zap.mbn` (GPU; the zap shader is signed
   by OnePlus for this model); `qcom/sm8150/oneplus/hotdog/{adsp,cdsp}.mbn`

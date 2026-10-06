@@ -243,9 +243,8 @@ the security side. None of this has run on the phone yet
   cannot yet regenerate them.
 - Without the builder's own firmware tree the image has no display
   acceleration, Wi-Fi or audio. With it, the firmware is in the image and
-  in the release `release.sh` makes from it, which does not check for it
-  (its manifest says the images contain no proprietary device firmware):
-  such a release is for the builder's own phone only (`legal.md`).
+  in the release `release.sh` makes from it: such a release is for the
+  builder's own phone only, as its manifest says (`legal.md`).
 - Images built with `ANTUMBRA_LIBCAMERA_LOCAL=1` are not reproducible:
   libcamera signs its IPA modules with a key generated at each build
   (`camera.md`).

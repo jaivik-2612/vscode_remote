@@ -35,11 +35,21 @@ is idempotent.
 | fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool and the mkbootimg tools, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified); with `ANTUMBRA_ANDROID=1` also the Waydroid images of the profile's variant (each zip pinned by SHA-256 and size, each extracted image by size, CRC-32 and SHA-256, checked again on every run, cached or not) and F-Droid (SHA-256, OpenPGP and APK certificate verified) |
 | kernel | `kernel.sh` | `build/out/kernel/`: raw arm64 `Image`, DTB, stripped modules tarball, config, kernel release, ASLR sysctl values |
 | libcamera (optional) | `libcamera.sh` (root) | only with `ANTUMBRA_LIBCAMERA_LOCAL=1`: `build/out/libcamera-repo/`, the port's patched libcamera 0.7.2 as arm64 packages in a local apt repository (`camera.md`) |
-| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt`, `build-flags` (the profile and knobs the tree was built with; later steps check it) |
-| squashfs | `squashfs.sh` (root) | `filesystem.squashfs` (xz, arm BCJ), `.verity` hash tree, `.roothash` |
+| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt`, `build-flags` (what the tree was built with, which later steps check: the device profile, the debug, minimal and Android knobs, whether the port's libcamera and the builder's firmware were installed, and the kernel release; deleted with the old tree before mmdebstrap runs, so a failed run leaves none) and, with the builder's firmware, `firmware.sha256` (each firmware file with its SHA-256) |
+| squashfs | `squashfs.sh` (root) | `filesystem.squashfs` (xz, arm BCJ), `.verity` hash tree, `.roothash`; `ANTUMBRA_VERITY` (1 or 0) added to `build-flags` |
 | image | `image.sh` | `userdata.simg`: 4096-byte-sector GPT sized to the physical partition, live partition + empty Persistent Storage partition, as an Android sparse image |
 | bootimg | `bootimg.sh` | `boot.img`: header v2, cmdline with the verity root hash, unsigned AVB footer, exactly 96 MiB |
-| release | `release.sh` | `build/out/release/antumbra-<version>-oneplus-hotdog/` with checksums, manifest and optional minisign signature |
+| release | `release.sh` | `build/out/release/antumbra-<version>-oneplus-hotdog/` with checksums, manifest and optional minisign signature; refuses a `build-flags` that does not record whether the image has device firmware (one an older `rootfs.sh` wrote: run the rootfs step again) |
+
+`rootfs.sh` does not install `config/rootfs` and `config/rootfs-android`
+as they are checked out: it stages copies in `build/work/overlay/`, owned
+by root, with 0755 directories and 0644 or 0755 files (by the execute
+bit), without Python byte code, and with the modes git cannot record set
+again (0440 for `etc/sudoers.d/*`, 0600 for `etc/usbguard/rules.conf` and
+`etc/skel/.tor/control_auth_cookie`), and installs those. It copies the
+firmware tree the same way, root-owned. So a checkout or firmware tree
+owned by an ordinary user (often UID 1000, which is `amnesia` in the
+image) passes neither its owner nor its umask's modes to the image.
 
 Firmware is a separate, deliberate step: `fetch-firmware.sh` assembles the
 proprietary blobs for **your** device from the community mirror the port
@@ -47,7 +57,13 @@ uses, verifies every file against the pinned hashes, and lays them out for
 `/lib/firmware` in `build/cache/firmware/`; it prints a notice and stops
 unless `ANTUMBRA_ACCEPT_PROPRIETARY_FIRMWARE=1` is set. Pass the result as
 `ANTUMBRA_FIRMWARE_DIR` to `rootfs.sh`. Without it the image boots but
-has no display acceleration, Wi-Fi or audio. See `docs/legal.md`.
+has no display acceleration, Wi-Fi or audio. With it, `rootfs.sh` records
+the firmware in `build-flags` and `firmware.sha256`, and the release's
+`MANIFEST.md` says that the userdata image contains proprietary device
+firmware which Qualcomm and OnePlus do not license for redistribution,
+that the release is for your own phone only and must not be published,
+and lists the files with their hashes; `release.sh` also warns about it
+when it finishes. See `docs/legal.md`.
 
 ## Knobs
 
@@ -56,11 +72,11 @@ has no display acceleration, Wi-Fi or audio. See `docs/legal.md`.
 | `ANTUMBRA_MINIMAL=1` | base + network + amnesia package lists only, no Phosh, apps or Tor Browser: validates the pipeline in a fraction of the time |
 | `ANTUMBRA_ANDROID=1` | Android apps: Waydroid, the LineageOS 20 images of the profile's `WAYDROID_IMAGE_VARIANT` and F-Droid, off until turned on at the Welcome screen (`architecture.md`, section 11.1). Recorded in `build-flags` and the release manifest; not combinable with `ANTUMBRA_MINIMAL=1`. Without it the image has no Waydroid, Android images or Android services; the firewall's Android rules and the kernel's binder driver are there but unused (binder devices root-only) |
 | `ANTUMBRA_DEBUG=1` | debug command line; in the VM profile also the root console, the virtual camera and its test tools (`vm-testing.md`); `release.sh` refuses to package such a build |
-| `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line |
-| `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware` |
+| `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line (empty or unset: dm-verity on); `squashfs.sh` records it in `build-flags` |
+| `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware`; recorded in `build-flags` and the release manifest (above) |
 | `ANTUMBRA_KERNEL_TOOLCHAIN=gcc` | Debian cross GCC instead of LLVM (the port validates only LLVM) |
 | `ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT=1` | warn instead of fail when the config fragment is not fully honoured |
-| `ANTUMBRA_LIBCAMERA_LOCAL=1` | build the port's patched libcamera 0.7.2 (`libcamera.sh`, about five minutes as a cross build on a 4-core x86-64 host) and install it instead of trixie-backports' 0.7.1; off by default, ignored with `ANTUMBRA_MINIMAL=1` (`camera.md`) |
+| `ANTUMBRA_LIBCAMERA_LOCAL=1` | build the port's patched libcamera 0.7.2 (`libcamera.sh`, about five minutes as a cross build on a 4-core x86-64 host) and install it instead of trixie-backports' 0.7.1; off by default, ignored with `ANTUMBRA_MINIMAL=1` (`camera.md`). Recorded in `build-flags` when installed; the release manifest then says that whoever distributes the build must also offer the patched libcamera source (`legal.md`) |
 | `ANTUMBRA_SQUASHFS_MEM=SIZE` | cache size for `mksquashfs` (default `1G`, where its own default is a quarter of the host's memory); the image does not depend on it |
 | `ANTUMBRA_SIGNING_KEY=FILE` | minisign secret key for `release.sh` |
 | `SOURCE_DATE_EPOCH` | build timestamp (default: the last git commit) |
@@ -92,12 +108,19 @@ profile reuses the phone's sources, patches and hardening fragment.
 ```sh
 make lint          # shellcheck, python, the pop-up motor's flag model, nftables syntax,
                    # Android's network lab, tor config, systemd units, yaml, phoc modes,
-                   # no OnePlus camera software, pinned inputs, file modes
+                   # no OnePlus camera software, pinned inputs, the staged overlays' modes
 make test          # lint, unit tests and the headless Welcome screen self-test
 sudo python3 -m pytest -q -p no:cacheprovider tests/unit/test_applier.py   # applier, as root
 make check-packages
 ANTUMBRA_MINIMAL=1 build/build.sh    # pipeline validation end to end
 ```
+
+Git records only the modes 0644 and 0755, so `make lint` does not read
+the checkout's modes: it stages both overlays as `rootfs.sh` does and
+checks the copies (0440 for the sudoers files, 0600 for usbguard's rules
+and the Tor control cookie, nothing group- or world-writable), and fails
+if `rootfs.sh` copies an overlay into the image straight from `config/`.
+A fresh clone passes without any `chmod`.
 
 Some of these skip on a build host that cannot run them, and say so:
 Android's network lab needs unprivileged user namespaces or root, and
