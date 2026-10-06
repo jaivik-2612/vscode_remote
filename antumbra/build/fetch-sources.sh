@@ -184,13 +184,12 @@ fetch_bootimg_tools() {
 # ---------------------------------------------------------------------------
 # Android apps (ANTUMBRA_ANDROID=1): Waydroid's images and F-Droid
 # ---------------------------------------------------------------------------
-lock_get_optional() { # lock_get_optional KEY : the value, or nothing
-    grep -E "^$1=" "${DEVICE_DIR}/sources.lock" | head -n1 | cut -d= -f2- || true
-}
-
 # Waydroid's system and vendor images for the profile's variant, extracted
 # from the pinned zips, so that "waydroid init" finds them preinstalled and
-# never downloads anything. Writes images.sha256 for the build hook, which
+# never downloads anything. Every extracted image is pinned by SHA-256 too
+# and checked on every run, cached or not: a cached image changed in place
+# (an ext4 image mounted read-write for a look changes without changing
+# size) is extracted again. Writes images.sha256 for the build hook, which
 # checks the copies in the root filesystem against it.
 fetch_waydroid() {
     local variant="${WAYDROID_IMAGE_VARIANT}" key dest kind img zip entries want_crc got sha pinned
@@ -211,40 +210,47 @@ fetch_waydroid() {
         want_crc="$(lock_get "${key}_${kind}_IMG_CRC32")"
         got="$(unzip -lv "${zip}" | awk -v n="${img}" '$NF == n {print $1, $7}')"
         [ "${got}" = "$(lock_get "${key}_${kind}_IMG_SIZE") ${want_crc}" ] || die "${zip}: ${img} is not the pinned image (size and CRC-32: ${got})"
+        pinned="$(lock_get "${key}_${kind}_IMG_SHA256")"
+        sha=""
         if [ -f "${dest}/${img}" ] && [ "$(cat "${dest}/${img}.from" 2>/dev/null)" = "$(lock_get "${key}_${kind}_SHA256")" ] \
            && [ "$(stat -c %s "${dest}/${img}")" -eq "$(lock_get "${key}_${kind}_IMG_SIZE")" ]; then
-            log "cached: ${variant}/${img}"
-        else
-            rm -f "${dest}/${img}" "${dest}/${img}.from"
+            sha="$(sha256sum "${dest}/${img}" | cut -d' ' -f1)"
+            if [ "${sha}" = "${pinned}" ]; then
+                log "cached: ${variant}/${img}"
+            else
+                warn "${variant}/${img}: the cached image changed (SHA-256 ${sha}); extracting it again"
+                sha=""
+            fi
+        fi
+        if [ -z "${sha}" ]; then
+            rm -rf "${dest:?}/${img}" "${dest}/${img}.from" "${dest}/extract"
             unzip -q -o "${zip}" "${img}" -d "${dest}/extract" || die "${zip}: extraction failed (CRC error?)"
             mv "${dest}/extract/${img}" "${dest}/${img}"
             rmdir "${dest}/extract"
-            lock_get "${key}_${kind}_SHA256" > "${dest}/${img}.from"
-        fi
-        sha="$(sha256sum "${dest}/${img}" | cut -d' ' -f1)"
-        pinned="$(lock_get_optional "${key}_${kind}_IMG_SHA256")"
-        if [ -n "${pinned}" ]; then
+            sha="$(sha256sum "${dest}/${img}" | cut -d' ' -f1)"
             [ "${sha}" = "${pinned}" ] || die "${variant}/${img}: SHA-256 ${sha}, pinned ${pinned}"
-        else
-            log "${variant}/${img}: SHA-256 ${sha} (pin it as ${key}_${kind}_IMG_SHA256 in sources.lock)"
+            lock_get "${key}_${kind}_SHA256" > "${dest}/${img}.from"
         fi
         printf '%s  %s\n' "${sha}" "${img}" >> "${dest}/images.sha256.new"
     done
     mv "${dest}/images.sha256.new" "${dest}/images.sha256"
-    log "Waydroid ${variant} images verified (zip SHA-256 and size, image size and CRC-32)"
+    log "Waydroid ${variant} images verified (zip SHA-256 and size, image size, CRC-32 and SHA-256)"
 }
 
 # F-Droid: pinned by SHA-256, F-Droid's OpenPGP signature over it, and the
 # certificate in the APK's own signature block (what Android checks updates
 # against).
 fetch_fdroid() {
-    local dest="${CACHE}/f-droid" apk fpr gnupghome sigs cert
+    local dest="${CACHE}/f-droid" apk sig fpr gnupghome sigs cert
     require_tools gpg gpgv unzip openssl
     apk="${dest}/F-Droid.apk"
+    # The signature is cached under its own (versioned) name, so that a new
+    # APK pin never meets the previous version's signature.
+    sig="${dest}/$(basename "$(lock_get FDROID_SIG_URL)")"
     mkdir -p "${dest}"
     fetch_verified "$(lock_get FDROID_APK_URL)" "${apk}" "$(lock_get FDROID_APK_SHA256)"
     [ "$(stat -c %s "${apk}")" -eq "$(lock_get FDROID_APK_SIZE)" ] || die "F-Droid.apk has an unexpected size"
-    [ -f "${apk}.asc" ] || fetch "$(lock_get FDROID_SIG_URL)" "${apk}.asc"
+    [ -f "${sig}" ] || fetch "$(lock_get FDROID_SIG_URL)" "${sig}"
     fpr="$(lock_get FDROID_SIGNING_KEY_FPR)"
     if [ -f "${DEVICE_DIR}/keys/f-droid.asc" ]; then
         cp "${DEVICE_DIR}/keys/f-droid.asc" "${dest}/signing-key.asc"
@@ -257,7 +263,7 @@ fetch_fdroid() {
     GNUPGHOME="${gnupghome}" gpg --batch --with-colons --fingerprint 2>/dev/null \
         | grep -q "^fpr:::::::::${fpr}:" || die "F-Droid signing key fingerprint mismatch (expected ${fpr})"
     GNUPGHOME="${gnupghome}" gpg -q --batch --export "${fpr}" > "${dest}/f-droid.keyring"
-    gpgv --keyring "${dest}/f-droid.keyring" "${apk}.asc" "${apk}" 2>/dev/null || die "F-Droid signature verification failed"
+    gpgv --keyring "${dest}/f-droid.keyring" "${sig}" "${apk}" 2>/dev/null || die "F-Droid signature verification failed"
     rm -rf "${gnupghome}"
     sigs="$(unzip -Z1 "${apk}" | grep -E '^META-INF/[^/]+\.(RSA|DSA|EC)$' || true)"
     if [ -z "${sigs}" ] || [ "$(printf '%s\n' "${sigs}" | wc -l)" -ne 1 ]; then

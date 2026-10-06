@@ -63,10 +63,12 @@ sections 8.5 and 11.1). While they are on:
   Tor Browser included, can call Android's system services with Android's
   system privileges, and owns Android's system files under
   `~/.local/share/waydroid/data`. Waydroid also opens the GPU render node,
-  the DMA-BUF heaps and the framebuffers to every user (0777). When the
-  container service stops, the binder devices go back to 0600 and udev
-  re-applies its modes to the others; binder itself is kernel attack
-  surface with a long history of bugs.
+  the DMA-BUF heaps and the framebuffers to every user (0777). Once the
+  container stops (Android stopped in the session, or logout), Waydroid's
+  container service is stopped too: the binder devices and the DMA-BUF
+  heaps go back to 0600 and udev re-applies its modes to the render node
+  and the framebuffers. Binder itself is kernel attack surface with a long
+  history of bugs.
 - **Waydroid's D-Bus service** accepts Stop, Freeze, Unfreeze and
   GetSession from any local user (Start checks the caller), so any process
   can stop or freeze Android.
@@ -76,6 +78,10 @@ sections 8.5 and 11.1). While they are on:
   reach only Tor's two listeners for Android and the DHCP server: the
   rules that decide this run on the host, and the container's start-host
   hook refuses to start Android without them.
+- **`.onion` names.** Tor answers Android's lookups of them with addresses
+  on Android's own loopback (127.192.0.0/10). The start-host hook rejects
+  that range inside the container, so that no app receives what another
+  app meant for an onion service; Android's root could remove that rule.
 - **Microphone.** Android reaches the session's PulseAudio socket
   (`pipewire-pulse`); recording is gated only by Android's own permission
   prompt, not by the host.
@@ -84,7 +90,12 @@ sections 8.5 and 11.1). While they are on:
   kernel release (it names the SoC and the phone's port), the CPU model,
   the GPU through OpenGL, the screen size, and the container's MAC address,
   which every Waydroid installation shares. An app can tell it runs on an
-  SM8150 phone under Antumbra.
+  SM8150 phone under Antumbra. It cannot read the phone's serial numbers:
+  Android gets a generic kernel command line instead of the host's (where
+  the boot loader puts `androidboot.serialno`, which would become
+  `ro.serialno`), and the SoC's, the UFS device's and the disks' serial
+  number files in sysfs read empty in the container. On the host itself,
+  `/proc/cmdline` still shows the serial number to every local process.
 - **Frozen images.** The LineageOS 20 images are those pinned at build
   time and receive no updates until Antumbra pins new ones. They are built
   by Waydroid's small team, are not reproducible, and are verified only by

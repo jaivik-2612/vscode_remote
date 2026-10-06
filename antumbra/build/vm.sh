@@ -13,6 +13,7 @@
 #          --memory MiB   guest memory (default 4096; the display is rendered in software)
 #          --smp N        virtual CPUs (default 3)
 #          --append ARGS  extra kernel command-line arguments
+#          --disk-serial S  the disk's serial number (default: none), as the phone's UFS has one
 #
 # Inputs : build/out/qemu-virt/{kernel/Image,rootfs/initrd.img,rootfs/filesystem.squashfs.roothash,vm-disk.img}
 #          device/qemu-virt/cmdline.txt
@@ -27,7 +28,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 usage() { sed -n '4,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 MODE="${1:-}"; [ $# -gt 0 ] && shift
-DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=4096; SMP=3; EXTRA_APPEND=""
+DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=4096; SMP=3; EXTRA_APPEND=""; DISK_SERIAL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --debug) DEBUG=1 ;;
@@ -37,6 +38,8 @@ while [ $# -gt 0 ]; do
         --memory) MEMORY="$2"; shift ;;
         --smp) SMP="$2"; shift ;;
         --append) EXTRA_APPEND="$2"; shift ;;
+        --disk-serial) DISK_SERIAL="$2"; shift
+                       [[ "${DISK_SERIAL}" =~ ^[A-Za-z0-9]{1,20}$ ]] || die "--disk-serial: 1 to 20 letters and digits" ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) break ;;
@@ -124,7 +127,7 @@ ARGS=(
     -kernel "${KOUT}/Image" -initrd "${ROUT}/initrd.img" -append "${CMDLINE}"
     # The disk: the only partition is "userdata", 4096-byte sectors like the phone's UFS.
     -drive "if=none,id=userdata,file=${RUN}/overlay.qcow2,format=qcow2,cache=writeback,discard=unmap"
-    -device "virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096"
+    -device "virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096${DISK_SERIAL:+,serial=${DISK_SERIAL}}"
     -device virtio-rng-pci
     # A phone-shaped display: 720x1440 at scale 2 (etc/antumbra/phoc.ini, output Virtual-1).
     -device "virtio-gpu-pci,xres=720,yres=1440" -device virtio-keyboard-pci -device virtio-tablet-pci

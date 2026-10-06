@@ -83,20 +83,44 @@ grep -qx 'lxc.net.0.hwaddr = 00:16:3e:f9:d3:03' "${CONFIGS}/config_3" || die "co
 sed -i '/^lxc\.cap\.keep/ s/ sys_time\b//g' "${CONFIGS}/config_base"
 grep -q '^lxc\.cap\.keep = .*sys_admin' "${CONFIGS}/config_base" || die "config_base: lxc.cap.keep not found"
 ! grep '^lxc\.cap\.keep' "${CONFIGS}/config_base" | grep -qw sys_time || die "config_base: sys_time still kept"
-# 3. The start-host hook (fails closed), no V4L2 devices, and no device tree:
-#    the container mounts the host's sysfs, where /sys/firmware/devicetree
-#    (and /proc/device-tree) would tell apps the phone's model. Without
-#    "optional", a failed mount aborts the container start.
+# 3. The start-host hook (fails closed); every device but V4L2: LXC's device
+#    list starts as "allow nothing", and only an "a" rule turns it into a
+#    deny list, so "allow = a" must come before the deny (a lone deny would
+#    block /dev/null and binder too); no device tree: the container mounts
+#    the host's sysfs, where /sys/firmware/devicetree (and
+#    /proc/device-tree) would tell apps the phone's model; and a generic
+#    kernel command line: the phone's boot loader puts its serial number
+#    there (androidboot.serialno), which Android's init would make
+#    ro.serialno, readable by every app. antumbra-waydroid copies
+#    ${ANDROID_DIR}/cmdline to /run before the container service starts
+#    (a writable copy: Android's first-stage init may chmod /proc/cmdline,
+#    which a read-only bind would make fatal) and masks the serial numbers
+#    in sysfs. Without "optional", a failed mount aborts the container start.
 cat >> "${CONFIGS}/config_3" <<'EOF'
 
 # Antumbra (config/hooks/56-session-android.sh): start only on the Tor-only
-# network; no camera devices; no device tree.
+# network; no camera devices; no device tree; not the host's kernel command line.
 lxc.hook.start-host = /usr/local/lib/antumbra-waydroid-start-host
+lxc.cgroup2.devices.allow = a
 lxc.cgroup2.devices.deny = c 81:* rwm
 lxc.mount.entry = tmpfs sys/firmware tmpfs ro,nosuid,nodev,noexec,mode=0555,size=4k 0 0
+lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0
 EOF
 [ "$(grep -c '^lxc.hook.start-host = /usr/local/lib/antumbra-waydroid-start-host$' "${CONFIGS}/config_3")" = "1" ] || die "config_3: start-host hook not set once"
 [ -x /usr/local/lib/antumbra-waydroid-start-host ] || die "the start-host hook is missing"
+[ "$(cat "${CONFIGS}/config_base" "${CONFIGS}/config_3" "${CONFIGS}/config_4" | grep '^lxc\.cgroup2\.devices\.')" \
+  = "$(printf '%s\n' 'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm')" ] \
+  || die "the templates' device rules are not exactly: allow a, then deny V4L2"
+[ -f "${ANDROID_DIR}/cmdline" ] || die "${ANDROID_DIR}/cmdline is missing"
+if grep -q 'androidboot' "${ANDROID_DIR}/cmdline"; then die "${ANDROID_DIR}/cmdline names androidboot values"; fi
+# 4. Close what Waydroid opened once the container stops: a post-stop hook
+#    ahead of Waydroid's own "/dev/null" one (which fails on purpose, so
+#    that LXC turns an Android reboot into a stop, and ends the list).
+sed -i 's|^lxc\.hook\.post-stop = /dev/null$|lxc.hook.post-stop = /usr/local/lib/antumbra-waydroid-post-stop\n&|' "${CONFIGS}/config_base"
+[ "$(grep '^lxc\.hook\.post-stop' "${CONFIGS}/config_base")" \
+  = "$(printf '%s\n' 'lxc.hook.post-stop = /usr/local/lib/antumbra-waydroid-post-stop' 'lxc.hook.post-stop = /dev/null')" ] \
+  || die "config_base: post-stop hooks are not exactly Antumbra's, then Waydroid's /dev/null"
+[ -x /usr/local/lib/antumbra-waydroid-post-stop ] || die "the post-stop hook is missing"
 
 # --- Waydroid itself: no camera devices --------------------------------------------------
 PATCH=/usr/share/antumbra/patches/waydroid-no-video.diff
