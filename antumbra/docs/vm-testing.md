@@ -96,7 +96,10 @@ how Persistent Storage survives a reboot in a test.
 initramfs, the compressed disk, the command line with the root hash and a
 `run.sh` that needs only `qemu-system-aarch64`, `qemu-img` and `zstd`, and
 uses KVM on arm64 Linux, Apple's hypervisor on Apple-silicon Macs and
-emulation elsewhere (`--debug` for the root console). The bundle has no
+emulation elsewhere (`--debug` for the root console). The VM gets 6 GiB
+of memory when the image has Android apps and 4 GiB otherwise (`MEM=` in
+MiB changes it), and the README names the commit the root filesystem was
+built from (`ANTUMBRA_SOURCE` in `build-flags`). The bundle has no
 harness: the checks below need the source tree.
 
 ## Smoke test

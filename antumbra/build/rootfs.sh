@@ -75,6 +75,11 @@ log "${#PKGS[@]} packages from lists: ${LISTS[*]}"
 
 # --- Overlays: root-owned copies with fixed modes (stage_overlay) ----------------
 OVERLAY="${WORK}/overlay"
+# The commit the overlays are staged from, for build-flags.
+SOURCE_COMMIT="$(git -C "${ANTUMBRA_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ "${SOURCE_COMMIT}" != unknown ] && [ -n "$(git -C "${ANTUMBRA_ROOT}" status --porcelain --untracked-files=no -- . 2>/dev/null)" ]; then
+    SOURCE_COMMIT="${SOURCE_COMMIT}-dirty"
+fi
 rm -rf "${OVERLAY}"
 stage_overlay "${CONFIG_DIR}/rootfs" "${OVERLAY}/rootfs"
 
@@ -252,8 +257,9 @@ log "initramfs: $(stat -c %s "${ROUT}/initrd.img") bytes"
 # bootimg, release) check it. ANTUMBRA_LIBCAMERA_LOCAL=1 when the local
 # libcamera was installed (never in minimal builds), DEVICE_FIRMWARE=1 when
 # the builder's firmware was; both are empty otherwise. squashfs.sh adds
-# ANTUMBRA_VERITY (1 or 0).
-printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nANTUMBRA_LIBCAMERA_LOCAL=%s\nDEVICE_FIRMWARE=%s\nKERNEL_RELEASE=%s\n' \
+# ANTUMBRA_VERITY (1 or 0). ANTUMBRA_SOURCE: the commit the overlays were
+# staged from, "-dirty" when the checkout had uncommitted changes then.
+printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nANTUMBRA_LIBCAMERA_LOCAL=%s\nDEVICE_FIRMWARE=%s\nKERNEL_RELEASE=%s\nANTUMBRA_SOURCE=%s\n' \
     "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "${LIBCAMERA_VERSION:+1}" "${DEVICE_FIRMWARE}" \
-    "${KREL}" > "${ROUT}/build-flags"
+    "${KREL}" "${SOURCE_COMMIT}" > "${ROUT}/build-flags"
 log "root filesystem tree ready at ${ROOT} ($(du -sh "${ROOT}" | cut -f1)), $(wc -l < "${ROUT}/packages.txt") packages"

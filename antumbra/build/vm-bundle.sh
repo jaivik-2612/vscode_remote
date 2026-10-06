@@ -42,6 +42,7 @@ cat > "${B}/run.sh" <<'RUN'
 #   ./run.sh --debug     also antumbra.debug=1: a root shell on the virtio
 #                        console, reachable at ./hvc0.sock (the script prints how)
 #   ./run.sh --fresh     discard the previous run's disk changes
+#   MEM=8192 ./run.sh    the VM's memory in MiB (default @MEM@)
 #
 # Needs qemu-system-aarch64, qemu-img and zstd. Uses KVM on arm64 Linux with
 # /dev/kvm and Apple's hypervisor on Apple-silicon Macs; anywhere else QEMU
@@ -71,7 +72,7 @@ if [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ]; then ACCEL=hvf; CPU=
 elif [ "$(uname -m)" = aarch64 ] && [ -w /dev/kvm ]; then ACCEL=kvm; CPU=host; fi
 echo "accelerator: $ACCEL"
 rm -f hvc0.sock
-set -- -M virt,gic-version=max -cpu "$CPU" -smp 4 -m 4096 -accel "$ACCEL" \
+set -- -M virt,gic-version=max -cpu "$CPU" -smp 4 -m "${MEM:-@MEM@}" -accel "$ACCEL" \
     -kernel Image -initrd initrd.img -append "$CMDLINE" \
     -drive if=none,id=userdata,file=overlay.qcow2,format=qcow2 \
     -device virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096 \
@@ -85,7 +86,21 @@ set -- -M virt,gic-version=max -cpu "$CPU" -smp 4 -m 4096 -accel "$ACCEL" \
 # shellcheck disable=SC2086  # EXTRA holds several arguments on purpose
 exec qemu-system-aarch64 "$@" $EXTRA
 RUN
+# Android apps need about 1.5 GB of their own next to the session.
+FLAGS="${ROUT}/build-flags"
+if grep -qx 'ANTUMBRA_ANDROID=1' "${FLAGS}" 2>/dev/null; then MEM_DEFAULT=6144; else MEM_DEFAULT=4096; fi
+sed -i "s/@MEM@/${MEM_DEFAULT}/g" "${B}/run.sh"
 chmod +x "${B}/run.sh"
+SOURCE="$(sed -n 's/^ANTUMBRA_SOURCE=//p' "${FLAGS}" 2>/dev/null)"
+ANDROID_NOTE=""
+if [ "${MEM_DEFAULT}" = 6144 ]; then
+    ANDROID_NOTE="
+Android apps are off until switched on at the Welcome screen. Under emulation
+Android takes about 15 minutes to boot and several more before its apps show in
+the app grid's Android folder; with KVM or Apple's hypervisor, a minute or two.
+Its traffic goes only through Tor, so it has no Internet until Tor has connected.
+"
+fi
 cat > "${B}/README.md" <<README
 # ${NAME}
 
@@ -103,7 +118,9 @@ On an Apple-silicon Mac or an arm64 Linux machine with KVM it runs at native spe
 Files: Image (kernel $(cat "${KOUT}/kernel.release")), initrd.img, vm-disk.img.zst
 (GPT disk with the "userdata" partition holding the live and Persistent
 Storage partitions), cmdline.txt (includes the dm-verity root hash of the
-squashfs), packages.txt. Built $(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ) from commit $(git -C "${ANTUMBRA_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown).
+squashfs), packages.txt. The root filesystem was built from commit
+${SOURCE:-unknown (built before build-flags recorded it)}. The VM gets ${MEM_DEFAULT} MiB of memory (MEM=... to change).
+${ANDROID_NOTE}
 See docs/vm-testing.md in the repository for what the VM can and cannot show.
 README
 ( cd "${B}" && sha256sum Image initrd.img vm-disk.img.zst cmdline.txt run.sh > SHA256SUMS )

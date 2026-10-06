@@ -44,8 +44,10 @@ is idempotent.
 `build-flags` records the device profile (`ANTUMBRA_DEVICE`), the debug,
 minimal and Android knobs, whether the port's libcamera and the
 builder's firmware were installed (`ANTUMBRA_LIBCAMERA_LOCAL` and
-`DEVICE_FIRMWARE`, 1 or empty) and the kernel release
-(`KERNEL_RELEASE`). `squashfs.sh` adds `ANTUMBRA_VERITY` (1 or 0),
+`DEVICE_FIRMWARE`, 1 or empty), the kernel release (`KERNEL_RELEASE`)
+and the commit the overlays were staged from (`ANTUMBRA_SOURCE`, with
+`-dirty` when the checkout had uncommitted changes; the test bundle's
+README names it). `squashfs.sh` adds `ANTUMBRA_VERITY` (1 or 0),
 replacing an earlier value, once the squashfs is complete.
 `squashfs.sh`, `image.sh`, `bootimg.sh` and `release.sh` refuse a
 missing `build-flags` or one for another profile. `bootimg.sh`, `vm.sh`

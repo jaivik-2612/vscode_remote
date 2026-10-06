@@ -452,6 +452,28 @@ class VerityAsBuiltTest(BuildOut):
         cmdline = os.path.join(self.t, "work", "qemu-virt", "bundle", f"antumbra-{VERSION}-qemu-virt", "cmdline.txt")
         return r, (read(cmdline) if r.returncode == 0 else None)
 
+    def test_vm_bundle_names_the_built_commit_and_gives_android_its_memory(self):
+        for tool in ("zstd", "tar"):
+            if not shutil.which(tool):
+                self.skipTest(f"{tool} missing")
+        write(os.path.join(self.out, "qemu-virt", "rootfs", "filesystem.squashfs.roothash"), ROOTHASH + "\n")
+        bundle = os.path.join(self.t, "work", "qemu-virt", "bundle", f"antumbra-{VERSION}-qemu-virt")
+        for android, source, mem in (("1", "0123abc", "6144"), ("", None, "4096")):
+            with self.subTest(android=android):
+                self.flags["ANTUMBRA_ANDROID"] = android
+                self.flags["ANTUMBRA_SOURCE"] = source
+                r, _ = self.vm_bundle()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                readme, run = read(os.path.join(bundle, "README.md")), read(os.path.join(bundle, "run.sh"))
+                # The commit the root filesystem was built from, not the checkout's HEAD now.
+                self.assertIn(f"built from commit\n{source}." if source else "built from commit\nunknown (built before build-flags recorded it).", readme)
+                self.assertIn(f'-m "${{MEM:-{mem}}}"', run)
+                self.assertNotIn("@MEM@", run)
+                self.assertEqual("Android apps are off until" in readme, bool(android))
+        src = read(os.path.join(BUILD, "rootfs.sh"))
+        self.assertIn("ANTUMBRA_SOURCE=%s", src)
+        self.assertLess(src.find("SOURCE_COMMIT=\"$(git"), src.find('\nstage_overlay "${CONFIG_DIR}/rootfs"'))
+
     def test_vm_bundle_follows_the_recorded_setting(self):
         for tool in ("zstd", "tar"):
             if not shutil.which(tool):
