@@ -332,11 +332,20 @@ class TrafficChecksTest(unittest.TestCase):
     BUILTIN = ("1.2.3.4", 443)
     GUARDS = [("198.51.100.10", 9001), ("198.51.100.11", 443), ("198.51.100.12", 9001)]
 
-    def phase(self, vm, fake, label, capture, peers):
+    def phase(self, vm, fake, label, capture, peers, record=None, timewait=()):
+        """The SYN check of one call, (ok, detail); its socket check goes to
+        self.sockets. CAPTURE is the whole run's capture so far, PEERS Tor's
+        sockets in this window, TIMEWAIT ownerless closed sockets in it,
+        RECORD the guest's record of Tor's SYNs (None: it cannot be read)."""
         with open(os.path.join(fake.run, "net.pcap"), "wb") as f:
             f.write(pcap(capture))
-        ss = "\n".join(f'tcp   ESTAB 0 0 10.0.2.15:4{i:04d} {ip}:{port} users:(("tor",pid=812,fd={i + 10})) uid:107 ino:{i + 4000}'
-                       for i, (ip, port) in enumerate(peers))
+        ss = "\n".join([f'tcp   ESTAB 0 0 10.0.2.15:4{i:04d} {ip}:{port} users:(("tor",pid=812,fd={i + 10})) uid:107 ino:{i + 4000}'
+                        for i, (ip, port) in enumerate(peers)]
+                       + [f"tcp   TIME-WAIT 0 0 10.0.2.15:5{i:04d} {ip}:{port} timer:(timewait,40sec,0) ino:0 sk:{i + 90}"
+                          for i, (ip, port) in enumerate(timewait)])
+        listing = ("table ip antumbra_vm_tor_syns {\n\tset syns {\n\t\ttype ipv4_addr . inet_service\n\t\tsize 65536\n"
+                   "\t\tflags dynamic\n" + (("\t\telements = { " + ",\n\t\t\t     ".join(f"{ip} . {port}" for ip, port in record) + " }\n")
+                                            if record else "") + "\t}\n}")
 
         def sh(cmd, timeout=120):
             if "ss -tunap" in cmd:
@@ -345,12 +354,15 @@ class TrafficChecksTest(unittest.TestCase):
                 return 0, "1.2.3.4 orport=443"
             if cmd == "id -u debian-tor":
                 return 0, "107"
+            if cmd == "nft -nn list set ip antumbra_vm_tor_syns syns" and record is not None:
+                return 0, listing
             return None, ""
         rep = vm.Report()
         vm.traffic_checks(fake, rep, lambda s: s, sh, label, 1)
         cap = "packet capture" if label == "after Welcome" else f"{label}, packet capture"
-        return [(ok, detail) for name, ok, detail, _ in rep.results
-                if name == f"{cap}: every TCP connection the guest opened went to a Tor directory or relay"][0]
+        found = {n: (ok, detail) for n, ok, detail, _ in rep.results}
+        self.sockets = found[f"{label}: every connection to the network belongs to Tor (DHCP aside)"]
+        return found[f"{cap}: every TCP connection the guest opened went to a Tor directory or relay"]
 
     def test_guards_of_an_earlier_phase_are_tor_s(self):
         vm = load_harness()
@@ -367,7 +379,84 @@ class TrafficChecksTest(unittest.TestCase):
             new_guard, stranger = ("198.51.100.13", 9001), ("203.0.113.9", 80)
             ok, detail = self.phase(vm, fake, "android-net", capture + [new_guard, stranger], [self.GUARDS[0], new_guard])
             self.assertFalse(ok)
-            self.assertEqual(detail, "not Tor's: 203.0.113.9:80")
+            self.assertEqual(detail, "not Tor's: 203.0.113.9:80; the record of Tor's SYNs could not be read")
+
+    def test_relay_closed_between_windows_is_tor_s_by_the_record(self):
+        # A directory fetch from a relay Tor first contacts between two
+        # windows and closes before the next: the SYN is new, no socket of
+        # Tor's shows it (at most an ownerless TIME-WAIT socket), and only
+        # the kernel's record of Tor's SYNs has it.
+        vm = load_harness()
+        relay, stranger = ("198.51.100.20", 443), ("203.0.113.9", 80)
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = types.SimpleNamespace(run=tmp)
+            capture = [self.BUILTIN] + self.GUARDS
+            record = [self.BUILTIN] + self.GUARDS
+            self.assertTrue(self.phase(vm, fake, "after Welcome", capture, self.GUARDS, record)[0])
+            capture, record = capture + [relay], record + [relay]
+            ok, detail = self.phase(vm, fake, "with Android", capture, self.GUARDS[:1], record, timewait=[relay])
+            self.assertTrue(ok, detail)
+            self.assertEqual(detail, "1 new destinations: 0 built into Tor, 0 seen on Tor's sockets, 1 only in the record of Tor's SYNs")
+            self.assertTrue(self.sockets[0], self.sockets[1])
+            self.assertIn("1 closed Tor sockets in TIME-WAIT", self.sockets[1])
+            # What no socket of Tor's sent stays a stranger, by the SYN and
+            # by its closed socket.
+            capture = capture + [stranger]
+            ok, detail = self.phase(vm, fake, "android-net", capture, self.GUARDS[:1], record, timewait=[stranger])
+            self.assertEqual((ok, detail), (False, "not Tor's: 203.0.113.9:80"))
+            self.assertFalse(self.sockets[0])
+            self.assertIn("203.0.113.9:80", self.sockets[1])
+
+    def test_without_the_record_a_relay_closed_between_windows_is_flagged(self):
+        # The record unreadable: as strict as before it existed.
+        vm = load_harness()
+        relay = ("198.51.100.20", 443)
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = types.SimpleNamespace(run=tmp)
+            capture = [self.BUILTIN] + self.GUARDS
+            self.assertTrue(self.phase(vm, fake, "after Welcome", capture, self.GUARDS)[0])
+            ok, detail = self.phase(vm, fake, "with Android", capture + [relay], self.GUARDS[:1])
+            self.assertEqual((ok, detail), (False, "not Tor's: 198.51.100.20:443; the record of Tor's SYNs could not be read"))
+
+    @unittest.skipUnless(os.geteuid() == 0 and shutil.which("nft") and shutil.which("unshare"), "needs root, nft and unshare")
+    def test_the_record_holds_only_tor_s_syns(self):
+        # The record's table in a network namespace of its own: a SYN from
+        # a socket of "Tor's" user (65534 here) is recorded, root's is not,
+        # and the harness reads the set back.
+        vm = load_harness()
+        script = r'''
+import os, socket, subprocess, sys
+def run(*cmd, **kw):
+    subprocess.run(cmd, check=True, **kw)
+run("nft", "-f", "-", input=sys.argv[1], text=True)
+run("ip", "link", "add", "rec0", "type", "veth", "peer", "name", "rec1")
+run("ip", "addr", "add", "192.0.2.1/24", "dev", "rec0")
+for link in ("lo", "rec0", "rec1"):
+    run("ip", "link", "set", link, "up")
+run("ip", "route", "add", "default", "via", "192.0.2.2", "dev", "rec0")
+def connect(host, port, uid):
+    if os.fork() == 0:
+        os.setgid(uid); os.setuid(uid)
+        s = socket.socket(); s.settimeout(0.3)
+        try:
+            s.connect((host, port))
+        except OSError:
+            pass
+        os._exit(0)
+    os.wait()
+connect("198.51.100.1", 443, 0)
+connect("198.51.100.2", 9001, 65534)
+connect("203.0.113.3", 443, 65534)
+sys.stdout.write(subprocess.run(["nft", "-nn", "list", "set", "ip", "antumbra_vm_tor_syns", "syns"], check=True,
+                                capture_output=True, text=True).stdout)
+'''
+        r = subprocess.run(["unshare", "-n", sys.executable, "-c", script, vm.tor_syn_table(65534)], capture_output=True, text=True)
+        if r.returncode != 0 and ("Unknown device type" in r.stderr or "Operation not supported" in r.stderr):
+            self.skipTest(r.stderr.strip()[-200:])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(vm.tor_syn_record(lambda cmd, timeout=120: (0, r.stdout)),
+                         {("198.51.100.2", 9001), ("203.0.113.3", 443)})
+        self.assertIsNone(vm.tor_syn_record(lambda cmd, timeout=120: (None, "")))
 
 
 LAB = os.path.join(ROOT, "tests", "android-net-lab.py")

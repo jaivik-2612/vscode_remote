@@ -127,8 +127,12 @@ asserts, in order:
    90 seconds, that every connection to the network belongs to Tor (DHCP
    aside); from the packet capture, that no DNS, NTP, IPv6 or other UDP
    left the guest, that every TCP connection the guest opened went to one
-   of the directory addresses built into the image's Tor or to a peer seen
-   on Tor's sockets, and that no frame carried the hardware MAC address;
+   of the directory addresses built into the image's Tor, to a peer seen
+   on Tor's sockets, or to a destination in the guest kernel's record of
+   the TCP SYNs Tor's sockets sent (an nft set in a table of the harness's
+   own, loaded before the Welcome decision and deleted after the session's
+   network checks; it catches relays Tor contacts and closes between two
+   socket polls), and that no frame carried the hardware MAC address;
 6. a short press of the virtual power button is ignored (only a long
    press powers off, as on the phone), a power-off requested from the
    console goes through the return-to-initramfs shutdown path (the hook

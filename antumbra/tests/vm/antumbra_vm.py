@@ -489,6 +489,9 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
     if android:
         # Found first: an Android switch turned on is drawn in the same accent.
         enable_android_switch(vm, rep, T, out)
+    # Before the guest has a network: from now on the kernel records where
+    # Tor's sockets send TCP SYNs (traffic_checks).
+    tor_syn_record_start(rep, sh)
     vm.tap(*target)
     # The session starts once the root-side applier has consumed the settings.
     session = False
@@ -528,12 +531,58 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
         android_phase(vm, rep, T, sh, out)
     if android_net:
         android_net_phase(vm, rep, T, sh, out)
+    tor_syn_record_stop(sh)
 
 
 # The confined applications' namespace veths, the containers' host-side veths
 # (LXC names them vethXXXXXX) and the Android bridge: links without a driver
 # that never carry the phone's traffic to a network themselves.
 HOST_ONLY_LINKS = r"veth[^:@ ]*|waydroid-tor"
+
+# The guest kernel's record of Tor's connection attempts: a table of the
+# harness's own adds the destination of every TCP SYN sent by a socket of
+# Tor's user to a set. It only records (policy accept, after the firewall's
+# filter chain, in a table that reloading nftables.conf leaves alone), from
+# before the Welcome screen brings the network up until the session's
+# network checks are done. ss sees a socket only while it exists during a
+# poll; the record also holds the relays Tor contacted and closed between
+# two polls.
+TOR_SYN_TABLE = "antumbra_vm_tor_syns"
+
+
+def tor_syn_table(uid):
+    """The record's nft table, for Tor's numeric user ID."""
+    return (f"table ip {TOR_SYN_TABLE} {{\n"
+            "    set syns { type ipv4_addr . inet_service; flags dynamic; size 65536; }\n"
+            "    chain output {\n"
+            "        type filter hook output priority 100; policy accept;\n"
+            f"        meta skuid {int(uid)} tcp flags & (syn | ack) == syn add @syns {{ ip daddr . tcp dport }}\n"
+            "    }\n"
+            "}\n")
+
+
+def tor_syn_record_start(rep, sh):
+    rc, o = sh("id -u debian-tor")
+    uid = o.strip() if rc == 0 and o.strip().isdigit() else None
+    ok = uid is not None and guest_write(sh, "/run/antumbra-vm-tor-syns.nft", tor_syn_table(uid), "0600")
+    if ok:
+        rc, o = sh(f"nft -f /run/antumbra-vm-tor-syns.nft && nft list chain ip {TOR_SYN_TABLE} output | grep -c 'add @syns'")
+        ok = rc == 0 and o.strip() == "1"
+    rep.check("harness: the guest kernel records where Tor's sockets send TCP SYNs (an nft set of the harness's own), "
+              "from before the network comes up", ok, o.strip()[-200:])
+
+
+def tor_syn_record(sh):
+    """{(IP, port)} of the TCP SYNs Tor's sockets sent since the record
+    started, or None if it cannot be read."""
+    rc, o = sh(f"nft -nn list set ip {TOR_SYN_TABLE} syns")
+    if rc != 0 or not re.search(r"^\s*type ipv4_addr \. inet_service$", o, re.M):
+        return None
+    return {(ip, int(port)) for ip, port in re.findall(r"(\d+\.\d+\.\d+\.\d+) \. (\d+)\b", o)}
+
+
+def tor_syn_record_stop(sh):
+    sh(f"nft delete table ip {TOR_SYN_TABLE}; rm -f /run/antumbra-vm-tor-syns.nft")
 
 
 def traffic_checks(vm, rep, T, sh, label, polls):
@@ -566,6 +615,13 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     def tor_owned(line):
         return '(("tor"' in line or (tor_uid is not None and re.search(rf"\buid:{tor_uid}\b", line) is not None)
 
+    capture = os.path.join(vm.run, "net.pcap")
+    syns = {(dst, port) for src, dst, port in pcap_tcp_syns(capture) if not src.startswith(SLIRP_MAC_PREFIXES)}
+    # The kernel's record of Tor's SYNs, read after the capture: each SYN of
+    # Tor's in the capture went through the output hook, and so into the
+    # record, before it reached the wire. Kept across calls like Tor's peers.
+    record = tor_syn_record(sh)
+    vm.tor_syns = getattr(vm, "tor_syns", set()) | (record or set())
     # NetworkManager's DHCP client (udp :68 -> :67, root) is the one non-Tor
     # flow the firewall allows, as in Tails. (Sockets on 10.200.1.0/24 and
     # 10.200.2.0/30 are the confined applications' and Android's connections
@@ -574,7 +630,7 @@ def traffic_checks(vm, rep, T, sh, label, polls):
             and ('(("NetworkManager"' in l or re.search(r"\buid:0\b", l))]
     tor_peers = {peer(l) for l in socks if tor_owned(l)} - {None}
     # A TIME-WAIT socket has no owner left; it is Tor's if its peer is.
-    timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin)]
+    timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin | vm.tor_syns)]
     non_tor = [l for l in socks if not tor_owned(l) and l not in dhcp and l not in timewait]
     rep.check(f"{label}: every connection to the network belongs to Tor (DHCP aside)", rc is not None and tor_uid is not None and not non_tor,
               f"{len(tor_peers)} Tor peers, {len(dhcp)} DHCP client sockets, {len(timewait)} closed Tor sockets in TIME-WAIT"
@@ -582,7 +638,6 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     cap = "packet capture" if label == "after Welcome" else f"{label}, packet capture"
     if label == "after Welcome":
         rep.check("Tor: its built-in directory addresses could be read from the guest", len(builtin) > 20, f"{len(builtin)} addresses")
-    capture = os.path.join(vm.run, "net.pcap")
     counts = pcap_summary(capture)
     # The capture holds both directions: judge every frame QEMU's user
     # network did not generate, whatever source MAC it carries.
@@ -593,19 +648,24 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     udp67 = sum(v for k, v in sent.items() if k[0] == "udp" and k[2] == 67)
     rep.check(f"{cap}: the guest sent no DNS, NTP, IPv6 or other UDP (DHCP aside)", not bad,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items())) or f"{sum(sent.values())} frames sent, {udp67} of them DHCP")
-    syns = {(dst, port) for src, dst, port in pcap_tcp_syns(capture) if not src.startswith(SLIRP_MAC_PREFIXES)}
     # The capture spans the whole run, but each call sees Tor's sockets only
     # in its own window, and Tor closes idle connections to its guards (a
     # reconnect reopens only the guard it uses). So Tor's peers are kept
     # across calls, and each call judges only the destinations that are new
-    # in the capture since the previous one.
+    # in the capture since the previous one. A destination is Tor's if it is
+    # built into Tor, was seen on Tor's sockets, or is in the kernel's record
+    # of SYNs from Tor's sockets (a relay contacted and closed between two
+    # windows is only there).
     vm.tor_peers = getattr(vm, "tor_peers", set()) | tor_peers
     new = syns - getattr(vm, "syns_seen", set())
-    stray = sorted(new - vm.tor_peers - builtin)
+    stray = sorted(new - vm.tor_peers - builtin - vm.tor_syns)
     vm.syns_seen = syns
+    seen = (new - builtin) & vm.tor_peers
     rep.check(f"{cap}: every TCP connection the guest opened went to a Tor directory or relay", bool(syns) and not stray,
               (("not Tor's: " + ", ".join(f"{d}:{p}" for d, p in stray[:8])) if stray else
-               f"{len(new)} new destinations: {len(new & builtin)} built into Tor, {len(new - builtin)} seen on Tor's sockets"))
+               f"{len(new)} new destinations: {len(new & builtin)} built into Tor, {len(seen)} seen on Tor's sockets, "
+               f"{len(new - builtin - seen)} only in the record of Tor's SYNs")
+              + ("" if record is not None else "; the record of Tor's SYNs could not be read"))
     rep.check(f"{cap}: no frame carried the hardware MAC address", not from_hw,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"guest frames came from {', '.join(sorted({k[3] for k in sent}))} only")
 
