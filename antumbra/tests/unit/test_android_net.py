@@ -226,6 +226,17 @@ class ConsoleAttachTest(unittest.TestCase):
         self.assertIn("nonexistent", o)
         self.assertEqual(run(f"{in_android('/system/bin/cat /nonexistent')} >/dev/null && echo readable || echo hidden"), (0, "hidden"))
 
+    def test_a_timed_out_command_is_interrupted(self):
+        # A command that outlives its limit keeps the shell busy: the next
+        # command times out behind it ...
+        with self.assertRaises(self.vm.Timeout):
+            self.console.run("sleep 60; echo late", timeout=2)
+        with self.assertRaises(self.vm.Timeout):
+            self.console.run("echo queued", timeout=3)
+        # ... until recover() interrupts it; then the console answers again.
+        self.assertTrue(self.console.recover(timeout=20))
+        self.assertEqual(self.console.run("echo after", timeout=20), (0, "after"))
+
     def test_waydroid_shell_with_redirections(self):
         self.assertEqual(self.console.run("for k in a b; do echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null "
                                           "| tr -d '\\r' | tail -n 1); done"), (0, "a=0\nb=0"))

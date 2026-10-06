@@ -191,6 +191,23 @@ class Console:
                 return int(m.group(1)), out.strip("\n")
         raise Timeout(f"console command timed out: {cmd!r}; got {buf[-500:]!r}")
 
+    def recover(self, timeout=120):
+        """After a command timed out the shell is still running it, and every
+        later command would wait behind it: interrupt it (Ctrl-C, as on a
+        terminal), then wait until a fresh marker comes back. True if the
+        shell answers again."""
+        if self.sock is None:
+            return False
+        try:
+            for _ in range(3):
+                self._raw("\x03")
+                time.sleep(1)
+            self._drain()
+            rc, _ = self.run("true", timeout=timeout)
+            return rc == 0
+        except Exception:  # noqa: BLE001
+            return False
+
     def close(self):
         if self.sock:
             self.sock.close()
@@ -2238,7 +2255,11 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
         try:
             return vm.console.run(cmd, timeout=timeout)
         except Exception as e:  # noqa: BLE001
-            rep.check(f"console: {cmd[:60]}", False, str(e)[:300])
+            # A timed-out command is still running in the guest's shell:
+            # interrupt it, so that one slow command does not fail every
+            # command after it.
+            recovered = isinstance(e, Timeout) and vm.console.recover()
+            rep.check(f"console: {cmd[:60]}", False, str(e)[:300] + (" (interrupted; the console answers again)" if recovered else ""))
             return None, ""
 
     # 1. Initramfs: the medium is found by bus and UUID, verity and the overlay come up.
