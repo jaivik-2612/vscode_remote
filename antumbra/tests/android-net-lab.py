@@ -15,9 +15,11 @@ runs for it as LXC runs it (LXC_PID one of its processes), then it runs
 android_probe_list of tests/vm/antumbra_vm.py, and judge_android_probes
 decides, as in the VM's --android-net run.
 
-Run by tests/lint.sh. Needs unprivileged user namespaces, or root; without
-them, or without nftables in the kernel, it says so and exits 0. --nft and
---hook take other versions of the two files.
+Run by tests/lint.sh. Needs unprivileged user namespaces, or root. Where the
+build host lacks something the lab itself needs (network or mount
+namespaces, a tmpfs, the bridge or veth driver, nftables or the reject
+expression the hook loads), it says what and exits 0: only the checks
+themselves fail. --nft and --hook take other versions of the two files.
 """
 import argparse
 import importlib.util
@@ -39,31 +41,53 @@ UPLINK = "192.168.1.37"
 SKIP = 3
 # The image's system users, numeric here (as in lint's nft -c).
 USERS = {"debian-tor": 9001, "htp": 1101, "clearnet": 1102, "_apt": 9002, "proxy": 13, "nobody": 65534, "root": 0}
+# What the start-host hook loads in the container's network namespace,
+# reduced to the kernel features it needs: an ip table on the output hook
+# with a reject expression (nft_reject_ipv4).
+REJECT_PROBE = ("table ip antumbra_lab_probe { chain output { type filter hook output priority filter; "
+                "policy accept; ip daddr 127.192.0.0/10 reject; }; }\n")
+# The exit status of the hook's wrapper when its mount namespace could not
+# be set up (the hook itself exits 0 or 1).
+HOOK_SETUP_FAILED = 125
 
 
-def run(*cmd, check=True):
-    return subprocess.run(cmd, check=check, text=True, capture_output=True, env=dict(os.environ, PATH=PATH))
+class Skip(Exception):
+    """This build host cannot run the lab: not a finding about the code."""
+
+
+def setup(why, *cmd, stdin=None):
+    """Run a command the lab needs to set itself up. If it fails, the host
+    lacks something (a namespace, a driver, a kernel feature): Skip."""
+    r = subprocess.run(cmd, text=True, capture_output=True, input=stdin, env=dict(os.environ, PATH=PATH))
+    if r.returncode != 0:
+        raise Skip(f"{why} ({' '.join(cmd)[:160]}): {(r.stderr or r.stdout).strip()[:300]}")
+    return r
 
 
 def write(path, value):
-    with open(path, "w") as f:
-        f.write(value)
+    try:
+        with open(path, "w") as f:
+            f.write(value)
+    except OSError as e:
+        raise Skip(f"cannot write {path}: {e.strerror}")
 
 
 def tor_stand_ins(onion_answer):
     """Tor's TransPort and DNSPort for Android, as far as the probes see them."""
-    tp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    tp.bind(("10.200.2.1", 9041))
-    tp.listen(64)
+    try:
+        tp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        tp.bind(("10.200.2.1", 9041))
+        tp.listen(64)
+        dp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        dp.bind(("10.200.2.1", 5354))
+    except OSError as e:
+        raise Skip(f"cannot open the stand-ins for Tor's listeners: {e}")
     held = []
 
     def accept():
         while True:
             held.append(tp.accept()[0])
-
-    dp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    dp.bind(("10.200.2.1", 5354))
 
     def answer():
         while True:
@@ -84,110 +108,132 @@ def tor_stand_ins(onion_answer):
 
 
 def lab(args):
+    tmp = tempfile.mkdtemp(prefix="antumbra-android-lab-")
+    container = []
+    try:
+        return checks(args, tmp, container)
+    except Skip as e:
+        print(f"skipped: {e}", flush=True)
+        return SKIP
+    finally:
+        for c in container:
+            c.kill()
+            c.wait()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def checks(args, tmp, container):
     spec = importlib.util.spec_from_file_location("antumbra_vm", os.path.join(ROOT, "tests", "vm", "antumbra_vm.py"))
     vm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(vm)
-    tmp = tempfile.mkdtemp(prefix="antumbra-android-lab-")
-    container = None
-    try:
-        # The host.
-        run("ip", "link", "set", "lo", "up")
-        write("/proc/sys/net/ipv4/ip_forward", "1")
-        run("ip", "link", "add", "waydroid-tor", "type", "bridge")
-        run("ip", "addr", "add", "10.200.2.1/30", "dev", "waydroid-tor")
-        run("ip", "link", "set", "waydroid-tor", "up")
-        write("/proc/sys/net/ipv4/conf/waydroid-tor/forwarding", "0")
-        for link, peer, addrs in (("wlan0", "wlan0-lan", (UPLINK + "/24", vm.HOST_PUBLIC + "/32")),
-                                  ("veth-tbb", "veth-tbb-ns", ("10.200.1.1/30",))):
-            run("ip", "link", "add", link, "type", "veth", "peer", "name", peer)
-            for a in addrs:
-                run("ip", "addr", "add", a, "dev", link)
-            run("ip", "link", "set", link, "up")
-            run("ip", "link", "set", peer, "up")
-        run("ip", "route", "add", "default", "via", "192.168.1.1", "dev", "wlan0")
-        with open(args.nft) as f:
-            ruleset = f.read()
-        for user, uid in USERS.items():
-            ruleset = ruleset.replace(f'"{user}"', str(uid))
-        r = subprocess.run(["nft", "-f", "-"], input=ruleset, text=True, capture_output=True, env=dict(os.environ, PATH=PATH))
-        if r.returncode != 0:
-            print(f"skipped: nftables.conf does not load in this namespace (kernel modules?): {r.stderr.strip()[:300]}")
-            return SKIP
-        tor_stand_ins("127.198.154.224")
-        # The container: a process in a network namespace of its own on the bridge.
-        container = subprocess.Popen(["unshare", "-n", "sleep", "600"], env=dict(os.environ, PATH=PATH))
-        own = os.readlink("/proc/self/ns/net")
-        for _ in range(250):
-            try:
-                if os.readlink(f"/proc/{container.pid}/ns/net") != own:
-                    break
-            except OSError:
-                pass
-            time.sleep(0.02)
-        else:
-            raise RuntimeError("the container's namespace did not appear")
-        ct = ("nsenter", "--target", str(container.pid), "--net")
-        run("ip", "link", "add", "vethct", "type", "veth", "peer", "name", "eth0", "netns", str(container.pid))
-        run("ip", "link", "set", "vethct", "master", "waydroid-tor")
-        run("ip", "link", "set", "vethct", "up")
-        run(*ct, "ip", "link", "set", "lo", "up")
-        run(*ct, "ip", "link", "set", "eth0", "address", vm.ANDROID_MAC)
-        run(*ct, "ip", "addr", "add", "10.200.2.2/30", "dev", "eth0")
-        run(*ct, "ip", "link", "set", "eth0", "up")
-        run(*ct, "ip", "route", "add", "default", "via", "10.200.2.1")
-        # The start-host hook, as LXC runs it.
-        # The configuration carries the identifier lines the hook also
-        # requires, with a mask for every serial number file on this machine;
-        # the hook runs in a mount namespace of its own with a fresh /run
-        # holding the image's generic kernel command line, where
-        # antumbra-waydroid puts it.
-        conf = os.path.join(tmp, "config")
-        serials = run("sh", "-c", vm.SERIAL_FIND, check=False).stdout.split("\n")
-        write(conf, "".join(l + "\n" for l in [
-            "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
-            "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
-            "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]
-            + [f"lxc.mount.entry = /dev/null {f.lstrip('/')} none bind,ro 0 0" for f in serials if f]))
-        generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
-        hook = subprocess.run(["unshare", "--mount", "--propagation", "private", "sh", "-c",
-                               'mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
-                               'cp "$1" /run/antumbra/android-cmdline && shift && exec sh "$@"',
-                               "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
-                              env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(container.pid), LXC_CONFIG_FILE=conf))
-        results = [("lab: the start-host hook passes for the stand-in container", hook.returncode == 0,
-                    f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l))]
-        # The harness's probes, each in a process of its own, all at once.
-        probe = os.path.join(tmp, "probe.py")
-        write(probe, vm.ANDROID_PROBE_PY)
-        procs = [subprocess.Popen([*ct, sys.executable, probe, "run", json.dumps([p])], text=True,
-                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ, PATH=PATH))
-                 for p in vm.android_probe_list(UPLINK)]
-        res = {}
-        for p in procs:
-            out, err = p.communicate(timeout=120)
-            m = re.search(r"^PROBES (\{.*\})$", out, re.M)
-            if p.returncode != 0 or not m:
-                results.append(("lab: probe ran", False, (out + err).strip()[-300:]))
-                continue
-            res.update(json.loads(m.group(1)))
-        results += vm.judge_android_probes(res, UPLINK)
-        # The .onion probe as the --android run uses it in Android's
-        # namespace, its DNS bound to eth0.
-        onion = [p for p in vm.android_probe_list(UPLINK) if p[0] == "onion"]
-        r = subprocess.run([*ct, sys.executable, probe, "run", json.dumps(onion)], text=True, capture_output=True,
-                           env=dict(os.environ, PATH=PATH, ANTUMBRA_PROBE_DNS_DEVICE="eth0"))
-        results.append(("lab: the .onion probe with its DNS bound to eth0 (as in --android) is refused too",
-                        r.returncode == 0 and r.stdout.strip().endswith('": "refused loopback=connected"}'), (r.stdout + r.stderr).strip()[-200:]))
-        if args.verbose:
-            print(json.dumps(res, indent=1, sort_keys=True))
-        for name, ok, detail in results:
-            print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""), flush=True)
-        return 0 if all(ok for _, ok, _ in results) else 1
-    finally:
-        if container is not None:
-            container.kill()
-            container.wait()
-        shutil.rmtree(tmp, ignore_errors=True)
+    # What the start-host hook's run needs from this host, tried on its own
+    # first, so that a hook failure is the hook's: a mount namespace with a
+    # tmpfs on /run, and the hook's reject rule in a new network namespace.
+    setup("no mount namespace with a tmpfs on /run for the hook's run",
+          "unshare", "--mount", "--propagation", "private", "sh", "-c", "mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra")
+    setup("this kernel does not load the hook's .onion reject rule in a new network namespace (nft_reject_ipv4?)",
+          "unshare", "-n", "nft", "-f", "-", stdin=REJECT_PROBE)
+    # The host.
+    why = "cannot build the lab's network (bridge and veth drivers, addresses, routes)"
+    setup(why, "ip", "link", "set", "lo", "up")
+    write("/proc/sys/net/ipv4/ip_forward", "1")
+    setup(why, "ip", "link", "add", "waydroid-tor", "type", "bridge")
+    setup(why, "ip", "addr", "add", "10.200.2.1/30", "dev", "waydroid-tor")
+    setup(why, "ip", "link", "set", "waydroid-tor", "up")
+    write("/proc/sys/net/ipv4/conf/waydroid-tor/forwarding", "0")
+    for link, peer, addrs in (("wlan0", "wlan0-lan", (UPLINK + "/24", vm.HOST_PUBLIC + "/32")),
+                              ("veth-tbb", "veth-tbb-ns", ("10.200.1.1/30",))):
+        setup(why, "ip", "link", "add", link, "type", "veth", "peer", "name", peer)
+        for a in addrs:
+            setup(why, "ip", "addr", "add", a, "dev", link)
+        setup(why, "ip", "link", "set", link, "up")
+        setup(why, "ip", "link", "set", peer, "up")
+    setup(why, "ip", "route", "add", "default", "via", "192.168.1.1", "dev", "wlan0")
+    with open(args.nft) as f:
+        ruleset = f.read()
+    for user, uid in USERS.items():
+        ruleset = ruleset.replace(f'"{user}"', str(uid))
+    setup("nftables.conf does not load in this namespace (kernel modules?)", "nft", "-f", "-", stdin=ruleset)
+    tor_stand_ins("127.198.154.224")
+    # The container: a process in a network namespace of its own on the bridge.
+    container.append(subprocess.Popen(["unshare", "-n", "sleep", "600"], env=dict(os.environ, PATH=PATH),
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
+    pid = container[0].pid
+    own = os.readlink("/proc/self/ns/net")
+    for _ in range(250):
+        if container[0].poll() is not None:
+            raise Skip(f"cannot create the container's network namespace (unshare -n): {container[0].stderr.read().strip()[:300]}")
+        try:
+            if os.readlink(f"/proc/{pid}/ns/net") != own:
+                break
+        except OSError:
+            pass
+        time.sleep(0.02)
+    else:
+        raise Skip("the container's network namespace did not appear")
+    ct = ("nsenter", "--target", str(pid), "--net")
+    why = "cannot build the container's network"
+    setup(why, "ip", "link", "add", "vethct", "type", "veth", "peer", "name", "eth0", "netns", str(pid))
+    setup(why, "ip", "link", "set", "vethct", "master", "waydroid-tor")
+    setup(why, "ip", "link", "set", "vethct", "up")
+    setup(why, *ct, "ip", "link", "set", "lo", "up")
+    setup(why, *ct, "ip", "link", "set", "eth0", "address", vm.ANDROID_MAC)
+    setup(why, *ct, "ip", "addr", "add", "10.200.2.2/30", "dev", "eth0")
+    setup(why, *ct, "ip", "link", "set", "eth0", "up")
+    setup(why, *ct, "ip", "route", "add", "default", "via", "10.200.2.1")
+    # The start-host hook, as LXC runs it.
+    # The configuration carries the identifier lines the hook also
+    # requires, with a mask for every serial number file on this machine;
+    # the hook runs in a mount namespace of its own with a fresh /run
+    # holding the image's generic kernel command line, where
+    # antumbra-waydroid puts it.
+    conf = os.path.join(tmp, "config")
+    serials = subprocess.run(["sh", "-c", vm.SERIAL_FIND], text=True, capture_output=True,
+                             env=dict(os.environ, PATH=PATH)).stdout.split("\n")
+    write(conf, "".join(l + "\n" for l in [
+        "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
+        "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
+        "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]
+        + [f"lxc.mount.entry = /dev/null {f.lstrip('/')} none bind,ro 0 0" for f in serials if f]))
+    generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
+    hook = subprocess.run(["unshare", "--mount", "--propagation", "private", "sh", "-c",
+                           '{ mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
+                           'cp "$1" /run/antumbra/android-cmdline; } || exit ' + str(HOOK_SETUP_FAILED) + '; '
+                           'shift && exec sh "$@"',
+                           "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
+                          env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(pid), LXC_CONFIG_FILE=conf))
+    # unshare's own errors start with "unshare: "; the hook's never do.
+    if hook.returncode == HOOK_SETUP_FAILED or hook.stderr.startswith("unshare: "):
+        raise Skip(f"cannot set up the hook's mount namespace: {hook.stderr.strip()[:300]}")
+    results = [("lab: the start-host hook passes for the stand-in container", hook.returncode == 0,
+                f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l))]
+    # The harness's probes, each in a process of its own, all at once.
+    probe = os.path.join(tmp, "probe.py")
+    write(probe, vm.ANDROID_PROBE_PY)
+    procs = [subprocess.Popen([*ct, sys.executable, probe, "run", json.dumps([p])], text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=dict(os.environ, PATH=PATH))
+             for p in vm.android_probe_list(UPLINK)]
+    res = {}
+    for p in procs:
+        out, err = p.communicate(timeout=120)
+        m = re.search(r"^PROBES (\{.*\})$", out, re.M)
+        if p.returncode != 0 or not m:
+            results.append(("lab: probe ran", False, (out + err).strip()[-300:]))
+            continue
+        res.update(json.loads(m.group(1)))
+    results += vm.judge_android_probes(res, UPLINK)
+    # The .onion probe as the --android run uses it in Android's
+    # namespace, its DNS bound to eth0.
+    onion = [p for p in vm.android_probe_list(UPLINK) if p[0] == "onion"]
+    r = subprocess.run([*ct, sys.executable, probe, "run", json.dumps(onion)], text=True, capture_output=True,
+                       env=dict(os.environ, PATH=PATH, ANTUMBRA_PROBE_DNS_DEVICE="eth0"))
+    results.append(("lab: the .onion probe with its DNS bound to eth0 (as in --android) is refused too",
+                    r.returncode == 0 and r.stdout.strip().endswith('": "refused loopback=connected"}'), (r.stdout + r.stderr).strip()[-200:]))
+    if args.verbose:
+        print(json.dumps(res, indent=1, sort_keys=True))
+    for name, ok, detail in results:
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f": {detail}" if detail else ""), flush=True)
+    return 0 if all(ok for _, ok, _ in results) else 1
 
 
 def main():

@@ -19,6 +19,7 @@ import shutil
 import socket
 import struct
 import subprocess
+import sys
 import tempfile
 import termios
 import threading
@@ -367,6 +368,100 @@ class TrafficChecksTest(unittest.TestCase):
             ok, detail = self.phase(vm, fake, "android-net", capture + [new_guard, stranger], [self.GUARDS[0], new_guard])
             self.assertFalse(ok)
             self.assertEqual(detail, "not Tor's: 203.0.113.9:80")
+
+
+LAB = os.path.join(ROOT, "tests", "android-net-lab.py")
+LAB_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+# Shims for the lab's tools, each standing for a build host without one
+# kernel feature; KEEP is the real program.
+LAB_SHIMS = {
+    # no bridge module (a user namespace cannot load one)
+    "bridge": ("ip", 'case " $* " in *" type bridge "*) echo "Error: Unknown device type." >&2; exit 2 ;; esac\n'
+                     'exec KEEP "$@"\n'),
+    # no tmpfs mount allowed
+    "tmpfs": ("mount", 'case " $* " in *" tmpfs "*) echo "mount: /run: permission denied." >&2; exit 32 ;; esac\n'
+                       'exec KEEP "$@"\n'),
+    # no mount namespaces
+    "mount namespace": ("unshare", 'case " $* " in *" --mount "*) echo "unshare: unshare failed: Operation not permitted" >&2; exit 1 ;; esac\n'
+                                   'exec KEEP "$@"\n'),
+    # nf_tables without nft_reject_ipv4 (the ruleset's inet rejects load)
+    "reject": ("nft", 'if [ "$1 $2" = "-f -" ]; then\n'
+                      '    input="$(cat)"\n'
+                      '    case "$input" in *"127.192.0.0/10 reject"*) echo "Error: Could not process rule: No such file or directory" >&2; exit 1 ;; esac\n'
+                      '    printf "%s\\n" "$input" | exec KEEP "$@"\n'
+                      'fi\n'
+                      'exec KEEP "$@"\n'),
+}
+
+
+class LabSkipTest(unittest.TestCase):
+    """tests/android-net-lab.py on build hosts that lack a kernel feature it
+    needs: it says so and exits 0 (lint goes on), while a hook that really
+    fails is still a failure. Each run binds a shim over one of the lab's
+    tools in a mount namespace of its own."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.ns = ["unshare", "--mount", "--propagation", "private"] if os.geteuid() == 0 else \
+            ["unshare", "-Ur", "--mount", "--propagation", "private"]
+        net = ["unshare", "-n", "true"] if os.geteuid() == 0 else ["unshare", "-Urn", "true"]
+        for probe in (cls.ns + ["true"], net):
+            if subprocess.run(probe, capture_output=True).returncode != 0:
+                raise unittest.SkipTest(f"cannot run {' '.join(probe)} here")
+        for tool in ("ip", "nft", "nsenter", "mount", "unshare"):
+            if not shutil.which(tool, path=LAB_PATH):
+                raise unittest.SkipTest(f"{tool} not installed")
+
+    def lab(self, shim=None, hook=None):
+        with tempfile.TemporaryDirectory() as d:
+            script = "set -e\n"
+            if shim:
+                tool, body = LAB_SHIMS[shim]
+                real = os.path.realpath(shutil.which(tool, path=LAB_PATH))
+                keep, fake = os.path.join(d, tool + ".real"), os.path.join(d, tool)
+                with open(fake, "w") as f:
+                    f.write("#!/bin/sh\n" + body.replace("KEEP", keep))
+                os.chmod(fake, 0o755)
+                open(keep, "w").close()
+                script += f"mount --bind {real} {keep}\nmount --bind {fake} {real}\n"
+            script += 'exec "$@"\n'
+            argv = [sys.executable, LAB] + (["--hook", hook] if hook else [])
+            r = subprocess.run(self.ns + ["sh", "-c", script, "sh"] + argv, capture_output=True, text=True, timeout=300,
+                               env=dict(os.environ, PATH=LAB_PATH))
+        return r.returncode, r.stdout + r.stderr
+
+    def test_missing_kernel_features_skip(self):
+        for shim, says in (("bridge", "Unknown device type"), ("tmpfs", "permission denied"),
+                           ("mount namespace", "unshare failed"), ("reject", "Could not process rule")):
+            with self.subTest(shim):
+                rc, out = self.lab(shim)
+                self.assertEqual(rc, 0, out)
+                self.assertTrue(out.startswith("skipped: "), out)
+                self.assertIn(says, out)
+                self.assertNotIn("[FAIL]", out)
+
+    def test_a_failing_hook_still_fails(self):
+        with open(os.path.join(ROOT, "config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid-start-host")) as f:
+            hook = f.read()
+        with tempfile.TemporaryDirectory() as d:
+            for name, text in (("refuses", hook.replace("\nexit 0\n", "\nfail 'lab test'\n")),
+                               ("bad nft", hook.replace("127.192.0.0/10 reject;", "127.192.0.0/10 rejekt;"))):
+                with self.subTest(name):
+                    self.assertNotEqual(text, hook)
+                    path = os.path.join(d, "hook")
+                    with open(path, "w") as f:
+                        f.write(text)
+                    rc, out = self.lab(hook=path)
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("[FAIL] lab: the start-host hook passes", out)
+                    self.assertNotIn("skipped", out)
+
+    def test_passes_with_every_feature(self):
+        rc, out = self.lab()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("skipped", out)
+        self.assertNotIn("[FAIL]", out)
+        self.assertGreaterEqual(out.count("[PASS]"), 8, out)
 
 
 if __name__ == "__main__":

@@ -218,7 +218,10 @@ failing closed without each part of the network or the container's PID
 missing, and from the packet capture that nothing of the stand-in left the
 guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
 firewall, the hook and these probes in network namespaces on the build
-host.
+host. Where the build host lacks something the lab itself needs (network
+or mount namespaces, a tmpfs, the bridge or veth driver, nftables or the
+reject expression the hook loads), the lab says what and is skipped
+(exit 0); only its checks fail.
 It takes a few minutes longer than `--through-welcome`.
 
 `tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
