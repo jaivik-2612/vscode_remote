@@ -132,7 +132,10 @@ asserts, in order:
    the TCP SYNs Tor's sockets sent (an nft set in a table of the harness's
    own, loaded before the Welcome decision and deleted after the session's
    network checks; it catches relays Tor contacts and closes between two
-   socket polls), and that no frame carried the hardware MAC address;
+   socket polls). Destinations are matched by address and port, so another
+   program's connection to an address and port Tor also used would pass
+   this capture check; the socket check catches it only while it is open.
+   And that no frame carried the hardware MAC address;
 6. a short press of the virtual power button is ignored (only a long
    press powers off, as on the phone), a power-off requested from the
    console goes through the return-to-initramfs shutdown path (the hook
