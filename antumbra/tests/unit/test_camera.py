@@ -432,9 +432,21 @@ class GuestScanTest(unittest.TestCase):
         self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith(f"the scan was stopped at its limit ({limit} s) after 1672 s"),
                         results[self.vm.ONEPLUS_SCAN][1])
         self.assertTrue(results[control][0])
-        # killed before its limit (the OOM killer, say): not "stopped at its limit"
-        results, _, _, _ = self.run_checks(scan="scan: exit 137 after 300 s")
+        # killed by SIGKILL: timeout dies by it too, and the console's
+        # interactive bash prints "Killed" before the status line. After
+        # its limit (timeout's -k 30): stopped at its limit, with the
+        # findings after the status line.
+        results, limit, kill, _ = self.run_checks(scan=f"Killed\nscan: exit 137 after {limit + 30} s\n/usr/a.apk: cannot inspect (zip: x)")
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN],
+                         (False, f"the scan was stopped at its limit ({limit} s) after {limit + kill} s: /usr/a.apk: cannot inspect (zip: x)"))
+        self.assertTrue(results[control][0])
+        # before its limit (the OOM killer, say): not "stopped at its limit"
+        results, _, _, _ = self.run_checks(scan="Killed\nscan: exit 137 after 300 s")
         self.assertEqual(results[self.vm.ONEPLUS_SCAN], (False, "scanner exit 137"))
+        # a status line anywhere else is no status line
+        results, _, _, _ = self.run_checks(scan="Killed\nscan: exit 0 after 300 s and more")
+        self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
+        self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith("no status from the scan: Killed"), results[self.vm.ONEPLUS_SCAN])
         # no status line: the scan did not run as asked
         results, _, _, _ = self.run_checks(scan="python3: can't open file")
         self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
@@ -553,6 +565,37 @@ class OnePlusScannerTest(unittest.TestCase):
                 self.assertEqual(rc, 1, out)
                 self.assertEqual(out, f"{argv[-1]}: cannot inspect (No such file or directory)\n")
         self.assertEqual(self.main(self.tmp), (0, ""))
+
+    def test_a_root_link_is_followed(self):
+        # ROOT a symbolic link to a file: the file's content and name count
+        # as well as the link's name, reported under ROOT.
+        package = self.apk("renamed.apk", "com.oneplus.camera")
+        named = self.touch("OnePlusCamera.apk")
+        clean = self.apk("F-Droid.apk", "org.fdroid.fdroid")
+        for target, hit in ((package, True), (named, True), (clean, False)):
+            link = os.path.join(self.tmp, "plain-link")
+            os.symlink(os.path.relpath(target, self.tmp), link)
+            with self.subTest(target=os.path.basename(target)):
+                self.assertFalse(self.nopc.name_matches("plain-link"))
+                self.assertEqual(self.nopc.scan(link, False, set()), [link] if hit else [])
+                self.assertEqual(self.main(link), (1, link + "\n") if hit else (0, ""))
+            os.unlink(link)
+
+    def test_a_root_link_to_a_directory_on_another_file_system(self):
+        # --xdev keeps to the file system of the directory ROOT leads to,
+        # not of the link.
+        try:
+            other = tempfile.mkdtemp(dir="/dev/shm")
+        except OSError:
+            self.skipTest("no /dev/shm to write to")
+        self.addCleanup(shutil.rmtree, other)
+        if os.stat(other).st_dev == os.stat(self.tmp).st_dev:
+            self.skipTest("/dev/shm is on the same file system as the temporary directory")
+        os.makedirs(os.path.join(other, "vendor", "firmware"))
+        open(os.path.join(other, "vendor", "firmware", "CAMERA_ICP.elf"), "w").close()
+        link = os.path.join(self.tmp, "image")
+        os.symlink(other, link)
+        self.assertEqual(self.nopc.scan(link, True, set()), [os.path.join(link, "vendor", "firmware", "CAMERA_ICP.elf")])
 
     def test_a_directory_it_cannot_list_fails(self):
         # (root may list any directory, so the refusal is simulated)

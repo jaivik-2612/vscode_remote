@@ -902,9 +902,12 @@ def oneplus_scan_checks(rep, T, sh):
     rc, o = sh(f"S=$(date +%s); timeout -k 30 {limit} python3 /tmp/antumbra-no-oneplus-camera.py --xdev / "
                "> /run/antumbra-nopc.out 2>&1; R=$?; echo \"scan: exit $R after $(( $(date +%s) - S )) s\"; "
                "cat /run/antumbra-nopc.out; rm -f /run/antumbra-nopc.out", timeout=limit + 30 + T(120))
-    lines = o.strip().split("\n") if rc == 0 else []
-    status = re.fullmatch(r"scan: exit (\d+) after (\d+) s", lines[0].strip()) if lines else None
-    found = "\n".join(lines[1:]).strip()
+    # The status line need not come first: when the scan dies by SIGKILL
+    # (timeout's -k, the OOM killer), timeout dies by it too and the
+    # console's interactive shell prints "Killed" before it. The findings
+    # are what follows it.
+    status = re.search(r"^scan: exit (\d+) after (\d+) s[ \t\r]*$", o, re.M) if rc == 0 else None
+    found = o[status.end():].strip() if status else ""
     if status is None:
         detail = "no status from the scan: " + flat(o)
     elif status.group(1) == "124" or (status.group(1) == "137" and int(status.group(2)) >= limit):

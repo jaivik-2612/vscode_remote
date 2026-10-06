@@ -20,8 +20,10 @@ judge_android_probes decides, as in the VM's --android-net run.
 Run by tests/lint.sh. Needs unprivileged user namespaces, or root. Where the
 build host lacks something the lab itself needs (network or mount
 namespaces, a tmpfs, bind mounts over sysfs, the bridge or veth driver,
-nftables or the reject expression the hook loads), it says what and exits 0: only the checks
-themselves fail. --nft and --hook take other versions of the two files.
+nftables or the reject expression the hook loads), it says what and exits
+0: only the checks themselves fail, and a file it runs (the firewall, the
+hook, the image's generic kernel command line) that cannot be read, on any
+host. --nft and --hook take other versions of the first two files.
 """
 import argparse
 import importlib.machinery
@@ -48,8 +50,12 @@ USERS = {"debian-tor": 9001, "htp": 1101, "clearnet": 1102, "_apt": 9002, "proxy
 # with a reject expression (nft_reject_ipv4).
 REJECT_PROBE = ("table ip antumbra_lab_probe { chain output { type filter hook output priority filter; "
                 "policy accept; ip daddr 127.192.0.0/10 reject; }; }\n")
+# The image's generic kernel command line, which antumbra-waydroid puts
+# in /run/antumbra for the container and the hook's run here copies there.
+GENERIC_CMDLINE = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
 # The exit status of the hook's wrapper when its mount namespace could not
-# be set up (the hook itself exits 0 or 1).
+# be set up (the hook itself exits 0 or 1). The files it copies were read
+# before (unreadable() in main), so this is the host's doing.
 HOOK_SETUP_FAILED = 125
 # The stand-in container's namespaces as LXC leaves the container's before
 # the start-host hook: a network namespace, and a mount namespace with the
@@ -133,6 +139,21 @@ def tor_stand_ins(onion_answer):
 
     for target in (accept, answer):
         threading.Thread(target=target, daemon=True).start()
+
+
+def unreadable(args):
+    """The files the lab runs, from the repository or from --nft and
+    --hook, that cannot be read: findings about the code, whatever the
+    host, never a reason to skip."""
+    bad = []
+    for what, path in (("the firewall", args.nft), ("the start-host hook", args.hook),
+                       ("the image's generic kernel command line", GENERIC_CMDLINE)):
+        try:
+            with open(path, "rb"):
+                pass
+        except OSError as e:
+            bad.append(f"[FAIL] lab: {what} can be read ({path}): {e.strerror}")
+    return bad
 
 
 def load_antumbra_waydroid():
@@ -231,7 +252,6 @@ def checks(args, tmp, container):
     # holding the image's generic kernel command line, where
     # antumbra-waydroid puts it.
     conf = os.path.join(tmp, "config")
-    generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
 
     def start_host(masks, pid=pid):
         write(conf, "".join(l + "\n" for l in [
@@ -243,7 +263,7 @@ def checks(args, tmp, container):
                                '{ mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
                                'cp "$1" /run/antumbra/android-cmdline; } || exit ' + str(HOOK_SETUP_FAILED) + '; '
                                'shift && exec sh "$@"',
-                               "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
+                               "sh", GENERIC_CMDLINE, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
                               env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(pid), LXC_CONFIG_FILE=conf))
         # unshare's own errors start with "unshare: "; the hook's never do.
         if hook.returncode == HOOK_SETUP_FAILED or hook.stderr.startswith("unshare: "):
@@ -309,6 +329,10 @@ def main():
     ap.add_argument("--inside", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     args.nft, args.hook = os.path.abspath(args.nft), os.path.abspath(args.hook)
+    bad = unreadable(args)
+    if bad:
+        print("\n".join(bad), flush=True)
+        return 1
     if args.inside:
         return lab(args)
     env = dict(os.environ, PATH=PATH)
