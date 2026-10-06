@@ -19,12 +19,17 @@ servers. Before that, waydroid.cfg gets Antumbra's settings:
 - in a virtual machine, software rendering (the virtio GPU has no 3D).
 
 Then the container gets a generic kernel command line (the phone's boot
-loader puts its serial number on the host's) and the hardware serial
-numbers in sysfs are masked, the generated LXC configuration is checked
+loader puts its serial number on the host's) and the hardware identifiers
+in sysfs and procfs are masked, the generated LXC configuration is checked
 (Tor-only bridge, start-host hook, every device but cameras, no device
 tree, the command line, the masks, the post-stop hook), the container
 service is started and /run/antumbra/android-ready tells the user's
 session it can start Android.
+
+  antumbra-waydroid                 # the above (antumbra-waydroid.service)
+  antumbra-waydroid --masks         # the masks again, for what is there now
+                                    # (ExecStartPre= of waydroid-container.service)
+  antumbra-waydroid --print-masks   # print the mask entries for this machine
 """
 import configparser
 import os
@@ -46,13 +51,39 @@ READY = "/run/antumbra/android-ready"
 CMDLINE_SRC = os.path.join(ANDROID_DIR, "cmdline")
 CMDLINE = "/run/antumbra/android-cmdline"
 CMDLINE_ENTRY = f"lxc.mount.entry = {CMDLINE} proc/cmdline none bind,create=file 0 0"
-# Hardware serial numbers the container's view of the host's sysfs would
-# show every app: the SoC's (soc0), the UFS device's string descriptor and
-# the battery's (serial_number), the SCSI disks' unit serial and device
-# identification pages and the WWID derived from them, and the "serial"
-# of USB, MMC and virtio disks. The start-host hook looks for the same names.
-SERIAL_NAMES = ("serial_number", "serial", "vpd_pg80", "vpd_pg83", "wwid")
-MASKS_MARK = "# Antumbra (antumbra-waydroid): hardware serial numbers masked"
+# Hardware identifiers the container's view of the host's sysfs and procfs
+# would show every app (docs/threat-model.md, "Fingerprinting by apps").
+# The container mounts a sysfs of its own network namespace: the host's
+# network interfaces and Wi-Fi radios, with their MAC addresses, are not in
+# it. The start-host hook looks for the same names (a unit test compares).
+#
+# Files, by name, anywhere under /sys/devices: the SoC's serial number
+# (soc0), the UFS device's string descriptor and a battery's
+# (serial_number); the serial of USB devices, MMC cards and virtio disks
+# (serial); the SCSI disks' unit serial and device identification pages and
+# the WWID derived from them (vpd_pg80, vpd_pg83, wwid); an SD or MMC card's
+# CID, which holds its serial number (cid); a device-mapper device's UUID,
+# which for unlocked Persistent Storage holds its LUKS UUID (uuid); the
+# legacy contents file of EEPROMs, such as a memory module's SPD with its
+# serial number (eeprom). Each is bound to /dev/null.
+MASKED_NAMES = ("serial_number", "serial", "vpd_pg80", "vpd_pg83", "wwid", "cid", "uuid", "eeprom")
+# The uevent file of a directory holding one of these repeats an identifier:
+# a partition's has its GPT unique GUID (PARTUUID), a power supply's its
+# serial number (POWER_SUPPLY_SERIAL_NUMBER). Bound to /dev/null too.
+UEVENT_MARKERS = ("partition", "serial_number")
+# Directories hidden whole (an empty read-only tmpfs over each), known by a
+# file in them: every nvmem provider ("nvmem", its raw contents, readable by
+# everyone unless the driver says otherwise: on the phone the SoC's QFPROM
+# fuses, with calibration values and very likely the chip's serial number;
+# its cells/ beside it), and every RTC ("since_epoch": the phone's PMIC RTC
+# cannot be set from Linux and counts from its first power-up, so its
+# reading less the real time is a constant of the phone).
+HIDDEN_DIR_MARKERS = ("nvmem", "since_epoch")
+# procfs files bound to /dev/null when they exist: the RTC's reading again.
+MASKED_PROC = ("driver/rtc",)
+# The options of the tmpfs that hides a directory, as for sys/firmware in config_3.
+HIDE_OPTIONS = "ro,nosuid,nodev,noexec,mode=0555,size=4k"
+MASKS_MARK = "# Antumbra (antumbra-waydroid): hardware identifiers masked"
 
 
 def log(msg):
@@ -108,33 +139,56 @@ def write_config(props):
     os.replace(tmp, CFG)
 
 
-def serial_files(sysfs="/sys"):
-    """Every hardware serial number attribute (a regular file named as in
-    SERIAL_NAMES) under SYSFS/devices, symbolic links not followed, as
-    absolute paths in the host's /sys."""
-    found = []
-    for dirpath, _dirs, files in os.walk(os.path.join(sysfs, "devices"), onerror=lambda e: None):
-        for name in files:
-            path = os.path.join(dirpath, name)
-            if name in SERIAL_NAMES and stat.S_ISREG(os.lstat(path).st_mode):
-                found.append("/sys" + path[len(sysfs):])
-    return sorted(found)
+def identifier_paths(sysfs="/sys", procfs="/proc"):
+    """What to hide from the container on this machine now: (FILES, DIRS),
+    absolute paths as the container sees them (/sys/..., /proc/...), each
+    sorted. Under SYSFS/devices, regular files only and symbolic links not
+    followed; a device that goes away during the scan is skipped."""
+    files, dirs = set(), set()
+    wanted = set(MASKED_NAMES) | set(UEVENT_MARKERS) | set(HIDDEN_DIR_MARKERS) | {"uevent"}
+    for dirpath, _dirs, names in os.walk(os.path.join(sysfs, "devices"), onerror=lambda e: None):
+        regular = set()
+        for name in wanted.intersection(names):
+            try:
+                if stat.S_ISREG(os.lstat(os.path.join(dirpath, name)).st_mode):
+                    regular.add(name)
+            except OSError:    # gone meanwhile: a device unplugged
+                pass
+        here = "/sys" + dirpath[len(sysfs):]
+        files.update(f"{here}/{name}" for name in regular.intersection(MASKED_NAMES))
+        if "uevent" in regular and regular.intersection(UEVENT_MARKERS):
+            files.add(f"{here}/uevent")
+        if regular.intersection(HIDDEN_DIR_MARKERS):
+            dirs.add(here)
+    for name in MASKED_PROC:
+        if os.path.isfile(os.path.join(procfs, name)):
+            files.add(f"/proc/{name}")
+    return sorted(files), sorted(dirs)
 
 
-def mask_entries(paths):
-    """The LXC mount entries that hide PATHS (absolute, in /sys) from the
-    container: /dev/null bound read-only over each. LXC parses the entries
-    like fstab lines, so a path with white space or a backslash fails."""
-    entries = []
-    for path in paths:
-        if not path.startswith("/sys/") or re.search(r"[\s\\]", path):
+def mask_entries(files, dirs=()):
+    """The LXC mount entries that hide FILES and DIRS (absolute, in /sys or
+    /proc) from the container: /dev/null bound read-only over each file, an
+    empty read-only tmpfs over each directory. Optional: one that has gone
+    by the time the container starts (a device unplugged) is skipped; the
+    start-host hook refuses an identifier that exists then and has no mask.
+    LXC parses the entries like fstab lines, so a path with white space or
+    a backslash fails."""
+    for path in list(files) + list(dirs):
+        if not re.match(r"/(sys|proc)/", path) or re.search(r"[\s\\]", path):
             fail(f"cannot mask {path!r} in the container")
-        entries.append(f"lxc.mount.entry = /dev/null {path[1:]} none bind,ro 0 0")
-    return entries
+    return ([f"lxc.mount.entry = /dev/null {p[1:]} none bind,ro,optional 0 0" for p in files]
+            + [f"lxc.mount.entry = tmpfs {p[1:]} tmpfs {HIDE_OPTIONS},optional 0 0" for p in dirs])
+
+
+def identifier_masks():
+    """The mask entries for this machine now."""
+    return mask_entries(*identifier_paths())
 
 
 def add_masks(entries):
-    """Append ENTRIES to the generated container configuration, once."""
+    """Put ENTRIES at the end of the generated container configuration, in
+    place of the masks written before."""
     with open(LXC_CONFIG, encoding="utf-8") as f:
         text = f.read()
     if MASKS_MARK in text:
@@ -147,9 +201,9 @@ def add_masks(entries):
     os.replace(tmp, LXC_CONFIG)
 
 
-def lxc_problems(lxc, serials):
+def lxc_problems(lxc, masks):
     """What is wrong with the generated container configuration LXC (text),
-    given the host's serial number files SERIALS; empty when nothing is."""
+    given the mask entries MASKS it must have; empty when nothing is."""
     problems = []
     wanted = [r"^lxc\.net\.0\.type = veth$", r"^lxc\.net\.0\.link = waydroid-tor$",
               r"^lxc\.hook\.start-host = /usr/local/lib/antumbra-waydroid-start-host$",
@@ -166,7 +220,7 @@ def lxc_problems(lxc, serials):
     post_stop = re.findall(r"^lxc\.hook\.post-stop = (.*)$", lxc, re.M)
     if post_stop[:1] != ["/usr/local/lib/antumbra-waydroid-post-stop"]:
         problems.append(f"the container's post-stop hooks do not start with Antumbra's: {post_stop}")
-    for entry in mask_entries(serials):
+    for entry in masks:
         if not re.search("^" + re.escape(entry) + "$", lxc, re.M):
             problems.append(f"the container configuration does not mask {entry.split()[3]}")
     cap_keep = re.search(r"^lxc\.cap\.keep = (.*)$", lxc, re.M)
@@ -175,7 +229,7 @@ def lxc_problems(lxc, serials):
     return problems
 
 
-def check_config(props, serials):
+def check_config(props, masks):
     cfg = configparser.ConfigParser()
     cfg.read(CFG)
     if cfg.get("waydroid", "images_path", fallback="") != IMAGES:
@@ -192,7 +246,7 @@ def check_config(props, serials):
             base = f.read().split("\n")
     except OSError as e:
         fail(f"waydroid init left no container configuration: {e}")
-    for problem in lxc_problems(lxc, serials):
+    for problem in lxc_problems(lxc, masks):
         fail(problem)
     with open(CMDLINE, encoding="utf-8") as f:
         if "androidboot." in f.read():
@@ -227,18 +281,18 @@ def main():
     # properties from the templates and waydroid.cfg, as Debian's postinst does.
     if run(["waydroid", "upgrade", "-o"]) != 0:
         fail("waydroid upgrade -o failed")
-    # The container's kernel command line and the serial number masks:
-    # after "upgrade", which regenerates the configuration from the templates.
+    # The container's kernel command line and the identifier masks: after
+    # "upgrade", which regenerates the configuration from the templates.
     with open(CMDLINE_SRC, encoding="utf-8") as f:
         cmdline = f.read()
     with open(CMDLINE + ".tmp", "w", encoding="utf-8") as f:
         f.write(cmdline)
     os.chmod(CMDLINE + ".tmp", 0o644)
     os.replace(CMDLINE + ".tmp", CMDLINE)
-    serials = serial_files()
-    add_masks(mask_entries(serials))
-    log(f"{len(serials)} hardware serial number files masked in the container")
-    check_config(props, serials)
+    masks = write_masks()
+    check_config(props, masks)
+    # The container service writes the masks again each time it starts
+    # (ExecStartPre= in its drop-in), for the devices there by then.
     if run(["systemctl", "start", "waydroid-container.service"]) != 0:
         fail("the Waydroid container service did not start")
     with open(READY, "w", encoding="utf-8") as f:
@@ -247,5 +301,40 @@ def main():
     log("Android apps ready for the session")
 
 
+def write_masks():
+    """Mask what identifies the hardware now, in place of the masks written
+    before (devices come and go between container starts); the entries."""
+    masks = identifier_masks()
+    add_masks(masks)
+    log(f"{len(masks)} hardware identifiers masked in the container")
+    return masks
+
+
+def masks_main():
+    """ExecStartPre= of waydroid-container.service: the masks again, for the
+    devices there now, and the whole configuration checked again. Android
+    stopped stops the service (antumbra-waydroid-stopped), so this runs
+    before each container start that follows; a start without it meets the
+    start-host hook, which refuses an identifier without a mask."""
+    if os.geteuid() != 0:
+        fail("must run as root")
+    if not os.path.exists("/run/antumbra/android-enabled"):
+        fail("Android apps are not enabled for this session")
+    if not os.path.isfile(LXC_CONFIG):
+        fail(f"no container configuration at {LXC_CONFIG} (antumbra-waydroid has not prepared Waydroid)")
+    masks = write_masks()
+    with open(LXC_CONFIG, encoding="utf-8") as f:
+        problems = lxc_problems(f.read(), masks)
+    for problem in problems:
+        fail(problem)
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--masks"]:
+        masks_main()
+    elif sys.argv[1:] == ["--print-masks"]:
+        print("".join(e + "\n" for e in identifier_masks()), end="")
+    elif sys.argv[1:]:
+        fail(f"unknown arguments: {' '.join(sys.argv[1:])}")
+    else:
+        main()

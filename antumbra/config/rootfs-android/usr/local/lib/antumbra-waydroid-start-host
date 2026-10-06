@@ -11,9 +11,10 @@
 # the bridge with its address, no route from the bridge to the host's
 # loopback, and a container configuration attached to that bridge. And only
 # without the phone's identifiers: the generic kernel command line instead
-# of the host's (which carries the serial number), every hardware serial
-# number in sysfs masked, every device but cameras. Any doubt fails
-# closed. Finally it switches forwarding off on the bridge again, in case
+# of the host's (which carries the serial number), every hardware
+# identifier in sysfs and procfs that exists now masked (antumbra-waydroid
+# writes the masks again before each start of the container service), every
+# device but cameras. Any doubt fails closed. Finally it switches forwarding off on the bridge again, in case
 # something switched ip_forward off and on since boot, and rejects .onion
 # virtual addresses inside the container's own network namespace (LXC_PID
 # is the container's first process): Tor answers Android's lookups of
@@ -63,14 +64,30 @@ if grep -q 'androidboot\.' "${CMDLINE}"; then fail "${CMDLINE} names androidboot
 # LXC's device list allows nothing until an "a" rule turns it into a deny list.
 [ "$(grep -E '^lxc\.cgroup2\.devices\.' "${CONFIG}")" = "$(printf '%s\n' 'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm')" ] \
     || fail "the container's device rules are not exactly: allow a, then deny V4L2"
-# The names antumbra-waydroid masks (SERIAL_NAMES there)
-serials="$(find /sys/devices \( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 -o -name wwid \) -type f 2>/dev/null)"
-while IFS= read -r path; do
+# Hardware identifiers, as antumbra-waydroid finds and masks them (its
+# MASKED_NAMES, UEVENT_MARKERS, HIDDEN_DIR_MARKERS and MASKED_PROC): every
+# one there now must have its mask. Masks of devices that have gone since
+# are optional entries, which LXC skips. Each line: the kind, then the path.
+identifiers="$(
+    find /sys/devices \( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 -o -name wwid -o -name cid -o -name uuid -o -name eeprom \) -type f 2>/dev/null \
+        | sed 's/^/file /'
+    find /sys/devices \( -name partition -o -name serial_number \) -type f 2>/dev/null | while IFS= read -r marker; do
+        uevent="${marker%/*}/uevent"
+        if [ -f "${uevent}" ] && [ ! -L "${uevent}" ]; then printf 'file %s\n' "${uevent}"; fi
+    done
+    find /sys/devices \( -name nvmem -o -name since_epoch \) -type f 2>/dev/null | sed 's/^/dir /; s|/[^/]*$||'
+    if [ -f /proc/driver/rtc ]; then printf 'file %s\n' /proc/driver/rtc; fi
+)"
+while read -r kind path; do
     [ -n "${path}" ] || continue
     case "${path}" in *[[:space:]\\]*) fail "cannot check the mask of ${path}" ;; esac
-    grep -qxF "lxc.mount.entry = /dev/null ${path#/} none bind,ro 0 0" "${CONFIG}" || fail "${path} is not masked in the container"
+    case "${kind}" in
+        file) entry="lxc.mount.entry = /dev/null ${path#/} none bind,ro,optional 0 0" ;;
+        *) entry="lxc.mount.entry = tmpfs ${path#/} tmpfs ro,nosuid,nodev,noexec,mode=0555,size=4k,optional 0 0" ;;
+    esac
+    grep -qxF "${entry}" "${CONFIG}" || fail "${path} is not masked in the container"
 done <<EOF
-${serials}
+${identifiers}
 EOF
 
 sysctl -q "net.ipv4.conf.${BRIDGE}.forwarding=0" || fail "could not switch forwarding off on ${BRIDGE}"

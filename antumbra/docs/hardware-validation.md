@@ -249,6 +249,25 @@ section 11.1). The VM covers the network and the setup
     none, `getprop ro.serialno` and `getprop ro.boot.serialno` do not show
     it, and `/sys/devices/soc0/serial_number`, the UFS device's
     `string_descriptors/serial_number` and every SCSI disk's `vpd_pg80`,
-    `vpd_pg83` and `wwid` read empty (the host's `find /sys/devices -name
-    serial_number -o -name serial -o -name 'vpd_pg8[03]' -o -name wwid`
-    lists them).
+    `vpd_pg83` and `wwid` read empty (the host's `find /sys/devices
+    \( -name serial_number -o -name serial -o -name 'vpd_pg8[03]' -o
+    -name wwid -o -name cid -o -name uuid -o -name eeprom \) -type f`
+    lists them; with Persistent Storage unlocked, its `dm/uuid` too).
+    The other identifiers `threat-model.md` lists as masked, inside
+    Android: `cat /sys/bus/nvmem/devices/*/nvmem | wc -c` prints 0 and
+    `ls -A` of each `/sys/bus/nvmem/devices/*` and `/sys/class/rtc/rtc0`
+    prints nothing (on the host, `ls /sys/bus/nvmem/devices` should show
+    `qfprom0`; record its size, `wc -c < /sys/bus/nvmem/devices/qfprom0/nvmem`,
+    and whether reading it works at all or is refused by the SoC's
+    access control); `cat /proc/driver/rtc` prints nothing; every
+    partition's `uevent` (`/sys/class/block/sd*[0-9]/uevent`) reads empty;
+    `cat /sys/class/net/*/address` shows only `00:16:3e:f9:d3:03` and
+    zeros, and `/sys/class/ieee80211` is empty. And record on the host,
+    for `threat-model.md`: `cat /sys/class/rtc/rtc0/since_epoch` next to
+    `date +%s` once the clock is set (is the RTC a count since the PMIC's
+    first power-up, and does `hwclock --systohc` fail?), `lsblk -o
+    NAME,PARTUUID` (do the factory partitions' GUIDs match those of
+    OnePlus's factory images, or are they this phone's own?), and
+    `find /sys/devices -type f -perm -004 \( -name '*serial*' -o -name
+    '*uuid*' -o -name '*_id' -o -name 'cid' \)` for anything else of
+    the kind.

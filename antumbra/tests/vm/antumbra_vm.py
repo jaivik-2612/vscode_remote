@@ -1584,18 +1584,53 @@ def android_phase(vm, rep, T, sh, out):
               o.replace("\n", " "))
     # Start Android again, so that the power-off checks run with the
     # container's loop mounts in place (once the refused start's container
-    # service has stopped).
+    # service has stopped). Meanwhile a device with an identifier is plugged
+    # in (a device-mapper device with a UUID): the container service writes
+    # the masks again before it starts, so the container starts and Android
+    # cannot read it. Then Android stops, the device goes, and Android starts
+    # once more, its mask gone with it.
     android_wait_service_stopped(T, sh)
+    rc, o = sh(f"dmsetup create {HOTPLUG_DM} --uuid {HOTPLUG_UUID} --table '0 8 error' >/dev/null 2>&1 && "
+               f"cat /sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid", timeout=60)
+    plugged = rc == 0 and o.strip() == HOTPLUG_UUID
+    running, o = android_restart_session(T, sh)
+    rep.check("android: the container starts again once the rules are back, with a device plugged in since (a dm device with a UUID)",
+              plugged and running, o.replace("\n", " "))
+    cat_f = in_android('/system/bin/cat "$f"', errors=True)
+    rc, o = sh(f"f=/sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid; "
+               "grep -cxF \"lxc.mount.entry = /dev/null ${f#/} none bind,ro,optional 0 0\" /var/lib/waydroid/lxc/waydroid/config; "
+               f"printf 'android=[%s]\\n' \"$({cat_f} | wc -c)\"", timeout=120) \
+        if plugged and running else (None, "not plugged in or not running")
+    rep.check("android: the device plugged in since Android was prepared has its mask, and Android reads its UUID empty",
+              rc == 0 and o.strip().split("\n") == ["1", "android=[0]"], o.replace("\n", " "))
+    stopped = False
+    if running:
+        sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=180)
+        deadline = time.monotonic() + T(180)
+        while time.monotonic() < deadline:
+            rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=60)
+            if rc == 0 and o.strip() == "STOPPED":
+                stopped = True
+                break
+            time.sleep(5)
+        android_wait_service_stopped(T, sh)
+    rc, o = sh(f"dmsetup remove {HOTPLUG_DM} >/dev/null 2>&1 && echo removed", timeout=60)
+    unplugged = rc == 0 and o.strip() == "removed"
+    running, o = android_restart_session(T, sh) if stopped and unplugged else (False, f"stopped={stopped} unplugged={unplugged}")
+    rep.check("android: the container starts again once that device is gone", running, o.replace("\n", " "))
+
+
+def android_restart_session(T, sh):
+    """Start Android again from the user's session unit; (running, last state)."""
     sh(f"runuser -u amnesia -- env {AMNESIA_ENV} systemctl --user restart antumbra-android-session.service; echo restarted", timeout=120)
-    running = False
+    o = ""
     deadline = time.monotonic() + T(600)
     while time.monotonic() < deadline:
         rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH; findmnt -rn -o SOURCE /var/lib/waydroid/rootfs | head -n1", timeout=60)
         if rc == 0 and o.strip().split("\n")[0] == "RUNNING":
-            running = True
-            break
+            return True, o
         time.sleep(10)
-    rep.check("android: the container starts again once the rules are back", running, o.replace("\n", " "))
+    return False, o
 
 
 def android_net_phase(vm, rep, T, sh, out):
@@ -1719,18 +1754,26 @@ def android_net_phase(vm, rep, T, sh, out):
 # phone's UFS has; neither may reach Android.
 TEST_SERIAL = "ANTUMBRATEST"
 TEST_DISK_SERIAL = "ANTUMBRATESTDISK"
-SERIAL_FIND = ("find /sys/devices \\( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 "
-               "-o -name wwid \\) -type f")
+# Hardware identifier files that must read empty in Android, by name (the
+# harness's own list, as docs/threat-model.md states it): serial numbers,
+# SCSI identification pages and WWIDs, MMC CIDs, device-mapper UUIDs
+# (Persistent Storage's LUKS UUID; the VM's dm-verity root), EEPROMs.
+IDENTIFIER_FIND = ("find /sys/devices \\( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 "
+                   "-o -name wwid -o -name cid -o -name uuid -o -name eeprom \\) -type f")
+# A device plugged in while Android is stopped (a device-mapper device
+# with a UUID; the error target needs no backing device), and out again.
+HOTPLUG_DM = "antumbra-hotplug-test"
+HOTPLUG_UUID = "ANTUMBRAHOTPLUGTEST"
 # The stand-in container's configuration for the start-host hook tests: the
 # network lines, and the identifier lines the real container gets from
 # config_3 and antumbra-waydroid (the generic kernel command line, the
-# device rules, a mask for every serial number file the hook looks for).
+# device rules, antumbra-waydroid's masks for what the VM has now).
 # The generic command line goes where antumbra-waydroid puts it, unless
 # Android already did.
 HOOKTEST_CONF = ("{ printf '%s\\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = waydroid-tor' "
                  "'lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0' "
                  "'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm'; "
-                 f"for f in $({SERIAL_FIND}); do printf 'lxc.mount.entry = /dev/null %s none bind,ro 0 0\\n' \"${{f#/}}\"; done; }} "
+                 "/usr/local/lib/antumbra-waydroid --print-masks; } "
                  "> /run/antumbra-hooktest.conf; "
                  "[ -f /run/antumbra/android-cmdline ] || install -D -m 0644 /usr/share/antumbra/android/cmdline /run/antumbra/android-cmdline; ")
 DEVICE_MODES = ("for n in /dev/binder /dev/hwbinder /dev/vndbinder /dev/dri/renderD* /dev/fb* /dev/dma_heap/*; do "
@@ -1788,15 +1831,54 @@ def android_identifier_checks(rep, sh):
               and "serialno" in f and "bootserial" in f and TEST_SERIAL not in o,
               o.replace("\n", " | ")[:400])
     cat_f = in_android('/system/bin/cat "$f"', errors=True)
-    rc, o = sh(f"for f in $({SERIAL_FIND}); do printf '%s host=[%s] android=[%s]\\n' \"$f\" "
+    rc, o = sh(f"for f in $({IDENTIFIER_FIND}); do printf '%s host=[%s] android=[%s]\\n' \"$f\" "
                "\"$(head -c 64 \"$f\" | tr -cd '[:alnum:]')\" "
                f"\"$({cat_f} | head -c 64 | tr -cd '[:alnum:]')\"; done; echo end", timeout=300)
     lines = o.strip().split("\n") if rc == 0 else []
     files = [l for l in lines if " host=[" in l]
-    rep.check("android: every hardware serial number file in sysfs reads empty in Android (the disk's serial included)",
+    rep.check("android: every hardware identifier file in sysfs reads empty in Android (serial numbers, the disk's included; "
+              "device-mapper UUIDs)",
               lines[-1:] == ["end"] and any(f"host=[{TEST_DISK_SERIAL}]" in l for l in files)
               and all(l.endswith(" android=[]") for l in files),
               f"{len(files)} files: " + " | ".join(files)[:400])
+    # Partitions' uevent (PARTUUID), the RTC and every nvmem provider (whole
+    # directories), /proc/driver/rtc: what the host shows, what Android does.
+    ls_f = in_android('/system/bin/ls -A "$f"', errors=True)
+    rc, o = sh("for p in $(find /sys/devices -name partition -type f); do f=\"${p%/*}/uevent\"; "
+               "printf 'uevent %s host=[%s] android=[%s]\\n' \"$f\" \"$(grep -c '^PARTUUID=' \"$f\")\" "
+               f"\"$({cat_f} | wc -c)\"; done; "
+               "for p in $(find /sys/devices \\( -name nvmem -o -name since_epoch \\) -type f); do f=\"${p%/*}\"; "
+               "printf 'dir %s host=[%s] android=[%s]\\n' \"$f\" \"$(ls -A \"$f\" | wc -l)\" "
+               f"\"$({ls_f} | wc -l)\"; done; "
+               "f=/proc/driver/rtc; printf 'proc %s host=[%s] android=[%s]\\n' \"$f\" \"$(wc -c < \"$f\")\" "
+               f"\"$({cat_f} | wc -c)\"; echo end", timeout=300)
+    lines = o.strip().split("\n") if rc == 0 else []
+    uevents = [l for l in lines if l.startswith("uevent ")]
+    dirs = [l for l in lines if l.startswith("dir ")]
+    proc = [l for l in lines if l.startswith("proc ")]
+    rep.check("android: partitions' uevent files (PARTUUID) read empty in Android",
+              lines[-1:] == ["end"] and any(l.endswith(" host=[1] android=[0]") for l in uevents)
+              and all(l.endswith(" android=[0]") for l in uevents),
+              f"{len(uevents)} files: " + " | ".join(uevents)[:400])
+    rep.check("android: the RTC's directory (its raw time) and every nvmem provider's (fuses, EEPROMs) are empty in Android, "
+              "and /proc/driver/rtc reads empty",
+              lines[-1:] == ["end"] and any("/rtc/rtc" in l for l in dirs)
+              and all(re.search(r" host=\[[1-9]\d*\] android=\[0\]$", l) for l in dirs)
+              and len(proc) == 1 and re.search(r" host=\[[1-9]\d*\] android=\[0\]$", proc[0]) is not None,
+              " | ".join(dirs + proc)[:500])
+    # The container mounts a sysfs of its own network namespace: none of the
+    # host's network interfaces (their MAC addresses) or Wi-Fi radios.
+    inside = ("cat /sys/class/net/*/address; for p in /sys/class/ieee80211/*; do if [ -e \"$p\" ]; then echo wiphy=$p; fi; done; "
+              "echo eth0=$(cat /sys/class/net/eth0/address); echo end")
+    rc, o = sh("cat /sys/class/net/*/address | sort -u; echo ---; " + in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True),
+               timeout=120)
+    host, _, inside = o.partition("---")
+    host_macs = {m for m in re.findall(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", host, re.M) if m != "00:00:00:00:00:00"}
+    inside_lines = inside.strip().split("\n")
+    rep.check("android: no host network interface's MAC address and no Wi-Fi radio in Android's sysfs (its own eth0 only)",
+              rc == 0 and bool(host_macs) and inside_lines[-1:] == ["end"] and f"eth0={ANDROID_MAC}" in inside_lines
+              and not host_macs.intersection(inside_lines) and not any(l.startswith("wiphy=") for l in inside_lines),
+              f"host {sorted(host_macs)}; android {inside_lines}"[:400])
     inside = ("if cat /dev/null; then echo null=ok; fi; mknod /dev/antumbra-v4l-test c 81 0 2>&1; "
               "cat /dev/antumbra-v4l-test 2>&1; rm -f /dev/antumbra-v4l-test; echo end")
     rc, o = sh(in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True), timeout=120)
