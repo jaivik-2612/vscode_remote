@@ -192,14 +192,23 @@ stand-in container (a network namespace with the container's MAC address
 on the bridge) runs the DHCP client and a set of probes. It checks the
 bridge's address and sysctls, Tor's two listeners, the self-check lines,
 the DHCP lease (with and without the broadcast flag), that TCP to the
-Internet reaches Tor's TransPort for Android and a held connection ends in
-the `tor` process, that the local network gets nowhere, that the host's
-address and services, Tor's control and SOCKS ports and DNS over TLS are
-refused at once, that any DNS server is answered by Tor, that NTP, QUIC,
-ping and IPv6 get no answer, the firewall's redirect counters, the
-start-host hook failing closed without each part of the network (and
-passing with it), that Tor refuses to connect while the bridge is missing,
-and from the packet capture that nothing of the stand-in left the guest.
+Internet, the host's own public address included (203.0.113.77, put on
+the guest's loopback for the probes), reaches Tor's TransPort for Android
+and a held connection ends in the `tor` process, that the local network
+and the host's own addresses there and on the namespaces' veths all time
+out alike, that the bridge's host address (Tor's control port, the
+control-port filter, the TransPort addressed directly) and DNS over TLS
+are refused at once, that any DNS server is answered by Tor, that the
+start-host hook, run for the stand-in with `LXC_PID`, rejects `.onion`
+virtual addresses in its namespace (a `.onion` name's address is refused
+while a listener on that port there works), that NTP, QUIC, ping and IPv6
+get no answer, the firewall's redirect counters, the start-host hook
+failing closed without each part of the network or the container's PID
+(and passing with it), that Tor refuses to connect while the bridge is
+missing, and from the packet capture that nothing of the stand-in left the
+guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
+firewall, the hook and these probes in network namespaces on the build
+host.
 It takes a few minutes longer than `--through-welcome`.
 
 `tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
@@ -216,10 +225,18 @@ slow), the generic Waydroid identity,
 (captive-portal checks, Private DNS and network time off), a screenshot
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
 listed in the app grid's "Android" folder, F-Droid's index fetch counted
-at Tor's TransPort for Android, the session's traffic, no frame from the
-container's MAC address or network in the capture, and the start-host
-hook refusing to start the container without the firewall's Android
-rules, after which Android starts again.
+at Tor's TransPort for Android, Android's resolver mapping a `.onion` name
+into 127.192.0.0/10 with no answer to a ping there, the start-host hook's
+`.onion` block in Android's network namespace (a connection to the name's
+address refused, not delivered to a listener there on its port), the
+session's traffic, no frame from the container's MAC address or network
+in the capture, and the start-host hook refusing to start the container
+without the firewall's Android rules, after which Android starts again.
+The harness runs commands inside the container with `lxc-attach` with no
+standard descriptor on the console's tty (`in_android`): given a tty,
+lxc-attach switches to a terminal proxy that sends the output to
+`/dev/tty` instead of a pipe and flushes the console's pending input,
+the harness's status marker with it.
 
 To check the `android` Persistent Storage feature by hand: run with
 `--keep-disk`, create Persistent Storage and turn on both Android

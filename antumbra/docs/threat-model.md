@@ -76,6 +76,10 @@ sections 8.5 and 11.1). While they are on:
   reach only Tor's two listeners for Android and the DHCP server: the
   rules that decide this run on the host, and the container's start-host
   hook refuses to start Android without them.
+- **`.onion` names.** Tor answers Android's lookups of them with addresses
+  on Android's own loopback (127.192.0.0/10). The start-host hook rejects
+  that range inside the container, so that no app receives what another
+  app meant for an onion service; Android's root could remove that rule.
 - **Microphone.** Android reaches the session's PulseAudio socket
   (`pipewire-pulse`); recording is gated only by Android's own permission
   prompt, not by the host.

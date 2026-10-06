@@ -145,9 +145,14 @@ the security side. None of this has run on the phone yet
   root, no SELinux, and binder open to every program of the user while
   Android runs. Use it only for apps you trust.
 - Network: TCP to the Internet only, through Tor. UDP (calls, WebRTC,
-  QUIC, many games), VPN apps, IPv6 and `.onion` addresses do not work.
-  Connections to the local network wait for a time-out instead of failing
-  at once. All apps share one Tor identity, separate from the host's and
+  QUIC, many games), VPN apps and IPv6 do not work. `.onion` addresses do
+  not work either: Tor answers a lookup of one with an address in
+  127.192.0.0/10, which inside Android is Android's own loopback, and
+  connections to that range are refused there (otherwise they would reach
+  whatever Android app listens on that port). Connections to the local
+  network, the phone's own addresses on it included, wait for a time-out
+  instead of failing at once; TCP to the phone's own public address, if it
+  has one, goes through Tor like TCP to any other. All apps share one Tor identity, separate from the host's and
   unchanged by Tor Browser's "New Identity"; streams are separated per
   destination only. Apps you log in to identify you.
 - Android checks for captive portals on its first start in a session
