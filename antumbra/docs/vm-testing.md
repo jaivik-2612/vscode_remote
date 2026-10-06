@@ -87,6 +87,14 @@ starts from a fresh copy-on-write overlay of `vm-disk.img` (so a run can
 never alter the image); `--keep-disk` reuses the previous overlay, which is
 how Persistent Storage survives a reboot in a test.
 
+`make vm-bundle` packages the build as a test bundle for another machine,
+`build/out/qemu-virt/antumbra-<version>-qemu-virt.tar`: the kernel, the
+initramfs, the compressed disk, the command line with the root hash and a
+`run.sh` that needs only `qemu-system-aarch64`, `qemu-img` and `zstd`, and
+uses KVM on arm64 Linux, Apple's hypervisor on Apple-silicon Macs and
+emulation elsewhere (`--debug` for the root console). The bundle has no
+harness: the checks below need the source tree.
+
 ## Smoke test
 
 ```sh
@@ -104,7 +112,8 @@ asserts, in order:
    medium mounted read-only, dm-verity active when the command line asks
    for it, the nftables ruleset with a
    dropping output chain, `selfcheck` reporting the firewall OK,
-   `tor@default.service` active,
+   `tor@default.service` active, AppArmor profiles loaded with Tor
+   confined in enforce mode,
    no network interface, no network driver and NetworkManager inactive
    before the Welcome decision, `virtio_net` in the driver blocklist, a
    resolver whose only nameserver is 127.0.0.1, zram-only swap with
@@ -125,7 +134,10 @@ asserts, in order:
    an address, that the interface's MAC address is not the one QEMU gave
    the hardware, and, polling every socket in the system once a second for
    90 seconds, that every connection to the network belongs to Tor (DHCP
-   aside); from the packet capture, that no DNS, NTP, IPv6 or other UDP
+   aside), judged by the owner the guest kernel reports for each socket
+   (Tor's user ID from `ss -e`, root's for the DHCP client; a socket in
+   TIME-WAIT, which has no owner left, by its peer, which must be Tor's);
+   from the packet capture, that no DNS, NTP, IPv6 or other UDP
    left the guest, that every TCP connection the guest opened went to one
    of the directory addresses built into the image's Tor, to a peer seen
    on Tor's sockets, or to a destination in the guest kernel's record of
@@ -165,9 +177,10 @@ APK placed in a small ext4 image and in a zstd-compressed XAPK. With
 camera as a libcamera node and has no V4L2 camera device or node; the first
 Snapshot start makes the camera portal ask through Phosh's Access dialog
 (seen on the session bus) and gets no stream meanwhile; once the decision
-is stored as "allow", the portal also gives `amnesia` a PipeWire
-connection when called from inside Tor Browser's network namespace (the
-gap the planned browser profile must close, `camera.md`; the call runs
+the "Allow" button stores (`yes`) is in place, the portal also gives
+`amnesia` a PipeWire connection when called from inside Tor Browser's
+network namespace (the gap the planned browser profile must close,
+`camera.md`; the call runs
 unconfined, so once the profile ships it has to run under the profile,
 `aa-exec -p`, and expect a refusal), Snapshot
 streams, the preview shows `vimc`'s colour
@@ -177,43 +190,58 @@ polls the display for up to five minutes times the timeout scale), the shortcut 
 stops when Snapshot quits and when it is killed. Screenshots:
 `camera-portal-prompt.png`, `camera-after-prompt.png`,
 `camera-preview.png`. The full run is
-`tests/vm-smoke.sh --through-welcome --camera`.
+`tests/vm-smoke.sh --through-welcome --camera`; without a session the
+session part is one FAIL.
 
 Every check is reported as PASS or FAIL and the exit status is non-zero if
 any failed; a command that fails on the debug console is a FAIL of its own,
-never output for a check to read. `--timeout-scale 2` doubles every timeout for slow hosts.
+never output for a check to read. A command that times out is interrupted
+(Ctrl-C on the console) so that the commands after it still get an
+answer. The results also go to
+`build/work/qemu-virt/vm-run/smoke/report.json`, beside the screenshots.
+`--timeout-scale 2` doubles every timeout for slow hosts.
 
 ## Android apps
 
 The VM profile selects Waydroid's `arm64_only` images: the test bundle
 may run the VM under HVF or KVM with a host CPU that has no 32-bit
 (AArch32) mode, which the phone's `arm64` images need. Build an image with
-Android apps beside the plain one:
+Android apps:
 
 ```sh
 ANTUMBRA_DEVICE=qemu-virt ANTUMBRA_DEBUG=1 ANTUMBRA_ANDROID=1 build/build.sh
 ```
 
+It replaces the plain image in `build/out/qemu-virt/`; to keep both,
+build and run one of them with other `ANTUMBRA_OUT` and `ANTUMBRA_WORK`
+directories.
+
 Both modes below need such an image and imply `--through-welcome`; on a
-plain image their first check fails. Before the Welcome screen, both check
-that Android is off: binder devices root-only, no container, no DHCP
-server, LXC's own services masked, D-Bus activation of Waydroid's
-container service refused, Waydroid's templates edited (bridge
-`waydroid-tor`, no `sys_time`, the start-host hook, every device but
+plain image their first check fails. They exclude each other and
+`--persistence`; `--camera` and `--tour` combine with them. Before the
+Welcome screen, both check that Android is off: binder devices
+root-only, no container, no DHCP server, LXC's own services masked,
+D-Bus activation of Waydroid's container service refused and the
+container service not started at boot, Waydroid's templates edited
+(bridge `waydroid-tor`, no `sys_time`, the start-host hook, every device but
 cameras: `allow = a` before the V4L2 deny, `/sys/firmware` hidden, the
 generic kernel command line, Antumbra's post-stop hook before
-Waydroid's), the images and F-Droid in the read-only system, `pkexec`
-not setuid; and they record the modes of the binder devices, the render
-node, the framebuffers and the DMA-BUF heaps. The usual checks of a
-session then run too, with the Android listeners excluded from
-"everything goes to Tor".
+Waydroid's) and its code passing no video device, the images and F-Droid
+in the read-only system, `pkexec` not setuid, Tor's listeners for Android
+and the `android` Persistent Storage feature configured; and they record
+the modes of the binder devices, the render node, the framebuffers and
+the DMA-BUF heaps. The usual checks of a session then run too, with the
+Android listeners excluded from "everything goes to Tor".
 
 `tests/vm-smoke.sh --android-net` presses Start without turning Android
 on, and tests the network Android would use without booting Android: a
 stand-in container (a network namespace with the container's MAC address
-on the bridge) runs the DHCP client and a set of probes. It checks the
-bridge's address and sysctls, Tor's two listeners, the self-check lines,
-the DHCP lease (with and without the broadcast flag), that TCP to the
+on the bridge) runs the DHCP client and a set of probes. The VM gets the
+same serial numbers as with `--android` below, on the kernel command line
+and the disk. It checks the bridge's address and sysctls, Tor's two
+listeners, the self-check lines, that the bridge's DHCP server does not
+start while Android is off, the DHCP lease (with and without the
+broadcast flag), that TCP to the
 Internet, the host's own public address included (203.0.113.77, put on
 the guest's loopback for the probes), reaches Tor's TransPort for Android
 and a held connection ends in the `tor` process, that the local network
@@ -226,17 +254,21 @@ virtual addresses in its namespace (a `.onion` name's address is refused
 while a listener on that port there works), that NTP, QUIC, ping and IPv6
 get no answer, the firewall's redirect counters, the start-host hook
 failing closed without each part of the network or the container's PID,
-or for a stand-in whose mount namespace lacks one identifier's mask (and
-passing with it: the stand-ins get the masks in a mount namespace of
-their own, as LXC mounts them), that Tor refuses to connect while the bridge is
-missing, and from the packet capture that nothing of the stand-in left the
-guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
-firewall, the hook and these probes in network namespaces on the build
-host, the stand-in container's identifier masks mounted in its mount
+or for a stand-in whose mount namespace lacks the mask of one identifier
+that has content (the hook rightly accepts an identifier that reads empty
+or is hidden with its directory), and passing with them all, switching
+the bridge's forwarding off (the stand-ins get the masks in a mount
+namespace of their own, as LXC mounts them), that Tor refuses to connect
+while the bridge is missing and connects again once it is back, and from
+the packet capture that nothing of the stand-in left the guest.
+`tests/android-net-lab.py`, run by `tests/lint.sh`, replays the firewall,
+the hook and these probes in network namespaces on the build host, the
+stand-in container's identifier masks mounted in its mount
 namespace (the hook must refuse a stand-in where a file's mask is
-missing, or a directory's if the build host has one to hide). Where the
-build host lacks something the lab itself needs (network or mount
-namespaces, a tmpfs, the bridge or veth driver, nftables or the reject
+missing, or a directory's if the build host has one to hide). It needs
+unprivileged user namespaces, or root. Where the build host lacks
+something the lab itself needs (network or mount namespaces, a tmpfs,
+bind mounts over sysfs, the bridge or veth driver, nftables or the reject
 expression the hook loads), the lab says what and is skipped (exit 0),
 and so are the unit tests of its skipping (`tests/unit/test_android_net.py`,
 with the lab's reason); only its checks fail, and on any host a file it
@@ -259,15 +291,16 @@ identifier masked in the container's own view (its journal line), and
 Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
 slow), the generic Waydroid identity,
-`/sys/firmware` hidden, that Android's `/proc/cmdline` is the generic one
-and neither it nor `ro.serialno` or `ro.boot.serialno` shows the test
-serial, that every hardware identifier file in sysfs (serial numbers, the
-disk's included, and device-mapper UUIDs, the dm-verity root's among
-them) and every partition's `uevent` (PARTUUID) read empty inside
-Android, that the RTC's directory (and any nvmem provider's) is empty
-there and `/proc/driver/rtc` reads empty, that none of the host's MAC
-addresses and no Wi-Fi radio shows in Android's sysfs, that the container
-can open `/dev/null` but not a V4L2 device node it creates, the DHCP lease
+`/sys/firmware` and `/proc/device-tree` hidden, that Android's
+`/proc/cmdline` is the generic one and neither it nor `ro.serialno` or
+`ro.boot.serialno` shows the test serial, that every hardware identifier
+file in sysfs (serial numbers, the disk's included, and device-mapper
+UUIDs, the dm-verity root's among them) and every partition's `uevent`
+(PARTUUID) read empty inside Android, that the RTC's directory (and any
+nvmem provider's) is empty there and `/proc/driver/rtc` reads empty, that
+none of the host's MAC addresses and no Wi-Fi radio shows in Android's
+sysfs, that the container can open `/dev/null` but not a V4L2 device node
+it creates, the DHCP lease
 and route, the provisioning
 (captive-portal checks, Private DNS and network time off), a screenshot
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
@@ -311,7 +344,8 @@ running.
 
 `tests/vm-smoke.sh --persistence` creates Persistent Storage, and
 `tests/vm-smoke.sh --persistence -- --keep-disk` (the next run, on the
-same disk overlay) unlocks it. Both write the Welcome screen's settings
+same disk overlay) unlocks it. The mode implies `--through-welcome` and
+excludes the Android modes. Both write the Welcome screen's settings
 through the Welcome screen's own module, run as the greeter user (the
 same files, byte for byte, as the Welcome screen writes: a passphrase
 typed through QMP into GTK password rows under software emulation would
