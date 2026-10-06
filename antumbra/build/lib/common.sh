@@ -156,10 +156,13 @@ require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
 # mmdebstrap's sync-in and cp -a keep every file's owner and mode, and set
 # them on directories the image already has (/, /etc, /usr, /lib/firmware),
 # but a checkout or a fetched tree belongs to whoever made it (often UID
-# 1000, which is amnesia in the image) and follows their umask.
+# 1000, which is amnesia in the image) and follows their umask. Python byte
+# code is left out: the unit tests import modules from the overlay on the
+# build host and leave __pycache__ directories in the checkout.
 copy_as_root() {
     rm -rf "$2"; mkdir -p "$2"
-    tar --create --file - --directory "$1" --numeric-owner --owner=0 --group=0 --mode=u=rwX,go=rX . \
+    tar --create --file - --directory "$1" --exclude=__pycache__ \
+        --numeric-owner --owner=0 --group=0 --mode=u=rwX,go=rX . \
         | tar --extract --file - --directory "$2"
 }
 
