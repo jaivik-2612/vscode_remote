@@ -22,7 +22,12 @@ by Robin Snyders, one developer, alpha quality, boots a close-to-mainline
 Linux 6.17 directly from the stock OnePlus bootloader. Antumbra pins its
 release tag `v0.2.0-alpha.2`: the kernel tree
 `gitlab.com/sm8150-mainline/linux` at `v6.17.0-sm8150` plus 27 patches,
-and the port's own DTBO and vbmeta images.
+and the port's own DTBO and vbmeta images. Antumbra adds two kernel
+patches of its own (`device/oneplus-hotdog/kernel/patches/`): 0101 lets
+only `CAP_NET_ADMIN` open QRTR sockets, and 0102 keeps the pop-up
+camera's motor safe across sleep, power-off and boot (`camera.md`). The
+port's libcamera patches are an optional build (`building.md`,
+`ANTUMBRA_LIBCAMERA_LOCAL=1`).
 
 What the port reports (its status page, August 2026), and therefore what
 Antumbra can expect:
