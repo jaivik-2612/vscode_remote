@@ -1626,7 +1626,7 @@ def android_phase(vm, rep, T, sh, out):
     ready = False
     deadline = time.monotonic() + T(900)
     while time.monotonic() < deadline:
-        rc, o = sh("systemctl is-active antumbra-waydroid.service; test -e /run/antumbra/android-ready && echo ready", timeout=60)
+        rc, o = sh("systemctl is-active antumbra-waydroid.service; test -e /run/antumbra/android-ready && echo ready", timeout=T(60))
         if rc is not None and "failed" in o:
             break
         if rc == 0 and o.strip().split("\n") == ["active", "ready"]:
@@ -1650,7 +1650,7 @@ def android_phase(vm, rep, T, sh, out):
     running = False
     deadline = time.monotonic() + T(900)
     while time.monotonic() < deadline:
-        rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=60)
+        rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=T(60))
         if rc == 0 and o.strip() == "RUNNING":
             running = True
             break
@@ -1667,19 +1667,19 @@ def android_phase(vm, rep, T, sh, out):
     if running:
         deadline = time.monotonic() + T(2400)
         while time.monotonic() < deadline:
-            rc, o = sh(in_android("/system/bin/getprop sys.boot_completed"), timeout=120)
+            rc, o = sh(in_android("/system/bin/getprop sys.boot_completed"), timeout=T(120))
             if rc == 0 and o.strip() == "1":
                 booted = True
                 break
             time.sleep(15)
         if not booted:
-            rc, o = sh(in_android("/system/bin/getprop sys.boot_completed", errors=True), timeout=120)
+            rc, o = sh(in_android("/system/bin/getprop sys.boot_completed", errors=True), timeout=T(120))
             o = f"rc={rc} {o}"
     rep.check("android: Android 13 booted (sys.boot_completed=1)", booted, o.strip()[-200:])
     if not booted:
-        rc, o = sh("tail -n 80 /var/lib/waydroid/waydroid.log; journalctl -b --no-pager -u antumbra-waydroid -u waydroid-container -u antumbra-waydroid-dhcp | tail -n 80", timeout=120)
+        rc, o = sh("tail -n 80 /var/lib/waydroid/waydroid.log; journalctl -b --no-pager -u antumbra-waydroid -u waydroid-container -u antumbra-waydroid-dhcp | tail -n 80", timeout=T(120))
         save_text(out, "android-boot-failure.txt", o)
-        rc, o = sh(in_android("/system/bin/logcat -d -t 400", errors=True), timeout=180)
+        rc, o = sh(in_android("/system/bin/logcat -d -t 400", errors=True), timeout=T(180))
         save_text(out, "android-logcat.txt", o)
         return
     try:
@@ -1687,7 +1687,7 @@ def android_phase(vm, rep, T, sh, out):
     except Exception:  # noqa: BLE001
         pass
     rc, o = sh(f"cat /usr/share/antumbra/android/product.prop; echo ---; for p in brand manufacturer model device name; do echo ro.product.waydroid.$p=$({in_android('/system/bin/getprop ro.product.waydroid.$p')}); done; "
-               f"echo model=$({in_android('/system/bin/getprop ro.product.model')})", timeout=180)
+               f"echo model=$({in_android('/system/bin/getprop ro.product.model')})", timeout=T(180))
     parts = o.split("---")
     want = sorted(l for l in parts[0].strip().split("\n") if l.startswith("ro.product.waydroid.")) if len(parts) == 2 else []
     got = sorted(l for l in parts[1].strip().split("\n") if l.startswith("ro.product.waydroid.")) if len(parts) == 2 else ["?"]
@@ -1696,7 +1696,7 @@ def android_phase(vm, rep, T, sh, out):
     # In a virtual machine antumbra-waydroid scales Android's timeouts: at
     # the default, the Watchdog's 2-second native stack dumps outlast
     # themselves under emulation and kill vold, which reboots Android.
-    rc, o = sh(f"echo $({in_android('/system/bin/getprop ro.hw_timeout_multiplier')})", timeout=120)
+    rc, o = sh(f"echo $({in_android('/system/bin/getprop ro.hw_timeout_multiplier')})", timeout=T(120))
     rep.check("android: Android's timeouts scaled for software emulation (ro.hw_timeout_multiplier=10)", rc == 0 and o.strip() == "10", o.strip())
     rc, o = sh(f"{in_android('/system/bin/ls -A /sys/firmware')} | wc -l; "
                f"{in_android('/system/bin/cat /proc/device-tree/model')} >/dev/null && echo model-readable || echo model-hidden")
@@ -1711,17 +1711,17 @@ def android_phase(vm, rep, T, sh, out):
     done = False
     deadline = time.monotonic() + T(600)
     while time.monotonic() < deadline:
-        rc, o = sh("systemctl show -p ExecMainExitTimestampMonotonic -p ExecMainStatus antumbra-waydroid-provision.service", timeout=60)
+        rc, o = sh("systemctl show -p ExecMainExitTimestampMonotonic -p ExecMainStatus antumbra-waydroid-provision.service", timeout=T(60))
         f = dict(line.split("=", 1) for line in o.split("\n") if "=" in line) if rc == 0 else {}
         if f.get("ExecMainExitTimestampMonotonic", "0") not in ("", "0"):
             done = f.get("ExecMainStatus") == "0"
             break
         time.sleep(10)
     rc, o = sh("for k in captive_portal_mode private_dns_mode auto_time auto_time_zone; do "
-               "echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null | tr -d '\\r' | tail -n 1); done", timeout=240)
+               "echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null | tr -d '\\r' | tail -n 1); done", timeout=T(240))
     rep.check("android: provisioned: no captive-portal probes, no Private DNS, no network time",
               done and rc == 0 and o.strip().split("\n") == ["captive_portal_mode=0", "private_dns_mode=off", "auto_time=0", "auto_time_zone=0"], o.replace("\n", " "))
-    sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid show-full-ui >/dev/null 2>&1; echo started", timeout=60)
+    sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid show-full-ui >/dev/null 2>&1; echo started", timeout=T(60))
     time.sleep(T(90))
     try:
         vm.screenshot(os.path.join(out, "android-full-ui.png"))
@@ -1732,24 +1732,24 @@ def android_phase(vm, rep, T, sh, out):
     fdroid = False
     deadline = time.monotonic() + T(1200)
     while time.monotonic() < deadline:
-        rc, o = sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 300 waydroid app list 2>/dev/null | grep -cx 'packageName: org.fdroid.fdroid'", timeout=400)
+        rc, o = sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 300 waydroid app list 2>/dev/null | grep -cx 'packageName: org.fdroid.fdroid'", timeout=T(400))
         if rc == 0 and o.strip() == "1":
             fdroid = True
             break
         time.sleep(20)
     rep.check("android: F-Droid installed on first start (antumbra-fdroid-install)", fdroid, o.strip())
     if not fdroid:
-        rc, o = sh("journalctl -b --no-pager -o short-precise _SYSTEMD_USER_UNIT=antumbra-fdroid-install.service | tail -n 60", timeout=180)
+        rc, o = sh("journalctl -b --no-pager -o short-precise _SYSTEMD_USER_UNIT=antumbra-fdroid-install.service | tail -n 60", timeout=T(180))
         save_text(out, "android-fdroid-install.txt", o)
     rc, o = sh("test -e /home/amnesia/.local/share/applications/waydroid.org.fdroid.fdroid.desktop && echo desktop; "
                f"runuser -u amnesia -- env {AMNESIA_ENV} gsettings get org.gnome.desktop.app-folders folder-children; "
-               f"runuser -u amnesia -- env {AMNESIA_ENV} gsettings get org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/Android/ apps", timeout=120)
+               f"runuser -u amnesia -- env {AMNESIA_ENV} gsettings get org.gnome.desktop.app-folders.folder:/org/gnome/desktop/app-folders/folders/Android/ apps", timeout=T(120))
     rep.check("android: Android apps listed in the app grid's Android folder",
               rc == 0 and o.startswith("desktop") and "'Android'" in o and "'waydroid.org.fdroid.fdroid.desktop'" in o and "'antumbra-android.desktop'" in o,
               o.replace("\n", " | ")[:300])
     if fdroid:
         before = android_counters(sh)
-        sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid app launch org.fdroid.fdroid >/dev/null 2>&1; echo started", timeout=60)
+        sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid app launch org.fdroid.fdroid >/dev/null 2>&1; echo started", timeout=T(60))
         time.sleep(T(120))
         try:
             vm.screenshot(os.path.join(out, "android-fdroid.png"))
@@ -1772,7 +1772,7 @@ def android_phase(vm, rep, T, sh, out):
     ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644")
     rc, o = sh("P=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -pH); "
                "nsenter --target \"$P\" --net nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'; "
-               f"ANTUMBRA_PROBE_DNS_DEVICE=eth0 nsenter --target \"$P\" --net python3 /run/antumbra-android-probe.py run '{probe}'", timeout=120)
+               f"ANTUMBRA_PROBE_DNS_DEVICE=eth0 nsenter --target \"$P\" --net python3 /run/antumbra-android-probe.py run '{probe}'", timeout=T(120))
     m = re.search(r"^PROBES (\{.*\})$", o, re.M) if rc == 0 else None
     res = json.loads(m.group(1)) if m else {}
     rep.check("android: .onion addresses are rejected in Android's network namespace: a connection is refused, not delivered to a listener there on its port",
@@ -1783,15 +1783,15 @@ def android_phase(vm, rep, T, sh, out):
     leaked = [f for f in frames if f[0] == ANDROID_MAC or f[1].startswith(ANDROID_NET)]
     rep.check("with Android, packet capture: no frame from the container's MAC address or network left the guest", not leaked,
               "; ".join(f"{f[1]}->{f[2]}:{f[4]}" for f in leaked[:6]) or f"{len(frames)} guest IPv4 frames checked")
-    rc, o = sh("journalctl -b --no-pager -u antumbra-waydroid -u waydroid-container -u antumbra-waydroid-dhcp -u antumbra-waydroid-provision | tail -n 200", timeout=120)
+    rc, o = sh("journalctl -b --no-pager -u antumbra-waydroid -u waydroid-container -u antumbra-waydroid-dhcp -u antumbra-waydroid-provision | tail -n 200", timeout=T(120))
     save_text(out, "android-journal.txt", o)
     # Fail closed: with the firewall's Android rules gone, the start-host
     # hook must stop LXC from starting the container.
-    sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=180)
+    sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=T(180))
     stopped = False
     deadline = time.monotonic() + T(180)
     while time.monotonic() < deadline:
-        rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=60)
+        rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=T(60))
         if rc == 0 and o.strip() == "STOPPED":
             stopped = True
             break
@@ -1800,7 +1800,7 @@ def android_phase(vm, rep, T, sh, out):
     rc, o = sh("nft flush chain ip antumbra-nat android && echo flushed; "
                f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 300 waydroid session start >/dev/null 2>&1; "
                "lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH; journalctl -b --no-pager -t antumbra-waydroid | grep -c 'Android container start refused'; "
-               "nft -f /etc/nftables.conf && echo restored", timeout=420)
+               "nft -f /etc/nftables.conf && echo restored", timeout=T(420))
     lines = o.strip().split("\n") if rc is not None else []
     rep.check("android: the start-host hook refuses to start the container without the firewall's Android rules",
               stopped and len(lines) == 4 and lines[0] == "flushed" and lines[1] == "STOPPED" and lines[2].isdigit() and int(lines[2]) > 0 and lines[3] == "restored",
@@ -1814,7 +1814,7 @@ def android_phase(vm, rep, T, sh, out):
     # once more, its mask gone with it.
     android_wait_service_stopped(T, sh)
     rc, o = sh(f"dmsetup create {HOTPLUG_DM} --uuid {HOTPLUG_UUID} --table '0 8 error' >/dev/null 2>&1 && "
-               f"cat /sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid", timeout=60)
+               f"cat /sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid", timeout=T(60))
     plugged = rc == 0 and o.strip() == HOTPLUG_UUID
     running, o = android_restart_session(T, sh)
     rep.check("android: the container starts again once the rules are back, with a device plugged in since (a dm device with a UUID)",
@@ -1822,22 +1822,22 @@ def android_phase(vm, rep, T, sh, out):
     cat_f = in_android('/system/bin/cat "$f"', errors=True)
     rc, o = sh(f"f=/sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid; "
                "grep -cxF \"lxc.mount.entry = /dev/null ${f#/} none bind,ro,optional 0 0\" /var/lib/waydroid/lxc/waydroid/config; "
-               f"printf 'android=[%s]\\n' \"$({cat_f} | wc -c)\"", timeout=120) \
+               f"printf 'android=[%s]\\n' \"$({cat_f} | wc -c)\"", timeout=T(120)) \
         if plugged and running else (None, "not plugged in or not running")
     rep.check("android: the device plugged in since Android was prepared has its mask, and Android reads its UUID empty",
               rc == 0 and o.strip().split("\n") == ["1", "android=[0]"], o.replace("\n", " "))
     stopped = False
     if running:
-        sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=180)
+        sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=T(180))
         deadline = time.monotonic() + T(180)
         while time.monotonic() < deadline:
-            rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=60)
+            rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH", timeout=T(60))
             if rc == 0 and o.strip() == "STOPPED":
                 stopped = True
                 break
             time.sleep(5)
         android_wait_service_stopped(T, sh)
-    rc, o = sh(f"dmsetup remove {HOTPLUG_DM} >/dev/null 2>&1 && echo removed", timeout=60)
+    rc, o = sh(f"dmsetup remove {HOTPLUG_DM} >/dev/null 2>&1 && echo removed", timeout=T(60))
     unplugged = rc == 0 and o.strip() == "removed"
     running, o = android_restart_session(T, sh) if stopped and unplugged else (False, f"stopped={stopped} unplugged={unplugged}")
     rep.check("android: the container starts again once that device is gone", running, o.replace("\n", " "))
