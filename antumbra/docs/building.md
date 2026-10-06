@@ -41,29 +41,47 @@ is idempotent.
 | bootimg | `bootimg.sh` | `boot.img`: header v2, cmdline with the verity root hash, unsigned AVB footer, exactly 96 MiB |
 | release | `release.sh` | `build/out/release/antumbra-<version>-oneplus-hotdog/` with checksums, manifest and optional minisign signature; checks `build-flags` first (below) |
 
-`build-flags` records the device profile, the debug, minimal and Android
-knobs, whether the port's libcamera and the builder's firmware were
-installed, and the kernel release; `squashfs.sh` adds `ANTUMBRA_VERITY`.
-`squashfs.sh`, `image.sh`, `bootimg.sh` and `release.sh` refuse a missing
-`build-flags` or one for another profile, and `bootimg.sh`, `vm.sh` and
-`vm-bundle.sh` an `ANTUMBRA_VERITY` other than the one recorded.
-`release.sh` also refuses a debug build, a kernel release other than
-`build/out/kernel`'s, a `build-flags` that does not record whether the
-image has device firmware (one an older `rootfs.sh` wrote: run the rootfs
-step again) and one that does not record `ANTUMBRA_VERITY` (`squashfs.sh`
-has not completed). Its manifest states whether dm-verity is on and
-whether the images contain device firmware, and mentions the port's
-libcamera and Android apps when they are in the image. Nothing reads the
-minimal knob: a minimal build is packaged like any other, and its
-manifest does not say what it is.
+`build-flags` records the device profile (`ANTUMBRA_DEVICE`), the debug,
+minimal and Android knobs, whether the port's libcamera and the
+builder's firmware were installed (`ANTUMBRA_LIBCAMERA_LOCAL` and
+`DEVICE_FIRMWARE`, 1 or empty) and the kernel release
+(`KERNEL_RELEASE`). `squashfs.sh` adds `ANTUMBRA_VERITY` (1 or 0),
+replacing an earlier value, once the squashfs is complete.
+`squashfs.sh`, `image.sh`, `bootimg.sh` and `release.sh` refuse a
+missing `build-flags` or one for another profile. `bootimg.sh`, `vm.sh`
+and `vm-bundle.sh` refuse an `ANTUMBRA_VERITY` other than the recorded
+one and say which value to set; with no value recorded they go on, and
+with dm-verity on they then need a root hash, which `rootfs.sh` and
+`squashfs.sh` delete before they run. `release.sh` also refuses a debug
+build, a kernel release other than `build/out/kernel`'s, a `build-flags`
+that does not record whether the image has device firmware (one an older
+`rootfs.sh` wrote: run the rootfs step again), `DEVICE_FIRMWARE=1`
+without a `firmware.sha256` listing the files, and a `build-flags` with
+no `ANTUMBRA_VERITY` (`squashfs.sh` has not completed on this tree: run
+it, then `image.sh` and `bootimg.sh`). Its manifest has a dm-verity
+line, `dm-verity: on` or `dm-verity: off (built with ANTUMBRA_VERITY=0;
+the root filesystem is not verified at boot)`, says whether the images
+contain device firmware, names a minimal build as such with what it
+lacks, and mentions the port's libcamera and Android apps when they are
+in the image.
 
-Just before mmdebstrap runs, `rootfs.sh` deletes the old tree, its
-`build-flags`, `firmware.sha256`, initramfs and squashfs, and the images
-built from them, so if mmdebstrap or a build hook fails there is no
-`build-flags` and the steps after it refuse to go on. A run that fails
-earlier, on a missing input for example, leaves the old tree and all of
-these as they were. `squashfs.sh` likewise deletes the images built from
-the previous squashfs.
+What each step deletes before it runs:
+
+- `rootfs.sh`, just before mmdebstrap: the old tree's `build-flags` and
+  `firmware.sha256`, its initramfs, its squashfs
+  (`filesystem.squashfs` and its `.verity`, `.roothash` and `.sha256`),
+  the images built from them (`userdata.simg`, `vm-disk.img` and
+  `boot.img`, each with its `.sha256`), then the tree itself. It writes
+  `build-flags` again last, so if mmdebstrap, a build hook or anything
+  after them fails there is no `build-flags` and the steps after it
+  refuse to go on. A run that fails before mmdebstrap, on a missing input
+  for example, leaves the old tree and all of these as they were, still
+  matching.
+- `squashfs.sh`: the previous squashfs (with its `.verity`, `.roothash`
+  and `.sha256`), the images built from it and the `ANTUMBRA_VERITY`
+  record.
+- `image.sh` and `bootimg.sh` replace only their own image, and
+  `release.sh` deletes the release directory of the same version.
 
 `rootfs.sh` does not install `config/rootfs` and `config/rootfs-android`
 as they are checked out: it stages copies in `build/work/overlay/`, owned
@@ -93,10 +111,10 @@ when it finishes. See `docs/legal.md`.
 
 | Variable | Effect |
 |---|---|
-| `ANTUMBRA_MINIMAL=1` | base + network + amnesia package lists only, no Phosh, apps or Tor Browser: validates the pipeline in a fraction of the time |
+| `ANTUMBRA_MINIMAL=1` | base + network + amnesia package lists only, no Phosh, apps or Tor Browser: validates the pipeline in a fraction of the time. Recorded in `build-flags`; the release manifest says that the build is a minimal one and what it lacks |
 | `ANTUMBRA_ANDROID=1` | Android apps: Waydroid, the LineageOS 20 images of the profile's `WAYDROID_IMAGE_VARIANT` and F-Droid, off until turned on at the Welcome screen (`architecture.md`, section 11.1). Recorded in `build-flags` and the release manifest; not combinable with `ANTUMBRA_MINIMAL=1`. Without it the image has no Waydroid, Android images or Android services; the firewall's Android rules and the kernel's binder driver are there but unused (binder devices root-only) |
 | `ANTUMBRA_DEBUG=1` | debug command line; in the VM profile also the root console, the virtual camera and its test tools (`vm-testing.md`); `release.sh` refuses to package such a build |
-| `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line (empty or unset: dm-verity on); `squashfs.sh` records it in `build-flags` |
+| `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line (empty or unset: dm-verity on); `squashfs.sh` records it in `build-flags`, `bootimg.sh`, `vm.sh` and `vm-bundle.sh` need the same value, and the release manifest states it (above) |
 | `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware`; recorded in `build-flags` and the release manifest (above) |
 | `ANTUMBRA_KERNEL_TOOLCHAIN=gcc` | Debian cross GCC instead of LLVM (the port validates only LLVM) |
 | `ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT=1` | warn instead of fail when the config fragment is not fully honoured |
@@ -163,6 +181,7 @@ kernel step was validated with LLVM 18 on the same host.
 
 The CI workflow (`.github/workflows/antumbra.yml`) runs the lint and unit
 tests (the applier's again as root), the Welcome screen self-test and the
-package check on every push, assembles a boot image from the pinned
-inputs, and on manual dispatch builds the kernel and a minimal root
+package check on every push, assembles a boot image with the pinned
+tools from a placeholder kernel, initramfs and build stamps (dm-verity
+off), and on manual dispatch builds the kernel and a minimal root
 filesystem on a native arm64 runner.
