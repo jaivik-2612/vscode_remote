@@ -432,6 +432,7 @@ class OnePlusScannerTest(unittest.TestCase):
         self.touch("usr", "share", "libcamera", "ipa", "simple", "imx471.yaml")
         self.touch("usr", "lib", "firmware", "qcom", "sm8150", "oneplus", "hotdog", "venus.mbn")
         self.apk("F-Droid.apk", "org.fdroid.fdroid")
+        self.apk("OpenCamera.apk", "net.sourceforge.opencamera")   # free software, not op*camera*
         self.assertEqual(self.nopc.scan(self.tmp, False, set()), [])
 
     def test_skip(self):
@@ -645,7 +646,7 @@ class OnePlusScannerTest(unittest.TestCase):
         unreadable.append(self.write("encrypted.zip", bytes(z)))
         # containers nested more than MAX_DEPTH deep
         nested = apk_bytes("org.example")
-        for _ in range(self.nopc.MAX_DEPTH + 2):
+        for _ in range(getattr(self.nopc, "MAX_DEPTH", 8) + 2):
             nested = gzip.compress(nested)
         unreadable.append(self.write("nested.gz", nested))
         src = os.path.join(self.tmp, "src")
