@@ -231,15 +231,16 @@ fi
 # record_device_firmware DIR LIST : each regular file in DIR but
 # fetch-firmware.sh's MANIFEST.sha256 (which hook 60 does not install) with
 # its SHA-256 in LIST, and DEVICE_FIRMWARE=1, when there is one; no LIST and
-# DEVICE_FIRMWARE empty otherwise. Hook 60 copies symbolic links too, but a
-# link holds no firmware itself (a target in DIR is listed as a file).
+# DEVICE_FIRMWARE empty otherwise, with a warning when ANTUMBRA_FIRMWARE_DIR
+# was given. Hook 60 copies symbolic links too, but a link holds no firmware
+# itself (a target in DIR is listed as a file).
 record_device_firmware() {
     ( cd "$1" && find . -type f ! -path ./MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "$2"
     if [ -s "$2" ]; then DEVICE_FIRMWARE=1; else DEVICE_FIRMWARE=''; rm -f "$2"; fi
+    [ -z "${ANTUMBRA_FIRMWARE_DIR}" ] || [ -n "${DEVICE_FIRMWARE}" ] \
+        || warn "ANTUMBRA_FIRMWARE_DIR holds no firmware files: the image has no device firmware"
 }
 record_device_firmware "${INPUT}/firmware" "${ROUT}/firmware.sha256"
-[ -z "${ANTUMBRA_FIRMWARE_DIR}" ] || [ -n "${DEVICE_FIRMWARE}" ] \
-    || warn "ANTUMBRA_FIRMWARE_DIR holds no firmware files: the image has no device firmware"
 
 # --- Collect the initramfs ----------------------------------------------------------------------
 KREL="$(cat "${KOUT}/kernel.release")"
