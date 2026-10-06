@@ -2235,6 +2235,8 @@ def persistence_phase(vm, rep, T, sh, out, run):
                   ok and len(lines) == 5 and lines[:2] == ["passwd-fails", "settings written"]
                   and re.fullmatch(r"error: unexpected error \(line \d+, exit status \d+\)", lines[2]) is not None
                   and lines[3:] == ["passwd-restored", "end"], o.replace("\n", " | ")[:400])
+        # passwd back, should that command have timed out and been interrupted
+        sh("if mountpoint -q /usr/bin/passwd; then umount /usr/bin/passwd; fi; echo ok")
         rep.check("persistence: nothing of the failed attempt was saved on the volume", *first_run_stored())
         # A wrong passphrase next, as a user might type it: the Welcome
         # screen hears of it and can start again; its report then stays
