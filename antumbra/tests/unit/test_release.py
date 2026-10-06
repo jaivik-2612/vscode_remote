@@ -421,6 +421,25 @@ class VerityAsBuiltTest(BuildOut):
         r = self.run_script("bootimg.sh")
         self.assertIn(f"dm-verity-root-hash=filesystem.squashfs:{ROOTHASH} ", read(self.args))
 
+    def test_bootimg_leaves_no_old_or_unchecked_image(self):
+        if not shutil.which("python3"):
+            self.skipTest("python3 missing")
+        self.bootimg_inputs()
+        self.write_flags()
+        img = os.path.join(self.out, "boot.img")
+        write(img, b"built from an earlier tree")
+        write(img + ".sha256", "0  boot.img\n")
+        r = self.run_script("bootimg.sh")
+        self.assertNotEqual(r.returncode, 0)  # the stand-in mkbootimg stops the build
+        self.assertTrue(os.path.exists(self.args), "mkbootimg did not run")
+        self.assertFalse(os.path.exists(img))
+        self.assertFalse(os.path.exists(img + ".sha256"))
+        src = read(os.path.join(BUILD, "bootimg.sh"))
+        # Footer and checks on the copy in the work directory; build/out gets it last.
+        self.assertLess(src.find('add_hash_footer --image "${NEWIMG}"'), src.find('mv "${NEWIMG}" "${OUTIMG}"'))
+        self.assertLess(src.find('info_image --image "${NEWIMG}"'), src.find('mv "${NEWIMG}" "${OUTIMG}"'))
+        self.assertEqual(src.count('"${OUTIMG}"'), 3)  # rm, mv, sha256sum
+
     def vm_bundle(self, **env):
         out = os.path.join(self.out, "qemu-virt")
         self.flags["ANTUMBRA_DEVICE"] = "qemu-virt"

@@ -48,6 +48,10 @@ fi
 log "command line (${#CMDLINE} bytes): ${CMDLINE}"
 
 # --- mkbootimg --------------------------------------------------------------------
+# The old boot.img, built from an earlier tree, goes first: a run that fails
+# from here on leaves no boot.img rather than a stale or unchecked one.
+OUTIMG="${OUT}/boot.img"
+rm -f "${OUTIMG}" "${OUTIMG}.sha256"
 RAW="${WORK}/boot-raw.img"
 python3 "${MKBOOTIMG}" \
     --header_version "${HEADER_VERSION}" \
@@ -68,21 +72,24 @@ RAWSIZE="$(stat -c %s "${RAW}")"
 [ "${RAWSIZE}" -le $((BOOT_PARTITION_SIZE - 1048576)) ] || die "boot image payload (${RAWSIZE} bytes) too large for the ${BOOT_PARTITION_SIZE}-byte partition"
 
 # --- Unsigned AVB footer, padded to the partition size ------------------------------
-OUTIMG="${OUT}/boot.img"
-cp "${RAW}" "${OUTIMG}"
+# Built and checked in the work directory, moved to build/out only once every
+# check below has passed.
+NEWIMG="${WORK}/boot.img"
+cp "${RAW}" "${NEWIMG}"
 SALT="$(printf 'antumbra-%s-%s' "${ANTUMBRA_VERSION}" "$(cat "${KOUT}/kernel.release")" | sha256sum | cut -d' ' -f1)"
-python3 "${AVBTOOL}" add_hash_footer --image "${OUTIMG}" --partition_name boot \
+python3 "${AVBTOOL}" add_hash_footer --image "${NEWIMG}" --partition_name boot \
     --partition_size "${BOOT_PARTITION_SIZE}" --algorithm NONE --salt "${SALT}"
-[ "$(stat -c %s "${OUTIMG}")" -eq "${BOOT_PARTITION_SIZE}" ] || die "boot.img is not exactly ${BOOT_PARTITION_SIZE} bytes"
+[ "$(stat -c %s "${NEWIMG}")" -eq "${BOOT_PARTITION_SIZE}" ] || die "boot.img is not exactly ${BOOT_PARTITION_SIZE} bytes"
 
 # --- Verify what we produced -------------------------------------------------------------
-INFO="$(python3 "${UNPACK_BOOTIMG}" --boot_img "${OUTIMG}" --out "${WORK}/boot-unpacked" 2>&1)"
+INFO="$(python3 "${UNPACK_BOOTIMG}" --boot_img "${NEWIMG}" --out "${WORK}/boot-unpacked" 2>&1)"
 echo "${INFO}" | grep -q "boot image header version: ${HEADER_VERSION}" || die "unexpected header version: ${INFO}"
 echo "${INFO}" | grep -q "page size: ${PAGESIZE}" || die "unexpected page size"
 echo "${INFO}" | grep -q "kernel load address: 0x$(printf '%08x' $((BASE + KERNEL_OFFSET)))" || die "unexpected kernel load address: ${INFO}"
 echo "${INFO}" | grep -q "ramdisk load address: 0x$(printf '%08x' $((BASE + RAMDISK_OFFSET)))" || die "unexpected ramdisk load address"
 echo "${INFO}" | grep -q "dtb address: 0x$(printf '%016x' $((BASE + DTB_OFFSET)))" || die "unexpected dtb address: ${INFO}"
-python3 "${AVBTOOL}" info_image --image "${OUTIMG}" | grep -q 'Partition Name:\s*boot' || die "AVB footer missing"
+python3 "${AVBTOOL}" info_image --image "${NEWIMG}" | grep -q 'Partition Name:\s*boot' || die "AVB footer missing"
 cmp -s "${WORK}/boot-unpacked/kernel" "${KOUT}/Image" || die "kernel inside boot.img differs"
+mv "${NEWIMG}" "${OUTIMG}"
 sha256sum "${OUTIMG}" | tee "${OUTIMG}.sha256"
 log "boot.img ready"

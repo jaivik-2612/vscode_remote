@@ -80,8 +80,12 @@ What each step deletes before it runs:
 - `squashfs.sh`: the previous squashfs (with its `.verity`, `.roothash`
   and `.sha256`), the images built from it and the `ANTUMBRA_VERITY`
   record.
-- `image.sh` and `bootimg.sh` replace only their own image, and
-  `release.sh` deletes the release directory of the same version.
+- `bootimg.sh`: the old `boot.img` and its `.sha256`. It builds and
+  checks the new one in the work directory and moves it to `build/out`
+  only once every check has passed, so a failed run leaves no
+  `boot.img` rather than an unchecked one.
+- `image.sh` replaces only its own image, and `release.sh` deletes the
+  release directory of the same version.
 
 `rootfs.sh` does not install `config/rootfs` and `config/rootfs-android`
 as they are checked out: it stages copies in `build/work/overlay/`, owned
