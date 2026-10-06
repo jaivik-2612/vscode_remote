@@ -1557,11 +1557,13 @@ def android_preflight(vm, rep, T, sh, out):
     rep.check("android: Waydroid's templates use waydroid-tor, keep no sys_time, run the start-host hook, deny V4L2, hide /sys/firmware, pass no video device",
               rc is not None and o.strip().split("\n") == ["1", "1", "0", "0", "1", "1", "1", "0"], o.replace("\n", " "))
     rc, o = sh("stat -c '%n %s' /usr/share/waydroid-extra/images/system.img /usr/share/waydroid-extra/images/vendor.img /usr/share/antumbra/android/F-Droid.apk; "
-               "stat -c '%a' /usr/bin/pkexec; grep -c '^TransPort 10.200.2.1:9041 ' /etc/tor/torrc; grep -c '^android|' /etc/antumbra/persistence-features.conf")
+               "stat -c '%a' /usr/bin/pkexec; grep -c '^TransPort 10.200.2.1:9041 ' /etc/tor/torrc; grep -cx 'DNSPort 10.200.2.1:5354' /etc/tor/torrc; "
+               "grep -c '^android|' /etc/antumbra/persistence-features.conf")
     lines = o.strip().split("\n") if rc == 0 else []
-    ok = (len(lines) == 6 and all(int(l.split()[1]) > 1000000 for l in lines[:3])
-          and lines[3] == "755" and lines[4] == "1" and lines[5] == "1")
-    rep.check("android: images and F-Droid in the read-only system, pkexec not setuid, Tor's Android listeners and the persistence feature configured", ok, o.replace("\n", " | "))
+    ok = (len(lines) == 7 and all(int(l.split()[1]) > 1000000 for l in lines[:3])
+          and lines[3] == "755" and lines[4:] == ["1", "1", "1"])
+    rep.check("android: images and F-Droid in the read-only system, pkexec not setuid, Tor's TransPort and DNSPort for Android and the persistence feature configured",
+              ok, o.replace("\n", " | "))
     # D-Bus activation (what any Waydroid client does) must not start the
     # container service while Android is off.
     rc, o = sh("runuser -u amnesia -- timeout 90 busctl --system call id.waydro.Container /ContainerManager id.waydro.ContainerManager GetSession "
