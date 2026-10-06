@@ -20,9 +20,10 @@ Why the backports: trixie's PipeWire camera plugin (`libspa-0.2-libcamera`
 is trixie-backports' 1.6.9, which requires the PipeWire modules of the same
 version, so the whole PipeWire stack comes from backports
 (`config/rootfs/etc/apt/preferences.d/antumbra-backports` pins exactly those
-packages; everything else stays on trixie). PipeWire 1.6.9 also passes the
-sensor's mounting rotation on as a video transform, which the IMX471,
-mounted at 90 degrees, needs.
+packages, and Waydroid's for images with Android apps; everything else
+stays on trixie). PipeWire 1.6.9 also passes the sensor's mounting
+rotation on as a video transform, which the IMX471, mounted at 90
+degrees, needs.
 
 `gnome-snapshot`, `libcamera-ipa` and `libspa-0.2-libcamera` are listed in
 `config/packages/apps.list`: Snapshot only recommends the last two, and the
@@ -98,7 +99,11 @@ What follows from that:
   keep the front camera open while walking, and do not push a raised
   camera down by hand.
 - Antumbra's kernel patch `0102` retracts the camera before suspend and
-  power-off and at boot; `hardware-validation.md` lists the motor checks.
+  raises it again after resume when a stream was held across sleep; it
+  retracts it before power-off and reboot, and at boot when it finds it
+  raised. It also bounds every course in time and makes the motor's
+  `status` file readable by root only (it shows whether the front camera
+  is in use). `hardware-validation.md` lists the motor checks.
 
 ## Limits
 
@@ -199,6 +204,13 @@ after the profile ships: then it has to run under the browser's profile
 the profile refuses has to. The physical pop-up remains the only signal
 for the front camera.
 
+Android apps, in images built with `ANTUMBRA_ANDROID=1`, get no camera:
+Waydroid is patched not to pass `/dev/video*` into its container (it
+would also open them to every local user), and the container's device
+rules deny V4L2 devices (major 81). Android's root is root on the host
+(`threat-model.md`), so this holds only while Android's system is not
+compromised.
+
 ## Why there is no OnePlus Camera
 
 Antumbra does not ship, download or script the installation of the
@@ -221,7 +233,8 @@ Technical:
   Linux has neither; the port uses the mainline CAMSS driver.
 - Inside an Android container (Waydroid), the Android 13 image uses AOSP's
   External Camera HAL, which accepts only MJPEG or depth frames from
-  `/dev/video*`; CAMSS delivers raw Bayer.
+  `/dev/video*`; CAMSS delivers raw Bayer. Antumbra passes no camera
+  device into the container anyway (above).
 - On OxygenOS the pop-up is moved by a system service, not by the camera
   app (observed on the OnePlus 7 Pro), so the app would not bring the
   pop-up with it anyway.

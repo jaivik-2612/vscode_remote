@@ -8,7 +8,8 @@ port in August 2026 and of this repository; see `roadmap.md` for plans.
 Nothing in this repository has booted on a physical OnePlus 7T Pro yet.
 `hardware-validation.md` lists what to confirm first: boot, display,
 touch, the Welcome screen under bare phoc, Wi-Fi with the modem in
-low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
+low-power mode, the self-check, Tor bootstrap, shutdown behaviour; then
+the pop-up motor, the cameras and Android apps.
 
 ## Hardware
 
@@ -33,8 +34,9 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   when the phone falls, on a signal from the sensor DSP, which Antumbra
   disables; mainline offers no free-fall sensor either. Do not keep the
   selfie camera open while walking, and do not push a raised camera down
-  by hand: the driver reads the Hall sensors only while the motor moves,
-  so it does not follow a push, and the push loads the idle gear train.
+  by hand: the driver reads the Hall sensors only for a course, for its
+  `status` file, around sleep, at boot and at power-off, so it does not
+  follow a push, and the push loads the idle gear train.
 - The front camera rises whenever the front sensor is powered, which makes
   it a physical indicator for that camera only. It is not a boundary
   against root, it can lag a few hundred milliseconds behind around
@@ -68,21 +70,34 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
 - No Unsafe Browser (captive portals cannot be handled from the device
   yet).
 - No Tor Connection assistant: bridges are entered on the Welcome screen
-  or with `antumbra-tor-connect`; no QR code or Moat.
+  or with `antumbra-tor-connect`; no QR code or Moat. What
+  `antumbra-tor-connect` sets lasts until the next network connection
+  comes up, when the Welcome screen's choice is applied again, or until
+  Tor restarts; it is not saved anywhere.
+- The Welcome screen does not show the settings saved in Persistent
+  Storage: the volume is unlocked only after Start, so every question,
+  bridges included, is answered again at each boot. The volume keeps
+  this boot's choices (never the screen-lock passphrase's hash) for a
+  Welcome screen that unlocks first, which does not exist yet. The "Tor
+  bridges" feature (`/var/lib/tca`) is mounted, but nothing stores
+  bridges in it.
 - The Welcome screen passes the Persistent Storage passphrase to the
-  root-side applier through a 0600 file in a tmpfs owned by the greeter
-  user, not over D-Bus as Tails' `tps` does.
+  root-side applier through a 0600 file in the greeter user's directory
+  in RAM (on the root overlay's tmpfs), which the applier moves into a
+  root-only directory and shreds, not over D-Bus as Tails' `tps` does.
 - Persistent Storage features are bind mounts without Tails' `nosymfollow`
   protection, and OS updates erase the volume (full re-flash).
 - When applying the Welcome screen's settings fails after Persistent
-  Storage was unlocked, the applier locks it again before the Welcome
-  screen can start again. If that fails too (a mount of it still in use;
-  the error then says "Persistent Storage could not be locked again"),
-  the volume stays open until a restart: a new attempt still needs the
-  passphrase, an attempt without Persistent Storage is refused (an
-  amnesic session must not start with the volume open), and the volume's
-  Welcome settings are unmounted from the greeter's directory (lazily if
-  need be), but restarting is the clean way out.
+  Storage was created or unlocked, the applier locks it again before the
+  Welcome screen can start again, and the volume's stored Welcome
+  settings stay as they were (they are saved last). If locking fails too
+  (a mount of it still in use; the error then says "Persistent Storage
+  could not be locked again"), the volume stays open until a restart: a
+  new attempt still needs the passphrase, an attempt without Persistent
+  Storage is refused (an amnesic session must not start with the volume
+  open), and the volume's Welcome settings are unmounted from the
+  greeter's directory (lazily if need be), but restarting is the clean
+  way out.
 - Audio routing uses Debian's generic ALSA UCM profiles, not the port's
   device-specific ones; sound may need manual mixer settings.
 - `htpdate` time synchronisation needs Tor to bootstrap first; the
@@ -158,8 +173,8 @@ the security side. None of this has run on the phone yet
   not signed; they are checked against the hash Waydroid publishes.
 - Android is a weaker sandbox than the rest of Antumbra and than a stock
   phone: a privileged container where Android's root is the system's
-  root, no SELinux, and binder open to every program of the user while
-  Android runs. Use it only for apps you trust.
+  root, no SELinux, and binder open to every local user while Android
+  runs. Use it only for apps you trust.
 - Network: TCP to the Internet only, through Tor. UDP (calls, WebRTC,
   QUIC, many games), VPN apps and IPv6 do not work. `.onion` addresses do
   not work either: Tor answers a lookup of one with an address in
@@ -168,14 +183,15 @@ the security side. None of this has run on the phone yet
   whatever Android app listens on that port). Connections to the local
   network, the phone's own addresses on it included, wait for a time-out
   instead of failing at once; TCP to the phone's own public address, if it
-  has one, goes through Tor like TCP to any other. All apps share one Tor identity, separate from the host's and
-  unchanged by Tor Browser's "New Identity"; streams are separated per
-  destination only. Apps you log in to identify you.
+  has one, goes through Tor like TCP to any other. All apps share one Tor
+  identity, separate from the host's and unchanged by Tor Browser's "New
+  Identity"; streams are separated per destination only. Apps you log in
+  to identify you.
 - Android checks for captive portals on its first start in a session
   before Antumbra's provisioning turns the check off; the check goes
   through Tor like everything else.
-- No cameras inside Android. The microphone is available, gated only by
-  Android's own permission prompt.
+- No cameras inside Android (`camera.md`). The microphone is available,
+  gated only by Android's own permission prompt.
 - Android apps use Android's keyboard, not Phosh's on-screen keyboard.
   There is no clipboard sharing between Android and the host (Waydroid's
   clipboard needs `pyclip`, which Debian does not package).
@@ -189,6 +205,13 @@ the security side. None of this has run on the phone yet
   readable inside Android until Android is next started; something
   plugged in while it is stopped is masked at its next start. Analog
   values such as the battery's measured capacity are not masked.
+- Android refuses to start rather than start without its Tor-only
+  network or with a hardware identifier the container could read: the
+  container's start-host hook checks the firewall, the bridge, the
+  container's configuration and every mask, in the container's own view,
+  at each start. `journalctl -t antumbra-waydroid` says what it found.
+  Android stopped in a session stays stopped until the "Android"
+  launcher starts it again.
 - Cost (estimates, not measured on the phone): about 1.1 GB more to
   download and flash (2.4 GB uncompressed in the root filesystem; 0.8 GB
   for the VM's `arm64_only` images), and roughly 1 to 1.5 GB of RAM while
@@ -213,4 +236,10 @@ the security side. None of this has run on the phone yet
 - The release includes the port's DTBO and vbmeta assets as-is; Antumbra
   cannot yet regenerate them.
 - Without the builder's own firmware tree the image has no display
-  acceleration, Wi-Fi or audio.
+  acceleration, Wi-Fi or audio. With it, the firmware is in the image and
+  in the release `release.sh` makes from it, which does not check for it
+  (its manifest says the images contain no proprietary device firmware):
+  such a release is for the builder's own phone only (`legal.md`).
+- Images built with `ANTUMBRA_LIBCAMERA_LOCAL=1` are not reproducible:
+  libcamera signs its IPA modules with a key generated at each build
+  (`camera.md`).

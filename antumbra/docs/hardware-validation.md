@@ -7,8 +7,13 @@ result of each item with the build id from `/etc/antumbra-release`.
 
 Use a debug build for the first attempts (`ANTUMBRA_DEBUG=1`): it keeps
 kernel messages visible and does not quiet the console, and it is refused
-by `release.sh` so it cannot leak into a release. Keep the slot-B backup
-from `flash.sh`.
+by `release.sh` so it cannot leak into a release. `flash.sh` takes a
+release directory, so flash a debug build by hand (`flashing.md`, "By
+hand") with `build/out/boot.img`, `build/out/userdata.simg` and the
+port's DTBO and vbmeta from `build/cache/device-assets/`, after backing
+up slot B as described there. Keep the slot-B backup. Items 46-55 need an
+image built with `ANTUMBRA_ANDROID=1`; item 43 compares the default
+libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
 
 ## Boot chain
 
@@ -30,7 +35,11 @@ from `flash.sh`.
    scale 3 (`/etc/antumbra/phoc.ini`).
 7. Touch works in the Welcome screen; squeekboard appears for text fields.
 8. "Start Antumbra" leads to the Phosh session as `amnesia` (check
-   `loginctl` for the session and `journalctl -t antumbra-welcome`).
+   `loginctl` for the session and `journalctl -t antumbra-welcome`). The
+   Welcome screen and the shell show Antumbra's dark theme (purple
+   accent, Roboto, the eclipse wallpaper); record whether the top bar's
+   items clear the display's rounded corners (`known-issues.md`,
+   "Interface").
 9. The screen locks on the power button when a passphrase was set and
    unlocks with it; `antumbra-auto-shutdown.timer` is active while locked
    (`systemctl list-timers`) and fires from suspend (set a short
@@ -76,8 +85,13 @@ from `flash.sh`.
 
 22. Create it from the Welcome screen; reboot; unlock it; `~/Persistent`
     is the volume (`findmnt /home/amnesia/Persistent`), Wi-Fi profiles
-    persist, Welcome settings persist.
-23. A wrong passphrase is refused and the session still starts amnesic.
+    persist, and `/var/lib/antumbra/settings/persistent`, the volume's
+    Welcome settings, holds this boot's choices and no `tails.password`
+    (the Welcome screen does not read them back; `known-issues.md`).
+23. A wrong passphrase is refused: the Welcome screen shows the error and
+    lets you start again. Started then without Persistent Storage, the
+    session is amnesic and the volume is not open (`ls /dev/mapper` as
+    root shows no `antumbra_data`).
 
 ## Power and radios
 
@@ -105,9 +119,10 @@ each course (`dmesg | grep camera-popup`).
     44160 and `elapsed_us` below `course_cap_us` from `status`. A normal
     course ending in error -34 (microstep budget spent) or -110
     (wall-clock cap) means the budget cuts real courses short.
-29. Once a camera app ships: the camera rises when the preview starts
-    and retracts when it stops, when the app is killed with SIGKILL and
-    when the stream fails to start.
+29. With a camera application (GNOME Snapshot, item 40): the camera
+    rises when the preview starts and retracts when it stops, when the
+    application is killed with SIGKILL and when the stream fails to
+    start.
 30. Suspend with the camera down (`auto`, then `rtcwake -m freeze -s 20`):
     no `open stopped`, `close stopped` or `automatic open failed` line
     between `Freezing user space processes` and `Restarting tasks`, where
@@ -179,8 +194,8 @@ in the phone image, so the cameras are listed through PipeWire.
     frame and retracts when Snapshot switches to a rear camera, when it
     quits and when it is killed (`pkill -9 snapshot`); `dmesg | grep
     camera-popup` shows one `open stopped` and one `close stopped` per
-    course, each with `endpoint=1 error=0`. This is item 29 with a real
-    application.
+    course, each with `endpoint=1 error=0`. This is item 29 with
+    Snapshot.
 41. Orientation and mirroring: with the phone held upright, the front
     preview is upright and mirrored, and the saved picture is upright.
     Record what Snapshot does with each of the four cameras.
@@ -216,7 +231,10 @@ section 11.1). The VM covers the network and the setup
 47. With it on: Android's full UI opens from the "Android" launcher.
     Record the time from Start to `waydroid shell getprop
     sys.boot_completed` printing 1, and the memory used (`free -m` before
-    and after), with and without Tor Browser open.
+    and after), with and without Tor Browser open. `journalctl -t
+    antumbra-waydroid` has `Android container checked: Tor only, N
+    hardware identifiers hidden in its view` from the start-host hook;
+    record N.
 48. The `arm64` images' 32-bit half runs: `waydroid shell getprop
     ro.product.cpu.abilist` lists `armeabi-v7a`, and `waydroid shell ps -A`
     shows both `zygote64` and `zygote`.
@@ -228,7 +246,10 @@ section 11.1). The VM covers the network and the setup
     from F-Droid shows Tor at <https://check.torproject.org>; on the host,
     `ss -tnp` shows Android's connections only as 10.200.2.2 to
     10.200.2.1:9041 (`tor`), and the counters in `nft list chain ip
-    antumbra-nat android` grow.
+    antumbra-nat android` grow. The `.onion` block is in Android's network
+    namespace: `nsenter --target "$(lxc-info -P /var/lib/waydroid/lxc -n
+    waydroid -pH)" --net nft list table ip antumbra_onion` shows `ip daddr
+    127.192.0.0/10 reject`.
 51. Audio: an Android app plays through the speakers; recording works
     only after Android's microphone prompt is allowed.
 52. Suspend and resume with Android running: Android, Wi-Fi and Tor come

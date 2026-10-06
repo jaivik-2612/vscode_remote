@@ -7,8 +7,9 @@
   Tails, GPL-3.0-or-later. Tails is a trademark of the Tails project;
   Antumbra is not Tails and is not endorsed by it.
 - Kernel sources: GPL-2.0 (Linux, the sm8150-mainline tree, the
-  hotdog-linux-bringup patches by Robin Snyders, and Antumbra's patch under
-  `device/oneplus-hotdog/kernel/patches/`).
+  hotdog-linux-bringup patches by Robin Snyders, and Antumbra's patches
+  under `device/oneplus-hotdog/kernel/patches/` and device-tree overrides
+  in `device/oneplus-hotdog/kernel/`).
 - The hotdog-linux-bringup tooling and documentation this project
   learned from: GPL-2.0.
 - `avbtool.py`, fetched at build time from AOSP: Apache-2.0 (MIT-style
@@ -48,8 +49,8 @@ style only. Antumbra uses no Google brand names or assets for it: no
 
 Only images built with `ANTUMBRA_ANDROID=1` contain these (`building.md`).
 
-- Waydroid (Debian package `waydroid`): GPL-3.0-or-later. Antumbra
-  changes it at build time with
+- Waydroid (Debian package `waydroid`, from trixie-backports):
+  GPL-3.0-or-later. Antumbra changes it at build time with
   `config/rootfs-android/usr/share/antumbra/patches/waydroid-no-video.diff`
   (GPL-3.0-or-later, like Waydroid) and edits its LXC configuration
   templates in `config/hooks/56-session-android.sh`; both are in this
@@ -86,9 +87,13 @@ modem and video engine. Qualcomm and OnePlus do not license it for
 redistribution. Consequently:
 
 - Antumbra never commits firmware to this repository and never includes it
-  in a published image. `release.sh` packages only what the build
-  produced from free sources plus two hash-pinned device-tree/vbmeta
-  assets from the port's public release.
+  in a published image. `release.sh` packages the images the build
+  produced plus two hash-pinned device-tree/vbmeta assets from the port's
+  public release. An image built with `ANTUMBRA_FIRMWARE_DIR` carries the
+  builder's firmware in its root filesystem, and `release.sh` packages it
+  all the same, with a manifest that still says the images contain no
+  proprietary device firmware: such a release is for the builder's own
+  phone.
 - `build/fetch-firmware.sh` assembles the firmware for the builder's own
   device from a community mirror that the mainline port also uses. It
   prints a notice and requires `ANTUMBRA_ACCEPT_PROPRIETARY_FIRMWARE=1`.
