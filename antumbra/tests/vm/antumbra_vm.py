@@ -1846,9 +1846,9 @@ def android_phase(vm, rep, T, sh, out):
     running, o = android_restart_session(T, sh)
     rep.check("android: the container starts again once the rules are back, with a device plugged in since (a dm device with a UUID)",
               plugged and running, o.replace("\n", " "))
-    # Right after the start lxc-attach can fail (its message, not the
-    # file, would be read): read until Android answers. "ok" marks a
-    # successful cat; the file's content follows, printable characters only.
+    # Right after the start attaching can fail (its message, not the file,
+    # would be read): read until Android answers. "ok" marks a successful
+    # cat, after the file's content (printable characters only).
     cat_f = in_android('/system/bin/sh -c \'/system/bin/cat "$0" && echo ok\' "$f"', errors=True)
     rc, o = None, "not plugged in or not running"
     deadline = time.monotonic() + T(300)
@@ -1856,7 +1856,7 @@ def android_phase(vm, rep, T, sh, out):
         rc, o = sh(f"f=/sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid; "
                    "grep -cxF \"lxc.mount.entry = /dev/null ${f#/} none bind,ro,optional 0 0\" /var/lib/waydroid/lxc/waydroid/config; "
                    f"printf 'android=[%s]\\n' \"$({cat_f} | tr -cd '[:print:]\\n' | tr '\\n' ' ')\"", timeout=T(120))
-        if rc is not None and "lxc-attach" not in o:
+        if rc is not None and re.search(r"^android=\[.*\bok \]$", o, re.M):
             break
         time.sleep(10)
     rep.check("android: the device plugged in since Android was prepared has its mask, and Android reads its UUID empty",
