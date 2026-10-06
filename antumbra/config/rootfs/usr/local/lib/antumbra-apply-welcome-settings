@@ -145,6 +145,10 @@ if antumbra-persistence status --quiet 2>/dev/null && [ -d "${VOLUME_SETTINGS}" 
     done
     rm -f -- "${VOLUME_SETTINGS:?}/tails.password"
 fi
+# The staged copies (the screen-lock passphrase's hash among them) are not
+# needed past this point: remove them now rather than when the script exits,
+# which is after the network has come up.
+cleanup
 
 # --- Passphrase, administration -------------------------------------------------------------
 rm -f "${SUDOERS}" "${POLKIT}"

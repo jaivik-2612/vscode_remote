@@ -1917,7 +1917,18 @@ def persistence_phase(vm, rep, T, sh, out, run):
             applied = o.strip()
             break
         time.sleep(10)
-    rep.check(f"persistence: the applier {'created' if create else 'unlocked'} Persistent Storage and applied the settings", applied == "applied", str(applied))
+    # welcome-applied appears before the applier unblocks the network; the
+    # checks below look at its end state, so wait for it to finish.
+    finished = False
+    deadline = time.monotonic() + T(300)
+    while applied == "applied" and time.monotonic() < deadline:
+        rc, o = sh("systemctl is-active antumbra-apply-welcome-settings.service", timeout=60)
+        if rc is not None and o.strip() in ("inactive", "failed"):
+            finished = True
+            break
+        time.sleep(5)
+    rep.check(f"persistence: the applier {'created' if create else 'unlocked'} Persistent Storage and applied the settings",
+              applied == "applied" and finished, f"{applied}; applier {'finished' if finished else 'still running'}")
     if applied != "applied":
         rc, o = sh("journalctl -b --no-pager -u antumbra-apply-welcome-settings -t antumbra-welcome | tail -n 60", timeout=60)
         save_text(out, "persistence-applier.txt", o)
