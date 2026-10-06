@@ -451,17 +451,35 @@ class CameraAccessDocsTest(unittest.TestCase):
             yield from (" ".join(p.split()) for p in re.split(r"\n(?=\s*(?:[-*] |\d+\. |\|))", block))
 
     def test_planned_confinement_covers_the_camera_portal(self):
+        # Also: the profile is an allow-list (deny rules for the portal next
+        # to a broad session-bus allow leave the systemd user manager and
+        # D-Bus activation open), and PipeWire listens on two sockets.
         found = 0
         for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
             if not name.endswith(".md"):
                 continue
             for p in self.paragraphs(read(os.path.join(ROOT, "docs", name))):
-                if "PipeWire socket" in p:
+                if re.search(r"PipeWire('s)? sockets?\b|pipewire-0", p):
                     found += 1
                     self.assertIn("camera portal", p, f"{name}: {p[:200]}")
                     self.assertIn("permission store", p.lower(), f"{name}: {p[:200]}")
+                    self.assertIn("allow-list", p, f"{name}: {p[:200]}")
+                    self.assertRegex(p, r"pipewire-0-manager|pipewire-0\*", f"{name}: {p[:200]}")
+                    self.assertIn("systemd user manager", p, f"{name}: {p[:200]}")
+                    self.assertIn("D-Bus activation", p, f"{name}: {p[:200]}")
         # camera.md, roadmap.md, known-issues.md, threat-model.md
         self.assertGreaterEqual(found, 4)
+
+    def test_deny_rules_are_not_presented_as_enough(self):
+        camera = " ".join(read(os.path.join(ROOT, "docs", "camera.md")).split())
+        section = camera[camera.index("## Who can use the cameras"):camera.index("## Why there is no OnePlus Camera")]
+        self.assertIn("Deny rules alone are not enough", section)
+        self.assertIn("StartTransientUnit", section)
+        self.assertNotIn("Better, the profile allows", section)
+        # The VM's portal check runs unconfined; it must run under the
+        # profile once there is one.
+        for doc in ("camera.md", "vm-testing.md"):
+            self.assertIn("aa-exec -p", read(os.path.join(ROOT, "docs", doc)), doc)
 
 
 class OnePlusScannerTest(unittest.TestCase):

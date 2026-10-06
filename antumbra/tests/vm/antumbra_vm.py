@@ -1105,7 +1105,9 @@ def camera_phase(vm, rep, T, sh, out):
     #     "Who can use the cameras"): from the browser's network namespace,
     #     as amnesia, without opening a camera device or PipeWire's socket,
     #     the camera portal hands over a connected PipeWire file descriptor
-    #     once the session's one decision for host programs is yes.
+    #     once the session's one decision for host programs is yes. This
+    #     call is unconfined: once the browser's profile ships, run it under
+    #     the profile (aa-exec -p) and expect a refusal, or it keeps passing.
     rc, o = sh("ip netns exec tbb " + AS_AMNESIA + "busctl --user --json=short call org.freedesktop.portal.Desktop "
                "/org/freedesktop/portal/desktop org.freedesktop.portal.Camera OpenPipeWireRemote 'a{sv}' 0 2>&1", timeout=60)
     try:

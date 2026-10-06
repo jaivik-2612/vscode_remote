@@ -149,21 +149,40 @@ permission. It is not an access control either:
 So any program running as `amnesia`, Tor Browser and anything that
 compromises it included, can use the cameras without a prompt. Enforcement
 needs Tor Browser confined, and the confinement has to close all three
-ways in: an AppArmor profile that denies `/dev/video*`, `/dev/media*`,
-`/dev/v4l-subdev*` and the PipeWire socket (`/run/user/1000/pipewire-0`),
-and that also denies the browser's session-bus calls to the camera portal
-and to the permission store. Rules for the devices and the socket alone
-are not enough: the portal hands the browser an already connected PipeWire
-file descriptor, so the browser never opens a camera device or PipeWire's
-socket by path. For example:
+ways in, and every way to start a helper outside it. The planned AppArmor
+profile is an allow-list: AppArmor denies every file and D-Bus access a
+profile does not allow, so the profile allows what the browser needs and
+nothing that reaches a camera. It allows none of `/dev/video*`,
+`/dev/media*` and `/dev/v4l-subdev*`; none of PipeWire's sockets,
+`/run/user/1000/pipewire-0*` (PipeWire listens on `pipewire-0` and, by
+default, on `pipewire-0-manager`, and either one gives the camera nodes),
+by a rule of its own or through an abstraction; and on the session bus
+only the peers and calls the browser needs. That leaves out the camera
+portal (`org.freedesktop.portal.Camera`), the portal's permission store
+(`org.freedesktop.impl.portal.PermissionStore`), and whatever starts a
+program outside the profile: the systemd user manager
+(`org.freedesktop.systemd1`, `StartTransientUnit`) and D-Bus activation
+(a call to a session service that is not running yet, or the bus's own
+`StartServiceByName`, which `abstractions/dbus-session-strict` allows, so
+a profile that includes it needs an explicit deny for that call). Each of
+those runs a helper as `amnesia`, unconfined, which can then use the
+camera portal or PipeWire itself.
+
+Rules for the devices and the sockets alone are not enough: the portal
+hands the browser an already connected PipeWire file descriptor, so the
+browser opens neither a camera device nor a socket by path. Deny rules
+alone are not enough either:
 
 ```
 deny dbus send bus=session path=/org/freedesktop/portal/desktop interface=org.freedesktop.portal.Camera,
 deny dbus send bus=session interface=org.freedesktop.impl.portal.PermissionStore,
 ```
 
-Better, the profile allows the session bus only for the names the browser
-needs. AppArmor's D-Bus rules are enforced by the bus daemon: the image's
+are the least a profile must carry if it ever allows more of the session
+bus than named peers, but next to a broad `dbus bus=session,` allow they
+still leave the systemd user manager and D-Bus activation open.
+
+AppArmor's D-Bus rules are enforced by the bus daemon: the image's
 `dbus-daemon` is built with AppArmor support and the 6.17 kernel
 advertises AppArmor D-Bus mediation, so session-bus rules in the profile
 should apply; the profile's own tests have to show that they do. The other
@@ -174,8 +193,11 @@ bubblewrap sandbox that is not a Flatpak still counts as a host program
 for the portal. The image has no Tor Browser profile yet; it is planned
 (`roadmap.md`). The VM camera checks call the portal as `amnesia` from
 inside the browser's network namespace and expect a PipeWire connection
-(`vm-testing.md`). The physical pop-up remains the only signal for the
-front camera.
+(`vm-testing.md`). That call runs unconfined, so it would go on passing
+after the profile ships: then it has to run under the browser's profile
+(`aa-exec -p <profile> --`) and expect a refusal, as every test of what
+the profile refuses has to. The physical pop-up remains the only signal
+for the front camera.
 
 ## Why there is no OnePlus Camera
 
