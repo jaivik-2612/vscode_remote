@@ -925,11 +925,14 @@ RAM. `config/hooks/56-session-android.sh` then:
    from subdirectories), writes `waydroid.cfg` (overlays off, since the
    root is already an overlayfs; the Waydroid image's own generic product
    values from `/usr/share/antumbra/android/product.prop`; multi-window
-   mode; density 480 on the phone and 320 in the VM; in a VM software
-   rendering, which Waydroid turns into ANGLE on SwiftShader), runs
-   `waydroid init` and `waydroid upgrade -o`, copies the generic kernel
-   command line to `/run/antumbra/android-cmdline` (writable, because
-   Android's first-stage init may chmod `/proc/cmdline`), masks the
+   mode; density 480 on the phone and 320 in the VM; in a VM also
+   software rendering, which Waydroid turns into ANGLE on SwiftShader,
+   and Android's timeouts scaled tenfold, `ro.hw_timeout_multiplier=10`,
+   as emulators set it, without which Android does not boot under full
+   emulation, as `vm-testing.md` explains), runs `waydroid init` and
+   `waydroid upgrade -o`, copies the generic kernel command line to
+   `/run/antumbra/android-cmdline` (writable, because Android's
+   first-stage init may chmod `/proc/cmdline`), masks the
    hardware identifiers in sysfs and procfs in the generated
    configuration, checks it, starts the container service and writes
    `/run/antumbra/android-ready`. The masks: read-only binds of
@@ -966,8 +969,10 @@ RAM. `config/hooks/56-session-android.sh` then:
    grid, after Antumbra's "Android" launcher (Android's full-screen
    interface; Waydroid's own launcher, which offers to download images, is
    hidden). `antumbra-fdroid-install` installs F-Droid unless it is
-   already there, and `antumbra-waydroid-provision` (root) applies the
-   settings of section 8.5 inside Android.
+   already there: it waits up to 40 minutes for Android to answer, then
+   up to 15 for the installation (its unit allows 60 in all);
+   `antumbra-waydroid-provision` (root) applies the settings of section
+   8.5 inside Android.
 
 The binder devices are static, root-only (0600) nodes; binderfs stays off
 because it can be mounted from an unprivileged user namespace. While

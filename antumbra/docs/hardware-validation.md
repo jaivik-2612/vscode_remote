@@ -11,7 +11,7 @@ by `release.sh` so it cannot leak into a release. `flash.sh` takes a
 release directory, so flash a debug build by hand (`flashing.md`, "By
 hand") with `build/out/boot.img`, `build/out/userdata.simg` and the
 port's DTBO and vbmeta from `build/cache/device-assets/`, after backing
-up slot B as described there. Keep the slot-B backup. Items 46-55 need an
+up slot B as described there. Keep the slot-B backup. Items 46-56 need an
 image built with `ANTUMBRA_ANDROID=1`; item 43 compares the default
 libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
 
@@ -299,3 +299,14 @@ section 11.1). The VM covers the network and the setup
     `find /sys/devices -type f -perm -004 \( -name '*serial*' -o -name
     '*uuid*' -o -name '*_id' -o -name 'cid' \)` for anything else of
     the kind.
+56. Android's own timeouts: `waydroid shell getprop
+    ro.hw_timeout_multiplier` prints nothing (the image sets it only in a
+    virtual machine), and `dmesg | grep 'received signal 13'` shows no
+    line for vold or a HAL once Android has booted, nor after an app has
+    been used for a few minutes (a native stack dump that outlasts
+    Android's 2-second limit kills the dumped process, and vold's death
+    reboots Android: `known-issues.md`, "Android apps"). F-Droid is
+    installed within the installer's limits (Android answering within 40
+    minutes, the installation within 15): `journalctl
+    _SYSTEMD_USER_UNIT=antumbra-fdroid-install.service` says "F-Droid
+    installed"; record how long after Android's boot.

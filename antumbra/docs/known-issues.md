@@ -241,8 +241,20 @@ the security side. None of this has run on the phone yet
   what is stored; Android's data stays on the volume, unused.
 - Every session sets Android up again (`waydroid init`). Without
   Persistent Storage, Android also boots for the first time and F-Droid
-  is installed again, which takes a while (unmeasured on the phone;
-  several minutes in the VM).
+  is installed again, which takes a while (unmeasured on the phone; in
+  the VM, under full emulation, Android's boot alone took about 24
+  minutes).
+- Android's own timeouts: when system_server's Watchdog reaches its
+  half-way mark, it asks for native stack dumps of vold and the HALs and
+  gives each 2 seconds. A dump that takes longer kills the dumped process
+  (SIGPIPE, when the requester gives up), and vold's death reboots
+  Android, which stops the container until the "Android" launcher starts
+  it again. This is Android's upstream behaviour. It kept Android from
+  booting under the VM's full emulation, so in a virtual machine
+  `antumbra-waydroid` scales Android's timeouts tenfold
+  (`ro.hw_timeout_multiplier=10`, as emulators do; `vm-testing.md`,
+  "Android apps"). The phone keeps Android's default timeouts, which
+  have not been tested there (`hardware-validation.md`, item 56).
 - Waydroid's AppArmor profiles run in complain mode, and while Android
   runs the GPU render node, DMA-BUF heaps and framebuffers are open to
   every local user.
