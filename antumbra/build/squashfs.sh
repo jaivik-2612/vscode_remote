@@ -8,8 +8,8 @@
 #          build/out/rootfs/filesystem.squashfs.verity   (unless ANTUMBRA_VERITY=0)
 #          build/out/rootfs/filesystem.squashfs.roothash
 #          ANTUMBRA_VERITY=1 or 0 added to build/out/rootfs/build-flags
-#          (release.sh requires it). Deletes the images built from the previous
-#          squashfs.
+#          (bootimg.sh, vm.sh and vm-bundle.sh refuse another value; release.sh
+#          requires it). Deletes the images built from the previous squashfs.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh

@@ -66,7 +66,8 @@ export SOURCE_DATE_EPOCH
 ANTUMBRA_DEBUG="${ANTUMBRA_DEBUG:-}"        # debug initramfs and console; never for releases
 ANTUMBRA_MINIMAL="${ANTUMBRA_MINIMAL:-}"    # small root filesystem for pipeline validation
 # dm-verity on the root filesystem: on unless ANTUMBRA_VERITY=0 (squashfs.sh,
-# bootimg.sh, vm.sh and vm-bundle.sh read it as ${ANTUMBRA_VERITY:-1}).
+# bootimg.sh, vm.sh and vm-bundle.sh read it as ${ANTUMBRA_VERITY:-1};
+# squashfs.sh records it in build-flags and the others check that record).
 ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"
 ANTUMBRA_FIRMWARE_DIR="${ANTUMBRA_FIRMWARE_DIR:-}"  # builder-provided firmware tree
 # Android apps (Waydroid, docs/architecture.md "Android apps"): 1 adds the
@@ -157,6 +158,19 @@ require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
 # from, and release.sh's manifest describes the images it packages.
 remove_built_images() {
     rm -f "${OUT}"/{userdata.simg,vm-disk.img,boot.img}{,.sha256}
+}
+
+# require_verity_as_built : the steps that put the root hash on the kernel
+# command line (bootimg.sh, vm.sh, vm-bundle.sh) refuse an ANTUMBRA_VERITY
+# other than the one squashfs.sh recorded in build-flags. Without a record
+# (squashfs.sh has not completed on this tree) they go on; with dm-verity
+# on, the missing root hash then stops them.
+require_verity_as_built() {
+    local want have
+    if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then want=1; else want=0; fi
+    have="$(stamp_value "${OUT}/rootfs/build-flags" ANTUMBRA_VERITY)"
+    [ -z "${have}" ] || [ "${have}" = "${want}" ] \
+        || die "squashfs.sh built the root filesystem with ANTUMBRA_VERITY=${have}, not ${want}: set ANTUMBRA_VERITY=${have}, or run squashfs.sh again"
 }
 
 # copy_as_root SRC DEST : copy a tree into DEST (made afresh), owned by root,
