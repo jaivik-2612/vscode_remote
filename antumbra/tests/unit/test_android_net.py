@@ -231,6 +231,30 @@ class ConsoleAttachTest(unittest.TestCase):
         self.assertEqual(self.console.run("for k in a b; do echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null "
                                           "| tr -d '\\r' | tail -n 1); done"), (0, "a=0\nb=0"))
 
+    def test_a_scan_killed_by_sigkill_is_read(self):
+        # The camera checks' image scan through this shell, with a scanner
+        # that ignores SIGTERM in its place and timeout's -k 1 instead of
+        # -k 30, the limit made 2 s by the timeout scale: timeout's SIGKILL
+        # kills timeout too, and bash prints "Killed" before the status line.
+        seen = []
+
+        def sh(cmd, timeout=120):
+            if "--xdev /" not in cmd:
+                return (1, "") if cmd.startswith("df ") else (None, "")
+            cmd = re.sub(r"timeout -k 30 (\d+) python3 /tmp/antumbra-no-oneplus-camera\.py --xdev /",
+                         r"""timeout -k 1 \1 sh -c 'trap "" TERM; sleep 20'""", cmd)
+            cmd = cmd.replace("/run/antumbra-nopc.out", os.path.join(self.tmp, "nopc.out"))
+            seen.append(self.console.run(cmd, timeout=timeout))
+            return seen[-1]
+        rep = self.vm.Report()
+        with unittest.mock.patch.object(self.vm, "put_file", lambda sh, path, data: True):
+            self.vm.oneplus_scan_checks(rep, lambda s: s / 1000, sh)
+        self.assertEqual(len(seen), 1)
+        self.assertRegex(seen[0][1], r"^Killed\nscan: exit 137 after \d+ s$")
+        results = {name: (ok, detail) for name, ok, detail, _ in rep.results}
+        ok, detail = results[self.vm.ONEPLUS_SCAN]
+        self.assertFalse(ok)
+        self.assertRegex(detail, r"^the scan was stopped at its limit \(2 s\) after \d+ s$")
 
 
 class HarnessAttachUseTest(unittest.TestCase):

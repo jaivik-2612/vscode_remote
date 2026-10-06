@@ -432,9 +432,21 @@ class GuestScanTest(unittest.TestCase):
         self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith(f"the scan was stopped at its limit ({limit} s) after 1672 s"),
                         results[self.vm.ONEPLUS_SCAN][1])
         self.assertTrue(results[control][0])
-        # killed before its limit (the OOM killer, say): not "stopped at its limit"
-        results, _, _, _ = self.run_checks(scan="scan: exit 137 after 300 s")
+        # killed by SIGKILL: timeout dies by it too, and the console's
+        # interactive bash prints "Killed" before the status line. After
+        # its limit (timeout's -k 30): stopped at its limit, with the
+        # findings after the status line.
+        results, limit, kill, _ = self.run_checks(scan=f"Killed\nscan: exit 137 after {limit + 30} s\n/usr/a.apk: cannot inspect (zip: x)")
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN],
+                         (False, f"the scan was stopped at its limit ({limit} s) after {limit + kill} s: /usr/a.apk: cannot inspect (zip: x)"))
+        self.assertTrue(results[control][0])
+        # before its limit (the OOM killer, say): not "stopped at its limit"
+        results, _, _, _ = self.run_checks(scan="Killed\nscan: exit 137 after 300 s")
         self.assertEqual(results[self.vm.ONEPLUS_SCAN], (False, "scanner exit 137"))
+        # a status line anywhere else is no status line
+        results, _, _, _ = self.run_checks(scan="Killed\nscan: exit 0 after 300 s and more")
+        self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
+        self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith("no status from the scan: Killed"), results[self.vm.ONEPLUS_SCAN])
         # no status line: the scan did not run as asked
         results, _, _, _ = self.run_checks(scan="python3: can't open file")
         self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
