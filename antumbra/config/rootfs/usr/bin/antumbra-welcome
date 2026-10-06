@@ -111,7 +111,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
             "Automatically", "Through bridges (enter below)", "Offline mode (no network at all)"]))
         self.net_combo.connect("notify::selected", self.on_network_changed)
         g.add(self.net_combo)
-        self.bridges_row = Adw.EntryRow(title="Bridge lines (obfs4 …, snowflake …), one per line")
+        # One line: bridges pasted on several lines keep their line breaks,
+        # which collect() turns into ';' (S.normalise_bridges). The title
+        # fits the phone's 480-pixel width; a longer one is cut short.
+        self.bridges_row = Adw.EntryRow(title="Bridges: obfs4, webtunnel or meek_lite, separated by ;")
         self.bridges_row.set_sensitive(False)
         g.add(self.bridges_row)
 
@@ -192,8 +195,10 @@ class WelcomeWindow(Adw.ApplicationWindow):
             raise ValueError("Enter the Persistent Storage passphrase, or choose not to use it.")
         m.mac_spoof = self.mac_row.get_active()
         m.network = ["direct", "bridges", "offline"][self.net_combo.get_selected()]
-        m.bridges = self.bridges_row.get_text().strip()
-        if m.network == "bridges" and not m.bridges:
+        m.bridges = S.normalise_bridges(self.bridges_row.get_text())
+        # bridge_lines() refuses, saying why, a bridge Tor cannot use here
+        # (snowflake), as antumbra-tor-connect would after the session starts.
+        if m.network == "bridges" and not S.bridge_lines(m.bridges.split(";")):
             raise ValueError("Enter at least one bridge line, or connect automatically.")
         m.user_password = self.pass_row.get_text()
         if m.user_password != self.pass2_row.get_text():
@@ -290,9 +295,25 @@ class WelcomeApp(Adw.Application):
             win.pass2_row.set_text("selftest-passphrase")
             if win.android_row is not None:
                 win.android_row.set_active(True)
+            # Bridges: a snowflake line is refused at Start; lines pasted
+            # with their line breaks are stored on one line, ';' between them.
+            win.net_combo.set_selected(1)
+            win.bridges_row.set_text("snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
+            refused = None
+            try:
+                win.collect()
+            except ValueError as e:
+                refused = str(e)
+            if refused != S.SNOWFLAKE_REFUSED:
+                raise RuntimeError(f"a snowflake bridge was not refused ({refused!r})")
+            win.net_combo.set_selected(0)
+            win.bridges_row.set_text("obfs4 192.0.2.1:443 A cert=x iat-mode=0\r\n\nwebtunnel 192.0.2.2:443 B url=https://example.org/b\n")
             win.collect()
             root = tempfile.mkdtemp(prefix="antumbra-welcome-selftest-")
             win.model.write(root)
+            bridges = S.read_setting(os.path.join(root, "persistent", "tails.bridges"), "ANTUMBRA_BRIDGES")
+            if bridges != "obfs4 192.0.2.1:443 A cert=x iat-mode=0;webtunnel 192.0.2.2:443 B url=https://example.org/b":
+                raise RuntimeError(f"bridges not written on one line ({bridges!r})")
             if win.android_row is not None:
                 android = S.read_setting(os.path.join(root, "persistent", "antumbra.android"), "ANTUMBRA_ANDROID_ENABLED")
                 if android != "true":

@@ -5,6 +5,7 @@ Written by the Welcome screen as the greeter user into
 /var/lib/antumbra/settings/{persistent,transient}; copied and applied by
 root (antumbra-apply-welcome-settings) into .../applied."""
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -30,6 +31,14 @@ BRIDGE_TRANSPORTS = ("obfs2", "obfs3", "obfs4", "webtunnel", "meek_lite")
 SNOWFLAKE_REFUSED = ("Snowflake bridges do not work in Antumbra: snowflake reaches its proxies through "
                      "WebRTC over UDP, and the firewall lets Tor make only TCP connections and DNS queries. "
                      "Use obfs4 or webtunnel bridges.")
+
+
+def normalise_bridges(text):
+    """TEXT (bridges as typed or pasted: one per line, or separated by ';')
+    as the Welcome screen stores it: on one line, with ';' between bridges,
+    each trimmed and empty ones left out. The NetworkManager dispatcher
+    splits the stored value at ';' and reads only its first line."""
+    return ";".join(b.strip() for b in re.split(r"[\r\n;]", text) if b.strip())
 
 
 def bridge_lines(lines):

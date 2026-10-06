@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the Welcome settings module (runs on the build host)."""
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -8,8 +9,25 @@ import tempfile
 import threading
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config", "rootfs", "usr", "lib", "python3", "dist-packages"))
+ROOTFS = os.path.join(os.path.dirname(__file__), "..", "..", "config", "rootfs")
+sys.path.insert(0, os.path.join(ROOTFS, "usr", "lib", "python3", "dist-packages"))
 from antumbra import settings as S  # noqa: E402
+
+DISPATCHER = os.path.join(ROOTFS, "etc", "NetworkManager", "dispatcher.d", "10-antumbra-tor.sh")
+WELCOME = os.path.join(ROOTFS, "usr", "bin", "antumbra-welcome")
+OBFS4 = "obfs4 192.0.2.1:443 0123456789ABCDEF0123456789ABCDEF01234567 cert=x iat-mode=0"
+WEBTUNNEL = "webtunnel [2001:db8::1]:443 0123456789ABCDEF0123456789ABCDEF01234567 url=https://example.org/p ver=0.0.1"
+MEEK = "meek_lite 192.0.2.18:80 BE776A53492E1E044A26F17306E1BC46A55A1625 url=https://meek.example.net/ front=ajax.example.com"
+
+
+def dispatcher_bridges(applied):
+    """The lines the NetworkManager dispatcher pipes to antumbra-tor-connect
+    from APPLIED/tails.bridges, by the dispatcher's own pipeline."""
+    with open(DISPATCHER, encoding="utf-8") as f:
+        m = re.search(r"\n\s*(sed -n 's/\^ANTUMBRA_BRIDGES=//p'.*?)\|\s*/usr/local/sbin/antumbra-tor-connect bridges -", f.read(), re.S)
+    pipeline = m.group(1).replace("\\\n", " ")
+    return subprocess.run(["sh", "-c", pipeline], env={"APPLIED": applied, "PATH": os.environ["PATH"]},
+                          capture_output=True, text=True, check=True).stdout.splitlines()
 
 
 class SettingsTest(unittest.TestCase):
@@ -90,6 +108,53 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(oct(os.stat(f).st_mode & 0o777), oct(0o600))
         with open(f) as fh:
             self.assertEqual(fh.read(), "secret passphrase")
+
+
+class BridgesTest(unittest.TestCase):
+    """The bridge field is one line: bridges pasted on several lines keep
+    their line breaks there, and the dispatcher reads only the setting's
+    first line, splitting it at ';'."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def test_normalise(self):
+        self.assertEqual(S.normalise_bridges(f" {OBFS4}\r\n\r\n{WEBTUNNEL}\n;; {MEEK} ;\n"), f"{OBFS4};{WEBTUNNEL};{MEEK}")
+        self.assertEqual(S.normalise_bridges(f"{OBFS4}\r{WEBTUNNEL}"), f"{OBFS4};{WEBTUNNEL}")
+        self.assertEqual(S.normalise_bridges(f"{OBFS4};{WEBTUNNEL}"), f"{OBFS4};{WEBTUNNEL}")
+        self.assertEqual(S.normalise_bridges(" \r\n ; \n"), "")
+        self.assertEqual(S.normalise_bridges(""), "")
+
+    def test_the_dispatcher_gets_every_pasted_bridge(self):
+        m = S.WelcomeSettings()
+        m.network = "bridges"
+        m.bridges = S.normalise_bridges(f"{OBFS4}\r\n{WEBTUNNEL}\n\n{MEEK}\n")
+        m.write(self.root)
+        self.assertEqual(dispatcher_bridges(os.path.join(self.root, "persistent")), [OBFS4, WEBTUNNEL, MEEK])
+
+    def test_bridge_lines(self):
+        self.assertEqual(S.bridge_lines(["# a comment", f"Bridge {OBFS4}", "", f"  bridge\t{MEEK} ",
+                                         "192.0.2.7:9001 0123456789ABCDEF0123456789ABCDEF01234567", "Bridge"]),
+                         [OBFS4, MEEK, "192.0.2.7:9001 0123456789ABCDEF0123456789ABCDEF01234567"])
+        for line in ("snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72", "Bridge Snowflake 192.0.2.3:80"):
+            with self.subTest(line), self.assertRaises(ValueError) as cm:
+                S.bridge_lines([OBFS4, line])
+            self.assertEqual(str(cm.exception), S.SNOWFLAKE_REFUSED)
+        with self.assertRaisesRegex(ValueError, "^Unsupported bridge type: conjure\\."):
+            S.bridge_lines(["conjure 192.0.2.9:80 0123456789ABCDEF0123456789ABCDEF01234567"])
+
+    def test_the_welcome_screen_uses_them(self):
+        with open(WELCOME, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("m.bridges = S.normalise_bridges(self.bridges_row.get_text())", source)
+        self.assertIn('S.bridge_lines(m.bridges.split(";"))', source)
+        title = re.search(r'self\.bridges_row = Adw\.EntryRow\(title="([^"]+)"\)', source).group(1)
+        for word in ("obfs4", "webtunnel", "meek_lite", ";"):
+            self.assertIn(word, title)
+        self.assertNotIn("snowflake", title)
 
 
 class RetryTest(unittest.TestCase):
