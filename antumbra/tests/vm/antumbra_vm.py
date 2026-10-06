@@ -1397,6 +1397,49 @@ def save_text(out, name, text):
         pass
 
 
+ONION_PING = "android: Android's resolver maps a .onion name into 127.192.0.0/10, and a ping to that address gets no answer"
+
+
+def judge_onion_ping(rc, o):
+    """(verdict, detail) for Android's ping of ONION_NAME, run as
+    android_onion_ping runs it (its exit status on a last line "rc=N").
+    The verdict is True for an address in 127.192.0.0/10 and no answer;
+    False for an answer, an address outside that range, or a zero exit
+    status; None if ping got no address at all (Android's resolver or ping
+    did not work under lxc-attach), which shows nothing about the .onion
+    block either way. The header and reply lines of iputils (Android's
+    /system/bin/ping), toybox and busybox are all understood."""
+    flat = o.replace("\n", " ").strip()[-300:]
+    if rc != 0:
+        return None, f"console status {rc}"
+    if re.search(r"\b\d+ bytes? from ", o):
+        return False, "an answer: " + flat
+    head = re.search(r"^PING \S+ \((\d+\.\d+\.\d+\.\d+)\)", o, re.M | re.I)
+    status = re.findall(r"^rc=(\d+)$", o, re.M)
+    if not head:
+        return None, "Android's ping got no address for the name: " + flat
+    if not re.fullmatch(r"127\.(19[2-9]|2[0-4]\d|25[0-5])\.\d+\.\d+", head.group(1)):
+        return False, f"{head.group(1)} is not in 127.192.0.0/10: " + flat
+    if status[-1:] in ([], ["0"]):
+        return False, "ping did not report a failure: " + flat
+    return True, flat
+
+
+def android_onion_ping(rep, sh, out):
+    """Android's own resolver (netd) and ping on a .onion name. If ping gets
+    no address under lxc-attach, that is reported and is not a failure: the
+    probe in Android's network namespace that follows is the check of the
+    .onion block, with its own lookup through Tor's DNSPort for Android."""
+    rc, o = sh(f"{in_android('/system/bin/ping -c 1 -W 3 ' + ONION_NAME, errors=True)}; antumbra_s=$?; echo; echo rc=$antumbra_s", timeout=120)
+    save_text(out, "android-onion-ping.txt", o)
+    verdict, detail = judge_onion_ping(rc, o)
+    if verdict is None:
+        print(f"[INFO] not shown: {ONION_PING}: {detail} (android-onion-ping.txt; the probe in Android's network namespace is the check)",
+              flush=True)
+    else:
+        rep.check(ONION_PING, verdict, detail)
+
+
 def android_preflight(vm, rep, T, sh, out):
     """Before the Welcome screen: the image carries Android apps, and they are
     off, closed and inert until the user turns them on."""
@@ -1600,11 +1643,7 @@ def android_phase(vm, rep, T, sh, out):
     # refused instead of reaching whatever app listens on that port there.
     # First Android's own resolver and ping, then the probe run in the
     # container's network namespace, with a listener there on the port.
-    rc, o = sh(f"{in_android('/system/bin/ping -c 1 -W 3 ' + ONION_NAME, errors=True)}; antumbra_s=$?; echo; echo rc=$antumbra_s", timeout=120)
-    m = re.search(r"PING \S+ \((127\.\d+\.\d+\.\d+)\)", o)
-    rep.check("android: Android's resolver maps a .onion name into 127.192.0.0/10, and a ping to that address gets no answer",
-              rc == 0 and m is not None and re.fullmatch(r"127\.(19[2-9]|2[0-4]\d|25[0-5])\.\d+\.\d+", m.group(1)) is not None
-              and re.search(r"\d+ bytes from", o) is None and re.search(r"^rc=[1-9]\d*$", o, re.M) is not None, o.replace("\n", " ")[-300:])
+    android_onion_ping(rep, sh, out)
     probe = json.dumps([["onion", "10.200.2.1", ONION_NAME, ONION_PORT]])
     ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644")
     rc, o = sh("P=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -pH); "

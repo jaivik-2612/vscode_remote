@@ -250,9 +250,14 @@ not a V4L2 device node it creates, the DHCP lease and route, the provisioning
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
 listed in the app grid's "Android" folder, F-Droid's index fetch counted
 at Tor's TransPort for Android, Android's resolver mapping a `.onion` name
-into 127.192.0.0/10 with no answer to a ping there, the start-host hook's
-`.onion` block in Android's network namespace (a connection to the name's
-address refused, not delivered to a listener there on its port), the
+into 127.192.0.0/10 with no answer to a ping there (Android's own
+`ping`, output saved as `android-onion-ping.txt`; should it get no
+address at all under `lxc-attach`, the run says so on an `[INFO]` line
+rather than failing, since that shows nothing about the block), the
+start-host hook's `.onion` block in Android's network namespace (a
+connection to the name's address, looked up through Tor's DNSPort for
+Android, refused, not delivered to a listener there on its port: the
+check that decides), the
 session's traffic, no frame from the container's MAC address or network
 in the capture; after `waydroid session stop`, that Waydroid's container
 service stops, that every device it opened has its boot mode again and

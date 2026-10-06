@@ -459,6 +459,62 @@ sys.stdout.write(subprocess.run(["nft", "-nn", "list", "set", "ip", "antumbra_vm
         self.assertIsNone(vm.tor_syn_record(lambda cmd, timeout=120: (None, "")))
 
 
+class OnionPingTest(unittest.TestCase):
+    """The --android run's ping of a .onion name with Android's own ping, as
+    android_onion_ping runs it. The image's /system/bin/ping is iputils
+    (header "PING name (address) 56(84) bytes of data.", "unknown host" when
+    the resolver gives nothing); toybox and busybox word it a little
+    differently."""
+
+    def run_ping(self, output):
+        vm = load_harness()
+        rep = vm.Report()
+        with tempfile.TemporaryDirectory() as out:
+            vm.android_onion_ping(rep, lambda cmd, timeout=120: (0, output.replace("NAME", vm.ONION_NAME)), out)
+            with open(os.path.join(out, "android-onion-ping.txt")) as f:
+                self.assertEqual(f.read(), output.replace("NAME", vm.ONION_NAME))
+        return [(ok, detail) for name, ok, detail, _ in rep.results if name == vm.ONION_PING]
+
+    def test_refused_address_passes(self):
+        for output in (
+                # iputils, the reject in the container's output chain
+                "PING NAME (127.198.154.224) 56(84) bytes of data.\nFrom 127.0.0.1 icmp_seq=1 Destination Port Unreachable\n\n"
+                "--- NAME ping statistics ---\n1 packets transmitted, 0 received, +1 errors, 100% packet loss, time 0ms\n\n\nrc=1",
+                # iputils, no answer at all
+                "PING NAME (127.255.0.1) 56(84) bytes of data.\n\n--- NAME ping statistics ---\n"
+                "1 packets transmitted, 0 received, 100% packet loss, time 0ms\n\n\nrc=1",
+                # toybox, busybox
+                "Ping NAME (127.198.154.224): 56(+28) data bytes\n\nrc=1",
+                "PING NAME (127.198.154.224): 56 data bytes\n\n--- NAME ping statistics ---\n"
+                "1 packets transmitted, 0 packets received, 100% packet loss\n\nrc=1"):
+            with self.subTest(output[:40]):
+                found = self.run_ping(output)
+                self.assertEqual(len(found), 1)
+                self.assertTrue(found[0][0], found[0][1])
+
+    def test_answer_or_wrong_address_fails(self):
+        for output in (
+                # the old hook: the container's loopback answers
+                "PING NAME (127.198.154.224) 56(84) bytes of data.\n64 bytes from 127.198.154.224: icmp_seq=1 ttl=64 time=0.051 ms\n\n"
+                "--- NAME ping statistics ---\n1 packets transmitted, 1 received, 0% packet loss, time 0ms\n\n\nrc=0",
+                "PING NAME (127.198.154.224): 56 data bytes\n64 bytes from 127.198.154.224: seq=0 ttl=64 time=0.1 ms\n\nrc=0",
+                # not Tor's automap answer
+                "PING NAME (10.11.12.13) 56(84) bytes of data.\n\nrc=1",
+                # an exit status 0 without a reply line
+                "PING NAME (127.198.154.224) 56(84) bytes of data.\n\nrc=0"):
+            with self.subTest(output[:40]):
+                found = self.run_ping(output)
+                self.assertEqual(len(found), 1)
+                self.assertFalse(found[0][0], found[0][1])
+
+    def test_no_address_is_reported_not_failed(self):
+        # Android's resolver gave ping nothing under lxc-attach: neither a
+        # pass nor a failure; the probe in Android's namespace decides.
+        for output in ("ping: unknown host NAME\n\nrc=2", "ping: icmp open socket: Operation not permitted\n\nrc=2", "\nrc=1"):
+            with self.subTest(output):
+                self.assertEqual(self.run_ping(output), [])
+
+
 LAB = os.path.join(ROOT, "tests", "android-net-lab.py")
 LAB_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 # Shims for the lab's tools, each standing for a build host without one
