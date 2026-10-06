@@ -597,10 +597,11 @@ class LabSkipTest(unittest.TestCase):
             raise unittest.SkipTest("the lab cannot run on this host: " + cls.plain[1].splitlines()[0][len("skipped: "):])
 
     @classmethod
-    def shimmed(cls, argv, shim=None, cwd=None):
-        """(exit status, output) of ARGV run with SHIM bound over its tool."""
+    def shimmed(cls, argv, shim=None, cwd=None, hide=()):
+        """(exit status, output) of ARGV run with SHIM bound over its tool,
+        and an empty directory over each directory in HIDE."""
         with tempfile.TemporaryDirectory() as d:
-            script = "set -e\n"
+            script = "set -e\n" + "".join(f"mount -t tmpfs antumbra-lab-test {h}\n" for h in hide)
             if shim:
                 tool, body = LAB_SHIMS[shim]
                 real = os.path.realpath(shutil.which(tool, path=LAB_PATH))
@@ -616,8 +617,8 @@ class LabSkipTest(unittest.TestCase):
         return r.returncode, r.stdout + r.stderr
 
     @classmethod
-    def lab(cls, shim=None, hook=None):
-        return cls.shimmed([sys.executable, LAB] + (["--hook", hook] if hook else []), shim)
+    def lab(cls, shim=None, hook=None, hide=()):
+        return cls.shimmed([sys.executable, LAB] + (["--hook", hook] if hook else []), shim, hide=hide)
 
     def test_these_tests_skip_where_the_lab_cannot_run(self):
         # This class itself on a build host without the bridge driver, where
@@ -658,6 +659,17 @@ class LabSkipTest(unittest.TestCase):
                     self.assertEqual(rc, 1, out)
                     self.assertIn("[FAIL] lab: the start-host hook passes", out)
                     self.assertNotIn("skipped", out)
+
+    def test_a_missing_repository_file_fails(self):
+        # The image's generic kernel command line, which the hook's run
+        # copies into its /run, gone from the repository: a finding about
+        # the code, not a gap of this host.
+        cmdline = os.path.join(os.path.abspath(ROOT), "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
+        self.assertTrue(os.path.isfile(cmdline))
+        rc, out = self.lab(hide=[os.path.dirname(cmdline)])
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"[FAIL] lab: the image's generic kernel command line can be read ({cmdline}): No such file or directory", out)
+        self.assertNotIn("skipped", out)
 
     def test_passes_with_every_feature(self):
         rc, out = self.plain   # the run setUpClass made

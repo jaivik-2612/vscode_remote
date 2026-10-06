@@ -233,7 +233,10 @@ firewall, the hook and these probes in network namespaces on the build
 host. Where the build host lacks something the lab itself needs (network
 or mount namespaces, a tmpfs, the bridge or veth driver, nftables or the
 reject expression the hook loads), the lab says what and is skipped
-(exit 0); only its checks fail.
+(exit 0), and so are the unit tests of its skipping
+(`tests/unit/test_android_net.py`, with the lab's reason); only its checks
+fail, and on any host a file it runs that cannot be read (the firewall,
+the hook, the image's generic kernel command line).
 It takes a few minutes longer than `--through-welcome`.
 
 `tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
