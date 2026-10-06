@@ -7,6 +7,7 @@
 # Outputs: build/out/rootfs/filesystem.squashfs
 #          build/out/rootfs/filesystem.squashfs.verity   (unless ANTUMBRA_VERITY=0)
 #          build/out/rootfs/filesystem.squashfs.roothash
+#          ANTUMBRA_VERITY=1 or 0 added to build/out/rootfs/build-flags
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -23,6 +24,7 @@ mkdir -p "${ROUT}"
 
 SQ="${ROUT}/filesystem.squashfs"
 rm -f "${SQ}" "${SQ}.verity" "${SQ}.roothash"
+sed -i '/^ANTUMBRA_VERITY=/d' "${ROUT}/build-flags"
 log "building squashfs (xz, arm BCJ, 1 MiB blocks)"
 # squashfs-tools >= 4.6 reads SOURCE_DATE_EPOCH itself and refuses the
 # explicit -mkfs-time/-all-time we pass for older versions; keep the flags.
@@ -48,3 +50,6 @@ if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then
     log "dm-verity root hash: $(cat "${SQ}.roothash")"
 fi
 sha256sum "${SQ}" > "${SQ}.sha256"
+# Recorded with the tree's other flags once the squashfs is complete.
+if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then VERITY_FLAG=1; else VERITY_FLAG=0; fi
+printf 'ANTUMBRA_VERITY=%s\n' "${VERITY_FLAG}" >> "${ROUT}/build-flags"

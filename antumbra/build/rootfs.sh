@@ -9,6 +9,8 @@
 # Outputs: build/work/rootfs/            the root filesystem tree (input of squashfs.sh)
 #          build/out/rootfs/initrd.img   the initramfs generated inside the chroot
 #          build/out/rootfs/packages.txt installed package versions
+#          build/out/rootfs/build-flags  what the tree was built with (later steps check it)
+#          build/out/rootfs/firmware.sha256  the builder's firmware files, when included
 #
 # Knobs  : ANTUMBRA_MINIMAL=1  base + network + amnesia lists only (pipeline validation)
 #          ANTUMBRA_DEBUG=1    debug console/initramfs (never for releases)
@@ -171,6 +173,8 @@ fi
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
+# No stamps from an earlier tree: if this run fails, later steps refuse to go on.
+rm -f "${ROUT}/build-flags" "${ROUT}/firmware.sha256"
 HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} ANTUMBRA_ANDROID=${ANTUMBRA_ANDROID} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
 log "running mmdebstrap (${SUITE}, arm64) into ${ROOT}"
 # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
@@ -207,9 +211,21 @@ if [ -n "${LIBCAMERA_VERSION}" ]; then
         || die "libcamera0.7 ${LIBCAMERA_VERSION} was not installed from the local repository"
 fi
 
+# The builder's device firmware, as hook 60 copied it into /lib/firmware:
+# release.sh names it in the manifest (docs/legal.md, "Firmware").
+DEVICE_FIRMWARE=''
+if [ -n "$(cd "${INPUT}/firmware" && find . ! -type d ! -path ./MANIFEST.sha256 -print -quit)" ]; then
+    DEVICE_FIRMWARE=1
+    ( cd "${INPUT}/firmware" && find . -type f ! -path ./MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "${ROUT}/firmware.sha256"
+fi
+
 # What this tree is: later steps (squashfs, image, bootimg, release) check it.
-printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nKERNEL_RELEASE=%s\n' \
-    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
+# ANTUMBRA_LIBCAMERA_LOCAL=1 when the local libcamera was installed (never in
+# minimal builds), DEVICE_FIRMWARE=1 when the builder's firmware was; both
+# are empty otherwise. squashfs.sh adds ANTUMBRA_VERITY (1 or 0).
+printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nANTUMBRA_LIBCAMERA_LOCAL=%s\nDEVICE_FIRMWARE=%s\nKERNEL_RELEASE=%s\n' \
+    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "${LIBCAMERA_VERSION:+1}" "${DEVICE_FIRMWARE}" \
+    "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
 
 # --- Collect the initramfs ----------------------------------------------------------------------
 KREL="$(cat "${KOUT}/kernel.release")"
