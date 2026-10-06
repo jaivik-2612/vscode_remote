@@ -5,7 +5,8 @@
 # minisign signature.
 #
 # Inputs : build/out/boot.img, build/out/userdata.simg, build/cache/device-assets/,
-#          build/out/rootfs/{build-flags,firmware.sha256,packages.txt} (rootfs.sh)
+#          build/out/rootfs/{build-flags,firmware.sha256,packages.txt} (rootfs.sh;
+#          squashfs.sh adds ANTUMBRA_VERITY to build-flags)
 # Output : build/out/release/antumbra-<version>-oneplus-hotdog/
 # Knob   : ANTUMBRA_SIGNING_KEY=path to a minisign secret key (optional)
 set -euo pipefail
@@ -39,6 +40,14 @@ FIRMWARE="$(stamp_value "${FLAGS}" DEVICE_FIRMWARE)"
 if [ "${FIRMWARE}" = "1" ]; then
     [ -s "${OUT}/rootfs/firmware.sha256" ] || die "${OUT}/rootfs/firmware.sha256 missing; rebuild the rootfs step"
 fi
+# rootfs.sh and squashfs.sh delete the images built before them, and
+# squashfs.sh records ANTUMBRA_VERITY once the squashfs is complete: with that
+# record, the images here were built from the tree build-flags describes.
+VERITY="$(stamp_value "${FLAGS}" ANTUMBRA_VERITY)"
+case "${VERITY}" in
+    0|1) ;;
+    *) die "${FLAGS} does not record ANTUMBRA_VERITY: squashfs.sh has not completed on this root filesystem; run it, then image.sh and bootimg.sh" ;;
+esac
 
 cp "${OUT}/boot.img" "${REL}/${NAME}-boot.img"
 cp "${CACHE}/device-assets/dtbo.img" "${REL}/${NAME}-dtbo.img"
@@ -53,6 +62,11 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     printf '# Antumbra %s for the OnePlus 7T Pro (hotdog)\n\n' "${ANTUMBRA_VERSION}"
     printf 'Built %s from commit %s.\n\n' "$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)" "$(git -C "${ANTUMBRA_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     printf 'Kernel release: %s\n\n' "$(cat "${OUT}/kernel/kernel.release")"
+    if [ "${VERITY}" = "1" ]; then
+        printf 'dm-verity: on\n\n'
+    else
+        printf 'dm-verity: off (built with ANTUMBRA_VERITY=0; the root filesystem is not verified at boot)\n\n'
+    fi
     printf '## Files\n\n'
     # shellcheck disable=SC2016  # backticks are Markdown, not command substitution
     printf -- '- `%s-boot.img`: slot-B boot image (kernel, initramfs, DTB), built by Antumbra.\n' "${NAME}"

@@ -151,6 +151,14 @@ require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
     done
 }
 
+# remove_built_images : delete the images built from the root filesystem
+# (image.sh, bootimg.sh). rootfs.sh and squashfs.sh call it before they
+# replace the tree or the squashfs, so no image outlives what it was built
+# from, and release.sh's manifest describes the images it packages.
+remove_built_images() {
+    rm -f "${OUT}"/{userdata.simg,vm-disk.img,boot.img}{,.sha256}
+}
+
 # copy_as_root SRC DEST : copy a tree into DEST (made afresh), owned by root,
 # with 0755 directories and 0755 or 0644 files (by the execute bit).
 # mmdebstrap's sync-in and cp -a keep every file's owner and mode, and set

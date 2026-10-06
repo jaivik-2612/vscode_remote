@@ -8,6 +8,8 @@
 #          build/out/rootfs/filesystem.squashfs.verity   (unless ANTUMBRA_VERITY=0)
 #          build/out/rootfs/filesystem.squashfs.roothash
 #          ANTUMBRA_VERITY=1 or 0 added to build/out/rootfs/build-flags
+#          (release.sh requires it). Deletes the images built from the previous
+#          squashfs.
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -23,7 +25,9 @@ ROUT="${OUT}/rootfs"
 mkdir -p "${ROUT}"
 
 SQ="${ROUT}/filesystem.squashfs"
-rm -f "${SQ}" "${SQ}.verity" "${SQ}.roothash"
+# The images built from the previous squashfs go with it.
+rm -f "${SQ}" "${SQ}.verity" "${SQ}.roothash" "${SQ}.sha256"
+remove_built_images
 sed -i '/^ANTUMBRA_VERITY=/d' "${ROUT}/build-flags"
 log "building squashfs (xz, arm BCJ, 1 MiB blocks)"
 # squashfs-tools >= 4.6 reads SOURCE_DATE_EPOCH itself and refuses the

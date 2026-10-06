@@ -182,6 +182,10 @@ rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
 # No stamps from an earlier tree: if this run fails, later steps refuse to go on.
 rm -f "${ROUT}/build-flags" "${ROUT}/firmware.sha256"
+# Nor anything built from it, which the new stamps would misdescribe: its
+# initramfs, its squashfs and the images.
+rm -f "${ROUT}/initrd.img" "${ROUT}"/filesystem.squashfs{,.verity,.roothash,.sha256}
+remove_built_images
 HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} ANTUMBRA_ANDROID=${ANTUMBRA_ANDROID} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
 log "running mmdebstrap (${SUITE}, arm64) into ${ROOT}"
 # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
