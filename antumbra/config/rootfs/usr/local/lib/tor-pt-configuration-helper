@@ -23,10 +23,13 @@ systemctl stop tor@default.service
 
 tor_set_in_torrc Sandbox "${ENABLE_SANDBOX}"
 sed -i '/^ClientTransportPlugin /d' /etc/tor/torrc
+# Antumbra: meek_lite too (lyrebird has it, and it needs only TCP and DNS,
+# which the firewall lets Tor's user make). Exactly the transports
+# antumbra-tor-connect accepts (BRIDGE_TRANSPORTS in antumbra/settings.py).
 if [ "${ENABLE_SANDBOX}" = 0 ]; then
     tor_set_in_torrc \
         ClientTransportPlugin \
-        'obfs2,obfs3,obfs4,webtunnel exec /usr/bin/obfs4proxy -enableLogging -logLevel DEBUG'
+        'obfs2,obfs3,obfs4,webtunnel,meek_lite exec /usr/bin/obfs4proxy -enableLogging -logLevel DEBUG'
 fi
 
 systemctl start tor@default.service

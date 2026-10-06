@@ -16,8 +16,11 @@ import stem
 import stem.connection
 import stem.control
 
+from antumbra import settings as S
+
 CONTROL = ("127.0.0.1", 9052)
-TRANSPORTS = "obfs2,obfs3,obfs4,webtunnel,meek_lite"
+# The transports Tor gets a pluggable transport for (tor-pt-configuration-helper)
+TRANSPORTS = S.BRIDGE_TRANSPORTS
 PT_HELPER = "/usr/local/lib/tor-pt-configuration-helper"
 
 
@@ -51,15 +54,13 @@ def cmd_direct():
 
 def cmd_bridges(path):
     src = sys.stdin if path == "-" else open(path, encoding="utf-8")
-    lines = [l.strip() for l in src if l.strip() and not l.startswith("#")]
-    lines = [l[len("bridge "):] if l.lower().startswith("bridge ") else l for l in lines]
+    try:
+        lines = S.bridge_lines(src)     # the same check as the Welcome screen's
+    except ValueError as e:
+        sys.exit(str(e))
     if not lines:
         sys.exit("no bridge lines given")
-    for l in lines:
-        kind = l.split()[0]
-        if kind not in TRANSPORTS.split(",") and "." not in kind and ":" not in kind:
-            sys.exit(f"unsupported transport in bridge line: {kind}")
-    needs_pt = any(l.split()[0] in TRANSPORTS.split(",") for l in lines)
+    needs_pt = any(l.split()[0] in TRANSPORTS for l in lines)
     set_sandbox(not needs_pt)
     with controller() as c:
         c.set_options({"UseBridges": "1", "Bridge": lines, "DisableNetwork": "0"})
