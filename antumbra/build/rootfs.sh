@@ -224,11 +224,17 @@ fi
 
 # The builder's device firmware, as hook 60 copied it into /lib/firmware:
 # release.sh names it in the manifest (docs/legal.md, "Firmware").
-DEVICE_FIRMWARE=''
-if [ -n "$(cd "${INPUT}/firmware" && find . ! -type d ! -path ./MANIFEST.sha256 -print -quit)" ]; then
-    DEVICE_FIRMWARE=1
-    ( cd "${INPUT}/firmware" && find . -type f ! -path ./MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "${ROUT}/firmware.sha256"
-fi
+# record_device_firmware DIR LIST : DEVICE_FIRMWARE=1 and each file's SHA-256
+# in LIST when DIR holds anything but fetch-firmware.sh's MANIFEST.sha256
+# (which hook 60 does not install); DEVICE_FIRMWARE empty otherwise.
+record_device_firmware() {
+    DEVICE_FIRMWARE=''
+    if [ -n "$(cd "$1" && find . ! -type d ! -path ./MANIFEST.sha256 -print -quit)" ]; then
+        DEVICE_FIRMWARE=1
+        ( cd "$1" && find . -type f ! -path ./MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "$2"
+    fi
+}
+record_device_firmware "${INPUT}/firmware" "${ROUT}/firmware.sha256"
 
 # What this tree is: later steps (squashfs, image, bootimg, release) check it.
 # ANTUMBRA_LIBCAMERA_LOCAL=1 when the local libcamera was installed (never in
