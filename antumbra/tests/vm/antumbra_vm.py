@@ -1627,8 +1627,15 @@ def android_net_phase(vm, rep, T, sh, out):
         rep.check("android-net: a stand-in container on the bridge, the bridge's DHCP running", ok and rc == 0 and o.strip() == "active", o.replace("\n", " "))
         for flag, name in (("", "android-net: DHCP lease 10.200.2.2/30, router and DNS 10.200.2.1, no NTP server"),
                            ("-B", "android-net: DHCP lease with the broadcast flag (udhcpc -B)")):
-            rc, o = sh(f"ip netns exec android-sim busybox udhcpc -f -q -n -t 5 -T 2 {flag} -i eth0 -s /run/antumbra-udhcpc.sh 2>&1 | grep '^LEASE '", timeout=120)
-            rep.check(name, rc == 0 and o.strip() == "LEASE ip=10.200.2.2 subnet=255.255.255.252 router=10.200.2.1 dns=10.200.2.1 ntpsrv=", o.strip())
+            # udhcpc's whole output and status are kept, so that a failure
+            # says why (the lease line comes from the -s script).
+            rc, o = sh(f"ip netns exec android-sim busybox udhcpc -f -q -n -t 5 -T 2 {flag} -i eth0 -s /run/antumbra-udhcpc.sh "
+                       "> /run/antumbra-udhcpc.out 2>&1; echo udhcpc-rc=$?; cat /run/antumbra-udhcpc.out; "
+                       "echo addr=$(ip -n android-sim -4 -o addr show dev eth0 | awk '{print $4}')", timeout=120)
+            lease = [l.strip() for l in o.split("\n") if l.startswith("LEASE ")]
+            rep.check(name, rc == 0 and "udhcpc-rc=0" in o.split("\n")
+                      and lease == ["LEASE ip=10.200.2.2 subnet=255.255.255.252 router=10.200.2.1 dns=10.200.2.1 ntpsrv="],
+                      " | ".join(lease) if lease else o.replace("\n", " | ")[-400:])
         # The start-host hook as LXC runs it for the container, LXC_PID a
         # process in the stand-in's network namespace: it puts its .onion
         # block there, as it does in Android's.
