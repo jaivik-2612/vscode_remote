@@ -22,15 +22,19 @@ filesystem, plus the images. Android apps (`ANTUMBRA_ANDROID=1`) add about
 
 ## Steps
 
-`build/build.sh` runs the steps below in order; each script can also be
-run on its own and is idempotent.
+`build/build.sh` runs the steps below in order, all but `release`:
+`libcamera` only with `ANTUMBRA_LIBCAMERA_LOCAL=1` (and not with
+`ANTUMBRA_MINIMAL=1`), and no `bootimg` for the VM profile.
+`build/build.sh STEP...` runs only the steps named (`build/build.sh
+release` packages a release). Each script can also be run on its own and
+is idempotent.
 
 | Step | Script | Produces |
 |---|---|---|
-| fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified); with `ANTUMBRA_ANDROID=1` also the Waydroid images (SHA-256, size and CRC verified, then extracted) and F-Droid (SHA-256, OpenPGP and APK certificate verified) |
+| fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool and the mkbootimg tools, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified); with `ANTUMBRA_ANDROID=1` also the Waydroid images of the profile's variant (each zip pinned by SHA-256 and size, each extracted image by size, CRC-32 and SHA-256, checked again on every run, cached or not) and F-Droid (SHA-256, OpenPGP and APK certificate verified) |
 | kernel | `kernel.sh` | `build/out/kernel/`: raw arm64 `Image`, DTB, stripped modules tarball, config, kernel release, ASLR sysctl values |
 | libcamera (optional) | `libcamera.sh` (root) | only with `ANTUMBRA_LIBCAMERA_LOCAL=1`: `build/out/libcamera-repo/`, the port's patched libcamera 0.7.2 as arm64 packages in a local apt repository (`camera.md`) |
-| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt` |
+| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt`, `build-flags` (the profile and knobs the tree was built with; later steps check it) |
 | squashfs | `squashfs.sh` (root) | `filesystem.squashfs` (xz, arm BCJ), `.verity` hash tree, `.roothash` |
 | image | `image.sh` | `userdata.simg`: 4096-byte-sector GPT sized to the physical partition, live partition + empty Persistent Storage partition, as an Android sparse image |
 | bootimg | `bootimg.sh` | `boot.img`: header v2, cmdline with the verity root hash, unsigned AVB footer, exactly 96 MiB |
@@ -39,9 +43,10 @@ run on its own and is idempotent.
 Firmware is a separate, deliberate step: `fetch-firmware.sh` assembles the
 proprietary blobs for **your** device from the community mirror the port
 uses, verifies every file against the pinned hashes, and lays them out for
-`/lib/firmware`. Pass the result as `ANTUMBRA_FIRMWARE_DIR` to
-`rootfs.sh`. Without it the image boots but has no display acceleration,
-Wi-Fi or audio. See `docs/legal.md`.
+`/lib/firmware` in `build/cache/firmware/`; it prints a notice and stops
+unless `ANTUMBRA_ACCEPT_PROPRIETARY_FIRMWARE=1` is set. Pass the result as
+`ANTUMBRA_FIRMWARE_DIR` to `rootfs.sh`. Without it the image boots but
+has no display acceleration, Wi-Fi or audio. See `docs/legal.md`.
 
 ## Knobs
 
@@ -49,12 +54,13 @@ Wi-Fi or audio. See `docs/legal.md`.
 |---|---|
 | `ANTUMBRA_MINIMAL=1` | base + network + amnesia package lists only, no Phosh, apps or Tor Browser: validates the pipeline in a fraction of the time |
 | `ANTUMBRA_ANDROID=1` | Android apps: Waydroid, the LineageOS 20 images of the profile's `WAYDROID_IMAGE_VARIANT` and F-Droid, off until turned on at the Welcome screen (`architecture.md`, section 11.1). Recorded in `build-flags` and the release manifest; not combinable with `ANTUMBRA_MINIMAL=1`. Without it the image has no Waydroid, Android images or Android services; the firewall's Android rules and the kernel's binder driver are there but unused (binder devices root-only) |
-| `ANTUMBRA_DEBUG=1` | debug command line; `release.sh` refuses to package such a build |
+| `ANTUMBRA_DEBUG=1` | debug command line; in the VM profile also the root console, the virtual camera and its test tools (`vm-testing.md`); `release.sh` refuses to package such a build |
 | `ANTUMBRA_VERITY=0` | no dm-verity hash tree and no root hash on the command line |
 | `ANTUMBRA_FIRMWARE_DIR=DIR` | firmware tree to copy into `/lib/firmware` |
 | `ANTUMBRA_KERNEL_TOOLCHAIN=gcc` | Debian cross GCC instead of LLVM (the port validates only LLVM) |
 | `ANTUMBRA_KERNEL_ALLOW_CONFIG_DRIFT=1` | warn instead of fail when the config fragment is not fully honoured |
-| `ANTUMBRA_LIBCAMERA_LOCAL=1` | build the port's patched libcamera 0.7.2 (`libcamera.sh`, about five minutes as a cross build on a 4-core x86-64 host) and install it instead of trixie-backports' 0.7.1; off by default (`camera.md`) |
+| `ANTUMBRA_LIBCAMERA_LOCAL=1` | build the port's patched libcamera 0.7.2 (`libcamera.sh`, about five minutes as a cross build on a 4-core x86-64 host) and install it instead of trixie-backports' 0.7.1; off by default, ignored with `ANTUMBRA_MINIMAL=1` (`camera.md`) |
+| `ANTUMBRA_SQUASHFS_MEM=SIZE` | cache size for `mksquashfs` (default `1G`, where its own default is a quarter of the host's memory); the image does not depend on it |
 | `ANTUMBRA_SIGNING_KEY=FILE` | minisign secret key for `release.sh` |
 | `SOURCE_DATE_EPOCH` | build timestamp (default: the last git commit) |
 | `ANTUMBRA_CACHE`, `ANTUMBRA_OUT`, `ANTUMBRA_WORK` | relocate the cache, output and scratch directories |
@@ -62,13 +68,16 @@ Wi-Fi or audio. See `docs/legal.md`.
 ## Reproducibility
 
 Every input is pinned by hash in `device/oneplus-hotdog/sources.lock` and
-the two `.sha256` lists next to it. Timestamps come from
-`SOURCE_DATE_EPOCH`, filesystem UUIDs and partition GUIDs are derived from
+the `.sha256` lists beside it (`kernel/port-patches.sha256`,
+`firmware/firmware-files.sha256`, `libcamera/patches.sha256`). Timestamps
+come from `SOURCE_DATE_EPOCH`, filesystem UUIDs and partition GUIDs are derived from
 the version string, the squashfs and ext4 are built with fixed times, and
 the package set can be pinned to a `snapshot.debian.org` timestamp
 (`DEBIAN_SNAPSHOT` in the lock file). What still varies between builds:
-Debian's packages when no snapshot is pinned, and the live partition's
-free-space layout if `mke2fs` changes between e2fsprogs versions.
+Debian's packages when no snapshot is pinned, the live partition's
+free-space layout if `mke2fs` changes between e2fsprogs versions, and,
+with `ANTUMBRA_LIBCAMERA_LOCAL=1`, the libcamera packages, whose IPA
+modules are signed with a key generated anew by each build.
 
 ## Testing in a VM
 
@@ -80,11 +89,21 @@ profile reuses the phone's sources, patches and hardening fragment.
 ## Checks before a release
 
 ```sh
-make lint          # shellcheck, python, nftables syntax, tor config, systemd units, yaml, file modes
-make test          # lint + unit tests
+make lint          # shellcheck, python, the pop-up motor's flag model, nftables syntax,
+                   # Android's network lab, tor config, systemd units, yaml, phoc modes,
+                   # no OnePlus camera software, pinned inputs, file modes
+make test          # lint, unit tests and the headless Welcome screen self-test
+sudo python3 -m pytest -q -p no:cacheprovider tests/unit/test_applier.py   # applier, as root
 make check-packages
 ANTUMBRA_MINIMAL=1 build/build.sh    # pipeline validation end to end
 ```
+
+Some of these skip on a build host that cannot run them, and say so:
+Android's network lab needs unprivileged user namespaces or root, and
+the network and mount namespaces, bridge and veth drivers and nftables
+features it uses (`vm-testing.md`); the Welcome settings applier's tests
+need root, to run it in a mount namespace of their own; the self-test
+needs GTK 4's and libadwaita's Python bindings and `xvfb-run`.
 
 The minimal pipeline has been run unattended on an x86-64 build host
 (arm64 under qemu-user binfmt): every hook, the initramfs check
@@ -94,6 +113,7 @@ partition was mounted and its squashfs and verity tree verified. The
 kernel step was validated with LLVM 18 on the same host.
 
 The CI workflow (`.github/workflows/antumbra.yml`) runs the lint and unit
-tests on every push, assembles a boot image from the pinned inputs, and on
-manual dispatch builds the kernel and a minimal root filesystem on a native
-arm64 runner.
+tests (the applier's again as root), the Welcome screen self-test and the
+package check on every push, assembles a boot image from the pinned
+inputs, and on manual dispatch builds the kernel and a minimal root
+filesystem on a native arm64 runner.
