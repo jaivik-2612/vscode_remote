@@ -339,6 +339,29 @@ class IdentifiersTest(unittest.TestCase):
         self.assertIn('if sys.argv[1:] == ["--masks"]:\n        masks_main()', source)
 
 
+class PropertiesTest(unittest.TestCase):
+    """Android's properties on the phone and in a virtual machine."""
+    def props(self, vm):
+        m = load_antumbra_waydroid()
+        product = "ro.product.waydroid.model=WayDroid arm64 only Device\nro.product.waydroid.brand=waydroid\n"
+        with mock.patch.object(m, "in_vm", return_value=vm), \
+                mock.patch("builtins.open", mock.mock_open(read_data=product)):
+            return m.properties()
+
+    def test_phone_keeps_androids_own_timeouts(self):
+        props = self.props(False)
+        self.assertNotIn("ro.hw_timeout_multiplier", props)
+        self.assertNotIn("ro.hardware.egl", props)
+        self.assertEqual(props["ro.product.waydroid.brand"], "waydroid")
+
+    def test_virtual_machine_scales_androids_timeouts(self):
+        # At the default, the Watchdog's 2-second native stack dumps kill
+        # vold and the HALs under emulation, and vold's death reboots Android.
+        props = self.props(True)
+        self.assertGreaterEqual(int(props["ro.hw_timeout_multiplier"]), 5)
+        self.assertEqual(props["ro.hardware.egl"], "swiftshader")
+
+
 class AndroidStopTest(unittest.TestCase):
     def test_stopped_session_stays_stopped(self):
         unit = read("config", "rootfs-android", "usr", "lib", "systemd", "user", "antumbra-android-session.service")

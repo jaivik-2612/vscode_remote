@@ -46,6 +46,9 @@ IMAGES = "/usr/share/waydroid-extra/images"
 ANDROID_DIR = "/usr/share/antumbra/android"
 LXC_PROFILE = "/etc/apparmor.d/lxc/lxc-waydroid"
 READY = "/run/antumbra/android-ready"
+# ro.hw_timeout_multiplier in a virtual machine (see properties()): QEMU's
+# software emulation runs Android about ten times slower than the phone.
+VM_TIMEOUT_MULTIPLIER = 10
 # The kernel command line Android sees (bound over its /proc/cmdline by the
 # config_3 template): a writable per-boot copy of the image's generic one.
 CMDLINE_SRC = os.path.join(ANDROID_DIR, "cmdline")
@@ -121,6 +124,13 @@ def properties():
         # SwiftShader Vulkan driver.
         props["ro.hardware.gralloc"] = "default"
         props["ro.hardware.egl"] = "swiftshader"
+        # Android's timeouts scaled for software emulation, as emulators
+        # set it. At the default, system_server's Watchdog asks for native
+        # stack dumps of vold and the HALs and gives each 2 seconds; under
+        # full emulation the dump outlasts that, the dumped process dies of
+        # SIGPIPE when the requester gives up, and vold's death reboots
+        # Android (reboot_on_failure), which stops the container.
+        props["ro.hw_timeout_multiplier"] = str(VM_TIMEOUT_MULTIPLIER)
     return props
 
 
