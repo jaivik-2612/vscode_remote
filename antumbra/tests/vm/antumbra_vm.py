@@ -1920,11 +1920,13 @@ def android_net_phase(vm, rep, T, sh, out):
                f"{hook}; cat /proc/sys/net/ipv4/conf/waydroid-tor/forwarding; "
                "echo onion=$(nsenter --target $P --net nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'); "
                # the first file mask not inside a hidden directory (the hook
-               # rightly accepts an identifier hidden with its directory)
+               # rightly accepts an identifier hidden with its directory) whose
+               # file has content (it also accepts one that reads empty)
                "M=$(awk '/^lxc\\.mount\\.entry = tmpfs sys\\// { h[++n] = $4 } "
                "/^lxc\\.mount\\.entry = \\/dev\\/null sys\\/.*,optional 0 0$/ { f[++m] = $4 } "
                "END { for (i = 1; i <= m; i++) { inside = 0; for (j = 1; j <= n; j++) if (index(f[i], h[j] \"/\") == 1) inside = 1; "
-               "if (!inside) { print \"/\" f[i]; exit } } }' /run/antumbra-hooktest.conf); "
+               "if (!inside) print \"/\" f[i] } }' /run/antumbra-hooktest.conf | "
+               "while read -r f; do if [ -n \"$(head -c 64 \"$f\" 2>/dev/null | tr -d '[:space:]')\" ]; then echo \"$f\"; break; fi; done); "
                f"Q=$({stand_in} \"$M\"); echo left=${{M:+sysfs}}; "
                + hook.replace("LXC_PID=$P", "LXC_PID=$Q").replace(">/dev/null 2>&1", "2>/run/antumbra-hooktest.err >/dev/null")
                + "; grep -c 'its mask did not take effect' /run/antumbra-hooktest.err; kill $Q; "
@@ -2565,7 +2567,7 @@ def main():
             args += ["--memory", "6144"]
         # A serial number on the kernel command line and on the disk, as the
         # phone has; Android must see neither.
-        if a.android:
+        if a.android or a.android_net:
             args = with_vm_args(args, f"androidboot.serialno={TEST_SERIAL}", TEST_DISK_SERIAL)
         vm.start(args)
         try:
