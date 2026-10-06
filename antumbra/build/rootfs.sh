@@ -3,7 +3,8 @@
 # Build the Debian root filesystem tree with mmdebstrap, apply the overlay and
 # run the build hooks inside the chroot (under qemu-user emulation on x86_64).
 #
-# Inputs : config/packages/*.list, config/rootfs/ (overlay), config/hooks/*.sh,
+# Inputs : config/packages/*.list, config/rootfs/ (overlay, staged by
+#          stage_overlay in lib/common.sh), config/hooks/*.sh,
 #          build/out/kernel/ (kernel.sh), build/cache/tor-browser/ (fetch-sources.sh),
 #          ANTUMBRA_FIRMWARE_DIR (optional, fetch-firmware.sh)
 # Outputs: build/work/rootfs/            the root filesystem tree (input of squashfs.sh)
@@ -72,6 +73,11 @@ done
 INCLUDE="$(IFS=,; printf '%s' "${PKGS[*]}")"
 log "${#PKGS[@]} packages from lists: ${LISTS[*]}"
 
+# --- Overlays: root-owned copies with fixed modes (stage_overlay) ----------------
+OVERLAY="${WORK}/overlay"
+rm -rf "${OVERLAY}"
+stage_overlay "${CONFIG_DIR}/rootfs" "${OVERLAY}/rootfs"
+
 # --- Build input staged into the chroot at /run/antumbra-build ------------------
 rm -rf "${INPUT}"
 mkdir -p "${INPUT}/hooks" "${INPUT}/kernel" "${INPUT}/tor-browser" "${INPUT}/firmware"
@@ -98,15 +104,16 @@ if [ -n "${ANTUMBRA_ANDROID}" ]; then
     cp "${WD}/images.sha256" "${CACHE}/f-droid/F-Droid.apk" "${INPUT}/android/"
     printf '%s\n' "${WAYDROID_IMAGE_VARIANT}" > "${INPUT}/android/variant"
     lock_get FDROID_APK_SHA256 > "${INPUT}/android/F-Droid.apk.sha256"
+    stage_overlay "${CONFIG_DIR}/rootfs-android" "${OVERLAY}/rootfs-android"
     # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
-    ANDROID_HOOKS=(--customize-hook="sync-in ${CONFIG_DIR}/rootfs-android /"
+    ANDROID_HOOKS=(--customize-hook="sync-in ${OVERLAY}/rootfs-android /"
                    --customize-hook='mkdir -p "$1/usr/share/waydroid-extra/images"'
                    --customize-hook="install -m 0644 '${WD}/system.img' '${WD}/vendor.img' \"\$1/usr/share/waydroid-extra/images/\"")
     log "Android apps: Waydroid ${WAYDROID_IMAGE_VARIANT} images and F-Droid included"
 fi
 if [ -n "${ANTUMBRA_FIRMWARE_DIR}" ]; then
     [ -d "${ANTUMBRA_FIRMWARE_DIR}" ] || die "ANTUMBRA_FIRMWARE_DIR does not exist"
-    cp -a "${ANTUMBRA_FIRMWARE_DIR}/." "${INPUT}/firmware/"
+    copy_as_root "${ANTUMBRA_FIRMWARE_DIR}" "${INPUT}/firmware"
     log "firmware tree included from ${ANTUMBRA_FIRMWARE_DIR}"
 else
     warn "no ANTUMBRA_FIRMWARE_DIR: the image will have no device firmware (display, Wi-Fi and audio will not work)"
@@ -136,7 +143,7 @@ else
     APT_SOURCES=("deb ${MIRROR} ${SUITE} main contrib non-free-firmware"
                  "deb ${MIRROR} ${BACKPORTS} main")
 fi
-PREFS="${CONFIG_DIR}/rootfs/etc/apt/preferences.d/antumbra-backports"
+PREFS="${OVERLAY}/rootfs/etc/apt/preferences.d/antumbra-backports"
 [ -f "${PREFS}" ] || die "missing ${PREFS}"
 
 # Optional patched libcamera (build/libcamera.sh, ANTUMBRA_LIBCAMERA_LOCAL=1):
@@ -193,7 +200,7 @@ mmdebstrap \
     --setup-hook='mkdir -p "$1/etc/apt/preferences.d"' \
     --setup-hook="copy-in ${PREFS} /etc/apt/preferences.d" \
     "${LIBCAMERA_HOOKS[@]}" \
-    --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
+    --customize-hook="sync-in ${OVERLAY}/rootfs /" \
     "${ANDROID_HOOKS[@]}" \
     --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \

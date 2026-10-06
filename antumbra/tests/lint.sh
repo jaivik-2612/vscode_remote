@@ -108,8 +108,26 @@ b="$(sed -n 's/^USERDATA_PARTITION_SIZE=//p' device/oneplus-hotdog/bootimg.conf)
 echo "profiles: $(printf '%s ' device/*/)"
 
 step "file modes"
-for f in config/rootfs/etc/sudoers.d/*; do [ "$(stat -c %a "$f")" = "440" ] || { echo "$f must be 0440"; fail=1; }; done
-[ "$(stat -c %a config/rootfs/etc/usbguard/rules.conf)" = "600" ] || { echo "usbguard rules.conf must be 0600"; fail=1; }
+# git records only 0644 and 0755, so the checkout's modes say nothing about
+# the image's: rootfs.sh installs the overlays from copies that stage_overlay
+# (build/lib/common.sh) makes. Stage them the same way and check the copies.
+grep -nE 'sync-in[^"]*\$\{CONFIG_DIR\}' build/rootfs.sh && { echo "rootfs.sh syncs an overlay in without stage_overlay"; fail=1; }
+STAGE="$(mktemp -d)"
+if ( source build/lib/common.sh && stage_overlay config/rootfs "${STAGE}/rootfs" \
+        && stage_overlay config/rootfs-android "${STAGE}/rootfs-android" ); then
+    for f in "${STAGE}"/rootfs/etc/sudoers.d/*; do
+        [ "$(stat -c %a "$f")" = "440" ] || { echo "${f#"${STAGE}"/rootfs/} is not staged 0440"; fail=1; }
+    done
+    for f in etc/usbguard/rules.conf etc/skel/.tor/control_auth_cookie; do
+        [ "$(stat -c %a "${STAGE}/rootfs/$f")" = "600" ] || { echo "$f is not staged 0600"; fail=1; }
+    done
+    writable="$(find "${STAGE}" -mindepth 1 ! -type l -perm /022)"
+    [ -z "${writable}" ] || { echo "group- or world-writable when staged: ${writable}"; fail=1; }
+    echo "overlays staged as rootfs.sh installs them: $(find "${STAGE}" ! -type d | wc -l) files checked"
+else
+    echo "stage_overlay failed"; fail=1
+fi
+rm -rf "${STAGE}"
 for f in config/hooks/*.sh build/*.sh config/rootfs-android/usr/local/lib/*; do [ -x "$f" ] || { echo "$f not executable"; fail=1; }; done
 
 if [ "${fail}" -ne 0 ]; then echo; echo "LINT FAILED"; exit 1; fi

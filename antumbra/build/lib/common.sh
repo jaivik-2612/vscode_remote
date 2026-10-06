@@ -151,6 +151,33 @@ require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
     done
 }
 
+# copy_as_root SRC DEST : copy a tree into DEST (made afresh), owned by root,
+# with 0755 directories and 0755 or 0644 files (by the execute bit).
+# mmdebstrap's sync-in and cp -a keep every file's owner and mode, and set
+# them on directories the image already has (/, /etc, /usr, /lib/firmware),
+# but a checkout or a fetched tree belongs to whoever made it (often UID
+# 1000, which is amnesia in the image) and follows their umask.
+copy_as_root() {
+    rm -rf "$2"; mkdir -p "$2"
+    tar --create --file - --directory "$1" --numeric-owner --owner=0 --group=0 --mode=u=rwX,go=rX . \
+        | tar --extract --file - --directory "$2"
+}
+
+# stage_overlay SRC DEST : an overlay tree (config/rootfs,
+# config/rootfs-android) as rootfs.sh installs it: copy_as_root, then the
+# modes git cannot record (it stores only 0644 and 0755) for the files that
+# need them. tests/lint.sh stages the overlays the same way and checks them.
+stage_overlay() {
+    local dest="$2" f
+    copy_as_root "$1" "${dest}"
+    for f in "${dest}"/etc/sudoers.d/*; do
+        if [ -f "${f}" ] && [ ! -L "${f}" ]; then chmod 0440 "${f}"; fi
+    done
+    for f in "${dest}/etc/usbguard/rules.conf" "${dest}/etc/skel/.tor/control_auth_cookie"; do
+        if [ -f "${f}" ] && [ ! -L "${f}" ]; then chmod 0600 "${f}"; fi
+    done
+}
+
 # fetch URL DEST : download with curl, atomically, following redirects.
 fetch() {
     local url="$1" dest="$2"
