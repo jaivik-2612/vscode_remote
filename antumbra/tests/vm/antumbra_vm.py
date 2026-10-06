@@ -1383,6 +1383,11 @@ print("PROBES " + json.dumps(results, sort_keys=True))
 '''
 
 # udhcpc's event script in the simulated container: apply the lease, print it.
+# udhcpc runs its script itself, so it must not be on a noexec mount: the
+# image mounts /run (and /run/antumbra) noexec, where udhcpc took the lease
+# and then silently failed to run the script, leaving the stand-in without
+# an address. /root is on the writable overlay root, in RAM.
+UDHCPC_SCRIPT = "/root/antumbra-udhcpc.sh"
 ANDROID_UDHCPC_SH = r'''#!/bin/sh
 case "$1" in
     bound|renew)
@@ -1829,7 +1834,7 @@ def android_net_phase(vm, rep, T, sh, out):
     rc, o = sh("ip -4 -o addr show scope global | grep -vE ': (veth|waydroid-tor|lo)' | awk '{print $4}' | cut -d/ -f1 | head -n1")
     uplink = o.strip() if rc == 0 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", o.strip()) else "10.0.2.15"
     try:
-        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, "/run/antumbra-udhcpc.sh", ANDROID_UDHCPC_SH)
+        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, UDHCPC_SCRIPT, ANDROID_UDHCPC_SH)
         rc, o = sh("ip netns add android-sim && ip link add vethandsim type veth peer name eth0 netns android-sim && "
                    "ip link set vethandsim master waydroid-tor && ip link set vethandsim up && ip -n android-sim link set lo up && "
                    f"ip -n android-sim link set eth0 address {ANDROID_MAC} && ip -n android-sim link set eth0 up && "
@@ -1840,7 +1845,7 @@ def android_net_phase(vm, rep, T, sh, out):
                            ("-B", "android-net: DHCP lease with the broadcast flag (udhcpc -B)")):
             # udhcpc's whole output and status are kept, so that a failure
             # says why (the lease line comes from the -s script).
-            rc, o = sh(f"ip netns exec android-sim busybox udhcpc -f -q -n -t 5 -T 2 {flag} -i eth0 -s /run/antumbra-udhcpc.sh "
+            rc, o = sh(f"ip netns exec android-sim busybox udhcpc -f -q -n -t 5 -T 2 {flag} -i eth0 -s {UDHCPC_SCRIPT} "
                        "> /run/antumbra-udhcpc.out 2>&1; echo udhcpc-rc=$?; cat /run/antumbra-udhcpc.out; "
                        "echo addr=$(ip -n android-sim -4 -o addr show dev eth0 | awk '{print $4}')", timeout=120)
             lease = [l.strip() for l in o.split("\n") if l.startswith("LEASE ")]
@@ -1888,7 +1893,7 @@ def android_net_phase(vm, rep, T, sh, out):
     finally:
         sh("ip netns pids android-sim 2>/dev/null | xargs -r kill; ip netns del android-sim 2>/dev/null; ip link del vethandsim 2>/dev/null; "
            f"ip addr del {HOST_PUBLIC}/32 dev lo 2>/dev/null; systemctl stop antumbra-waydroid-dhcp.service; "
-           "rm -f /run/antumbra/android-enabled /var/lib/misc/dnsmasq.waydroid0.leases /run/antumbra-hooktest.conf; echo cleaned")
+           f"rm -f /run/antumbra/android-enabled /var/lib/misc/dnsmasq.waydroid0.leases /run/antumbra-hooktest.conf {UDHCPC_SCRIPT}; echo cleaned")
     # The start-host hook, run as LXC runs it, with the network in place and
     # with each piece of it missing. LXC_PID is a process in a network
     # namespace of its own, where the hook puts its .onion block.
