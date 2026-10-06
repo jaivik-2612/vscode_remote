@@ -357,8 +357,8 @@ and network checks.
 The first run (fresh disk) checks that the partition had no volume,
 chooses "Create" with a screen-lock passphrase and administration on,
 and checks that the volume is LUKS2 with argon2id, unlocked and mounted,
-with `~/Persistent`, the Welcome settings, the network connections and
-`/var/lib/tca` bound from it; that this boot's settings were applied and
+with `~/Persistent`, the Welcome settings and the network connections
+bound from it; that this boot's settings were applied and
 saved on the volume, owned by the greeter user, without the passphrase's
 hash; that no Persistent Storage passphrase was left behind, and no
 staging directory of the applier's (`settings/staged`, and

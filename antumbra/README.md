@@ -41,7 +41,7 @@ for that first boot. Treat this as a developer preview.
 | Interface | a dark theme close to Android 14's (Material Design 3 colours, Roboto, Material Symbols status icons), as far as Phosh allows without code changes |
 | Cameras | GNOME Snapshot through the camera portal, PipeWire and libcamera's software ISP; the pop-up front camera rises while it streams; no OnePlus camera app |
 | Android apps | optional (`ANTUMBRA_ANDROID=1`): Waydroid with LineageOS 20 (Android 13) and F-Droid, no Google apps, traffic only through Tor, off until turned on at the Welcome screen |
-| Persistence | LUKS2/argon2id volume with Tails-style features (folder, Welcome settings, Wi-Fi, GnuPG, SSH, dotfiles; Android apps and data in images built with them) |
+| Persistence | LUKS2/argon2id volume with Tails-style features (folder, Wi-Fi, GnuPG, SSH, and the Welcome settings, which are not read back yet; Android apps and data in images built with them) |
 
 ## Quick start (build machine: Debian/Ubuntu x86_64 or arm64, root for the root-filesystem steps)
 

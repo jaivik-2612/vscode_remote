@@ -349,28 +349,42 @@ the "Tor has bootstrapped" flag.
 
 Bridges and pluggable transports follow Tails: the transport binaries
 come from the Tor Browser tarball the build verifies. The Linux aarch64
-tarball ships `lyrebird` (obfs4, meek_lite, webtunnel, snowflake) and
+tarball ships `lyrebird` (obfs2, obfs3, obfs4, meek_lite, scramblesuit,
+webtunnel and snowflake; there is no separate snowflake client) and
 `conjure-client`; `lyrebird` is installed as `/usr/bin/obfs4proxy` so
 Debian's Tor AppArmor abstraction keeps matching, and Tails'
 `tor-pt-configuration-helper` writes the `ClientTransportPlugin` line and
-turns the seccomp sandbox off only when a transport is in use. That line,
-as in Tails, names obfs2, obfs3, obfs4 and webtunnel only, so these are
-the bridges that work: `antumbra-tor-connect` refuses snowflake lines, and
-accepts meek_lite lines for which Tor then has no transport.
+turns the seccomp sandbox off only when a transport is in use. Antumbra's
+copy of the helper adds meek_lite to Tails' obfs2, obfs3, obfs4 and
+webtunnel in that line, so plain bridges (an address first) and obfs2,
+obfs3, obfs4, webtunnel and meek_lite bridges work; `BRIDGE_TRANSPORTS`
+in `antumbra.settings`, the Welcome screen's settings module, names the
+same transports, and `tests/unit/test_tor_connect.py` checks that they
+match. Snowflake bridges do not work: snowflake reaches its proxies
+through WebRTC over UDP, and the firewall lets `debian-tor` make only TCP
+connections and DNS queries (section 8.1). The Welcome screen and
+`antumbra-tor-connect` refuse a snowflake line with that reason, and any
+other bridge type (conjure, say) as unsupported.
 
 Connecting: Tails' Tor Connection assistant is not ported yet. The
-Welcome screen records the mode (automatic, bridges with the lines
-given, or offline), and the NetworkManager dispatcher calls
+Welcome screen records the mode (automatic, bridges with the lines given,
+or offline), and the NetworkManager dispatcher calls
 `antumbra-tor-connect` when a connection comes up; the same tool serves
-on the command line (`direct`, `bridges FILE|-`, `status`,
-`disconnect`). The Welcome screen's bridge field is a single line:
-several bridges go there separated by `;`, where the dispatcher splits
-them. `antumbra-tor-connect` applies its settings with SETCONF only, never
+on the command line (`direct`, `bridges FILE|-`, `status`, `disconnect`).
+The Welcome screen's bridge field ("Bridges: obfs4, webtunnel or
+meek_lite, separated by ;") is a single line: several bridges typed there
+go separated by `;`, and bridges pasted one per line keep their line
+breaks, which the Welcome screen turns into `;` when it stores them
+(`ANTUMBRA_BRIDGES` in `tails.bridges`, on one line); the dispatcher
+splits them at `;` again. When "Through bridges" is chosen, Start checks
+every bridge with the same function as `antumbra-tor-connect`
+(`bridge_lines` in `antumbra.settings`) and shows why it refuses one.
+`antumbra-tor-connect` applies its settings with SETCONF only, never
 SAVECONF: Tor runs as `debian-tor` and cannot write `/etc/tor`, and the
 dispatcher applies the Welcome screen's choice again on every connection.
-The dispatcher ignores the tool's failures, so a refused bridge line
-leaves Tor disconnected without a message; `antumbra-tor-connect status`,
-as root, shows it.
+The dispatcher ignores the tool's failures, so any other failure leaves
+Tor disconnected without a message; `antumbra-tor-connect status`, as
+root, shows it.
 
 ### 8.3 DNS and name resolution
 
@@ -964,11 +978,11 @@ a session stays stopped.
 `ANTUMBRA_DATA` partition with Tails' `tps` parameters and the partition
 type GUID Tails uses. Features (`/etc/antumbra/persistence-features.conf`)
 are directories on the volume bind-mounted onto their targets, in order:
-Persistent folder, Welcome settings, Network connections, Tor bridges
-(`/var/lib/tca`), GnuPG and SSH client. Creation formats the partition
-(`luksFormat --type luks2 --pbkdf argon2id --pbkdf-memory 1048576
---pbkdf-force-iterations 4`) and pre-creates every feature directory with
-its owner and mode, except features marked `off`. The only one so far is
+Persistent folder, Welcome settings, Network connections, GnuPG and SSH
+client. Creation formats the partition (`luksFormat --type luks2 --pbkdf
+argon2id --pbkdf-memory 1048576 --pbkdf-force-iterations 4`) and
+pre-creates every feature directory with its owner and mode, except
+features marked `off`. The only one so far is
 `android` (images with Android apps: `~/.local/share/waydroid`, Android's
 apps and data), created by `antumbra-persistence enable android` the
 first time the user chooses "Keep Android apps and data" and mounted only
@@ -976,14 +990,16 @@ in sessions with Android on and that choice made; only its top directory
 is chowned, so Android's own file owners survive. It also keeps Android's
 own usage history.
 
-Two of Tails' features keep nothing yet. Dotfiles: activation symlinks
-every entry of a `dotfiles` directory on the volume into the home, but
-that directory is not in the features file, so creation does not make it
-and only root can add it. Tor bridges keeps the directory of Tails' Tor
-Connection assistant, which is not ported: bridge lines entered at the
-Welcome screen are saved only with the Welcome settings, which this
-version does not read back (section 10), so they are entered again at
-every boot.
+Two of Tails' features are missing. Dotfiles keeps nothing yet:
+activation symlinks every entry of a `dotfiles` directory on the volume
+into the home, but that directory is not in the features file, so
+creation does not make it and only root can add it. Tor bridges, which
+keeps the directory of Tails' Tor Connection assistant (`/var/lib/tca`),
+is not a feature, since that assistant is not ported. Bridge lines
+entered at the Welcome screen are saved only with the Welcome settings,
+which this version does not read back (section 10), so they are entered
+again at every boot. A volume created by an earlier image, which had
+that feature, keeps an empty `tca` directory that nothing mounts.
 
 `unlock` asks for the passphrase even when the volume is open already
 (after an attempt at the Welcome screen that failed and could not lock it

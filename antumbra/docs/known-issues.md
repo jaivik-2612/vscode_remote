@@ -71,16 +71,22 @@ the pop-up motor, the cameras and Android apps.
   yet).
 - No Tor Connection assistant: bridges are entered on the Welcome screen
   or with `antumbra-tor-connect`; no QR code or Moat. What
-  `antumbra-tor-connect` sets lasts until the next network connection
-  comes up, when the Welcome screen's choice is applied again, or until
-  Tor restarts; it is not saved anywhere.
+  `antumbra-tor-connect` sets lasts until Tor restarts or, unless the
+  Welcome screen chose offline mode, until the next network connection
+  comes up, when the Welcome screen's choice is applied again; it is not
+  saved anywhere.
+- Bridges: plain, obfs4, webtunnel, meek_lite, obfs2 and obfs3 bridges
+  work. Snowflake bridges do not: snowflake needs UDP, and the firewall
+  lets Tor make only TCP connections and DNS queries. The Welcome screen
+  refuses a snowflake line at Start, saying so, and any other bridge type
+  as unsupported. Its bridge field is a single line, but bridges pasted
+  one per line are all kept; bridges typed there go separated by `;`.
+  They are entered again at every boot (next item).
 - The Welcome screen does not show the settings saved in Persistent
   Storage: the volume is unlocked only after Start, so every question,
   bridges included, is answered again at each boot. The volume keeps
   this boot's choices (never the screen-lock passphrase's hash) for a
-  Welcome screen that unlocks first, which does not exist yet. The "Tor
-  bridges" feature (`/var/lib/tca`) is mounted, but nothing stores
-  bridges in it.
+  Welcome screen that unlocks first, which does not exist yet.
 - The Welcome screen passes the Persistent Storage passphrase to the
   root-side applier through a 0600 file in the greeter user's directory
   in RAM (on the root overlay's tmpfs), which the applier moves into a
