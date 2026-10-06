@@ -72,11 +72,11 @@ What each step deletes before it runs:
   (`filesystem.squashfs` and its `.verity`, `.roothash` and `.sha256`),
   the images built from them (`userdata.simg`, `vm-disk.img` and
   `boot.img`, each with its `.sha256`), then the tree itself. It writes
-  `build-flags` again last, so if mmdebstrap, a build hook or anything
-  after them fails there is no `build-flags` and the steps after it
-  refuse to go on. A run that fails before mmdebstrap, on a missing input
-  for example, leaves the old tree and all of these as they were, still
-  matching.
+  `build-flags` again last, so if anything fails from the deletions on
+  (mmdebstrap, a build hook, the initramfs) there is no `build-flags`
+  and the steps after it refuse to go on. A run that fails before them,
+  on a missing input for example, leaves the old tree and all of these
+  as they were, still matching.
 - `squashfs.sh`: the previous squashfs (with its `.verity`, `.roothash`
   and `.sha256`), the images built from it and the `ANTUMBRA_VERITY`
   record.
