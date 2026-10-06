@@ -152,6 +152,17 @@ class ReleaseManifestTest(BuildOut):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("dm-verity: off (built with ANTUMBRA_VERITY=0;", self.manifest())
 
+    def test_minimal_build_is_stated(self):
+        r = self.release()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("minimal build", self.manifest())
+        self.flags["ANTUMBRA_MINIMAL"] = "1"
+        r = self.release()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("This is a minimal build (ANTUMBRA_MINIMAL=1), made to validate the build pipeline: it has only "
+                      "the base, network and amnesia package lists, and no Phosh, applications or Tor Browser.\n\n## Files\n",
+                      self.manifest())
+
     def test_local_libcamera_comes_with_the_source_offer(self):
         r = self.release()
         self.assertEqual(r.returncode, 0, r.stderr)
