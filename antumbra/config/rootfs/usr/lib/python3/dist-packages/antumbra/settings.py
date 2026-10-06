@@ -7,6 +7,7 @@ root (antumbra-apply-welcome-settings) into .../applied."""
 import os
 import shlex
 import subprocess
+import time
 
 SETTINGS_ROOT = "/var/lib/antumbra/settings"
 PERSISTENT = os.path.join(SETTINGS_ROOT, "persistent")
@@ -14,6 +15,59 @@ TRANSIENT = os.path.join(SETTINGS_ROOT, "transient")
 APPLIED = os.path.join(SETTINGS_ROOT, "applied")
 DONE_MARKER = os.path.join(TRANSIENT, "welcome-done")
 APPLIED_MARKER = "/run/antumbra/welcome-applied"
+# The applier's report of a failure, with its message; it stays until the
+# applier runs again (root's, in a directory the greeter cannot write).
+FAILED_MARKER = "/run/antumbra/welcome-failed"
+
+
+def failure_report_id(path=FAILED_MARKER):
+    """The applier's failure report as it is now (None if there is none),
+    to tell a report left by an earlier attempt from a new one."""
+    try:
+        st = os.stat(path)
+    except FileNotFoundError:
+        return None
+    return (st.st_dev, st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)
+
+
+def submit(model, root=SETTINGS_ROOT, failed=FAILED_MARKER):
+    """Hand MODEL (WelcomeSettings) to the applier for this attempt and
+    return the failure report there before it (for wait_for_applier). Not
+    written while the applier has not finished the previous attempt (its
+    welcome-done still there, after a time-out): once Persistent Storage is
+    active the settings directory is the volume's, and a second write could
+    leave a passphrase hash there."""
+    stale = failure_report_id(failed)
+    if not os.path.lexists(os.path.join(root, "transient", "welcome-done")):
+        model.write(root)
+    return stale
+
+
+def wait_for_applier(stale, timeout=600, applied=APPLIED_MARKER, failed=FAILED_MARKER, poll=0.5):
+    """Wait for the root-side applier to apply the settings just written:
+    return once they are applied; raise RuntimeError with the applier's
+    message once it reports a failure other than STALE (failure_report_id()
+    taken before the settings were written: an earlier attempt's report
+    stays until the applier starts again, which can take a while), or
+    after TIMEOUT seconds."""
+    deadline = time.monotonic() + timeout
+    while not os.path.exists(applied):
+        report = failure_report_id(failed)
+        if report is not None and report != stale:
+            text = ""
+            for _ in range(3):      # the applier may be writing it right now
+                try:
+                    with open(failed, encoding="utf-8") as f:
+                        text = f.read().strip()
+                except OSError:
+                    pass
+                if text:
+                    break
+                time.sleep(poll)
+            raise RuntimeError(text or "settings could not be applied")
+        if time.monotonic() > deadline:
+            raise RuntimeError("timed out waiting for the settings to be applied")
+        time.sleep(poll)
 
 
 def read_setting(path, key, default=None):

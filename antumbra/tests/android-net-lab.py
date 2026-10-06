@@ -20,6 +20,7 @@ them, or without nftables in the kernel, it says so and exits 0. --nft and
 --hook take other versions of the two files.
 """
 import argparse
+import importlib.machinery
 import importlib.util
 import json
 import os
@@ -83,6 +84,14 @@ def tor_stand_ins(onion_answer):
         threading.Thread(target=target, daemon=True).start()
 
 
+def load_antumbra_waydroid():
+    path = os.path.join(ROOT, "config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid")
+    loader = importlib.machinery.SourceFileLoader("antumbra_waydroid", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader("antumbra_waydroid", loader))
+    loader.exec_module(mod)
+    return mod
+
+
 def lab(args):
     spec = importlib.util.spec_from_file_location("antumbra_vm", os.path.join(ROOT, "tests", "vm", "antumbra_vm.py"))
     vm = importlib.util.module_from_spec(spec)
@@ -137,25 +146,37 @@ def lab(args):
         run(*ct, "ip", "route", "add", "default", "via", "10.200.2.1")
         # The start-host hook, as LXC runs it.
         # The configuration carries the identifier lines the hook also
-        # requires, with a mask for every serial number file on this machine;
+        # requires, with antumbra-waydroid's masks for this machine's
+        # hardware identifiers (which the hook finds on its own);
         # the hook runs in a mount namespace of its own with a fresh /run
         # holding the image's generic kernel command line, where
         # antumbra-waydroid puts it.
         conf = os.path.join(tmp, "config")
-        serials = run("sh", "-c", vm.SERIAL_FIND, check=False).stdout.split("\n")
-        write(conf, "".join(l + "\n" for l in [
-            "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
-            "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
-            "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]
-            + [f"lxc.mount.entry = /dev/null {f.lstrip('/')} none bind,ro 0 0" for f in serials if f]))
+        masks = load_antumbra_waydroid().identifier_masks()
         generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
-        hook = subprocess.run(["unshare", "--mount", "--propagation", "private", "sh", "-c",
-                               'mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
-                               'cp "$1" /run/antumbra/android-cmdline && shift && exec sh "$@"',
-                               "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
-                              env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(container.pid), LXC_CONFIG_FILE=conf))
-        results = [("lab: the start-host hook passes for the stand-in container", hook.returncode == 0,
-                    f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l))]
+
+        def start_host(masks):
+            write(conf, "".join(l + "\n" for l in [
+                "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
+                "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
+                "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]
+                + masks))
+            return subprocess.run(["unshare", "--mount", "--propagation", "private", "sh", "-c",
+                                   'mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
+                                   'cp "$1" /run/antumbra/android-cmdline && shift && exec sh "$@"',
+                                   "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
+                                  env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(container.pid), LXC_CONFIG_FILE=conf))
+
+        results = []
+        if masks:
+            # One identifier there and its mask missing: the hook refuses.
+            hook = start_host(masks[1:])
+            results.append((f"lab: the start-host hook refuses a configuration without the mask of {masks[0].split()[3]}",
+                            hook.returncode != 0 and "is not masked in the container" in hook.stderr,
+                            f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l)))
+        hook = start_host(masks)
+        results.append((f"lab: the start-host hook passes for the stand-in container ({len(masks)} identifier masks)", hook.returncode == 0,
+                        f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l)))
         # The harness's probes, each in a process of its own, all at once.
         probe = os.path.join(tmp, "probe.py")
         write(probe, vm.ANDROID_PROBE_PY)

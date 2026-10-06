@@ -169,7 +169,15 @@ the security side. None of this has run on the phone yet
   There is no clipboard sharing between Android and the host (Waydroid's
   clipboard needs `pyclip`, which Debian does not package).
 - Apps can read the kernel release, which names the SoC and this port,
-  and the CPU and GPU models (`threat-model.md`).
+  and the CPU and GPU models (`threat-model.md`). The phone's own
+  identifiers in sysfs and procfs are masked as far as Antumbra knows
+  them, but which ones the phone has (its QFPROM fuse region, a settable
+  or free-running RTC, factory partition GUIDs) is confirmed only on
+  hardware (`hardware-validation.md`, item 55). Something plugged in
+  while Android runs, such as a USB device with a serial number, is
+  readable inside Android until Android is next started; something
+  plugged in while it is stopped is masked at its next start. Analog
+  values such as the battery's measured capacity are not masked.
 - Cost (estimates, not measured on the phone): about 1.1 GB more to
   download and flash (2.4 GB uncompressed in the root filesystem; 0.8 GB
   for the VM's `arm64_only` images), and roughly 1 to 1.5 GB of RAM while

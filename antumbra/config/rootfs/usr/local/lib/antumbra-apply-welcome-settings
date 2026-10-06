@@ -11,8 +11,14 @@
 # owned by the greeter user; the greeter can no longer swap it afterwards.
 # Everything below reads these staged copies. Staging before Persistent
 # Storage is activated also keeps this boot's choices: activation mounts the
-# volume's stored Welcome settings over ${PERSISTENT}.
-set -euo pipefail
+# volume's stored Welcome settings over ${PERSISTENT}. In the greeter's
+# directories root only renames (and removes what it moved out of them):
+# it never writes there, changes the mode or owner of anything there, or
+# follows a link there.
+#
+# A command failing unexpectedly ends this as a failure the Welcome screen
+# shows (the ERR trap, which functions and subshells inherit: -E).
+set -Eeuo pipefail
 # /usr/local/sbin: antumbra-persistence
 export PATH=/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 ROOT=/var/lib/antumbra/settings
@@ -20,8 +26,12 @@ PERSISTENT="${ROOT}/persistent"; TRANSIENT="${ROOT}/transient"; APPLIED="${ROOT}
 # Root only (0700), on the file system of the greeter's directories, so that
 # staging is a rename; removed when this script exits.
 STAGE="${ROOT}/staged"
-# The "Welcome settings" feature's directory on the unlocked volume.
+# The "Welcome settings" feature's directory on the unlocked volume (the
+# greeter user's), and a root-only directory beside it on the same volume,
+# where the copies saved there are made before they are renamed into it;
+# removed when this script exits.
 VOLUME_SETTINGS=/var/lib/antumbra/persistence/welcome-settings
+VOLUME_STAGE=/var/lib/antumbra/persistence/.antumbra-welcome-staging
 MARKER=/run/antumbra/welcome-applied
 FAILED=/run/antumbra/welcome-failed
 LIVE_USERNAME=amnesia
@@ -36,16 +46,32 @@ SAVED_ON_VOLUME="${EXPORTED_PERSISTENT} antumbra.android"
 # Only in images built with ANTUMBRA_ANDROID=1 (antumbra.android is exported below).
 ANDROID_DIR=/usr/share/antumbra/android
 
-log() { logger -t antumbra-welcome -p daemon.info -- "$*"; echo "$*" >&2; }
+log() { logger -t antumbra-welcome -p daemon.info -- "$*" || true; echo "$*" >&2; }
 # On failure the welcome-done marker goes too: the path unit would otherwise
 # start this again at once, with the settings already consumed; the Welcome
-# screen shows the error and writes everything again on the next Start.
-fail() { log "ERROR: $*"; printf '%s\n' "$*" > "${FAILED}"; rm -f "${TRANSIENT}/welcome-done"; exit 1; }
-cleanup() {
+# screen shows the error and writes everything again on the next Start. The
+# marker goes first: once welcome-failed exists the Welcome screen lets the
+# user start again, and that new marker must stay. rm -r: whatever the
+# greeter left under that name (rm removes a link, never follows it).
+fail() {
+    trap - ERR
+    log "ERROR: $*"
+    rm -rf -- "${TRANSIENT}/welcome-done" || true
+    printf '%s\n' "$*" > "${FAILED}" || true
+    exit 1
+}
+trap 'fail "unexpected error (line ${LINENO}, exit status $?)"' ERR
+# drop_staged: remove the staged copies (the passphrases among them).
+drop_staged() {
     if [ -f "${STAGE}/antumbra.persistence-passphrase" ]; then
         shred -u "${STAGE}/antumbra.persistence-passphrase" 2>/dev/null || true
     fi
     rm -rf -- "${STAGE}" || true
+}
+cleanup() {
+    trap - ERR
+    drop_staged
+    if [ -d "${VOLUME_STAGE}" ] && [ ! -L "${VOLUME_STAGE}" ]; then rm -rf -- "${VOLUME_STAGE}" || true; fi
 }
 
 # owned_by_greeter FILE: a regular file, not a symbolic link, owned by the greeter user.
@@ -132,23 +158,39 @@ done
 for f in tails.network antumbra.android; do
     if [ -e "${APPLIED}/${f}" ]; then chmod 0644 "${APPLIED}/${f}"; fi
 done
-# "Welcome settings" feature: this boot's settings replace the stored ones.
-# install(1) replaces a file or link the greeter left there, never writes through it.
+# "Welcome settings" feature: this boot's settings replace the stored ones,
+# and no screen-lock passphrase hash stays there. The directory is the
+# greeter user's, so root only renames in it: whatever the greeter left
+# under each name (a file, a link, a directory) is moved out to
+# ${VOLUME_STAGE} and removed there, and each copy is made there, already
+# the greeter's and 0640, then moved in. A rename never follows a link, so
+# nothing root does lands outside the directory. Saving is best effort.
+save_on_volume() {
+    local f="$1"
+    if [ -e "${VOLUME_SETTINGS}/${f}" ] || [ -L "${VOLUME_SETTINGS}/${f}" ]; then
+        mv -fT -- "${VOLUME_SETTINGS}/${f}" "${VOLUME_STAGE}/old.${f}" || return 1
+        rm -rf -- "${VOLUME_STAGE:?}/old.${f}" || return 1
+    fi
+    case " ${SAVED_ON_VOLUME} " in *" ${f} "*) ;; *) return 0 ;; esac
+    [ -f "${STAGE}/${f}" ] || return 0
+    install -m 0640 -o "${GREETER_USER}" -g "${GREETER_USER}" -- "${STAGE}/${f}" "${VOLUME_STAGE}/${f}" || return 1
+    mv -fT -- "${VOLUME_STAGE}/${f}" "${VOLUME_SETTINGS}/${f}"
+}
 if antumbra-persistence status --quiet 2>/dev/null && [ -d "${VOLUME_SETTINGS}" ]; then
-    for f in ${SAVED_ON_VOLUME}; do
-        if [ -f "${STAGE}/${f}" ]; then
-            install -m 0640 -o "${GREETER_USER}" -g "${GREETER_USER}" "${STAGE}/${f}" "${VOLUME_SETTINGS}/${f}" \
-                || log "could not save ${f} on Persistent Storage"
-        else
-            rm -f -- "${VOLUME_SETTINGS:?}/${f}"
-        fi
-    done
-    rm -f -- "${VOLUME_SETTINGS:?}/tails.password"
+    if rm -rf -- "${VOLUME_STAGE}" && mkdir -m 0700 -- "${VOLUME_STAGE}"; then
+        for f in ${SAVED_ON_VOLUME} tails.password; do
+            save_on_volume "${f}" || log "could not save ${f} on Persistent Storage, or remove what was there"
+        done
+        rm -rf -- "${VOLUME_STAGE}" || true
+    else
+        log "could not save the Welcome settings on Persistent Storage"
+    fi
 fi
 # The staged copies (the screen-lock passphrase's hash among them) are not
 # needed past this point: remove them now rather than when the script exits,
-# which is after the network has come up.
-cleanup
+# which is after the network has come up. (Not cleanup: that also drops the
+# ERR trap, which must stay for the steps below.)
+drop_staged
 
 # --- Passphrase, administration -------------------------------------------------------------
 rm -f "${SUDOERS}" "${POLKIT}"
@@ -179,5 +221,5 @@ fi
 # --- Network: unblock drivers (MAC spoofing fires per interface) ---------------------------
 touch "${MARKER}"
 /usr/local/lib/antumbra-unblock-network || log "network unblock reported an error (see journal)"
-rm -f "${TRANSIENT}/welcome-done"
+rm -rf -- "${TRANSIENT}/welcome-done"
 log "welcome settings applied"

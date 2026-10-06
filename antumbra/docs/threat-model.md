@@ -90,12 +90,43 @@ sections 8.5 and 11.1). While they are on:
   kernel release (it names the SoC and the phone's port), the CPU model,
   the GPU through OpenGL, the screen size, and the container's MAC address,
   which every Waydroid installation shares. An app can tell it runs on an
-  SM8150 phone under Antumbra. It cannot read the phone's serial numbers:
-  Android gets a generic kernel command line instead of the host's (where
-  the boot loader puts `androidboot.serialno`, which would become
-  `ro.serialno`), and the SoC's, the UFS device's and the disks' serial
-  number files in sysfs read empty in the container. On the host itself,
-  `/proc/cmdline` still shows the serial number to every local process.
+  SM8150 phone under Antumbra. What would tell it *which* phone, and so
+  link amnesic sessions, is hidden as far as Antumbra knows, but the list
+  is checked only in the VM so far (`hardware-validation.md`, item 55):
+  - *Masked:* Android gets a generic kernel command line instead of the
+    host's (where the boot loader puts `androidboot.serialno`, which would
+    become `ro.serialno`). In the container's sysfs, the SoC's, the UFS
+    device's and the disks' serial numbers and SCSI identifiers, any SD
+    card's CID, any EEPROM's contents, device-mapper UUIDs (unlocked
+    Persistent Storage's is its LUKS UUID) and the partitions' `uevent`
+    files (their GPT unique GUIDs; whether the factory partitions' differ
+    from phone to phone is not known) read empty. Every nvmem provider's
+    directory is empty: on the phone that is the SoC's QFPROM fuse region,
+    which the kernel shows everyone and which holds per-chip calibration
+    and, very likely, the chip's serial number. The RTC's directory and
+    `/proc/driver/rtc` are empty too: the phone's PMIC RTC cannot be set
+    from Linux and should count from its first power-up, so its reading
+    minus the real time would be a constant of the phone. These masks
+    cover the devices present when the container starts; the container
+    refuses to start with one unmasked, but something plugged in while
+    Android runs (a USB device's serial number) is readable until Android
+    is next started. The container's sysfs belongs to its own network
+    namespace, so the host's network interfaces and Wi-Fi radio (their
+    MAC addresses, the factory one included) are not in it. Apps get no
+    Bluetooth socket (the kernel allows those only in the host's network
+    namespace; Bluetooth is off anyway) and no QRTR socket (the modem's
+    and DSPs' services, the IMEI's among them; Antumbra's kernel allows
+    them only with `CAP_NET_ADMIN`).
+  - *Not masked:* what is the same on every 7T Pro (SoC model and
+    revision, memory size, the kernel's configuration); slowly drifting
+    values a determined app could still correlate across sessions, such
+    as the battery's measured capacity and cycle count; accessories'
+    identifiers other than USB serial numbers (a USB keyboard's serial
+    number again in its input device's `uniq`, a monitor's in its EDID).
+    Android's root, unlike its apps, is root on the host as well and can
+    read anything, the kernel log with the serial number included.
+  On the host itself, `/proc/cmdline` still shows the serial number to
+  every local process, and the identifiers above stay readable there.
 - **Frozen images.** The LineageOS 20 images are those pinned at build
   time and receive no updates until Antumbra pins new ones. They are built
   by Waydroid's small team, are not reproducible, and are verified only by

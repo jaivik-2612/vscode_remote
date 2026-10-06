@@ -658,14 +658,23 @@ answers once.
    Then it unlocks or creates Persistent Storage and activates its
    features; copies this boot's settings to `settings/applied/`
    (root-owned); with Persistent Storage, saves them on the volume (the
-   "Welcome settings" feature, owned by the greeter user); sets the user's
-   password with `chpasswd -e` or deletes it; installs the sudoers and
-   polkit admin rules when asked; writes the marker; runs
-   `antumbra-unblock-network`. On a failure (a wrong passphrase, say) it
-   writes `/run/antumbra/welcome-failed` and removes `welcome-done`, so
+   "Welcome settings" feature, owned by the greeter user: whatever the
+   greeter left under each name is renamed out to a root-only directory
+   on the volume and removed there, and each copy is made there, already
+   the greeter's and 0640, then renamed in, so that root never changes a
+   mode or owner, or follows a link, in the greeter's directory); sets the
+   user's password with `chpasswd -e` or deletes it; installs the sudoers
+   and polkit admin rules when asked; writes the marker; runs
+   `antumbra-unblock-network`. On a failure (a wrong passphrase, say, or
+   any command failing unexpectedly: an `ERR` trap) it removes
+   `welcome-done` and then writes `/run/antumbra/welcome-failed`, so
    that its path unit does not start it again on settings it has already
    consumed; the Welcome screen shows the error and writes everything
-   again on the next Start. What is applied is always what the Welcome
+   again on the next Start. The Welcome screen takes only a failure
+   report other than the one there before it wrote (the earlier attempt's
+   stays until the applier runs again), keeps Start insensitive until the
+   applier answers, and writes nothing while `welcome-done` is still there
+   (after a time-out). What is applied is always what the Welcome
    screen showed this boot: the volume is unlocked only after Start, so
    the Welcome screen cannot show the stored settings, and stored settings
    that silently replaced this boot's choice (offline mode, MAC address
@@ -849,14 +858,28 @@ RAM. `config/hooks/56-session-android.sh` then:
    rendering, which Waydroid turns into ANGLE on SwiftShader), runs
    `waydroid init` and `waydroid upgrade -o`, copies the generic kernel
    command line to `/run/antumbra/android-cmdline` (writable, because
-   Android's first-stage init may chmod `/proc/cmdline`), masks every
-   hardware serial number file in sysfs (`serial_number`, `serial`,
-   `vpd_pg80`, `vpd_pg83`, `wwid`: the SoC's, the UFS device's, the
-   disks') with read-only binds of `/dev/null` in the generated
+   Android's first-stage init may chmod `/proc/cmdline`), masks the
+   hardware identifiers in sysfs and procfs in the generated
    configuration, checks it, starts the container service and writes
-   `/run/antumbra/android-ready`. The start-host hook refuses to start
-   the container if the command line bind, the device rules or a mask is
-   missing.
+   `/run/antumbra/android-ready`. The masks: read-only binds of
+   `/dev/null` over every file named `serial_number`, `serial`,
+   `vpd_pg80`, `vpd_pg83`, `wwid`, `cid`, `uuid` or `eeprom` (the SoC's,
+   the UFS device's and the disks' serial numbers and SCSI identifiers, an
+   SD card's CID, device-mapper UUIDs, Persistent Storage's LUKS UUID among
+   them, EEPROM contents), over the `uevent` of every partition (its
+   PARTUUID) and of every directory with a `serial_number` (a power
+   supply's repeats it), and over `/proc/driver/rtc`; an empty read-only
+   tmpfs over every nvmem provider's directory (the SoC's QFPROM fuses,
+   which sysfs shows everyone) and every RTC's (the PMIC RTC's raw count,
+   a constant of the phone once the real time is known). Each mask is
+   optional, so that a device unplugged since does not stop the start;
+   the container service writes them again before each of its starts
+   (`ExecStartPre=antumbra-waydroid --masks`), and stops with the
+   container. The start-host hook looks for the same identifiers on its
+   own and refuses to start the container if one that exists has no mask,
+   or if the command line bind or the device rules are missing. The
+   container mounts a sysfs of its own network namespace, which has none
+   of the host's network interfaces or Wi-Fi radios.
 3. In the session, `antumbra-android-session.path` starts `waydroid
    session start` once Android is ready: Android boots, its apps open as
    ordinary windows (app_id `waydroid.<package>`), and Waydroid writes a

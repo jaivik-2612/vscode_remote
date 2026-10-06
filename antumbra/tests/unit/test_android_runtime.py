@@ -10,6 +10,7 @@ import re
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 ANDROID = os.path.join(ROOT, "config", "rootfs-android")
@@ -103,15 +104,65 @@ class DeviceCgroupTest(unittest.TestCase):
 
 def generated_config(m, masks=()):
     """A container configuration as "waydroid upgrade" generates it from the
-    edited templates, plus antumbra-waydroid's masks."""
+    edited templates, plus antumbra-waydroid's mask entries MASKS."""
     text = "\n".join(["lxc.rootfs.path = /var/lib/waydroid/rootfs",
                       "lxc.cap.keep = audit_control sys_nice setpcap sys_admin net_admin mknod",
                       *post_stop_after_hook56(),
                       "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
                       *config_3_additions()]) + "\n"
     if masks:
-        text += "\n" + m.MASKS_MARK + "\n" + "".join(e + "\n" for e in m.mask_entries(masks))
+        text += "\n" + m.MASKS_MARK + "\n" + "".join(e + "\n" for e in masks)
     return text
+
+
+START_HOST = ("config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid-start-host")
+
+# A sysfs and procfs laid out as on the phone (and the VM), with every kind
+# of identifier antumbra-waydroid hides; paths relative to the fake root.
+QFPROM = "sys/devices/platform/soc@0/784000.efuse/qfprom0"
+RTC = "sys/devices/platform/soc@0/c440000.spmi/spmi-0/0-00/c440000.spmi:pmic@0:rtc@6000/rtc/rtc0"
+SCSI = "sys/devices/platform/soc@0/1d84000.ufshc/host0/target0:0:0/0:0:0:0"
+BATTERY = "sys/devices/platform/soc@0/a8c000.i2c/i2c-1/1-0055/power_supply/bq27411-0"
+MASKED_FILES = ["sys/devices/soc0/serial_number",
+                "sys/devices/soc0/uevent",                                  # next to serial_number
+                "sys/devices/platform/soc@0/1d84000.ufshc/string_descriptors/serial_number",
+                f"{SCSI}/vpd_pg80", f"{SCSI}/vpd_pg83", f"{SCSI}/wwid",
+                f"{SCSI}/block/sda/sda5/uevent",                            # a partition's: PARTUUID
+                "sys/devices/pci0000:00/0000:00:02.0/virtio1/block/vda/serial",
+                "sys/devices/virtual/block/dm-1/dm/uuid",                   # Persistent Storage's LUKS UUID
+                "sys/devices/platform/soc@0/8804000.mmc/mmc_host/mmc0/mmc0:aaaa/cid",
+                "sys/devices/platform/soc@0/a90000.i2c/i2c-0/0-0050/eeprom",
+                f"{BATTERY}/serial_number", f"{BATTERY}/uevent",            # POWER_SUPPLY_SERIAL_NUMBER
+                "proc/driver/rtc"]
+HIDDEN_DIRS = [QFPROM, RTC]
+LEFT_ALONE = ["sys/devices/soc0/machine", f"{SCSI}/block/sda/uevent", f"{SCSI}/block/sda/size",
+              f"{SCSI}/block/sda/sda5/size", f"{SCSI}/uevent", "sys/devices/virtual/block/dm-1/dm/name",
+              f"{BATTERY}/capacity", "proc/cmdline"]
+
+
+def fake_sysfs(root):
+    """Lay out the fake sysfs and procfs under ROOT."""
+    inside = [f"{QFPROM}/nvmem", f"{QFPROM}/cells/gpu-speed-bin@133,5", f"{QFPROM}/uevent", f"{QFPROM}/type",
+              f"{RTC}/since_epoch", f"{RTC}/date", f"{RTC}/time", f"{RTC}/wakealarm", f"{RTC}/uevent",
+              f"{SCSI}/block/sda/sda5/partition"]
+    for rel in MASKED_FILES + LEFT_ALONE + inside:
+        os.makedirs(os.path.dirname(os.path.join(root, rel)), exist_ok=True)
+        with open(os.path.join(root, rel), "w") as f:
+            f.write("x\n")
+    os.makedirs(os.path.join(root, "sys", "devices", "virtual", "serial"))              # a directory: not an identifier
+    os.symlink("../soc0", os.path.join(root, "sys", "devices", "platform", "soc0"))      # links are not followed
+    os.symlink("../../soc0/serial_number", os.path.join(root, "sys", "devices", "virtual", "uuid"))
+
+
+def start_host_identifiers(root):
+    """The start-host hook's own list of identifiers (its identifiers=
+    block, run by dash with /sys/devices and /proc under ROOT): sorted
+    (kind, path) pairs, paths as in the container."""
+    m = re.search(r'^identifiers="\$\(\n(.*?)\n\)"$', read(*START_HOST), re.M | re.S)
+    block = m.group(1).replace("/sys/devices", f"{root}/sys/devices").replace("/proc/driver/rtc", f"{root}/proc/driver/rtc")
+    out = subprocess.run(["dash", "-c", block], capture_output=True, text=True, check=True).stdout
+    pairs = [line.split(" ", 1) for line in out.splitlines() if line]
+    return sorted({(kind, path[len(root):]) for kind, path in pairs})
 
 
 class IdentifiersTest(unittest.TestCase):
@@ -130,48 +181,87 @@ class IdentifiersTest(unittest.TestCase):
         without = generated_config(self.m).replace(self.m.CMDLINE_ENTRY + "\n", "")
         self.assertTrue(self.m.lxc_problems(without, []))
 
-    def test_serial_numbers_are_found_and_masked(self):
-        with tempfile.TemporaryDirectory() as sysfs:
-            files = ["devices/soc0/serial_number",
-                     "devices/platform/soc@0/1d84000.ufshc/string_descriptors/serial_number",
-                     "devices/platform/soc@0/1d84000.ufshc/host0/target0:0:0/0:0:0:0/vpd_pg80",
-                     "devices/platform/soc@0/1d84000.ufshc/host0/target0:0:0/0:0:0:0/vpd_pg83",
-                     "devices/platform/soc@0/1d84000.ufshc/host0/target0:0:0/0:0:0:0/wwid",
-                     "devices/pci0000:00/0000:00:02.0/virtio1/block/vda/serial"]
-            for rel in files + ["devices/soc0/machine"]:
-                os.makedirs(os.path.dirname(os.path.join(sysfs, rel)), exist_ok=True)
-                with open(os.path.join(sysfs, rel), "w") as f:
-                    f.write("x\n")
-            os.makedirs(os.path.join(sysfs, "devices", "virtual", "serial"))           # a directory: not a serial
-            os.symlink("../soc0", os.path.join(sysfs, "devices", "platform", "soc0"))   # links are not followed
-            found = self.m.serial_files(sysfs)
-            self.assertEqual(found, sorted("/sys/" + rel for rel in files))
-            good = generated_config(self.m, found)
-            self.assertEqual(self.m.lxc_problems(good, found), [])
-            self.assertIn("lxc.mount.entry = /dev/null sys/devices/soc0/serial_number none bind,ro 0 0", good)
-            missing = good.replace("lxc.mount.entry = /dev/null sys/devices/soc0/serial_number none bind,ro 0 0\n", "")
-            self.assertEqual(self.m.lxc_problems(missing, found),
-                             ["the container configuration does not mask sys/devices/soc0/serial_number"])
+    def test_identifiers_are_found_and_masked(self):
+        with tempfile.TemporaryDirectory() as root:
+            fake_sysfs(root)
+            files, dirs = self.m.identifier_paths(os.path.join(root, "sys"), os.path.join(root, "proc"))
+            self.assertEqual(files, sorted("/" + rel for rel in MASKED_FILES))
+            self.assertEqual(dirs, sorted("/" + rel for rel in HIDDEN_DIRS))
+            masks = self.m.mask_entries(files, dirs)
+            self.assertIn("lxc.mount.entry = /dev/null sys/devices/soc0/serial_number none bind,ro,optional 0 0", masks)
+            self.assertIn("lxc.mount.entry = /dev/null proc/driver/rtc none bind,ro,optional 0 0", masks)
+            self.assertIn(f"lxc.mount.entry = tmpfs {QFPROM} tmpfs ro,nosuid,nodev,noexec,mode=0555,size=4k,optional 0 0", masks)
+            good = generated_config(self.m, masks)
+            self.assertEqual(self.m.lxc_problems(good, masks), [])
+            for entry, path in ((masks[0], files[0][1:]), (masks[-1], dirs[-1][1:])):
+                missing = good.replace(entry + "\n", "")
+                self.assertEqual(self.m.lxc_problems(missing, masks), [f"the container configuration does not mask {path}"])
         with self.assertRaises(SystemExit):
             self.m.mask_entries(["/sys/devices/a b/serial"])
+        with self.assertRaises(SystemExit):
+            self.m.mask_entries([], ["/run/antumbra"])
 
-    def test_masks_are_replaced_not_stacked(self):
+    def test_a_device_gone_during_the_scan_is_skipped(self):
+        # A device unplugged while antumbra-waydroid looks: its files vanish
+        # between the directory listing and the lstat.
+        real_lstat = os.lstat
+
+        def lstat(path, *a, **kw):
+            if str(path).endswith("/vda/serial"):
+                raise FileNotFoundError(path)
+            return real_lstat(path, *a, **kw)
+
+        with tempfile.TemporaryDirectory() as root:
+            fake_sysfs(root)
+            with mock.patch.object(self.m.os, "lstat", lstat):
+                files, dirs = self.m.identifier_paths(os.path.join(root, "sys"), os.path.join(root, "proc"))
+        self.assertEqual(files, sorted("/" + rel for rel in MASKED_FILES if not rel.endswith("/vda/serial")))
+        self.assertEqual(dirs, sorted("/" + rel for rel in HIDDEN_DIRS))
+
+    def test_start_host_hook_finds_the_same_identifiers(self):
+        # The hook's own scan, run on the same tree, lists exactly what
+        # antumbra-waydroid masks, and looks for the entries it writes.
+        with tempfile.TemporaryDirectory() as root:
+            fake_sysfs(root)
+            files, dirs = self.m.identifier_paths(os.path.join(root, "sys"), os.path.join(root, "proc"))
+            self.assertEqual(start_host_identifiers(root), sorted([("file", f) for f in files] + [("dir", d) for d in dirs]))
+        hook = read(*START_HOST)
+        f, d = self.m.mask_entries(["/sys/x"], ["/sys/y"])
+        self.assertIn('entry="' + f.replace("sys/x", "${path#/}") + '"', hook)
+        self.assertIn('entry="' + d.replace("sys/y", "${path#/}") + '"', hook)
+
+    def test_start_host_hook_looks_for_the_same_names(self):
+        hook = read(*START_HOST)
+        finds = re.findall(r"find /sys/devices \\\( (.*?) \\\) -type f", hook)
+        self.assertEqual(len(finds), 3, finds)
+        for names, want in zip(finds, (self.m.MASKED_NAMES, self.m.UEVENT_MARKERS, self.m.HIDDEN_DIR_MARKERS)):
+            self.assertEqual(sorted(re.findall(r"-name (\S+)", names)), sorted(want))
+        self.assertEqual(re.findall(r"if \[ -f (/proc/\S+) \]; then printf 'file %s\\n' \1; fi", hook),
+                         ["/proc/" + p for p in self.m.MASKED_PROC])
+
+    def test_masks_are_optional_and_replaced_not_stacked(self):
         with tempfile.TemporaryDirectory() as d:
             self.m.LXC_CONFIG = os.path.join(d, "config")
             with open(self.m.LXC_CONFIG, "w") as f:
                 f.write(generated_config(self.m))
-            self.m.add_masks(self.m.mask_entries(["/sys/devices/soc0/serial_number"]))
-            self.m.add_masks(self.m.mask_entries(["/sys/devices/soc0/serial_number"]))
+            self.m.add_masks(self.m.mask_entries(["/sys/devices/soc0/serial_number", "/sys/devices/x/serial"]))
+            self.m.add_masks(self.m.mask_entries(["/sys/devices/soc0/serial_number"], ["/sys/devices/y/rtc/rtc0"]))
             with open(self.m.LXC_CONFIG) as f:
                 text = f.read()
-            self.assertEqual(text.count(self.m.MASKS_MARK), 1)
-            self.assertEqual(text.count("sys/devices/soc0/serial_number"), 1)
+        self.assertEqual(text.count(self.m.MASKS_MARK), 1)
+        self.assertEqual(text.count("sys/devices/soc0/serial_number"), 1)
+        self.assertNotIn("sys/devices/x/serial", text)     # a device gone since: its mask goes too
+        masks = text[text.index(self.m.MASKS_MARK):].splitlines()[1:]
+        self.assertEqual(len(masks), 2)
+        self.assertTrue(all(re.search(r",optional 0 0$", line) for line in masks), masks)
 
-    def test_start_host_hook_looks_for_the_same_names(self):
-        start_host = read("config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid-start-host")
-        names = re.search(r'find /sys/devices \\\( (.*?) \\\) -type f', start_host).group(1)
-        self.assertEqual(sorted(re.findall(r"-name (\S+)", names)), sorted(self.m.SERIAL_NAMES))
-        self.assertIn('"lxc.mount.entry = /dev/null ${path#/} none bind,ro 0 0"', start_host)
+    def test_masks_are_written_again_before_each_container_start(self):
+        # Devices come and go: the container service writes the masks for
+        # what is there before it starts, and it stops with the container.
+        dropin = read("config", "rootfs-android", "etc", "systemd", "system", "waydroid-container.service.d", "antumbra.conf")
+        self.assertEqual(re.findall(r"(?m)^ExecStartPre=(.*)$", dropin), ["/usr/local/lib/antumbra-waydroid --masks"])
+        source = read("config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid")
+        self.assertIn('if sys.argv[1:] == ["--masks"]:\n        masks_main()', source)
 
 
 class AndroidStopTest(unittest.TestCase):

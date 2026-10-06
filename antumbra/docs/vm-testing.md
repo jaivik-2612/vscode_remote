@@ -236,9 +236,14 @@ harness waits 40 minutes times the timeout scale; software emulation is
 slow), the generic Waydroid identity,
 `/sys/firmware` hidden, that Android's `/proc/cmdline` is the generic one
 and neither it nor `ro.serialno` or `ro.boot.serialno` shows the test
-serial, that every serial number file in sysfs (the disk's included)
-reads empty inside Android, that the container can open `/dev/null` but
-not a V4L2 device node it creates, the DHCP lease and route, the provisioning
+serial, that every hardware identifier file in sysfs (serial numbers, the
+disk's included, and device-mapper UUIDs, the dm-verity root's among
+them) and every partition's `uevent` (PARTUUID) read empty inside
+Android, that the RTC's directory (and any nvmem provider's) is empty
+there and `/proc/driver/rtc` reads empty, that none of the host's MAC
+addresses and no Wi-Fi radio shows in Android's sysfs, that the container
+can open `/dev/null` but not a V4L2 device node it creates, the DHCP lease
+and route, the provisioning
 (captive-portal checks, Private DNS and network time off), a screenshot
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
 listed in the app grid's "Android" folder, F-Droid's index fetch counted
@@ -251,7 +256,10 @@ in the capture; after `waydroid session stop`, that Waydroid's container
 service stops, that every device it opened has its boot mode again and
 that Android stays stopped for 30 seconds; and the start-host hook
 refusing to start the container without the firewall's Android rules,
-after which Android starts again. The harness runs commands inside the
+after which Android starts again with a device plugged in meanwhile (a
+device-mapper device with a UUID: its mask is in the configuration and
+Android reads it empty), and once more after Android has stopped and the
+device has gone. The harness runs commands inside the
 container with `lxc-attach` with no standard descriptor on the console's
 tty (`in_android`): given a tty, lxc-attach switches to a terminal proxy
 that sends the output to `/dev/tty` instead of a pipe and flushes the
@@ -278,8 +286,9 @@ through the Welcome screen's own module, run as the greeter user (the
 same files, byte for byte, as the Welcome screen writes: a passphrase
 typed through QMP into GTK password rows under software emulation would
 test the keyboard path rather than Persistent Storage), wait for the
-root applier, then press "Start Antumbra", which starts the session as
-after a logout, and run the usual session and network checks.
+root applier as the Welcome screen does, then press "Start Antumbra",
+which starts the session as after a logout, and run the usual session
+and network checks.
 
 The first run (fresh disk) checks that the partition had no volume,
 chooses "Create" with a screen-lock passphrase and administration on,
@@ -292,8 +301,12 @@ administration and the passphrase are in force; and that a file written
 to `~/Persistent` lands on the volume. The second run (`--keep-disk`)
 checks that the partition holds a LUKS volume, opens it read-only first
 to check what the first run stored (administration on, no passphrase
-hash, the file in `Persistent`), then chooses "Unlock" with no
-screen-lock passphrase and administration off, and checks that the
+hash, the file in `Persistent`), tries "Unlock" with a wrong passphrase
+(the error reaches the Welcome screen's wait, `welcome-done` and the
+passphrase are gone so that it can start again), then chooses "Unlock"
+with the right one, no screen-lock passphrase and administration off
+(the wrong attempt's report, still there, must not be taken for this
+one's), and checks that the
 volume was unlocked, that this boot's settings were applied and replaced
 the stored ones (administration off, no passphrase, no sudoers rule), and
 that `~/Persistent` still holds the file. The run takes longer than
