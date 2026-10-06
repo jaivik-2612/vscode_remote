@@ -606,8 +606,12 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     # so a socket opened in between has none: with Tor opening and dropping
     # connections every second, a 90-second poll always hits that gap. -O keeps
     # each socket on one line.
-    rc, o = sh(f"for i in $(seq {polls}); do ss -tunapeHO state all; sleep 1; done | "
-               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 3 + 120)
+    # The poll runs for POLLS seconds of the guest's clock, however long each
+    # ss takes, and without -p: the owner comes from -e's UID, and -p's scan
+    # of every process in /proc made each ss take seconds once Android's
+    # processes were running, so a count of polls overran the console's limit.
+    rc, o = sh(f"t_end=$(( $(date +%s) + {polls} )); while [ \"$(date +%s)\" -lt \"$t_end\" ]; do ss -tunaeHO state all; sleep 1; done | "
+               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 2 + 300)
     socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"] if rc is not None else []
 
     def peer(line):

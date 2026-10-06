@@ -348,7 +348,7 @@ class TrafficChecksTest(unittest.TestCase):
                                             if record else "") + "\t}\n}")
 
         def sh(cmd, timeout=120):
-            if "ss -tunap" in cmd:
+            if "ss -tuna" in cmd:
                 return 0, ss + "\nend"
             if "orport" in cmd:
                 return 0, "1.2.3.4 orport=443"
