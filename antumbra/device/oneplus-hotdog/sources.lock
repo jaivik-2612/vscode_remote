@@ -65,20 +65,22 @@ TORBROWSER_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/EF6E28
 # https://ota.waydro.id/vendor/waydroid_<variant>/MAINLINE.json; the files
 # are on SourceForge). Waydroid itself checks only the zip's SHA-256 from
 # that JSON; the build checks it, the zip's size, and the size and CRC-32
-# the zip records for each image. An optional *_IMG_SHA256 key also pins the
-# extracted image (fetch-sources.sh prints the value); the arm64_only (VM)
-# images have it, the arm64 (phone) ones get it on their first fetch. The device profile
-# picks the variant (WAYDROID_IMAGE_VARIANT in device.conf).
+# the zip records for each image. *_IMG_SHA256 pins the extracted image,
+# checked on every run, cached or not (for arm64: computed on 2026-10-05 by
+# streaming each pinned zip through funzip, whose CRC-32 check passed). The
+# device profile picks the variant (WAYDROID_IMAGE_VARIANT in device.conf).
 WAYDROID_ARM64_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64/lineage-20.0-20260927-VANILLA-waydroid_arm64-system.zip/download
 WAYDROID_ARM64_SYSTEM_SHA256=5fb8179ed4455f45919c5a2bfbfdd1591619295994ad321217f03bb1dcfc53a7
 WAYDROID_ARM64_SYSTEM_SIZE=912267974
 WAYDROID_ARM64_SYSTEM_IMG_SIZE=1994985472
 WAYDROID_ARM64_SYSTEM_IMG_CRC32=70723829
+WAYDROID_ARM64_SYSTEM_IMG_SHA256=ba4da2882999bc09a63eab5f2b02a77cdce13df0b72b98fea58a4d7ccb125f4d
 WAYDROID_ARM64_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64/lineage-20.0-20260927-MAINLINE-waydroid_arm64-vendor.zip/download
 WAYDROID_ARM64_VENDOR_SHA256=20a49c11961a5ac7295320f578764eeab3c982b217f1bfde7473adfc22e747ae
 WAYDROID_ARM64_VENDOR_SIZE=147678746
 WAYDROID_ARM64_VENDOR_IMG_SIZE=421634048
 WAYDROID_ARM64_VENDOR_IMG_CRC32=7fac583f
+WAYDROID_ARM64_VENDOR_IMG_SHA256=c5371756f0f97ca56c0d114de14b352eaf926e81c4664d2b3e9862a0ab47642d
 WAYDROID_ARM64_ONLY_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64_only/lineage-20.0-20260927-VANILLA-waydroid_arm64_only-system.zip/download
 WAYDROID_ARM64_ONLY_SYSTEM_SHA256=a7806741ea8ca5be917d0c66b031d97a60abb7a95031ca5b35c40620b6273ccd
 WAYDROID_ARM64_ONLY_SYSTEM_SIZE=733009660

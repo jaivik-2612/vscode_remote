@@ -5,9 +5,10 @@ commands over the debug console (hvc0), QMP (screenshots, power button),
 packet-capture summaries, and the smoke test. Standard library only.
 
 usage: antumbra_vm.py [--run-dir DIR] COMMAND ...
-  smoke [--timeout-scale F] [--no-stop] [--through-welcome [--tour]] [--camera] [--android | --android-net]
+  smoke [--timeout-scale F] [--no-stop] [--through-welcome [--tour]] [--camera] [--android | --android-net | --persistence]
                                           boot, check, power down; exit 1 on any failure
-                                          (--android, --android-net: images built with ANTUMBRA_ANDROID=1)
+                                          (--android, --android-net: images built with ANTUMBRA_ANDROID=1;
+                                          --persistence: creates Persistent Storage, with -- --keep-disk unlocks it)
   wait REGEX [--timeout S]                wait for REGEX in the serial log
   shell CMD...                            run a command on the debug console, print its output
   screenshot FILE.png                     dump the display
@@ -1314,6 +1315,8 @@ def android_preflight(vm, rep, T, sh, out):
     rc, o = sh("runuser -u amnesia -- timeout 90 busctl --system call id.waydro.Container /ContainerManager id.waydro.ContainerManager GetSession "
                ">/dev/null 2>&1 && echo answered || echo refused; sleep 2; systemctl is-active waydroid-container.service", timeout=180)
     rep.check("android: D-Bus activation of the container service is refused while Android is off", rc is not None and o.strip().split("\n") == ["refused", "inactive"], o.replace("\n", " "))
+    android_templates_check(rep, sh)
+    android_boot_modes(rep, sh, out)
 
 
 def enable_android_switch(vm, rep, T, out):
@@ -1411,6 +1414,7 @@ def android_phase(vm, rep, T, sh, out):
     rc, o = sh(f"{in_android('/system/bin/ls -A /sys/firmware')} | wc -l; "
                f"{in_android('/system/bin/cat /proc/device-tree/model')} >/dev/null && echo model-readable || echo model-hidden")
     rep.check("android: /sys/firmware and /proc/device-tree are hidden from Android", rc == 0 and o.strip().split("\n") == ["0", "model-hidden"], o.replace("\n", " "))
+    android_identifier_checks(rep, sh)
     rc, o = sh(f"{in_android('/system/bin/ip -4 -o addr show eth0')}; {in_android('/system/bin/ip route show table all')} | grep -c '^default via 10.200.2.1 '; "
                "cat /var/lib/misc/dnsmasq.waydroid0.leases")
     rep.check("android: the container got 10.200.2.2 from the bridge's DHCP, default route via 10.200.2.1",
@@ -1506,6 +1510,7 @@ def android_phase(vm, rep, T, sh, out):
             stopped = True
             break
         time.sleep(5)
+    android_stop_checks(rep, T, sh, out, stopped)
     rc, o = sh("nft flush chain ip antumbra-nat android && echo flushed; "
                f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 300 waydroid session start >/dev/null 2>&1; "
                "lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH; journalctl -b --no-pager -t antumbra-waydroid | grep -c 'Android container start refused'; "
@@ -1515,7 +1520,9 @@ def android_phase(vm, rep, T, sh, out):
               stopped and len(lines) == 4 and lines[0] == "flushed" and lines[1] == "STOPPED" and lines[2].isdigit() and int(lines[2]) > 0 and lines[3] == "restored",
               o.replace("\n", " "))
     # Start Android again, so that the power-off checks run with the
-    # container's loop mounts in place.
+    # container's loop mounts in place (once the refused start's container
+    # service has stopped).
+    android_wait_service_stopped(T, sh)
     sh(f"runuser -u amnesia -- env {AMNESIA_ENV} systemctl --user restart antumbra-android-session.service; echo restarted", timeout=120)
     running = False
     deadline = time.monotonic() + T(600)
@@ -1562,7 +1569,7 @@ def android_net_phase(vm, rep, T, sh, out):
         # The start-host hook as LXC runs it for the container, LXC_PID a
         # process in the stand-in's network namespace: it puts its .onion
         # block there, as it does in Android's.
-        rc, o = sh("printf 'lxc.net.0.type = veth\\nlxc.net.0.link = waydroid-tor\\n' > /run/antumbra-hooktest.conf; "
+        rc, o = sh(HOOKTEST_CONF +
                    "P=$(ip netns exec android-sim sh -c 'sleep 1800 </dev/null >/dev/null 2>&1 & echo $!'); "
                    "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; "
                    "echo hook=$?; ip netns exec android-sim nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'")
@@ -1605,7 +1612,7 @@ def android_net_phase(vm, rep, T, sh, out):
     # with each piece of it missing. LXC_PID is a process in a network
     # namespace of its own, where the hook puts its .onion block.
     hook = "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; echo $?"
-    good_conf = "printf 'lxc.net.0.type = veth\\nlxc.net.0.link = waydroid-tor\\n' > /run/antumbra-hooktest.conf; "
+    good_conf = HOOKTEST_CONF
     rc, o = sh("P=$(unshare -n sh -c 'sleep 600 </dev/null >/dev/null 2>&1 & echo $!'); " + good_conf +
                "sysctl -qw net.ipv4.conf.waydroid-tor.forwarding=1; "
                f"{hook}; cat /proc/sys/net/ipv4/conf/waydroid-tor/forwarding; "
@@ -1641,7 +1648,247 @@ def android_net_phase(vm, rep, T, sh, out):
     traffic_checks(vm, rep, T, sh, "android-net", int(T(20)))
 
 
-def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh_disk=True, camera=False, android=False, android_net=False):
+# ---------------------------------------------------------------------------
+# Android: identifiers, devices, stopping (images built with ANTUMBRA_ANDROID=1)
+# ---------------------------------------------------------------------------
+# --android boots the VM with a serial number on the kernel command line, as
+# the phone's boot loader adds its own, and gives the disk one, as the
+# phone's UFS has; neither may reach Android.
+TEST_SERIAL = "ANTUMBRATEST"
+TEST_DISK_SERIAL = "ANTUMBRATESTDISK"
+SERIAL_FIND = ("find /sys/devices \\( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 "
+               "-o -name wwid \\) -type f")
+# The stand-in container's configuration for the start-host hook tests: the
+# network lines, and the identifier lines the real container gets from
+# config_3 and antumbra-waydroid (the generic kernel command line, the
+# device rules, a mask for every serial number file the hook looks for).
+# The generic command line goes where antumbra-waydroid puts it, unless
+# Android already did.
+HOOKTEST_CONF = ("{ printf '%s\\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = waydroid-tor' "
+                 "'lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0' "
+                 "'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm'; "
+                 f"for f in $({SERIAL_FIND}); do printf 'lxc.mount.entry = /dev/null %s none bind,ro 0 0\\n' \"${{f#/}}\"; done; }} "
+                 "> /run/antumbra-hooktest.conf; "
+                 "[ -f /run/antumbra/android-cmdline ] || install -D -m 0644 /usr/share/antumbra/android/cmdline /run/antumbra/android-cmdline; ")
+DEVICE_MODES = ("for n in /dev/binder /dev/hwbinder /dev/vndbinder /dev/dri/renderD* /dev/fb* /dev/dma_heap/*; do "
+                "if [ -e \"$n\" ]; then stat -c '%n %a %U %G' \"$n\"; fi; done; echo end")
+
+
+def with_vm_args(args, append, disk_serial):
+    """vm.sh ARGS plus a kernel command-line argument and a disk serial number
+    (merged into a --append given already)."""
+    args = list(args)
+    if "--append" in args and args.index("--append") + 1 < len(args):
+        i = args.index("--append") + 1
+        args[i] = f"{args[i]} {append}"
+    else:
+        args += ["--append", append]
+    if "--disk-serial" not in args:
+        args += ["--disk-serial", disk_serial]
+    return args
+
+
+def android_templates_check(rep, sh):
+    """Before the Welcome screen: Waydroid's templates as hook 56 left them."""
+    C = "/usr/lib/waydroid/data/configs"
+    rc, o = sh(f"cat {C}/config_base {C}/config_3 {C}/config_4 | "
+               "grep -E '^lxc\\.(cgroup2\\.devices\\.|hook\\.post-stop|mount\\.entry = /run/antumbra/android-cmdline )'; echo end")
+    want = ["lxc.hook.post-stop = /usr/local/lib/antumbra-waydroid-post-stop", "lxc.hook.post-stop = /dev/null",
+            "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm",
+            "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0", "end"]
+    rep.check("android: the templates allow every device but cameras (allow a, then deny V4L2), bind a generic kernel "
+              "command line and run Antumbra's post-stop hook before Waydroid's", rc == 0 and o.strip().split("\n") == want,
+              o.replace("\n", " | "))
+
+
+def android_boot_modes(rep, sh, out):
+    """Before the Welcome screen: the modes of the devices Waydroid opens, to
+    compare with once Android has stopped."""
+    rc, o = sh(DEVICE_MODES)
+    lines = o.strip().split("\n") if rc == 0 else []
+    save_text(out, "android-device-modes-boot.txt", "\n".join(lines[:-1]) + "\n")
+    rep.check("android: modes of binder, the render node, framebuffers and DMA-BUF heaps recorded before Android",
+              rc == 0 and lines[-1:] == ["end"] and any(l.startswith("/dev/binder ") for l in lines), o.replace("\n", " | "))
+
+
+def android_identifier_checks(rep, sh):
+    """With Android booted: no hardware identifier reaches it, and it has
+    every device but cameras."""
+    inside = ("printf 'cmdline=[%s]\\nserialno=[%s]\\nbootserial=[%s]\\n' \"$(cat /proc/cmdline)\" "
+              "\"$(getprop ro.serialno)\" \"$(getprop ro.boot.serialno)\"")
+    rc, o = sh(f"tr ' ' '\\n' < /proc/cmdline | grep -cx 'androidboot.serialno={TEST_SERIAL}'; "
+               "printf 'generic=[%s]\\n' \"$(cat /run/antumbra/android-cmdline)\"; "
+               + in_android(f"/system/bin/sh -c {sh_quote(inside)}"), timeout=180)
+    f = dict(re.findall(r"^(\w+)=\[(.*)\]$", o, re.M)) if rc == 0 else {}
+    rep.check("android: Android sees the generic kernel command line, not the host's with its serial number, and no serial property",
+              rc == 0 and o.startswith("1\n") and "cmdline" in f and f.get("cmdline") == f.get("generic")
+              and "serialno" in f and "bootserial" in f and TEST_SERIAL not in o,
+              o.replace("\n", " | ")[:400])
+    cat_f = in_android('/system/bin/cat "$f"', errors=True)
+    rc, o = sh(f"for f in $({SERIAL_FIND}); do printf '%s host=[%s] android=[%s]\\n' \"$f\" "
+               "\"$(head -c 64 \"$f\" | tr -cd '[:alnum:]')\" "
+               f"\"$({cat_f} | head -c 64 | tr -cd '[:alnum:]')\"; done; echo end", timeout=300)
+    lines = o.strip().split("\n") if rc == 0 else []
+    files = [l for l in lines if " host=[" in l]
+    rep.check("android: every hardware serial number file in sysfs reads empty in Android (the disk's serial included)",
+              lines[-1:] == ["end"] and any(f"host=[{TEST_DISK_SERIAL}]" in l for l in files)
+              and all(l.endswith(" android=[]") for l in files),
+              f"{len(files)} files: " + " | ".join(files)[:400])
+    inside = ("if cat /dev/null; then echo null=ok; fi; mknod /dev/antumbra-v4l-test c 81 0 2>&1; "
+              "cat /dev/antumbra-v4l-test 2>&1; rm -f /dev/antumbra-v4l-test; echo end")
+    rc, o = sh(in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True), timeout=120)
+    rep.check("android: the container opens /dev/null but no V4L2 device (the device cgroup's deny list)",
+              rc == 0 and "null=ok" in o.split("\n") and "Operation not permitted" in o and o.strip().endswith("end"),
+              o.replace("\n", " | ")[:300])
+
+
+def android_stop_checks(rep, T, sh, out, stopped):
+    """Android stopped in the session: it stays stopped, Waydroid's container
+    service stops, and every device it opened is back to its boot mode."""
+    inactive, o = False, "the container did not stop"
+    deadline = time.monotonic() + T(180)
+    while stopped and time.monotonic() < deadline:
+        rc, o = sh("systemctl is-active waydroid-container.service", timeout=60)
+        if rc is not None and o.strip() == "inactive":
+            inactive = True
+            break
+        time.sleep(5)
+    rep.check("android: once Android is stopped, Waydroid's container service stops (antumbra-waydroid-stopped)", inactive, o.strip())
+    try:
+        with open(os.path.join(out, "android-device-modes-boot.txt"), encoding="utf-8") as f:
+            boot = sorted(l for l in f.read().split("\n") if l)
+    except OSError:
+        boot = []
+    rc, o = sh(DEVICE_MODES)
+    now = sorted(l for l in o.strip().split("\n")[:-1] if l) if rc == 0 and o.strip().endswith("end") else ["?"]
+    rep.check("android: once stopped, binder, the render node, framebuffers and DMA-BUF heaps have their boot modes again",
+              bool(boot) and now == boot, ("now: " + " | ".join(now) + " / boot: " + " | ".join(boot))[:500])
+    time.sleep(T(30))
+    rc, o = sh("lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH; "
+               f"runuser -u amnesia -- env {AMNESIA_ENV} systemctl --user show -p ActiveState -p SubState antumbra-android-session.service", timeout=60)
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check("android: a stopped Android stays stopped (the session unit does not start it again)",
+              lines[:1] == ["STOPPED"] and sorted(lines[1:]) == ["ActiveState=active", "SubState=exited"], o.replace("\n", " "))
+
+
+def android_wait_service_stopped(T, sh):
+    """Wait for antumbra-waydroid-stopped to stop the container service after a
+    refused start, so that a new session finds it gone, not stopping."""
+    deadline = time.monotonic() + T(180)
+    while time.monotonic() < deadline:
+        rc, o = sh("systemctl is-active waydroid-container.service", timeout=60)
+        if rc is not None and o.strip() == "inactive":
+            return
+        time.sleep(5)
+
+
+def sh_quote(s):
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
+# ---------------------------------------------------------------------------
+# Persistent Storage (--persistence; docs/vm-testing.md)
+# ---------------------------------------------------------------------------
+PERSISTENCE_PASSPHRASE = "antumbra vm persistence"   # at least 12 characters, as the Welcome screen asks
+LOCK_PASSPHRASE = "vm-lock-passphrase"
+PERSISTENT_MARK = "/home/amnesia/Persistent/antumbra-vm-run1"
+# The Welcome screen's own module writes the settings, as the greeter user.
+WRITE_SETTINGS_PY = r'''
+import json, sys
+from antumbra import settings as S
+m = S.WelcomeSettings()
+for k, v in json.loads(sys.argv[1]).items():
+    setattr(m, k, v)
+m.write()
+print("settings written")
+'''
+
+
+def persistence_phase(vm, rep, T, sh, out, run):
+    """Persistent Storage through the Welcome settings: RUN "create" (fresh
+    disk) creates it with a screen-lock passphrase and administration on;
+    RUN "unlock" (--keep-disk, after a "create" run) first reads what the
+    volume stored, then unlocks it with both off. The settings are written
+    by the Welcome screen's own module as the greeter user (the files the
+    Welcome screen writes, byte for byte); "Start Antumbra" then starts the
+    session as after a logout, and the usual network checks follow."""
+    create = run == "create"
+    rc, o = sh("cat /run/antumbra/persistence-state; blkid -o value -s TYPE /dev/disk/by-partlabel/ANTUMBRA_DATA; echo end")
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check(f"persistence: the volume is {'absent (create)' if create else 'present (unlock)'} at the Welcome screen",
+              lines == (["none", "end"] if create else ["luks", "crypto_LUKS", "end"]), o.replace("\n", " "))
+    if not create:
+        # What the first run stored, read-only, before the applier unlocks it.
+        rc, o = sh(f"printf %s {sh_quote(PERSISTENCE_PASSPHRASE)} > /run/antumbra-vm-key && chmod 0600 /run/antumbra-vm-key && "
+                   "cryptsetup open --readonly --key-file /run/antumbra-vm-key /dev/disk/by-partlabel/ANTUMBRA_DATA antumbra_vmcheck && "
+                   "mkdir -p /run/antumbra-vmcheck && mount -o ro,noload /dev/mapper/antumbra_vmcheck /run/antumbra-vmcheck && "
+                   "{ ls -A /run/antumbra-vmcheck/welcome-settings | tr '\\n' ' '; echo; "
+                   "grep -h '^ANTUMBRA_ADMIN_ENABLED=' /run/antumbra-vmcheck/welcome-settings/antumbra.admin; "
+                   f"cat /run/antumbra-vmcheck/{PERSISTENT_MARK.split('/home/amnesia/', 1)[1]}; }}; "
+                   "umount /run/antumbra-vmcheck; cryptsetup close antumbra_vmcheck; rm -f /run/antumbra-vm-key; echo end", timeout=int(T(900)))
+        lines = o.strip().split("\n") if rc == 0 else []
+        stored = lines[0].split() if lines else []
+        rep.check("persistence: the volume kept the first run's Welcome settings (administration on), not the screen-lock passphrase, "
+                  "and the file written to ~/Persistent",
+                  len(lines) == 4 and sorted(stored) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
+                  and lines[1:] == ["ANTUMBRA_ADMIN_ENABLED=true", "antumbra-vm-run1", "end"], o.replace("\n", " | ")[:400])
+    choices = {"persistence": run, "persistence_passphrase": PERSISTENCE_PASSPHRASE, "network": "direct",
+               "user_password": LOCK_PASSPHRASE if create else "", "admin": create}
+    ok = guest_write(sh, "/run/antumbra-vm-settings.py", WRITE_SETTINGS_PY, "0644")
+    rc, o = sh("runuser -u antumbra-greeter -- python3 /run/antumbra-vm-settings.py "
+               f"{sh_quote(json.dumps(choices))}", timeout=120)
+    rep.check(f"persistence: Welcome settings for '{run}' written as the greeter user", ok and rc == 0 and o.strip().endswith("settings written"), o.strip()[-200:])
+    applied = None
+    deadline = time.monotonic() + T(1500)
+    while time.monotonic() < deadline:
+        rc, o = sh("if [ -e /run/antumbra/welcome-applied ]; then echo applied; elif [ -e /run/antumbra/welcome-failed ]; then "
+                   "echo failed: $(cat /run/antumbra/welcome-failed); else echo waiting; fi", timeout=60)
+        if rc == 0 and o.strip() != "waiting":
+            applied = o.strip()
+            break
+        time.sleep(10)
+    rep.check(f"persistence: the applier {'created' if create else 'unlocked'} Persistent Storage and applied the settings", applied == "applied", str(applied))
+    if applied != "applied":
+        rc, o = sh("journalctl -b --no-pager -u antumbra-apply-welcome-settings -t antumbra-welcome | tail -n 60", timeout=60)
+        save_text(out, "persistence-applier.txt", o)
+        return
+    rc, o = sh("/usr/local/sbin/antumbra-persistence status; echo rc=$?; findmnt -no SOURCE /var/lib/antumbra/persistence; "
+               "cryptsetup luksDump /dev/disk/by-partlabel/ANTUMBRA_DATA | sed -nE 's/^[[:space:]]*(Version|PBKDF):[[:space:]]+(.*)$/\\1: \\2/p' | sort -u; "
+               "for d in /home/amnesia/Persistent /var/lib/antumbra/settings/persistent /etc/NetworkManager/system-connections /var/lib/tca; do "
+               "findmnt -no TARGET \"$d\"; done", timeout=120)
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check("persistence: LUKS2 with argon2id, unlocked, mounted, its features bound in place",
+              lines[:3] == ["luks", "rc=0", "/dev/mapper/antumbra_data"] and "PBKDF: argon2id" in lines and "Version: 2" in lines
+              and lines[-4:] == ["/home/amnesia/Persistent", "/var/lib/antumbra/settings/persistent",
+                                 "/etc/NetworkManager/system-connections", "/var/lib/tca"], o.replace("\n", " | "))
+    W = "/var/lib/antumbra/persistence/welcome-settings"
+    rc, o = sh(f"stat -c '%n %U %a' {W}/*; grep -h '^ANTUMBRA_ADMIN_ENABLED=' {W}/antumbra.admin /var/lib/antumbra/settings/applied/antumbra.admin; "
+               "ls -A /var/lib/antumbra/settings/transient | tr '\\n' ' '; echo; "
+               "test -e /var/lib/antumbra/settings/staged && echo staged-left; test -e /etc/sudoers.d/antumbra-admin && echo sudoers; "
+               "passwd -S amnesia | cut -d' ' -f2; echo end", timeout=60)
+    lines = o.strip().split("\n") if rc == 0 else []
+    files = [l for l in lines if l.startswith(W)]
+    admin = "true" if create else "false"
+    rep.check("persistence: this boot's Welcome settings applied and saved on the volume (greeter-owned, no passphrase hash), "
+              "no passphrase left behind",
+              sorted(l.split()[0].rsplit("/", 1)[1] for l in files) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
+              and all(l.endswith(" antumbra-greeter 640") for l in files)
+              and lines[len(files):len(files) + 2] == [f"ANTUMBRA_ADMIN_ENABLED={admin}"] * 2
+              and "passphrase" not in o and "staged-left" not in lines
+              and ("sudoers" in lines) == create and lines[-2:] == (["P", "end"] if create else ["NP", "end"]),
+              o.replace("\n", " | ")[:500])
+    welcome_phase(vm, rep, T, sh, out, False)
+    if create:
+        rc, o = sh(f"runuser -u amnesia -- sh -c 'echo antumbra-vm-run1 > {PERSISTENT_MARK}' && sync && "
+                   f"cat /var/lib/antumbra/persistence/Persistent/{os.path.basename(PERSISTENT_MARK)}", timeout=60)
+        rep.check("persistence: a file written to ~/Persistent lands on the volume", rc == 0 and o.strip() == "antumbra-vm-run1", o.strip())
+    else:
+        rc, o = sh(f"cat {PERSISTENT_MARK}", timeout=60)
+        rep.check("persistence: ~/Persistent still holds the first run's file", rc == 0 and o.strip() == "antumbra-vm-run1", o.strip())
+
+
+def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh_disk=True, camera=False, android=False, android_net=False,
+          persistence=False):
     rep = Report()
     T = lambda s: s * scale  # noqa: E731
     out = os.path.join(vm.run, "smoke")
@@ -1737,7 +1984,10 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
                   all(x.startswith("/dev/zram") for x in swaps) and f.get("dmesg") == "1"
                   and f.get("journal") == "Storage=volatile" and f.get("journal-dir") == "no", o.replace("\n", " "))
         rc, o = sh("blkid -o value -s TYPE $(cat /run/antumbra/loop-device)p2; echo end")
-        rep.check("guest: Persistent Storage partition has no filesystem signature", rc == 0 and o.strip() == "end", o)
+        if persistence and not fresh_disk:
+            rep.check("guest: Persistent Storage partition holds the previous run's LUKS volume", rc == 0 and o.strip() == "crypto_LUKS\nend", o)
+        else:
+            rep.check("guest: Persistent Storage partition has no filesystem signature", rc == 0 and o.strip() == "end", o)
         rc, o = sh("grep -c '^ANTUMBRA_MINIMAL=1' /etc/antumbra-release; systemctl is-active greetd; pgrep -xc phoc", timeout=60)
         parts = o.strip().split("\n")
         minimal = len(parts) >= 1 and parts[0] == "1"
@@ -1771,7 +2021,9 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
     rep.check("network: no frame of any kind left the guest before the Welcome decision", not from_guest,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} from {k[3]} x{v}" for k, v in sorted(from_guest.items()))
               or (f"no guest frames ({sum(counts.values())} from QEMU's user network)" if counts else "no frames"))
-    if through_welcome and debug:
+    if through_welcome and debug and persistence:
+        persistence_phase(vm, rep, T, sh, out, "create" if fresh_disk else "unlock")
+    elif through_welcome and debug:
         welcome_phase(vm, rep, T, sh, out, tour, android, android_net)
     if camera and debug:
         camera_phase(vm, rep, T, sh, out)
@@ -1811,7 +2063,9 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
         # 4. Amnesia on disk: the copy-on-write overlay holds every block the
         #    guest wrote; on a run that started from a fresh overlay it must
         #    hold none (no Persistent Storage was created in this test).
-        if fresh_disk:
+        if persistence:
+            print("storage: check skipped: Persistent Storage writes the disk by design (--persistence)", flush=True)
+        elif fresh_disk:
             try:
                 mp = json.loads(subprocess.run(["qemu-img", "map", "--output=json", os.path.join(vm.run, "overlay.qcow2")],
                                                capture_output=True, text=True, check=True).stdout)
@@ -1834,6 +2088,8 @@ def main():
     android_mode = s.add_mutually_exclusive_group()
     android_mode.add_argument("--android", action="store_true",
                               help="implies --through-welcome: switch Android apps on, boot Android, check it stays on Tor (ANTUMBRA_ANDROID=1 images)")
+    android_mode.add_argument("--persistence", action="store_true",
+                              help="implies --through-welcome: create Persistent Storage through the Welcome settings; with -- --keep-disk, unlock it")
     android_mode.add_argument("--android-net", action="store_true",
                               help="implies --through-welcome: test Android's Tor-only network with a stand-in namespace, without Android")
     s.add_argument("vm_args", nargs="*")
@@ -1854,10 +2110,15 @@ def main():
         # Android needs about 1.5 GB of its own next to the session.
         if a.android and "--memory" not in args:
             args += ["--memory", "6144"]
+        # A serial number on the kernel command line and on the disk, as the
+        # phone has; Android must see neither.
+        if a.android:
+            args = with_vm_args(args, f"androidboot.serialno={TEST_SERIAL}", TEST_DISK_SERIAL)
         vm.start(args)
         try:
-            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome or a.android or a.android_net, a.tour,
-                        fresh_disk="--keep-disk" not in args, camera=a.camera, android=a.android, android_net=a.android_net)
+            rep = smoke(vm, a.timeout_scale, not a.no_stop, debug, a.through_welcome or a.android or a.android_net or a.persistence, a.tour,
+                        fresh_disk="--keep-disk" not in args, camera=a.camera, android=a.android, android_net=a.android_net,
+                        persistence=a.persistence)
         except KeyboardInterrupt:
             vm.stop(); raise
         failed = rep.failed()

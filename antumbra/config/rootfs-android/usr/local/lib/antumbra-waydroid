@@ -18,14 +18,18 @@ servers. Before that, waydroid.cfg gets Antumbra's settings:
 - the screen density for Phosh's scale (3 on the phone, 2 in the VM);
 - in a virtual machine, software rendering (the virtio GPU has no 3D).
 
-Then the generated LXC configuration is checked (Tor-only bridge, start-host
-hook, no camera devices, no device tree), the container service is started
-and /run/antumbra/android-ready tells the user's session it can start
-Android.
+Then the container gets a generic kernel command line (the phone's boot
+loader puts its serial number on the host's) and the hardware serial
+numbers in sysfs are masked, the generated LXC configuration is checked
+(Tor-only bridge, start-host hook, every device but cameras, no device
+tree, the command line, the masks, the post-stop hook), the container
+service is started and /run/antumbra/android-ready tells the user's
+session it can start Android.
 """
 import configparser
 import os
 import re
+import stat
 import subprocess
 import sys
 
@@ -37,6 +41,18 @@ IMAGES = "/usr/share/waydroid-extra/images"
 ANDROID_DIR = "/usr/share/antumbra/android"
 LXC_PROFILE = "/etc/apparmor.d/lxc/lxc-waydroid"
 READY = "/run/antumbra/android-ready"
+# The kernel command line Android sees (bound over its /proc/cmdline by the
+# config_3 template): a writable per-boot copy of the image's generic one.
+CMDLINE_SRC = os.path.join(ANDROID_DIR, "cmdline")
+CMDLINE = "/run/antumbra/android-cmdline"
+CMDLINE_ENTRY = f"lxc.mount.entry = {CMDLINE} proc/cmdline none bind,create=file 0 0"
+# Hardware serial numbers the container's view of the host's sysfs would
+# show every app: the SoC's (soc0), the UFS device's string descriptor and
+# the battery's (serial_number), the SCSI disks' unit serial and device
+# identification pages and the WWID derived from them, and the "serial"
+# of USB, MMC and virtio disks. The start-host hook looks for the same names.
+SERIAL_NAMES = ("serial_number", "serial", "vpd_pg80", "vpd_pg83", "wwid")
+MASKS_MARK = "# Antumbra (antumbra-waydroid): hardware serial numbers masked"
 
 
 def log(msg):
@@ -92,7 +108,74 @@ def write_config(props):
     os.replace(tmp, CFG)
 
 
-def check_config(props):
+def serial_files(sysfs="/sys"):
+    """Every hardware serial number attribute (a regular file named as in
+    SERIAL_NAMES) under SYSFS/devices, symbolic links not followed, as
+    absolute paths in the host's /sys."""
+    found = []
+    for dirpath, _dirs, files in os.walk(os.path.join(sysfs, "devices"), onerror=lambda e: None):
+        for name in files:
+            path = os.path.join(dirpath, name)
+            if name in SERIAL_NAMES and stat.S_ISREG(os.lstat(path).st_mode):
+                found.append("/sys" + path[len(sysfs):])
+    return sorted(found)
+
+
+def mask_entries(paths):
+    """The LXC mount entries that hide PATHS (absolute, in /sys) from the
+    container: /dev/null bound read-only over each. LXC parses the entries
+    like fstab lines, so a path with white space or a backslash fails."""
+    entries = []
+    for path in paths:
+        if not path.startswith("/sys/") or re.search(r"[\s\\]", path):
+            fail(f"cannot mask {path!r} in the container")
+        entries.append(f"lxc.mount.entry = /dev/null {path[1:]} none bind,ro 0 0")
+    return entries
+
+
+def add_masks(entries):
+    """Append ENTRIES to the generated container configuration, once."""
+    with open(LXC_CONFIG, encoding="utf-8") as f:
+        text = f.read()
+    if MASKS_MARK in text:
+        text = text[:text.index(MASKS_MARK)].rstrip("\n") + "\n"
+    text += "\n" + MASKS_MARK + "\n" + "".join(e + "\n" for e in entries)
+    tmp = LXC_CONFIG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, LXC_CONFIG)
+
+
+def lxc_problems(lxc, serials):
+    """What is wrong with the generated container configuration LXC (text),
+    given the host's serial number files SERIALS; empty when nothing is."""
+    problems = []
+    wanted = [r"^lxc\.net\.0\.type = veth$", r"^lxc\.net\.0\.link = waydroid-tor$",
+              r"^lxc\.hook\.start-host = /usr/local/lib/antumbra-waydroid-start-host$",
+              r"^lxc\.mount\.entry = tmpfs sys/firmware tmpfs ", "^" + re.escape(CMDLINE_ENTRY) + "$"]
+    for pattern in wanted:
+        if not re.search(pattern, lxc, re.M):
+            problems.append(f"the container configuration lacks {pattern}")
+    # LXC's device list allows nothing until an "a" rule makes it a deny
+    # list: exactly "allow a", then the V4L2 deny.
+    devices = re.findall(r"^lxc\.cgroup2\.devices\.\S+ = .*$", lxc, re.M)
+    if devices != ["lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]:
+        problems.append(f"the container's device rules are not exactly allow a, then deny V4L2: {devices}")
+    # Antumbra's post-stop hook ahead of Waydroid's failing /dev/null one.
+    post_stop = re.findall(r"^lxc\.hook\.post-stop = (.*)$", lxc, re.M)
+    if post_stop[:1] != ["/usr/local/lib/antumbra-waydroid-post-stop"]:
+        problems.append(f"the container's post-stop hooks do not start with Antumbra's: {post_stop}")
+    for entry in mask_entries(serials):
+        if not re.search("^" + re.escape(entry) + "$", lxc, re.M):
+            problems.append(f"the container configuration does not mask {entry.split()[3]}")
+    cap_keep = re.search(r"^lxc\.cap\.keep = (.*)$", lxc, re.M)
+    if not cap_keep or "sys_time" in cap_keep.group(1).split():
+        problems.append("the container would keep sys_time")
+    return problems
+
+
+def check_config(props, serials):
     cfg = configparser.ConfigParser()
     cfg.read(CFG)
     if cfg.get("waydroid", "images_path", fallback="") != IMAGES:
@@ -109,15 +192,11 @@ def check_config(props):
             base = f.read().split("\n")
     except OSError as e:
         fail(f"waydroid init left no container configuration: {e}")
-    wanted = [r"^lxc\.net\.0\.type = veth$", r"^lxc\.net\.0\.link = waydroid-tor$",
-              r"^lxc\.hook\.start-host = /usr/local/lib/antumbra-waydroid-start-host$",
-              r"^lxc\.cgroup2\.devices\.deny = c 81:\* rwm$", r"^lxc\.mount\.entry = tmpfs sys/firmware tmpfs "]
-    for pattern in wanted:
-        if not re.search(pattern, lxc, re.M):
-            fail(f"the container configuration lacks {pattern}")
-    cap_keep = re.search(r"^lxc\.cap\.keep = (.*)$", lxc, re.M)
-    if not cap_keep or "sys_time" in cap_keep.group(1).split():
-        fail("the container would keep sys_time")
+    for problem in lxc_problems(lxc, serials):
+        fail(problem)
+    with open(CMDLINE, encoding="utf-8") as f:
+        if "androidboot." in f.read():
+            fail(f"{CMDLINE} names androidboot values")
     if "waydroid.updater.disabled=true" not in base:
         fail("Waydroid's image updater is not disabled")
     for key in ("ro.product.waydroid.model", "ro.product.waydroid.brand"):
@@ -148,7 +227,18 @@ def main():
     # properties from the templates and waydroid.cfg, as Debian's postinst does.
     if run(["waydroid", "upgrade", "-o"]) != 0:
         fail("waydroid upgrade -o failed")
-    check_config(props)
+    # The container's kernel command line and the serial number masks:
+    # after "upgrade", which regenerates the configuration from the templates.
+    with open(CMDLINE_SRC, encoding="utf-8") as f:
+        cmdline = f.read()
+    with open(CMDLINE + ".tmp", "w", encoding="utf-8") as f:
+        f.write(cmdline)
+    os.chmod(CMDLINE + ".tmp", 0o644)
+    os.replace(CMDLINE + ".tmp", CMDLINE)
+    serials = serial_files()
+    add_masks(mask_entries(serials))
+    log(f"{len(serials)} hardware serial number files masked in the container")
+    check_config(props, serials)
     if run(["systemctl", "start", "waydroid-container.service"]) != 0:
         fail("the Waydroid container service did not start")
     with open(READY, "w", encoding="utf-8") as f:

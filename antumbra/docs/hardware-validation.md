@@ -233,12 +233,22 @@ section 11.1). The VM covers the network and the setup
     only after Android's microphone prompt is allowed.
 52. Suspend and resume with Android running: Android, Wi-Fi and Tor come
     back; compare overnight battery drain with Android on and off.
-53. `waydroid session stop`: the container stops, the binder devices are
-    0600 again, and `/dev/dri/renderD128`, `/dev/dma_heap/*` and
-    `/dev/fb0` have udev's modes again.
+53. `waydroid session stop`: the container stops and stays stopped;
+    within a minute `waydroid-container.service` is inactive, the binder
+    devices and `/dev/dma_heap/*` are 0600 again, and `/dev/dri/renderD128`
+    and `/dev/fb0` have udev's modes again (compare `stat -c '%n %a %G'`
+    with a boot without Android). The "Android" launcher starts Android
+    again.
 54. "Keep Android apps and data": install an app, reboot, unlock with the
     switch on and find it; unlock with the switch off and get a fresh
     Android.
 55. What apps see: record `uname -a`, `/proc/cpuinfo`,
     `getprop ro.product.model` and the GPU strings inside Android, for
-    `threat-model.md`.
+    `threat-model.md`. No serial number: on the host, `/proc/cmdline` has
+    `androidboot.serialno=`; inside Android, `cat /proc/cmdline` has
+    none, `getprop ro.serialno` and `getprop ro.boot.serialno` do not show
+    it, and `/sys/devices/soc0/serial_number`, the UFS device's
+    `string_descriptors/serial_number` and every SCSI disk's `vpd_pg80`,
+    `vpd_pg83` and `wwid` read empty (the host's `find /sys/devices -name
+    serial_number -o -name serial -o -name 'vpd_pg8[03]' -o -name wwid`
+    lists them).

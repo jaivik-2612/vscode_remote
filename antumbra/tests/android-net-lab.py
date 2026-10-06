@@ -136,9 +136,23 @@ def lab(args):
         run(*ct, "ip", "link", "set", "eth0", "up")
         run(*ct, "ip", "route", "add", "default", "via", "10.200.2.1")
         # The start-host hook, as LXC runs it.
+        # The configuration carries the identifier lines the hook also
+        # requires, with a mask for every serial number file on this machine;
+        # the hook runs in a mount namespace of its own with a fresh /run
+        # holding the image's generic kernel command line, where
+        # antumbra-waydroid puts it.
         conf = os.path.join(tmp, "config")
-        write(conf, "lxc.net.0.type = veth\nlxc.net.0.link = waydroid-tor\n")
-        hook = subprocess.run(["sh", args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
+        serials = run("sh", "-c", vm.SERIAL_FIND, check=False).stdout.split("\n")
+        write(conf, "".join(l + "\n" for l in [
+            "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
+            "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
+            "lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]
+            + [f"lxc.mount.entry = /dev/null {f.lstrip('/')} none bind,ro 0 0" for f in serials if f]))
+        generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
+        hook = subprocess.run(["unshare", "--mount", "--propagation", "private", "sh", "-c",
+                               'mount -t tmpfs -o mode=0755 antumbra-lab /run && mkdir /run/antumbra && '
+                               'cp "$1" /run/antumbra/android-cmdline && shift && exec sh "$@"',
+                               "sh", generic, args.hook, "waydroid", "lxc", "start-host"], text=True, capture_output=True,
                               env=dict(os.environ, PATH=PATH, LXC_NAME="waydroid", LXC_PID=str(container.pid), LXC_CONFIG_FILE=conf))
         results = [("lab: the start-host hook passes for the stand-in container", hook.returncode == 0,
                     f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l))]

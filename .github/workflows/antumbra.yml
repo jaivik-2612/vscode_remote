@@ -34,6 +34,9 @@ jobs:
       - name: Unit tests
         working-directory: antumbra
         run: python3 -m pytest -q tests/unit
+      - name: Welcome settings applier (as root, in a mount namespace)
+        working-directory: antumbra
+        run: sudo python3 -m pytest -q -p no:cacheprovider tests/unit/test_applier.py
       - name: Welcome screen UI self-test (headless)
         working-directory: antumbra
         run: tests/ui-selftest.sh

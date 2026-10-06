@@ -181,10 +181,14 @@ plain image their first check fails. Before the Welcome screen, both check
 that Android is off: binder devices root-only, no container, no DHCP
 server, LXC's own services masked, D-Bus activation of Waydroid's
 container service refused, Waydroid's templates edited (bridge
-`waydroid-tor`, no `sys_time`, the start-host hook, cameras denied,
-`/sys/firmware` hidden), the images and F-Droid in the read-only system,
-`pkexec` not setuid. The usual checks of a session then run too, with the
-Android listeners excluded from "everything goes to Tor".
+`waydroid-tor`, no `sys_time`, the start-host hook, every device but
+cameras: `allow = a` before the V4L2 deny, `/sys/firmware` hidden, the
+generic kernel command line, Antumbra's post-stop hook before
+Waydroid's), the images and F-Droid in the read-only system, `pkexec`
+not setuid; and they record the modes of the binder devices, the render
+node, the framebuffers and the DMA-BUF heaps. The usual checks of a
+session then run too, with the Android listeners excluded from
+"everything goes to Tor".
 
 `tests/vm-smoke.sh --android-net` presses Start without turning Android
 on, and tests the network Android would use without booting Android: a
@@ -214,14 +218,21 @@ It takes a few minutes longer than `--through-welcome`.
 `tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
 at the Welcome screen (Alt+A, the switch's mnemonic, then a screenshot
 `welcome-android.png`) and boots Android, with 6 GiB of guest memory
-unless `--memory` is given. It checks that
+unless `--memory` is given, `androidboot.serialno=ANTUMBRATEST` added to
+the kernel command line (`vm.sh --append`, as the phone's boot loader adds
+its serial number) and the disk given the serial number
+`ANTUMBRATESTDISK` (`vm.sh --disk-serial`). It checks that
 `antumbra-waydroid.service` prepared Waydroid from the images in the
 system without touching the network, the generated container
 configuration, that Waydroid's own `waydroid-net.sh` does nothing, that
 the container runs and Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
 slow), the generic Waydroid identity,
-`/sys/firmware` hidden, the DHCP lease and route, the provisioning
+`/sys/firmware` hidden, that Android's `/proc/cmdline` is the generic one
+and neither it nor `ro.serialno` or `ro.boot.serialno` shows the test
+serial, that every serial number file in sysfs (the disk's included)
+reads empty inside Android, that the container can open `/dev/null` but
+not a V4L2 device node it creates, the DHCP lease and route, the provisioning
 (captive-portal checks, Private DNS and network time off), a screenshot
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
 listed in the app grid's "Android" folder, F-Droid's index fetch counted
@@ -230,13 +241,15 @@ into 127.192.0.0/10 with no answer to a ping there, the start-host hook's
 `.onion` block in Android's network namespace (a connection to the name's
 address refused, not delivered to a listener there on its port), the
 session's traffic, no frame from the container's MAC address or network
-in the capture, and the start-host hook refusing to start the container
-without the firewall's Android rules, after which Android starts again.
-The harness runs commands inside the container with `lxc-attach` with no
-standard descriptor on the console's tty (`in_android`): given a tty,
-lxc-attach switches to a terminal proxy that sends the output to
-`/dev/tty` instead of a pipe and flushes the console's pending input,
-the harness's status marker with it.
+in the capture; after `waydroid session stop`, that Waydroid's container
+service stops, that every device it opened has its boot mode again and
+that Android stays stopped for 30 seconds; and the start-host hook
+refusing to start the container without the firewall's Android rules,
+after which Android starts again. The harness runs commands inside the
+container with `lxc-attach` with no standard descriptor on the console's
+tty (`in_android`): given a tty, lxc-attach switches to a terminal proxy
+that sends the output to `/dev/tty` instead of a pipe and flushes the
+console's pending input, the harness's status marker with it.
 
 To check the `android` Persistent Storage feature by hand: run with
 `--keep-disk`, create Persistent Storage and turn on both Android
@@ -249,6 +262,41 @@ phone, the 32-bit half of the `arm64` images, the Adreno GPU under
 Android (the VM renders in software), audio and the microphone, the
 on-screen layout at the phone's density, and suspend with Android
 running.
+
+## Persistent Storage
+
+`tests/vm-smoke.sh --persistence` creates Persistent Storage, and
+`tests/vm-smoke.sh --persistence -- --keep-disk` (the next run, on the
+same disk overlay) unlocks it. Both write the Welcome screen's settings
+through the Welcome screen's own module, run as the greeter user (the
+same files, byte for byte, as the Welcome screen writes: a passphrase
+typed through QMP into GTK password rows under software emulation would
+test the keyboard path rather than Persistent Storage), wait for the
+root applier, then press "Start Antumbra", which starts the session as
+after a logout, and run the usual session and network checks.
+
+The first run (fresh disk) checks that the partition had no volume,
+chooses "Create" with a screen-lock passphrase and administration on,
+and checks that the volume is LUKS2 with argon2id, unlocked and mounted,
+with `~/Persistent`, the Welcome settings, the network connections and
+`/var/lib/tca` bound from it; that this boot's settings were applied and
+saved on the volume, owned by the greeter user, without the passphrase's
+hash; that no Persistent Storage passphrase was left behind; that
+administration and the passphrase are in force; and that a file written
+to `~/Persistent` lands on the volume. The second run (`--keep-disk`)
+checks that the partition holds a LUKS volume, opens it read-only first
+to check what the first run stored (administration on, no passphrase
+hash, the file in `Persistent`), then chooses "Unlock" with no
+screen-lock passphrase and administration off, and checks that the
+volume was unlocked, that this boot's settings were applied and replaced
+the stored ones (administration off, no passphrase, no sudoers rule), and
+that `~/Persistent` still holds the file. The run takes longer than
+`--through-welcome`: argon2id with 1 GiB of memory runs several times
+under emulation.
+
+In this mode the check "the guest wrote nothing to the disk" is skipped,
+not failed (the harness says so): Persistent Storage writes the disk by
+design.
 
 ## Kernel test modules
 

@@ -650,15 +650,33 @@ answers once.
    by the greeter user, then touches `welcome-done`.
 3. `antumbra-apply-welcome-settings.path` wakes the root one-shot of the
    same name, Tails' `PostLogin/Default` as a unit. It refuses to run if
-   `/run/antumbra/welcome-applied` exists or if any input is not owned by
-   the greeter user; unlocks or creates Persistent Storage and activates
-   its features (so persistent settings come from the volume); copies the
-   settings to `settings/applied/` (root-owned); sets the user's password
-   with `chpasswd -e` or deletes it; installs the sudoers and polkit admin
-   rules when asked; writes the marker; runs `antumbra-unblock-network`.
-   The Persistent Storage passphrase travels in a 0600 file in the
-   greeter's tmpfs directory that the applier shreds; a D-Bus service as in
-   Tails' `tps` is on the roadmap.
+   `/run/antumbra/welcome-applied` exists. It first moves each of the
+   greeter's files into `settings/staged/`, a root-only directory (a
+   rename, which never follows a symbolic link), and uses a file only if
+   what arrived there is a regular file the greeter user owns: the greeter
+   can neither point root at another file nor swap one after the check.
+   Then it unlocks or creates Persistent Storage and activates its
+   features; copies this boot's settings to `settings/applied/`
+   (root-owned); with Persistent Storage, saves them on the volume (the
+   "Welcome settings" feature, owned by the greeter user); sets the user's
+   password with `chpasswd -e` or deletes it; installs the sudoers and
+   polkit admin rules when asked; writes the marker; runs
+   `antumbra-unblock-network`. On a failure (a wrong passphrase, say) it
+   writes `/run/antumbra/welcome-failed` and removes `welcome-done`, so
+   that its path unit does not start it again on settings it has already
+   consumed; the Welcome screen shows the error and writes everything
+   again on the next Start. What is applied is always what the Welcome
+   screen showed this boot: the volume is unlocked only after Start, so
+   the Welcome screen cannot show the stored settings, and stored settings
+   that silently replaced this boot's choice (offline mode, MAC address
+   anonymization) would be worse. The stored copy is for a Welcome screen
+   that unlocks first, as Tails' does (roadmap). Unlike Tails, the
+   screen-lock passphrase's hash (`tails.password`) is never saved: the
+   Welcome screen asks for it at every boot and nothing would read it
+   back. The Persistent Storage passphrase travels in a 0600 file in the
+   greeter's tmpfs directory, which the applier moves away and shreds,
+   also when it fails; a D-Bus service as in Tails' `tps` is on the
+   roadmap.
 4. The Welcome screen waits for the marker, then uses greetd's IPC to
    create a session for `amnesia` (greetd's PAM stack for IPC sessions,
    `/etc/pam.d/greetd`, lets that user in without a password, since the
@@ -769,7 +787,8 @@ image Android stays off until the user turns on "Android apps
 **Build.** `fetch-sources.sh` downloads the two image zips and F-Droid
 pinned in `sources.lock`: each zip by SHA-256 and size, as listed in
 Waydroid's update channel, and each image inside by its size and CRC-32
-(an optional `*_IMG_SHA256` key also pins the extracted image); F-Droid by
+and the extracted image's SHA-256 (`*_IMG_SHA256`), checked on every run,
+cached or not (a cached image that changed is extracted again); F-Droid by
 SHA-256, F-Droid's OpenPGP signature (key vendored in
 `device/oneplus-hotdog/keys/f-droid.asc`) and the SHA-256 of the
 certificate in its signature block. `rootfs.sh` adds `android.list`,
@@ -792,11 +811,18 @@ RAM. `config/hooks/56-session-android.sh` then:
   container's configuration on every `init` and `upgrade`: the link moves
   from `waydroid0` to `waydroid-tor`, `sys_time` leaves the kept
   capabilities (Waydroid's seccomp profile already makes the set-time
-  calls no-ops), and `config_3` gains the start-host hook, a device-cgroup
-  deny of V4L2 (major 81) and an empty read-only tmpfs over
-  `/sys/firmware`, which otherwise shows apps the phone's device-tree
-  model through the host's sysfs. Every edit is checked; a template that
-  no longer matches fails the build;
+  calls no-ops), and `config_3` gains the start-host hook, the device
+  rules "allow everything, then deny V4L2 (major 81)" (LXC 6's device list
+  starts as "allow nothing" and only an `a` rule turns it into a deny
+  list, so a lone deny would block `/dev/null` and binder too), an empty
+  read-only tmpfs over `/sys/firmware`, which otherwise shows apps the
+  phone's device-tree model through the host's sysfs, and a bind of a
+  generic kernel command line over `/proc/cmdline`: the phone's boot
+  loader adds `androidboot.serialno` to the host's, which Android's init
+  would make `ro.serialno`, readable by every app. `config_base` gains a
+  post-stop hook ahead of Waydroid's own `/dev/null` one (which fails on
+  purpose, so that LXC turns an Android reboot into a stop). Every edit
+  is checked; a template that no longer matches fails the build;
 - applies `waydroid-no-video.diff` (dry run first, failure fails the
   build): Waydroid stops making `/dev/video*` mode 0777 and passing it
   into the container;
@@ -821,9 +847,16 @@ RAM. `config/hooks/56-session-android.sh` then:
    values from `/usr/share/antumbra/android/product.prop`; multi-window
    mode; density 480 on the phone and 320 in the VM; in a VM software
    rendering, which Waydroid turns into ANGLE on SwiftShader), runs
-   `waydroid init` and `waydroid upgrade -o`, checks the generated
-   configuration, starts the container service and writes
-   `/run/antumbra/android-ready`.
+   `waydroid init` and `waydroid upgrade -o`, copies the generic kernel
+   command line to `/run/antumbra/android-cmdline` (writable, because
+   Android's first-stage init may chmod `/proc/cmdline`), masks every
+   hardware serial number file in sysfs (`serial_number`, `serial`,
+   `vpd_pg80`, `vpd_pg83`, `wwid`: the SoC's, the UFS device's, the
+   disks') with read-only binds of `/dev/null` in the generated
+   configuration, checks it, starts the container service and writes
+   `/run/antumbra/android-ready`. The start-host hook refuses to start
+   the container if the command line bind, the device rules or a mask is
+   missing.
 3. In the session, `antumbra-android-session.path` starts `waydroid
    session start` once Android is ready: Android boots, its apps open as
    ordinary windows (app_id `waydroid.<package>`), and Waydroid writes a
@@ -840,7 +873,15 @@ because it can be mounted from an unprivileged user namespace. While
 Android runs, Waydroid opens them, the GPU render node, the DMA-BUF heaps
 and the framebuffers to every local user, because Waydroid's host-side
 session, which runs as the user, talks to Android through binder. What
-this means is in `threat-model.md`.
+this means is in `threat-model.md`. When the container stops (`waydroid
+session stop`, logout, Android shutting down), its post-stop hook starts
+`antumbra-waydroid-stopped.service`, which waits for Waydroid's own
+clean-up and stops the container service; the service's `ExecStopPost`
+puts binder and the DMA-BUF heaps back to 0600 and lets udev re-apply
+its modes to the render node and the framebuffers. The next `waydroid
+session start` (the "Android" launcher) starts the service again through
+D-Bus. The session unit has `RemainAfterExit=yes`, so Android stopped in
+a session stays stopped.
 
 ## 12. Persistent Storage
 
