@@ -542,6 +542,7 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
         vm.screenshot(os.path.join(out, "session.png"))
     except Exception:  # noqa: BLE001
         pass
+    indexer_check(rep, sh)
     if tour:
         take_tour(vm, rep, sh, out, T)
     if android:
@@ -549,6 +550,26 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
     if android_net:
         android_net_phase(vm, rep, T, sh, out)
     tor_syn_record_stop(sh)
+
+
+# The file indexer's user units, masked by config/hooks/52-session-enable.sh.
+INDEXER_UNITS = ("localsearch-3.service", "localsearch-control-3.service", "localsearch-writeback-3.service",
+                 "tinysparql-xdg-portal-3.service")
+
+
+def indexer_check(rep, sh):
+    """The session runs no file indexer: its user units are masked, a D-Bus
+    call to its name (which would activate localsearch-3.service) is
+    refused, and no localsearch process runs, for any user."""
+    rc, o = sh(f"{AS_AMNESIA}systemctl --user is-enabled {' '.join(INDEXER_UNITS)} 2>&1; "
+               f"{AS_AMNESIA}timeout 60 busctl --user call org.freedesktop.LocalSearch3 /org/freedesktop/Tracker3/Miner/Files "
+               "org.freedesktop.DBus.Peer Ping >/dev/null 2>&1 && echo answered || echo refused; sleep 2; "
+               f"{AS_AMNESIA}systemctl --user is-active localsearch-3.service; pgrep -c -f '^/usr/libexec/localsearch'", timeout=180)
+    # is-enabled and is-active exit non-zero for a masked, inactive unit, and
+    # pgrep -c when it counts 0: the output decides, not the status.
+    rep.check("session: no file indexer (localsearch-3 and its companion user units masked, D-Bus activation refused, not running)",
+              rc is not None and o.strip().split("\n") == ["masked"] * len(INDEXER_UNITS) + ["refused", "inactive", "0"],
+              o.replace("\n", " "))
 
 
 # The confined applications' namespace veths, the containers' host-side veths
@@ -1557,11 +1578,13 @@ def android_preflight(vm, rep, T, sh, out):
     rep.check("android: Waydroid's templates use waydroid-tor, keep no sys_time, run the start-host hook, deny V4L2, hide /sys/firmware, pass no video device",
               rc is not None and o.strip().split("\n") == ["1", "1", "0", "0", "1", "1", "1", "0"], o.replace("\n", " "))
     rc, o = sh("stat -c '%n %s' /usr/share/waydroid-extra/images/system.img /usr/share/waydroid-extra/images/vendor.img /usr/share/antumbra/android/F-Droid.apk; "
-               "stat -c '%a' /usr/bin/pkexec; grep -c '^TransPort 10.200.2.1:9041 ' /etc/tor/torrc; grep -c '^android|' /etc/antumbra/persistence-features.conf")
+               "stat -c '%a' /usr/bin/pkexec; grep -c '^TransPort 10.200.2.1:9041 ' /etc/tor/torrc; grep -cx 'DNSPort 10.200.2.1:5354' /etc/tor/torrc; "
+               "grep -c '^android|' /etc/antumbra/persistence-features.conf")
     lines = o.strip().split("\n") if rc == 0 else []
-    ok = (len(lines) == 6 and all(int(l.split()[1]) > 1000000 for l in lines[:3])
-          and lines[3] == "755" and lines[4] == "1" and lines[5] == "1")
-    rep.check("android: images and F-Droid in the read-only system, pkexec not setuid, Tor's Android listeners and the persistence feature configured", ok, o.replace("\n", " | "))
+    ok = (len(lines) == 7 and all(int(l.split()[1]) > 1000000 for l in lines[:3])
+          and lines[3] == "755" and lines[4:] == ["1", "1", "1"])
+    rep.check("android: images and F-Droid in the read-only system, pkexec not setuid, Tor's TransPort and DNSPort for Android and the persistence feature configured",
+              ok, o.replace("\n", " | "))
     # D-Bus activation (what any Waydroid client does) must not start the
     # container service while Android is off.
     rc, o = sh("runuser -u amnesia -- timeout 90 busctl --system call id.waydro.Container /ContainerManager id.waydro.ContainerManager GetSession "

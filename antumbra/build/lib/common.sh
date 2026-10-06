@@ -61,10 +61,14 @@ if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
 fi
 export SOURCE_DATE_EPOCH
 
-# Build knobs (documented in docs/building.md). Empty means off.
+# Build knobs (documented in docs/building.md). Empty means off, except for
+# ANTUMBRA_VERITY.
 ANTUMBRA_DEBUG="${ANTUMBRA_DEBUG:-}"        # debug initramfs and console; never for releases
 ANTUMBRA_MINIMAL="${ANTUMBRA_MINIMAL:-}"    # small root filesystem for pipeline validation
-ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"      # dm-verity on the root filesystem (experimental)
+# dm-verity on the root filesystem: on unless ANTUMBRA_VERITY=0 (squashfs.sh,
+# bootimg.sh, vm.sh and vm-bundle.sh read it as ${ANTUMBRA_VERITY:-1};
+# squashfs.sh records it in build-flags and the others check that record).
+ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"
 ANTUMBRA_FIRMWARE_DIR="${ANTUMBRA_FIRMWARE_DIR:-}"  # builder-provided firmware tree
 # Android apps (Waydroid, docs/architecture.md "Android apps"): 1 adds the
 # Waydroid packages, the pinned Android images and F-Droid, and the Android
@@ -145,6 +149,57 @@ require_profile_stamps() { # require_profile_stamps [kernel] [rootfs]
         [ -f "${f}" ] || die "${f} missing: rebuild the ${what} step for ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE}"
         dev="$(stamp_value "${f}" ANTUMBRA_DEVICE)"
         [ "${dev}" = "${ANTUMBRA_DEVICE}" ] || die "${f} was built for ${dev:-an unknown profile}, not ${ANTUMBRA_DEVICE}"
+    done
+}
+
+# remove_built_images : delete the images built from the root filesystem
+# (image.sh, bootimg.sh). rootfs.sh and squashfs.sh call it before they
+# replace the tree or the squashfs, so no image outlives what it was built
+# from, and release.sh's manifest describes the images it packages.
+remove_built_images() {
+    rm -f "${OUT}"/{userdata.simg,vm-disk.img,boot.img}{,.sha256}
+}
+
+# require_verity_as_built : the steps that put the root hash on the kernel
+# command line (bootimg.sh, vm.sh, vm-bundle.sh) refuse an ANTUMBRA_VERITY
+# other than the one squashfs.sh recorded in build-flags. Without a record
+# (squashfs.sh has not completed on this tree) they go on; with dm-verity
+# on, the missing root hash then stops them.
+require_verity_as_built() {
+    local want have
+    if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then want=1; else want=0; fi
+    have="$(stamp_value "${OUT}/rootfs/build-flags" ANTUMBRA_VERITY)"
+    [ -z "${have}" ] || [ "${have}" = "${want}" ] \
+        || die "squashfs.sh built the root filesystem with ANTUMBRA_VERITY=${have}, not ${want}: set ANTUMBRA_VERITY=${have}, or run squashfs.sh again"
+}
+
+# copy_as_root SRC DEST : copy a tree into DEST (made afresh), owned by root,
+# with 0755 directories and 0755 or 0644 files (by the execute bit).
+# mmdebstrap's sync-in and cp -a keep every file's owner and mode, and set
+# them on directories the image already has (/, /etc, /usr, /lib/firmware),
+# but a checkout or a fetched tree belongs to whoever made it (often UID
+# 1000, which is amnesia in the image) and follows their umask. Python byte
+# code is left out: the unit tests import modules from the overlay on the
+# build host and leave __pycache__ directories in the checkout.
+copy_as_root() {
+    rm -rf "$2"; mkdir -p "$2"
+    tar --create --file - --directory "$1" --exclude=__pycache__ \
+        --numeric-owner --owner=0 --group=0 --mode=u=rwX,go=rX . \
+        | tar --extract --file - --directory "$2"
+}
+
+# stage_overlay SRC DEST : an overlay tree (config/rootfs,
+# config/rootfs-android) as rootfs.sh installs it: copy_as_root, then the
+# modes git cannot record (it stores only 0644 and 0755) for the files that
+# need them. tests/lint.sh stages the overlays the same way and checks them.
+stage_overlay() {
+    local dest="$2" f
+    copy_as_root "$1" "${dest}"
+    for f in "${dest}"/etc/sudoers.d/*; do
+        if [ -f "${f}" ] && [ ! -L "${f}" ]; then chmod 0440 "${f}"; fi
+    done
+    for f in "${dest}/etc/usbguard/rules.conf" "${dest}/etc/skel/.tor/control_auth_cookie"; do
+        if [ -f "${f}" ] && [ ! -L "${f}" ]; then chmod 0600 "${f}"; fi
     done
 }
 

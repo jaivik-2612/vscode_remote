@@ -32,6 +32,7 @@ done
 [ "$(dd if="${KOUT}/Image" bs=1 skip=56 count=4 2>/dev/null)" = "ARM$(printf '\x64')" ] || die "Image is not a raw arm64 kernel"
 
 # --- Command line ---------------------------------------------------------------
+require_verity_as_built
 CMDLINE="$(tr -d '\n' < "${DEVICE_DIR}/cmdline.txt")"
 if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then
     [ -f "${ROUT}/filesystem.squashfs.roothash" ] || die "no root hash (run squashfs.sh, or set ANTUMBRA_VERITY=0)"

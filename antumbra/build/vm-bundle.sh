@@ -20,8 +20,10 @@ B="${WORK}/bundle/${NAME}"
 rm -rf "${WORK}/bundle"; mkdir -p "${B}"
 for f in "${KOUT}/Image" "${ROUT}/initrd.img" "${OUT}/vm-disk.img"; do [ -f "${f}" ] || die "missing ${f}"; done
 
+require_verity_as_built
 CMDLINE="$(tr -d '\n' < "${PROFILE_DIR}/cmdline.txt")"
 if [ "${ANTUMBRA_VERITY:-1}" != "0" ]; then
+    [ -f "${ROUT}/filesystem.squashfs.roothash" ] || die "no root hash (run squashfs.sh, or set ANTUMBRA_VERITY=0)"
     ROOTHASH="$(tr -d '\n' < "${ROUT}/filesystem.squashfs.roothash")"
     CMDLINE="${CMDLINE} dm-verity-root-hash=filesystem.squashfs:${ROOTHASH} dm-verity-oncorruption=panic"
 fi

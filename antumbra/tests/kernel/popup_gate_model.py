@@ -14,11 +14,12 @@ logic of hotdog-popup-motor.c, as 0102 first had it (old) and as fixed
                   callbacks never move the motor: the old reconcile left the
                   camera raised after resume.
 
-It also checks that the fix keeps a stream held across sleep raised again,
-and replays motor-safety-5 (no settle push on a seated camera). Exits
-non-zero when the new logic fails a sequence, or when the old logic no
-longer shows a defect (the replay would have lost its teeth). Run by
-tests/lint.sh; the kernel is not involved.
+It also checks that the fix keeps a stream held across sleep raised again.
+It does not replay motor-safety-5 (no settle push on a seated camera): that
+fix changes the close's motion, not the flags, and hardware-validation.md
+item 34 checks it on the phone. Exits non-zero when the new logic fails a
+sequence, or when the old logic no longer shows a defect (the replay would
+have lost its teeth). Run by tests/lint.sh; the kernel is not involved.
 """
 import sys
 

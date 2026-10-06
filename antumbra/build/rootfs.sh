@@ -3,12 +3,15 @@
 # Build the Debian root filesystem tree with mmdebstrap, apply the overlay and
 # run the build hooks inside the chroot (under qemu-user emulation on x86_64).
 #
-# Inputs : config/packages/*.list, config/rootfs/ (overlay), config/hooks/*.sh,
+# Inputs : config/packages/*.list, config/rootfs/ (overlay, staged by
+#          stage_overlay in lib/common.sh), config/hooks/*.sh,
 #          build/out/kernel/ (kernel.sh), build/cache/tor-browser/ (fetch-sources.sh),
 #          ANTUMBRA_FIRMWARE_DIR (optional, fetch-firmware.sh)
 # Outputs: build/work/rootfs/            the root filesystem tree (input of squashfs.sh)
 #          build/out/rootfs/initrd.img   the initramfs generated inside the chroot
 #          build/out/rootfs/packages.txt installed package versions
+#          build/out/rootfs/build-flags  what the tree was built with (later steps check it)
+#          build/out/rootfs/firmware.sha256  the builder's firmware files, when included
 #
 # Knobs  : ANTUMBRA_MINIMAL=1  base + network + amnesia lists only (pipeline validation)
 #          ANTUMBRA_DEBUG=1    debug console/initramfs (never for releases)
@@ -70,6 +73,11 @@ done
 INCLUDE="$(IFS=,; printf '%s' "${PKGS[*]}")"
 log "${#PKGS[@]} packages from lists: ${LISTS[*]}"
 
+# --- Overlays: root-owned copies with fixed modes (stage_overlay) ----------------
+OVERLAY="${WORK}/overlay"
+rm -rf "${OVERLAY}"
+stage_overlay "${CONFIG_DIR}/rootfs" "${OVERLAY}/rootfs"
+
 # --- Build input staged into the chroot at /run/antumbra-build ------------------
 rm -rf "${INPUT}"
 mkdir -p "${INPUT}/hooks" "${INPUT}/kernel" "${INPUT}/tor-browser" "${INPUT}/firmware"
@@ -96,15 +104,16 @@ if [ -n "${ANTUMBRA_ANDROID}" ]; then
     cp "${WD}/images.sha256" "${CACHE}/f-droid/F-Droid.apk" "${INPUT}/android/"
     printf '%s\n' "${WAYDROID_IMAGE_VARIANT}" > "${INPUT}/android/variant"
     lock_get FDROID_APK_SHA256 > "${INPUT}/android/F-Droid.apk.sha256"
+    stage_overlay "${CONFIG_DIR}/rootfs-android" "${OVERLAY}/rootfs-android"
     # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
-    ANDROID_HOOKS=(--customize-hook="sync-in ${CONFIG_DIR}/rootfs-android /"
+    ANDROID_HOOKS=(--customize-hook="sync-in ${OVERLAY}/rootfs-android /"
                    --customize-hook='mkdir -p "$1/usr/share/waydroid-extra/images"'
                    --customize-hook="install -m 0644 '${WD}/system.img' '${WD}/vendor.img' \"\$1/usr/share/waydroid-extra/images/\"")
     log "Android apps: Waydroid ${WAYDROID_IMAGE_VARIANT} images and F-Droid included"
 fi
 if [ -n "${ANTUMBRA_FIRMWARE_DIR}" ]; then
     [ -d "${ANTUMBRA_FIRMWARE_DIR}" ] || die "ANTUMBRA_FIRMWARE_DIR does not exist"
-    cp -a "${ANTUMBRA_FIRMWARE_DIR}/." "${INPUT}/firmware/"
+    copy_as_root "${ANTUMBRA_FIRMWARE_DIR}" "${INPUT}/firmware"
     log "firmware tree included from ${ANTUMBRA_FIRMWARE_DIR}"
 else
     warn "no ANTUMBRA_FIRMWARE_DIR: the image will have no device firmware (display, Wi-Fi and audio will not work)"
@@ -134,7 +143,7 @@ else
     APT_SOURCES=("deb ${MIRROR} ${SUITE} main contrib non-free-firmware"
                  "deb ${MIRROR} ${BACKPORTS} main")
 fi
-PREFS="${CONFIG_DIR}/rootfs/etc/apt/preferences.d/antumbra-backports"
+PREFS="${OVERLAY}/rootfs/etc/apt/preferences.d/antumbra-backports"
 [ -f "${PREFS}" ] || die "missing ${PREFS}"
 
 # Optional patched libcamera (build/libcamera.sh, ANTUMBRA_LIBCAMERA_LOCAL=1):
@@ -171,6 +180,12 @@ fi
 # --- mmdebstrap --------------------------------------------------------------------------
 rm -rf "${ROOT}"
 mkdir -p "${ROUT}"
+# No stamps from an earlier tree: if this run fails, later steps refuse to go on.
+rm -f "${ROUT}/build-flags" "${ROUT}/firmware.sha256"
+# Nor anything built from it, which the new stamps would misdescribe: its
+# initramfs, its squashfs and the images.
+rm -f "${ROUT}/initrd.img" "${ROUT}"/filesystem.squashfs{,.verity,.roothash,.sha256}
+remove_built_images
 HOOK_ENV="ANTUMBRA_VERSION=${ANTUMBRA_VERSION} ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH} ANTUMBRA_DEBUG=${ANTUMBRA_DEBUG} ANTUMBRA_MINIMAL=${ANTUMBRA_MINIMAL} ANTUMBRA_ANDROID=${ANTUMBRA_ANDROID} KERNEL_RELEASE=$(cat "${KOUT}/kernel.release")"
 log "running mmdebstrap (${SUITE}, arm64) into ${ROOT}"
 # shellcheck disable=SC2016  # $1 is expanded by mmdebstrap, not here
@@ -189,7 +204,7 @@ mmdebstrap \
     --setup-hook='mkdir -p "$1/etc/apt/preferences.d"' \
     --setup-hook="copy-in ${PREFS} /etc/apt/preferences.d" \
     "${LIBCAMERA_HOOKS[@]}" \
-    --customize-hook="sync-in ${CONFIG_DIR}/rootfs /" \
+    --customize-hook="sync-in ${OVERLAY}/rootfs /" \
     "${ANDROID_HOOKS[@]}" \
     --customize-hook='mkdir -p "$1/run/antumbra-build"' \
     --customize-hook="sync-in ${INPUT} /run/antumbra-build" \
@@ -207,9 +222,27 @@ if [ -n "${LIBCAMERA_VERSION}" ]; then
         || die "libcamera0.7 ${LIBCAMERA_VERSION} was not installed from the local repository"
 fi
 
+# The builder's device firmware, as hook 60 copied it into /lib/firmware:
+# release.sh names it in the manifest (docs/legal.md, "Firmware").
+# record_device_firmware DIR LIST : DEVICE_FIRMWARE=1 and each file's SHA-256
+# in LIST when DIR holds anything but fetch-firmware.sh's MANIFEST.sha256
+# (which hook 60 does not install); DEVICE_FIRMWARE empty otherwise.
+record_device_firmware() {
+    DEVICE_FIRMWARE=''
+    if [ -n "$(cd "$1" && find . ! -type d ! -path ./MANIFEST.sha256 -print -quit)" ]; then
+        DEVICE_FIRMWARE=1
+        ( cd "$1" && find . -type f ! -path ./MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "$2"
+    fi
+}
+record_device_firmware "${INPUT}/firmware" "${ROUT}/firmware.sha256"
+
 # What this tree is: later steps (squashfs, image, bootimg, release) check it.
-printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nKERNEL_RELEASE=%s\n' \
-    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
+# ANTUMBRA_LIBCAMERA_LOCAL=1 when the local libcamera was installed (never in
+# minimal builds), DEVICE_FIRMWARE=1 when the builder's firmware was; both
+# are empty otherwise. squashfs.sh adds ANTUMBRA_VERITY (1 or 0).
+printf 'ANTUMBRA_DEVICE=%s\nANTUMBRA_DEBUG=%s\nANTUMBRA_MINIMAL=%s\nANTUMBRA_ANDROID=%s\nANTUMBRA_LIBCAMERA_LOCAL=%s\nDEVICE_FIRMWARE=%s\nKERNEL_RELEASE=%s\n' \
+    "${ANTUMBRA_DEVICE}" "${ANTUMBRA_DEBUG}" "${ANTUMBRA_MINIMAL}" "${ANTUMBRA_ANDROID}" "${LIBCAMERA_VERSION:+1}" "${DEVICE_FIRMWARE}" \
+    "$(cat "${KOUT}/kernel.release")" > "${ROUT}/build-flags"
 
 # --- Collect the initramfs ----------------------------------------------------------------------
 KREL="$(cat "${KOUT}/kernel.release")"
