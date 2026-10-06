@@ -566,6 +566,37 @@ class OnePlusScannerTest(unittest.TestCase):
                 self.assertEqual(out, f"{argv[-1]}: cannot inspect (No such file or directory)\n")
         self.assertEqual(self.main(self.tmp), (0, ""))
 
+    def test_a_root_link_is_followed(self):
+        # ROOT a symbolic link to a file: the file's content and name count
+        # as well as the link's name, reported under ROOT.
+        package = self.apk("renamed.apk", "com.oneplus.camera")
+        named = self.touch("OnePlusCamera.apk")
+        clean = self.apk("F-Droid.apk", "org.fdroid.fdroid")
+        for target, hit in ((package, True), (named, True), (clean, False)):
+            link = os.path.join(self.tmp, "plain-link")
+            os.symlink(os.path.relpath(target, self.tmp), link)
+            with self.subTest(target=os.path.basename(target)):
+                self.assertFalse(self.nopc.name_matches("plain-link"))
+                self.assertEqual(self.nopc.scan(link, False, set()), [link] if hit else [])
+                self.assertEqual(self.main(link), (1, link + "\n") if hit else (0, ""))
+            os.unlink(link)
+
+    def test_a_root_link_to_a_directory_on_another_file_system(self):
+        # --xdev keeps to the file system of the directory ROOT leads to,
+        # not of the link.
+        try:
+            other = tempfile.mkdtemp(dir="/dev/shm")
+        except OSError:
+            self.skipTest("no /dev/shm to write to")
+        self.addCleanup(shutil.rmtree, other)
+        if os.stat(other).st_dev == os.stat(self.tmp).st_dev:
+            self.skipTest("/dev/shm is on the same file system as the temporary directory")
+        os.makedirs(os.path.join(other, "vendor", "firmware"))
+        open(os.path.join(other, "vendor", "firmware", "CAMERA_ICP.elf"), "w").close()
+        link = os.path.join(self.tmp, "image")
+        os.symlink(other, link)
+        self.assertEqual(self.nopc.scan(link, True, set()), [os.path.join(link, "vendor", "firmware", "CAMERA_ICP.elf")])
+
     def test_a_directory_it_cannot_list_fails(self):
         # (root may list any directory, so the refusal is simulated)
         locked = os.path.dirname(self.touch("locked", "CAMERA_ICP.elf"))

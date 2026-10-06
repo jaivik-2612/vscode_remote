@@ -26,7 +26,8 @@ stream that would need more than MEM_LIMIT bytes of memory, a damaged
 archive or image.
 
 usage: no-oneplus-camera.py [--xdev] [--skip DIR]... ROOT...
-ROOT is a directory or a file. Prints each offending path (a member of an
+ROOT is a directory or a file, or a symbolic link to one (followed; below
+ROOT, links are not). Prints each offending path (a member of an
 archive or image as OUTER!/MEMBER); exit status 1 if there is any. A ROOT
 that does not exist and a directory that cannot be listed are reported
 too (one removed while the scan runs is not).
@@ -841,9 +842,12 @@ def inspect_as(f, label, depth, out, kind):
         out.append(f"{label}: cannot inspect ({reason})")
 
 
-def check_file(path, name, out):
+def check_file(path, name, out, label=None):
+    """PATH by NAME, and by content if it is a regular file (a symbolic link
+    is not followed); reported as LABEL, PATH by default."""
+    label = label or path
     if name_matches(name):
-        out.append(path)
+        out.append(label)
         return
     try:
         st = os.lstat(path)
@@ -855,9 +859,9 @@ def check_file(path, name, out):
         with open(path, "rb") as f:
             kind = sniff(f.read(HEAD))
             if kind is not None:
-                inspect_as(f, path, 0, out, kind)
+                inspect_as(f, label, 0, out, kind)
     except OSError as e:
-        out.append(f"{path}: cannot inspect ({e.strerror})")
+        out.append(f"{label}: cannot inspect ({e.strerror})")
 
 
 def scan(root, xdev, skip):
@@ -869,9 +873,16 @@ def scan(root, xdev, skip):
     except OSError as e:
         return [f"{root}: cannot inspect ({e.strerror})"]
     if not stat.S_ISDIR(st.st_mode):
-        check_file(root, os.path.basename(root), out)
+        # A file, or a symbolic link to one: the file it leads to is checked,
+        # by its name and the link's, and reported as ROOT.
+        real = os.path.realpath(root)
+        if name_matches(os.path.basename(real)):
+            return [root]
+        check_file(real, os.path.basename(root), out, label=root)
         return list(dict.fromkeys(out))
-    root_dev = os.lstat(root).st_dev
+    # The directory it leads to: --xdev keeps to that directory's file
+    # system, not the link's.
+    root_dev = st.st_dev
 
     def unlistable(e):
         # A directory removed while the scan runs held nothing; ROOT did.
