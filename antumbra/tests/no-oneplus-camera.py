@@ -27,10 +27,13 @@ archive or image.
 
 usage: no-oneplus-camera.py [--xdev] [--skip DIR]... ROOT...
 ROOT is a directory or a file. Prints each offending path (a member of an
-archive or image as OUTER!/MEMBER); exit status 1 if there is any.
+archive or image as OUTER!/MEMBER); exit status 1 if there is any. A ROOT
+that does not exist and a directory that cannot be listed are reported
+too (one removed while the scan runs is not).
 """
 import bisect
 import bz2
+import errno
 import fnmatch
 import gzip
 import io
@@ -859,11 +862,23 @@ def check_file(path, name, out):
 
 def scan(root, xdev, skip):
     out = []
-    if not os.path.isdir(root):
+    # ROOT itself must exist (a symbolic link to it is followed): a mistyped
+    # path is not a clean image.
+    try:
+        st = os.stat(root)
+    except OSError as e:
+        return [f"{root}: cannot inspect ({e.strerror})"]
+    if not stat.S_ISDIR(st.st_mode):
         check_file(root, os.path.basename(root), out)
         return list(dict.fromkeys(out))
     root_dev = os.lstat(root).st_dev
-    for dirpath, dirnames, filenames in os.walk(root):
+
+    def unlistable(e):
+        # A directory removed while the scan runs held nothing; ROOT did.
+        if e.errno not in (errno.ENOENT, errno.ENOTDIR) or os.path.normpath(e.filename) == root:
+            out.append(f"{e.filename}: cannot list ({e.strerror})")
+
+    for dirpath, dirnames, filenames in os.walk(root, onerror=unlistable):
         keep = []
         for d in dirnames:
             p = os.path.normpath(os.path.join(dirpath, d))

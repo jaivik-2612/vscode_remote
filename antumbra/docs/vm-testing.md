@@ -127,8 +127,15 @@ asserts, in order:
    90 seconds, that every connection to the network belongs to Tor (DHCP
    aside); from the packet capture, that no DNS, NTP, IPv6 or other UDP
    left the guest, that every TCP connection the guest opened went to one
-   of the directory addresses built into the image's Tor or to a peer seen
-   on Tor's sockets, and that no frame carried the hardware MAC address;
+   of the directory addresses built into the image's Tor, to a peer seen
+   on Tor's sockets, or to a destination in the guest kernel's record of
+   the TCP SYNs Tor's sockets sent (an nft set in a table of the harness's
+   own, loaded before the Welcome decision and deleted after the session's
+   network checks; it catches relays Tor contacts and closes between two
+   socket polls). Destinations are matched by address and port, so another
+   program's connection to an address and port Tor also used would pass
+   this capture check; the socket check catches it only while it is open.
+   And that no frame carried the hardware MAC address;
 6. a short press of the virtual power button is ignored (only a long
    press powers off, as on the phone), a power-off requested from the
    console goes through the return-to-initramfs shutdown path (the hook
@@ -149,7 +156,10 @@ libcamera plugin at PipeWire's version are installed, and Megapixels is
 not; no OnePlus camera software or Qualcomm camera HAL file is anywhere in
 the image, inside packages, archives, compressed files, the initramfs and
 Waydroid's Android images included (`tests/no-oneplus-camera.py`, run in
-the guest), and the same scanner in the guest does flag a OnePlus camera
+the guest under a limit that follows the timeout scale and the size of the
+image's squashfs, about 28 minutes for the `--android` image at scale 1;
+the guest stops it there, and the log gives the time it took), and the
+same scanner in the guest does flag a OnePlus camera
 APK placed in a small ext4 image and in a zstd-compressed XAPK. With
 `--through-welcome` it goes on in the amnesia session: PipeWire offers the
 camera as a libcamera node and has no V4L2 camera device or node; the first
@@ -157,7 +167,9 @@ Snapshot start makes the camera portal ask through Phosh's Access dialog
 (seen on the session bus) and gets no stream meanwhile; once the decision
 is stored as "allow", the portal also gives `amnesia` a PipeWire
 connection when called from inside Tor Browser's network namespace (the
-gap the planned browser profile must close, `camera.md`), Snapshot
+gap the planned browser profile must close, `camera.md`; the call runs
+unconfined, so once the profile ships it has to run under the profile,
+`aa-exec -p`, and expect a refusal), Snapshot
 streams, the preview shows `vimc`'s colour
 bars (under full emulation the first frame takes a few minutes: Snapshot
 draws 1920x1080 frames in software and drops most as late, so the harness
@@ -218,7 +230,10 @@ failing closed without each part of the network or the container's PID
 missing, and from the packet capture that nothing of the stand-in left the
 guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
 firewall, the hook and these probes in network namespaces on the build
-host.
+host. Where the build host lacks something the lab itself needs (network
+or mount namespaces, a tmpfs, the bridge or veth driver, nftables or the
+reject expression the hook loads), the lab says what and is skipped
+(exit 0); only its checks fail.
 It takes a few minutes longer than `--through-welcome`.
 
 `tests/vm-smoke.sh --android --timeout-scale 3` turns on "Android apps"
@@ -248,9 +263,14 @@ and route, the provisioning
 of Android's full UI (`android-full-ui.png`), F-Droid installed and
 listed in the app grid's "Android" folder, F-Droid's index fetch counted
 at Tor's TransPort for Android, Android's resolver mapping a `.onion` name
-into 127.192.0.0/10 with no answer to a ping there, the start-host hook's
-`.onion` block in Android's network namespace (a connection to the name's
-address refused, not delivered to a listener there on its port), the
+into 127.192.0.0/10 with no answer to a ping there (Android's own
+`ping`, output saved as `android-onion-ping.txt`; should it get no
+address at all under `lxc-attach`, the run says so on an `[INFO]` line
+rather than failing, since that shows nothing about the block), the
+start-host hook's `.onion` block in Android's network namespace (a
+connection to the name's address, looked up through Tor's DNSPort for
+Android, refused, not delivered to a listener there on its port: the
+check that decides), the
 session's traffic, no frame from the container's MAC address or network
 in the capture; after `waydroid session stop`, that Waydroid's container
 service stops, that every device it opened has its boot mode again and

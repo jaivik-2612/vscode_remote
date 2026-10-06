@@ -489,6 +489,9 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
     if android:
         # Found first: an Android switch turned on is drawn in the same accent.
         enable_android_switch(vm, rep, T, out)
+    # Before the guest has a network: from now on the kernel records where
+    # Tor's sockets send TCP SYNs (traffic_checks).
+    tor_syn_record_start(rep, sh)
     vm.tap(*target)
     # The session starts once the root-side applier has consumed the settings.
     session = False
@@ -528,12 +531,61 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
         android_phase(vm, rep, T, sh, out)
     if android_net:
         android_net_phase(vm, rep, T, sh, out)
+    tor_syn_record_stop(sh)
 
 
 # The confined applications' namespace veths, the containers' host-side veths
 # (LXC names them vethXXXXXX) and the Android bridge: links without a driver
 # that never carry the phone's traffic to a network themselves.
 HOST_ONLY_LINKS = r"veth[^:@ ]*|waydroid-tor"
+
+# The guest kernel's record of Tor's connection attempts: a table of the
+# harness's own adds the destination of every TCP SYN sent by a socket of
+# Tor's user to a set. It only records (policy accept, after the firewall's
+# filter chain, in a table that reloading nftables.conf leaves alone), from
+# before the Welcome screen brings the network up until the session's
+# network checks are done. ss sees a socket only while it exists during a
+# poll; the record also holds the relays Tor contacted and closed between
+# two polls.
+TOR_SYN_TABLE = "antumbra_vm_tor_syns"
+
+
+def tor_syn_table(uid):
+    """The record's nft table, for Tor's numeric user ID."""
+    return (f"table ip {TOR_SYN_TABLE} {{\n"
+            "    set syns { type ipv4_addr . inet_service; flags dynamic; size 65536; }\n"
+            "    chain output {\n"
+            "        type filter hook output priority 100; policy accept;\n"
+            f"        meta skuid {int(uid)} tcp flags & (syn | ack) == syn add @syns {{ ip daddr . tcp dport }}\n"
+            "    }\n"
+            "}\n")
+
+
+def tor_syn_record_start(rep, sh):
+    rc, o = sh("id -u debian-tor")
+    uid = o.strip() if rc == 0 and o.strip().isdigit() else None
+    if uid is None:
+        ok, detail = False, "no user ID for debian-tor: " + o.strip()[-200:]
+    elif not guest_write(sh, "/run/antumbra-vm-tor-syns.nft", tor_syn_table(uid), "0600"):
+        ok, detail = False, "could not write the table to the guest"
+    else:
+        rc, o = sh(f"nft -f /run/antumbra-vm-tor-syns.nft 2>&1 && nft list chain ip {TOR_SYN_TABLE} output | grep -c 'add @syns'")
+        ok, detail = rc == 0 and o.strip() == "1", f"SYNs of UID {uid}" if rc == 0 and o.strip() == "1" else o.strip()[-200:]
+    rep.check("harness: the guest kernel records where Tor's sockets send TCP SYNs (an nft set of the harness's own), "
+              "from before the network comes up", ok, detail)
+
+
+def tor_syn_record(sh):
+    """{(IP, port)} of the TCP SYNs Tor's sockets sent since the record
+    started, or None if it cannot be read."""
+    rc, o = sh(f"nft -nn list set ip {TOR_SYN_TABLE} syns")
+    if rc != 0 or not re.search(r"^\s*type ipv4_addr \. inet_service$", o, re.M):
+        return None
+    return {(ip, int(port)) for ip, port in re.findall(r"(\d+\.\d+\.\d+\.\d+) \. (\d+)\b", o)}
+
+
+def tor_syn_record_stop(sh):
+    sh(f"nft delete table ip {TOR_SYN_TABLE}; rm -f /run/antumbra-vm-tor-syns.nft")
 
 
 def traffic_checks(vm, rep, T, sh, label, polls):
@@ -566,6 +618,13 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     def tor_owned(line):
         return '(("tor"' in line or (tor_uid is not None and re.search(rf"\buid:{tor_uid}\b", line) is not None)
 
+    capture = os.path.join(vm.run, "net.pcap")
+    syns = {(dst, port) for src, dst, port in pcap_tcp_syns(capture) if not src.startswith(SLIRP_MAC_PREFIXES)}
+    # The kernel's record of Tor's SYNs, read after the capture: each SYN of
+    # Tor's in the capture went through the output hook, and so into the
+    # record, before it reached the wire. Kept across calls like Tor's peers.
+    record = tor_syn_record(sh)
+    vm.tor_syns = getattr(vm, "tor_syns", set()) | (record or set())
     # NetworkManager's DHCP client (udp :68 -> :67, root) is the one non-Tor
     # flow the firewall allows, as in Tails. (Sockets on 10.200.1.0/24 and
     # 10.200.2.0/30 are the confined applications' and Android's connections
@@ -574,7 +633,7 @@ def traffic_checks(vm, rep, T, sh, label, polls):
             and ('(("NetworkManager"' in l or re.search(r"\buid:0\b", l))]
     tor_peers = {peer(l) for l in socks if tor_owned(l)} - {None}
     # A TIME-WAIT socket has no owner left; it is Tor's if its peer is.
-    timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin)]
+    timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin | vm.tor_syns)]
     non_tor = [l for l in socks if not tor_owned(l) and l not in dhcp and l not in timewait]
     rep.check(f"{label}: every connection to the network belongs to Tor (DHCP aside)", rc is not None and tor_uid is not None and not non_tor,
               f"{len(tor_peers)} Tor peers, {len(dhcp)} DHCP client sockets, {len(timewait)} closed Tor sockets in TIME-WAIT"
@@ -582,7 +641,6 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     cap = "packet capture" if label == "after Welcome" else f"{label}, packet capture"
     if label == "after Welcome":
         rep.check("Tor: its built-in directory addresses could be read from the guest", len(builtin) > 20, f"{len(builtin)} addresses")
-    capture = os.path.join(vm.run, "net.pcap")
     counts = pcap_summary(capture)
     # The capture holds both directions: judge every frame QEMU's user
     # network did not generate, whatever source MAC it carries.
@@ -593,19 +651,24 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     udp67 = sum(v for k, v in sent.items() if k[0] == "udp" and k[2] == 67)
     rep.check(f"{cap}: the guest sent no DNS, NTP, IPv6 or other UDP (DHCP aside)", not bad,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(bad.items())) or f"{sum(sent.values())} frames sent, {udp67} of them DHCP")
-    syns = {(dst, port) for src, dst, port in pcap_tcp_syns(capture) if not src.startswith(SLIRP_MAC_PREFIXES)}
     # The capture spans the whole run, but each call sees Tor's sockets only
     # in its own window, and Tor closes idle connections to its guards (a
     # reconnect reopens only the guard it uses). So Tor's peers are kept
     # across calls, and each call judges only the destinations that are new
-    # in the capture since the previous one.
+    # in the capture since the previous one. A destination is Tor's if it is
+    # built into Tor, was seen on Tor's sockets, or is in the kernel's record
+    # of SYNs from Tor's sockets (a relay contacted and closed between two
+    # windows is only there).
     vm.tor_peers = getattr(vm, "tor_peers", set()) | tor_peers
     new = syns - getattr(vm, "syns_seen", set())
-    stray = sorted(new - vm.tor_peers - builtin)
+    stray = sorted(new - vm.tor_peers - builtin - vm.tor_syns)
     vm.syns_seen = syns
+    seen = (new - builtin) & vm.tor_peers
     rep.check(f"{cap}: every TCP connection the guest opened went to a Tor directory or relay", bool(syns) and not stray,
               (("not Tor's: " + ", ".join(f"{d}:{p}" for d, p in stray[:8])) if stray else
-               f"{len(new)} new destinations: {len(new & builtin)} built into Tor, {len(new - builtin)} seen on Tor's sockets"))
+               f"{len(new)} new destinations: {len(new & builtin)} built into Tor, {len(seen)} seen on Tor's sockets, "
+               f"{len(new - builtin - seen)} only in the record of Tor's SYNs")
+              + ("" if record is not None else "; the record of Tor's SYNs could not be read"))
     rep.check(f"{cap}: no frame carried the hardware MAC address", not from_hw,
               "; ".join(f"{k[0]} {k[1]}:{k[2]} x{v}" for k, v in sorted(from_hw.items())) or f"guest frames came from {', '.join(sorted({k[3] for k in sent}))} only")
 
@@ -768,6 +831,80 @@ def pw_cameras(sh):
     return rows
 
 
+ONEPLUS_SCAN = ("camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image "
+                "(inside packages, archives, compressed files and Waydroid's images included)")
+# The root file system below the overlay, whose size the scan's limit follows.
+LIVE_SQUASHFS = "/run/live/rootfs/filesystem.squashfs"
+
+
+def scan_limit(T, mib, inodes):
+    """Seconds the guest scan may take: 600 s, 0.6 s per MiB of squashfs
+    and 5 ms per inode, times the timeout scale. The scanner reads the head
+    of every file and parses Waydroid's images, and the guest kernel
+    decompresses what it reads; for the --android image (1270 MiB, about
+    62 000 inodes) this gives 1672 s, about twice the slowest estimate
+    under full emulation (850 s). Without a size, the limit of an image
+    twice as large as that."""
+    if mib is None or inodes is None:
+        mib, inodes = 2540, 124000
+    return int(T(round(600 + 0.6 * mib + 0.005 * inodes)))
+
+
+def oneplus_scan_checks(rep, T, sh):
+    """No OnePlus camera software anywhere in the image (the same scanner
+    tests/lint.sh runs over the source tree): file names, and contents
+    inside packages, bundles, archives, compressed files, the initramfs and
+    disk images, Waydroid's system.img and vendor.img included. Then its
+    positive control."""
+    def flat(o, n=300):
+        return o.strip().replace("\n", " | ")[:n]
+
+    scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
+    copied = (put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner)
+              and put_file(sh, "/tmp/antumbra-nopc-fixture.py", NOPC_FIXTURE.encode()))
+    if not copied:
+        rep.check(ONEPLUS_SCAN, False, "could not copy the scanner and its fixture to the guest")
+        return
+    # Its limit, from the size of the root file system (squashfs reports
+    # its image size as used and its inode count as inodes used). The guest
+    # stops the scan at that limit (and kills it 30 s later), well before
+    # the console stops waiting, so a scan that runs too long fails alone
+    # instead of answering the commands after it. Its output goes to /run,
+    # which --xdev leaves out.
+    rc, o = sh(f"df -B1M --output=used,iused {LIVE_SQUASHFS} | tail -n 1", timeout=60)
+    m = re.fullmatch(r"\s*(\d+)\s+(\d+)\s*", o) if rc == 0 else None
+    mib, inodes = (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    limit = scan_limit(T, mib, inodes)
+    print(f"camera: scanning the image ({mib if m else '?'} MiB of squashfs, {inodes if m else '?'} inodes), "
+          f"limit {limit} s", flush=True)
+    rc, o = sh(f"S=$(date +%s); timeout -k 30 {limit} python3 /tmp/antumbra-no-oneplus-camera.py --xdev / "
+               "> /run/antumbra-nopc.out 2>&1; R=$?; echo \"scan: exit $R after $(( $(date +%s) - S )) s\"; "
+               "cat /run/antumbra-nopc.out; rm -f /run/antumbra-nopc.out", timeout=limit + 30 + T(120))
+    lines = o.strip().split("\n") if rc == 0 else []
+    status = re.fullmatch(r"scan: exit (\d+) after (\d+) s", lines[0].strip()) if lines else None
+    found = "\n".join(lines[1:]).strip()
+    if status is None:
+        detail = "no status from the scan: " + flat(o)
+    elif status.group(1) == "124" or (status.group(1) == "137" and int(status.group(2)) >= limit):
+        print(f"camera: the image scan was stopped at its limit, {limit} s", flush=True)
+        detail = f"the scan was stopped at its limit ({limit} s) after {status.group(2)} s" + (": " + flat(found) if found else "")
+    else:
+        print(f"camera: the image scan took {status.group(2)} s (limit {limit} s)", flush=True)
+        detail = flat(found) or (f"none found in {status.group(2)} s" if status.group(1) == "0" else f"scanner exit {status.group(1)}")
+    rep.check(ONEPLUS_SCAN, status is not None and status.group(1) == "0" and not found, detail)
+    # 5b. The positive control, after the scan: the same scanner in the
+    #     guest finds a OnePlus camera APK inside an ext4 image like
+    #     Waydroid's and inside a zstd-compressed XAPK.
+    rc, o = sh("rm -rf /tmp/antumbra-nopc && python3 /tmp/antumbra-nopc-fixture.py /tmp/antumbra-nopc "
+               "&& { python3 /tmp/antumbra-no-oneplus-camera.py /tmp/antumbra-nopc/scan; echo \"scanner exit $?\"; }; "
+               "rm -rf /tmp/antumbra-nopc", timeout=300)
+    lines = [line.rstrip("\r") for line in o.strip().split("\n")] if rc == 0 else []
+    want = [h.format(scan="/tmp/antumbra-nopc/scan") for h in NOPC_FIXTURE_HITS]
+    rep.check("camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK",
+              lines[:1] == ["fixture ready"] and lines[-1:] == ["scanner exit 1"] and sorted(lines[1:-1]) == sorted(want),
+              flat(o))
+
+
 def camera_phase(vm, rep, T, sh, out):
     """The camera path on vimc. Without a session: the driver, udev's names
     for its nodes, libcamera's camera list, the packages, no OnePlus camera
@@ -835,31 +972,8 @@ def camera_phase(vm, rep, T, sh, out):
     rep.check("camera: Snapshot, libcamera 0.7 with its IPA modules from one build, PipeWire's libcamera plugin "
               "at PipeWire's version; no Megapixels",
               ok, ", ".join(f"{k} {v}" for k, v in sorted(pk.items())) + f"; megapixels {o2.strip() or '?'}")
-    # 5. No OnePlus camera software anywhere in the image (the same scanner
-    #    tests/lint.sh runs over the source tree): file names, and contents
-    #    inside packages, bundles, archives, compressed files, the initramfs
-    #    and disk images, Waydroid's system.img and vendor.img included.
-    name = ("camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image "
-            "(inside packages, archives, compressed files and Waydroid's images included)")
-    scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
-    copied = (put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner)
-              and put_file(sh, "/tmp/antumbra-nopc-fixture.py", NOPC_FIXTURE.encode()))
-    if copied:
-        rc, o = sh("python3 /tmp/antumbra-no-oneplus-camera.py --xdev /", timeout=900)
-        rep.check(name, rc == 0 and not o.strip(), flat(o) or "none found")
-        # 5b. The positive control, after the scan: the same scanner in the
-        #     guest finds a OnePlus camera APK inside an ext4 image like
-        #     Waydroid's and inside a zstd-compressed XAPK.
-        rc, o = sh("rm -rf /tmp/antumbra-nopc && python3 /tmp/antumbra-nopc-fixture.py /tmp/antumbra-nopc "
-                   "&& { python3 /tmp/antumbra-no-oneplus-camera.py /tmp/antumbra-nopc/scan; echo \"scanner exit $?\"; }; "
-                   "rm -rf /tmp/antumbra-nopc", timeout=300)
-        lines = [line.rstrip("\r") for line in o.strip().split("\n")] if rc == 0 else []
-        want = [h.format(scan="/tmp/antumbra-nopc/scan") for h in NOPC_FIXTURE_HITS]
-        rep.check("camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK",
-                  lines[:1] == ["fixture ready"] and lines[-1:] == ["scanner exit 1"] and sorted(lines[1:-1]) == sorted(want),
-                  flat(o))
-    else:
-        rep.check(name, False, "could not copy the scanner and its fixture to the guest")
+    # 5. No OnePlus camera software anywhere in the image.
+    oneplus_scan_checks(rep, T, sh)
 
     # --- In the amnesia session ------------------------------------------------
     rc, o = sh("pgrep -u amnesia -xc phosh", timeout=30)
@@ -994,7 +1108,9 @@ def camera_phase(vm, rep, T, sh, out):
     #     "Who can use the cameras"): from the browser's network namespace,
     #     as amnesia, without opening a camera device or PipeWire's socket,
     #     the camera portal hands over a connected PipeWire file descriptor
-    #     once the session's one decision for host programs is yes.
+    #     once the session's one decision for host programs is yes. This
+    #     call is unconfined: once the browser's profile ships, run it under
+    #     the profile (aa-exec -p) and expect a refusal, or it keeps passing.
     rc, o = sh("ip netns exec tbb " + AS_AMNESIA + "busctl --user --json=short call org.freedesktop.portal.Desktop "
                "/org/freedesktop/portal/desktop org.freedesktop.portal.Camera OpenPipeWireRemote 'a{sv}' 0 2>&1", timeout=60)
     try:
@@ -1337,6 +1453,49 @@ def save_text(out, name, text):
         pass
 
 
+ONION_PING = "android: Android's resolver maps a .onion name into 127.192.0.0/10, and a ping to that address gets no answer"
+
+
+def judge_onion_ping(rc, o):
+    """(verdict, detail) for Android's ping of ONION_NAME, run as
+    android_onion_ping runs it (its exit status on a last line "rc=N").
+    The verdict is True for an address in 127.192.0.0/10 and no answer;
+    False for an answer, an address outside that range, or a zero exit
+    status; None if ping got no address at all (Android's resolver or ping
+    did not work under lxc-attach), which shows nothing about the .onion
+    block either way. The header and reply lines of iputils (Android's
+    /system/bin/ping), toybox and busybox are all understood."""
+    flat = o.replace("\n", " ").strip()[-300:]
+    if rc != 0:
+        return None, f"console status {rc}"
+    if re.search(r"\b\d+ bytes? from ", o):
+        return False, "an answer: " + flat
+    head = re.search(r"^PING \S+ \((\d+\.\d+\.\d+\.\d+)\)", o, re.M | re.I)
+    status = re.findall(r"^rc=(\d+)$", o, re.M)
+    if not head:
+        return None, "Android's ping got no address for the name: " + flat
+    if not re.fullmatch(r"127\.(19[2-9]|2[0-4]\d|25[0-5])\.\d+\.\d+", head.group(1)):
+        return False, f"{head.group(1)} is not in 127.192.0.0/10: " + flat
+    if status[-1:] in ([], ["0"]):
+        return False, "ping did not report a failure: " + flat
+    return True, flat
+
+
+def android_onion_ping(rep, sh, out):
+    """Android's own resolver (netd) and ping on a .onion name. If ping gets
+    no address under lxc-attach, that is reported and is not a failure: the
+    probe in Android's network namespace that follows is the check of the
+    .onion block, with its own lookup through Tor's DNSPort for Android."""
+    rc, o = sh(f"{in_android('/system/bin/ping -c 1 -W 3 ' + ONION_NAME, errors=True)}; antumbra_s=$?; echo; echo rc=$antumbra_s", timeout=120)
+    save_text(out, "android-onion-ping.txt", o)
+    verdict, detail = judge_onion_ping(rc, o)
+    if verdict is None:
+        print(f"[INFO] not shown: {ONION_PING}: {detail} (android-onion-ping.txt; the probe in Android's network namespace is the check)",
+              flush=True)
+    else:
+        rep.check(ONION_PING, verdict, detail)
+
+
 def android_preflight(vm, rep, T, sh, out):
     """Before the Welcome screen: the image carries Android apps, and they are
     off, closed and inert until the user turns them on."""
@@ -1540,11 +1699,7 @@ def android_phase(vm, rep, T, sh, out):
     # refused instead of reaching whatever app listens on that port there.
     # First Android's own resolver and ping, then the probe run in the
     # container's network namespace, with a listener there on the port.
-    rc, o = sh(f"{in_android('/system/bin/ping -c 1 -W 3 ' + ONION_NAME, errors=True)}; antumbra_s=$?; echo; echo rc=$antumbra_s", timeout=120)
-    m = re.search(r"PING \S+ \((127\.\d+\.\d+\.\d+)\)", o)
-    rep.check("android: Android's resolver maps a .onion name into 127.192.0.0/10, and a ping to that address gets no answer",
-              rc == 0 and m is not None and re.fullmatch(r"127\.(19[2-9]|2[0-4]\d|25[0-5])\.\d+\.\d+", m.group(1)) is not None
-              and re.search(r"\d+ bytes from", o) is None and re.search(r"^rc=[1-9]\d*$", o, re.M) is not None, o.replace("\n", " ")[-300:])
+    android_onion_ping(rep, sh, out)
     probe = json.dumps([["onion", "10.200.2.1", ONION_NAME, ONION_PORT]])
     ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644")
     rc, o = sh("P=$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -pH); "

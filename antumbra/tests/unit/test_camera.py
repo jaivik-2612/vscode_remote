@@ -9,6 +9,7 @@ virtual camera must stay out of the phone's kernel; the OnePlus camera
 scanner must find what it is meant to find. See docs/camera.md.
 """
 import bz2
+import contextlib
 import gzip
 import importlib.util
 import io
@@ -24,6 +25,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
@@ -360,6 +362,84 @@ class VmHarnessTest(unittest.TestCase):
             self.assertEqual(sorted(r.stdout.splitlines()), sorted(h.format(scan=scan) for h in self.vm.NOPC_FIXTURE_HITS))
 
 
+class GuestScanTest(unittest.TestCase):
+    """Step 5 of the VM camera checks: the scanner run over the guest's
+    root file system. It reads the head of every file and Waydroid's
+    images, so its time grows with the image and with emulation: its limit
+    follows the harness's timeout scale and the measured size of the root
+    file system, and the guest kills it before the console gives up on it
+    (a scan left running would answer the next command)."""
+
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("antumbra_vm", os.path.join(ROOT, "tests", "vm", "antumbra_vm.py"))
+        cls.vm = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.vm)
+
+    def run_checks(self, scale=1, df="  1270  61934", scan="scan: exit 0 after 812 s"):
+        calls = []
+        hits = [h.format(scan="/tmp/antumbra-nopc/scan") for h in self.vm.NOPC_FIXTURE_HITS]
+
+        def sh(cmd, timeout=120):
+            calls.append((cmd, timeout))
+            if cmd.startswith("df "):
+                return (0, df) if df is not None else (1, "df: no such file or directory")
+            if "--xdev /" in cmd:
+                return 0, scan
+            if "antumbra-nopc-fixture.py /tmp/antumbra-nopc" in cmd:
+                return 0, "\n".join(["fixture ready"] + hits + ["scanner exit 1"])
+            return None, ""
+        saved = self.vm.put_file
+        self.vm.put_file = lambda sh, path, data: True
+        try:
+            rep = self.vm.Report()
+            self.vm.oneplus_scan_checks(rep, lambda s: s * scale, sh)
+        finally:
+            self.vm.put_file = saved
+        results = {name: (ok, detail) for name, ok, detail, _ in rep.results}
+        scans = [(cmd, timeout) for cmd, timeout in calls if "--xdev /" in cmd]
+        self.assertEqual(len(scans), 1)
+        m = re.search(r"\btimeout -k (\d+) (\d+) python3 /tmp/antumbra-no-oneplus-camera\.py --xdev /", scans[0][0])
+        self.assertIsNotNone(m, f"the guest scan does not run under timeout: {scans[0][0]}")
+        return results, int(m.group(2)), int(m.group(1)), scans[0][1]
+
+    def test_limit_scales_with_the_timeout_scale_and_the_image(self):
+        _, limit, kill, console = self.run_checks()
+        # the --android image (1270 MiB of squashfs, 62 000 inodes): well
+        # above the verifier's 850 s estimate under emulation
+        self.assertGreaterEqual(limit, 1500)
+        self.assertGreater(console, limit + kill)
+        _, limit2, kill2, console2 = self.run_checks(scale=2)
+        self.assertEqual(limit2, 2 * limit)
+        self.assertGreater(console2, limit2 + kill2)
+        _, bigger, _, _ = self.run_checks(df="  2540  124000")
+        self.assertGreater(bigger, limit)
+        # no size: the limit for an image twice the --android one
+        _, unknown, _, _ = self.run_checks(df=None)
+        self.assertEqual(unknown, bigger)
+
+    def test_verdicts(self):
+        control = "camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK"
+        results, _, _, _ = self.run_checks()
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN], (True, "none found in 812 s"))
+        self.assertTrue(results[control][0])
+        results, limit, _, _ = self.run_checks(scan="scan: exit 1 after 700 s\n/usr/lib/libarcsoft_beauty.so")
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN], (False, "/usr/lib/libarcsoft_beauty.so"))
+        # killed at its limit: a failure that says so, and the positive
+        # control still runs on a clean console
+        results, limit, _, _ = self.run_checks(scan="scan: exit 124 after 1672 s\n/usr/a.apk: cannot inspect (zip: x)")
+        self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
+        self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith(f"the scan was stopped at its limit ({limit} s) after 1672 s"),
+                        results[self.vm.ONEPLUS_SCAN][1])
+        self.assertTrue(results[control][0])
+        # killed before its limit (the OOM killer, say): not "stopped at its limit"
+        results, _, _, _ = self.run_checks(scan="scan: exit 137 after 300 s")
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN], (False, "scanner exit 137"))
+        # no status line: the scan did not run as asked
+        results, _, _, _ = self.run_checks(scan="python3: can't open file")
+        self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])
+
+
 class CameraAccessDocsTest(unittest.TestCase):
     """Wherever the docs describe the planned Tor Browser confinement for the
     cameras (devices and PipeWire's socket), they must also name the camera
@@ -374,17 +454,35 @@ class CameraAccessDocsTest(unittest.TestCase):
             yield from (" ".join(p.split()) for p in re.split(r"\n(?=\s*(?:[-*] |\d+\. |\|))", block))
 
     def test_planned_confinement_covers_the_camera_portal(self):
+        # Also: the profile is an allow-list (deny rules for the portal next
+        # to a broad session-bus allow leave the systemd user manager and
+        # D-Bus activation open), and PipeWire listens on two sockets.
         found = 0
         for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
             if not name.endswith(".md"):
                 continue
             for p in self.paragraphs(read(os.path.join(ROOT, "docs", name))):
-                if "PipeWire socket" in p:
+                if re.search(r"PipeWire('s)? sockets?\b|pipewire-0", p):
                     found += 1
                     self.assertIn("camera portal", p, f"{name}: {p[:200]}")
                     self.assertIn("permission store", p.lower(), f"{name}: {p[:200]}")
+                    self.assertIn("allow-list", p, f"{name}: {p[:200]}")
+                    self.assertRegex(p, r"pipewire-0-manager|pipewire-0\*", f"{name}: {p[:200]}")
+                    self.assertIn("systemd user manager", p, f"{name}: {p[:200]}")
+                    self.assertIn("D-Bus activation", p, f"{name}: {p[:200]}")
         # camera.md, roadmap.md, known-issues.md, threat-model.md
         self.assertGreaterEqual(found, 4)
+
+    def test_deny_rules_are_not_presented_as_enough(self):
+        camera = " ".join(read(os.path.join(ROOT, "docs", "camera.md")).split())
+        section = camera[camera.index("## Who can use the cameras"):camera.index("## Why there is no OnePlus Camera")]
+        self.assertIn("Deny rules alone are not enough", section)
+        self.assertIn("StartTransientUnit", section)
+        self.assertNotIn("Better, the profile allows", section)
+        # The VM's portal check runs unconfined; it must run under the
+        # profile once there is one.
+        for doc in ("camera.md", "vm-testing.md"):
+            self.assertIn("aa-exec -p", read(os.path.join(ROOT, "docs", doc)), doc)
 
 
 class OnePlusScannerTest(unittest.TestCase):
@@ -438,6 +536,40 @@ class OnePlusScannerTest(unittest.TestCase):
     def test_skip(self):
         self.touch("build", "cache", "CAMERA_ICP.elf")
         self.assertEqual(self.nopc.scan(self.tmp, False, {os.path.join(self.tmp, "build", "cache")}), [])
+
+    def main(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = self.nopc.main(list(argv))
+        return rc, out.getvalue()
+
+    def test_a_root_it_cannot_read_fails(self):
+        # A mistyped path must not report a clean image.
+        missing = os.path.join(self.tmp, "missing")
+        os.symlink(missing, os.path.join(self.tmp, "dangling"))
+        for argv in ([missing], ["--xdev", missing], [os.path.join(self.tmp, "dangling")]):
+            with self.subTest(argv=argv):
+                rc, out = self.main(*argv)
+                self.assertEqual(rc, 1, out)
+                self.assertEqual(out, f"{argv[-1]}: cannot inspect (No such file or directory)\n")
+        self.assertEqual(self.main(self.tmp), (0, ""))
+
+    def test_a_directory_it_cannot_list_fails(self):
+        # (root may list any directory, so the refusal is simulated)
+        locked = os.path.dirname(self.touch("locked", "CAMERA_ICP.elf"))
+        gone = os.path.dirname(self.touch("gone", "x"))
+        real = os.scandir
+
+        def scandir(path="."):
+            if os.path.normpath(path) == locked:
+                raise PermissionError(13, "Permission denied", path)
+            if os.path.normpath(path) == gone:   # removed while the scan ran
+                raise FileNotFoundError(2, "No such file or directory", path)
+            return real(path)
+        with unittest.mock.patch("os.scandir", scandir):
+            self.assertEqual(self.nopc.scan(self.tmp, False, set()), [f"{locked}: cannot list (Permission denied)"])
+            self.assertEqual(self.nopc.scan(locked, False, set()), [f"{locked}: cannot list (Permission denied)"])
+            self.assertEqual(self.nopc.scan(gone, False, set()), [f"{gone}: cannot list (No such file or directory)"])
 
     # --- Packages in bundles, archives, compressed files and disk images ------
     def write(self, rel, data):

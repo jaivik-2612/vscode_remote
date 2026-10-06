@@ -57,10 +57,12 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   PipeWire, or through the camera portal (one "Allow" for any installed
   program, or one write to the portal's permission store by any program
   in the session, counts for all of them). That stays so until Tor Browser
-  gets a confinement profile that denies the camera devices, the PipeWire
-  socket, and its session-bus calls to the camera portal and the
-  permission store (`camera.md`). There is no OnePlus camera app, and
-  there will not be.
+  gets a confinement profile that is an allow-list: no camera device,
+  neither of PipeWire's sockets (`pipewire-0`, `pipewire-0-manager`), and
+  on the session bus only what the browser needs, so not the camera
+  portal, the permission store, the systemd user manager or D-Bus
+  activation (`camera.md`). There is no OnePlus camera app, and there will
+  not be.
 - Tor Browser is a desktop browser on a phone screen: usable with the
   compositor's 3x scale, not adapted.
 - No Unsafe Browser (captive portals cannot be handled from the device
