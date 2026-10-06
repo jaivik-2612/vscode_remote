@@ -9,6 +9,7 @@ virtual camera must stay out of the phone's kernel; the OnePlus camera
 scanner must find what it is meant to find. See docs/camera.md.
 """
 import bz2
+import contextlib
 import gzip
 import importlib.util
 import io
@@ -24,6 +25,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
@@ -513,6 +515,40 @@ class OnePlusScannerTest(unittest.TestCase):
     def test_skip(self):
         self.touch("build", "cache", "CAMERA_ICP.elf")
         self.assertEqual(self.nopc.scan(self.tmp, False, {os.path.join(self.tmp, "build", "cache")}), [])
+
+    def main(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = self.nopc.main(list(argv))
+        return rc, out.getvalue()
+
+    def test_a_root_it_cannot_read_fails(self):
+        # A mistyped path must not report a clean image.
+        missing = os.path.join(self.tmp, "missing")
+        os.symlink(missing, os.path.join(self.tmp, "dangling"))
+        for argv in ([missing], ["--xdev", missing], [os.path.join(self.tmp, "dangling")]):
+            with self.subTest(argv=argv):
+                rc, out = self.main(*argv)
+                self.assertEqual(rc, 1, out)
+                self.assertEqual(out, f"{argv[-1]}: cannot inspect (No such file or directory)\n")
+        self.assertEqual(self.main(self.tmp), (0, ""))
+
+    def test_a_directory_it_cannot_list_fails(self):
+        # (root may list any directory, so the refusal is simulated)
+        locked = os.path.dirname(self.touch("locked", "CAMERA_ICP.elf"))
+        gone = os.path.dirname(self.touch("gone", "x"))
+        real = os.scandir
+
+        def scandir(path="."):
+            if os.path.normpath(path) == locked:
+                raise PermissionError(13, "Permission denied", path)
+            if os.path.normpath(path) == gone:   # removed while the scan ran
+                raise FileNotFoundError(2, "No such file or directory", path)
+            return real(path)
+        with unittest.mock.patch("os.scandir", scandir):
+            self.assertEqual(self.nopc.scan(self.tmp, False, set()), [f"{locked}: cannot list (Permission denied)"])
+            self.assertEqual(self.nopc.scan(locked, False, set()), [f"{locked}: cannot list (Permission denied)"])
+            self.assertEqual(self.nopc.scan(gone, False, set()), [f"{gone}: cannot list (No such file or directory)"])
 
     # --- Packages in bundles, archives, compressed files and disk images ------
     def write(self, rel, data):

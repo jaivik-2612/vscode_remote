@@ -216,7 +216,8 @@ Android sparse images, Waydroid's `system.img` and `vendor.img` among
 them. A file in one of those formats that it cannot read entirely (an
 EROFS image with compressed files, an Android super image or OTA payload,
 an encrypted zip member, nesting deeper than eight levels) is reported,
-so the check fails closed. `tests/lint.sh` runs it over the source tree;
+so the check fails closed; so are a path it is given that does not exist
+and a directory it cannot list. `tests/lint.sh` runs it over the source tree;
 the VM camera checks run it in the guest over the root file system, then
 over a small fixture it must flag (a OnePlus camera APK inside an ext4
 image and inside a zstd-compressed XAPK).
