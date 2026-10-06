@@ -61,10 +61,13 @@ if [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
 fi
 export SOURCE_DATE_EPOCH
 
-# Build knobs (documented in docs/building.md). Empty means off.
+# Build knobs (documented in docs/building.md). Empty means off, except for
+# ANTUMBRA_VERITY.
 ANTUMBRA_DEBUG="${ANTUMBRA_DEBUG:-}"        # debug initramfs and console; never for releases
 ANTUMBRA_MINIMAL="${ANTUMBRA_MINIMAL:-}"    # small root filesystem for pipeline validation
-ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"      # dm-verity on the root filesystem (experimental)
+# dm-verity on the root filesystem: on unless ANTUMBRA_VERITY=0 (squashfs.sh,
+# bootimg.sh, vm.sh and vm-bundle.sh read it as ${ANTUMBRA_VERITY:-1}).
+ANTUMBRA_VERITY="${ANTUMBRA_VERITY:-}"
 ANTUMBRA_FIRMWARE_DIR="${ANTUMBRA_FIRMWARE_DIR:-}"  # builder-provided firmware tree
 # Android apps (Waydroid, docs/architecture.md "Android apps"): 1 adds the
 # Waydroid packages, the pinned Android images and F-Droid, and the Android
