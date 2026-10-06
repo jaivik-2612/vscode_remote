@@ -42,7 +42,12 @@ def set_sandbox(enabled: bool):
 # cannot write /etc/tor, so SAVECONF always failed after the settings had
 # taken effect, and an amnesic system keeps no Tor configuration anyway.
 # The NetworkManager dispatcher applies the Welcome screen's choice on
-# every connection, and bridges persist through the tor-bridges feature.
+# every connection. Bridges are kept only as part of that choice: the Welcome
+# screen writes them (ANTUMBRA_BRIDGES in tails.bridges), its applier copies
+# them to /var/lib/antumbra/settings/applied, where the dispatcher reads
+# them, and with Persistent Storage unlocked also saves them with the
+# volume's Welcome settings, which nothing reads back: they are entered at
+# every boot.
 
 
 def cmd_direct():

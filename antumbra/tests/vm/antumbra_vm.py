@@ -2292,13 +2292,13 @@ def persistence_phase(vm, rep, T, sh, out, run):
         return
     rc, o = sh("/usr/local/sbin/antumbra-persistence status; echo rc=$?; findmnt -no SOURCE /var/lib/antumbra/persistence; "
                "cryptsetup luksDump /dev/disk/by-partlabel/ANTUMBRA_DATA | sed -nE 's/^[[:space:]]*(Version|PBKDF):[[:space:]]+(.*)$/\\1: \\2/p' | sort -u; "
-               "for d in /home/amnesia/Persistent /var/lib/antumbra/settings/persistent /etc/NetworkManager/system-connections /var/lib/tca; do "
+               "for d in /home/amnesia/Persistent /var/lib/antumbra/settings/persistent /etc/NetworkManager/system-connections; do "
                "findmnt -no TARGET \"$d\"; done", timeout=120)
     lines = o.strip().split("\n") if rc == 0 else []
     rep.check("persistence: LUKS2 with argon2id, unlocked, mounted, its features bound in place",
               lines[:3] == ["luks", "rc=0", "/dev/mapper/antumbra_data"] and "PBKDF: argon2id" in lines and "Version: 2" in lines
-              and lines[-4:] == ["/home/amnesia/Persistent", "/var/lib/antumbra/settings/persistent",
-                                 "/etc/NetworkManager/system-connections", "/var/lib/tca"], o.replace("\n", " | "))
+              and lines[-3:] == ["/home/amnesia/Persistent", "/var/lib/antumbra/settings/persistent",
+                                 "/etc/NetworkManager/system-connections"], o.replace("\n", " | "))
     W = "/var/lib/antumbra/persistence/welcome-settings"
     rc, o = sh(f"stat -c '%n %U %a' {W}/*; grep -h '^ANTUMBRA_ADMIN_ENABLED=' {W}/antumbra.admin /var/lib/antumbra/settings/applied/antumbra.admin; "
                "ls -A /var/lib/antumbra/settings/transient | tr '\\n' ' '; echo; "
