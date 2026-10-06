@@ -191,6 +191,23 @@ class Console:
                 return int(m.group(1)), out.strip("\n")
         raise Timeout(f"console command timed out: {cmd!r}; got {buf[-500:]!r}")
 
+    def recover(self, timeout=120):
+        """After a command timed out the shell is still running it, and every
+        later command would wait behind it: interrupt it (Ctrl-C, as on a
+        terminal), then wait until a fresh marker comes back. True if the
+        shell answers again."""
+        if self.sock is None:
+            return False
+        try:
+            for _ in range(3):
+                self._raw("\x03")
+                time.sleep(1)
+            self._drain()
+            rc, _ = self.run("true", timeout=timeout)
+            return rc == 0
+        except Exception:  # noqa: BLE001
+            return False
+
     def close(self):
         if self.sock:
             self.sock.close()
@@ -606,8 +623,12 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     # so a socket opened in between has none: with Tor opening and dropping
     # connections every second, a 90-second poll always hits that gap. -O keeps
     # each socket on one line.
-    rc, o = sh(f"for i in $(seq {polls}); do ss -tunapeHO state all; sleep 1; done | "
-               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 3 + 120)
+    # The poll runs for POLLS seconds of the guest's clock, however long each
+    # ss takes, and without -p: the owner comes from -e's UID, and -p's scan
+    # of every process in /proc made each ss take seconds once Android's
+    # processes were running, so a count of polls overran the console's limit.
+    rc, o = sh(f"t_end=$(( $(date +%s) + {polls} )); while [ \"$(date +%s)\" -lt \"$t_end\" ]; do ss -tunaeHO state all; sleep 1; done | "
+               "grep -vE '127\\.0\\.0\\.1|\\[::1\\]|10\\.200\\.1\\.|10\\.200\\.2\\.|LISTEN|UNCONN' | sort -u; echo end", timeout=polls * 2 + 300)
     socks = [l for l in o.split("\n") if l.strip() and l.strip() != "end"] if rc is not None else []
 
     def peer(line):
@@ -2312,7 +2333,11 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
         try:
             return vm.console.run(cmd, timeout=timeout)
         except Exception as e:  # noqa: BLE001
-            rep.check(f"console: {cmd[:60]}", False, str(e)[:300])
+            # A timed-out command is still running in the guest's shell:
+            # interrupt it, so that one slow command does not fail every
+            # command after it.
+            recovered = isinstance(e, Timeout) and vm.console.recover()
+            rep.check(f"console: {cmd[:60]}", False, str(e)[:300] + (" (interrupted; the console answers again)" if recovered else ""))
             return None, ""
 
     # 1. Initramfs: the medium is found by bus and UUID, verity and the overlay come up.
