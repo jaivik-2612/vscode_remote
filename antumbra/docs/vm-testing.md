@@ -225,14 +225,20 @@ start-host hook, run for the stand-in with `LXC_PID`, rejects `.onion`
 virtual addresses in its namespace (a `.onion` name's address is refused
 while a listener on that port there works), that NTP, QUIC, ping and IPv6
 get no answer, the firewall's redirect counters, the start-host hook
-failing closed without each part of the network or the container's PID
-(and passing with it), that Tor refuses to connect while the bridge is
+failing closed without each part of the network or the container's PID,
+or for a stand-in whose mount namespace lacks one identifier's mask (and
+passing with it: the stand-ins get the masks in a mount namespace of
+their own, as LXC mounts them), that Tor refuses to connect while the bridge is
 missing, and from the packet capture that nothing of the stand-in left the
 guest. `tests/android-net-lab.py`, run by `tests/lint.sh`, replays the
 firewall, the hook and these probes in network namespaces on the build
-host. Where the build host lacks something the lab itself needs (network
-or mount namespaces, a tmpfs, the bridge or veth driver, nftables or the
-reject expression the hook loads), the lab says what and is skipped
+host, the stand-in container's identifier masks mounted in its mount
+namespace (the hook must refuse a stand-in where a file's mask is
+missing, or a directory's if the build host has one to hide). Where the
+build host lacks something the
+lab itself needs (network or mount namespaces, a tmpfs, the bridge or
+veth driver, nftables or the reject expression the hook loads), the lab
+says what and is skipped
 (exit 0); only its checks fail.
 It takes a few minutes longer than `--through-welcome`.
 
@@ -246,7 +252,9 @@ its serial number) and the disk given the serial number
 `antumbra-waydroid.service` prepared Waydroid from the images in the
 system without touching the network, the generated container
 configuration, that Waydroid's own `waydroid-net.sh` does nothing, that
-the container runs and Android reports `sys.boot_completed=1` (the
+the container runs, its start-host hook having found every hardware
+identifier masked in the container's own view (its journal line), and
+Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
 slow), the generic Waydroid identity,
 `/sys/firmware` hidden, that Android's `/proc/cmdline` is the generic one
@@ -316,12 +324,19 @@ and checks that the volume is LUKS2 with argon2id, unlocked and mounted,
 with `~/Persistent`, the Welcome settings, the network connections and
 `/var/lib/tca` bound from it; that this boot's settings were applied and
 saved on the volume, owned by the greeter user, without the passphrase's
-hash; that no Persistent Storage passphrase was left behind; that
+hash; that no Persistent Storage passphrase was left behind, and no
+staging directory of the applier's (`settings/staged`, and
+`.antumbra-welcome-staging` on the volume); that unlocking the volume
+while it is open still refuses a wrong passphrase (both runs); that
 administration and the passphrase are in force; and that a file written
 to `~/Persistent` lands on the volume. The second run (`--keep-disk`)
 checks that the partition holds a LUKS volume, opens it read-only first
 to check what the first run stored (administration on, no passphrase
-hash, the file in `Persistent`), tries "Unlock" with a wrong passphrase
+hash, the file in `Persistent`, no staging directory of the applier's),
+tries "Unlock" with the right passphrase while `passwd` fails (bound to
+`/bin/false`), which must reach the Welcome screen as an unexpected
+error with Persistent Storage locked again by then and, read-only again,
+nothing of that attempt on the volume, tries "Unlock" with a wrong passphrase
 (the error reaches the Welcome screen's wait, `welcome-done` and the
 passphrase are gone so that it can start again), then chooses "Unlock"
 with the right one, no screen-lock passphrase and administration off

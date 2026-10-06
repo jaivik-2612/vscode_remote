@@ -13,8 +13,9 @@
 # without the phone's identifiers: the generic kernel command line instead
 # of the host's (which carries the serial number), every hardware
 # identifier in sysfs and procfs that exists now masked (antumbra-waydroid
-# writes the masks again before each start of the container service), every
-# device but cameras. Any doubt fails closed. Finally it switches forwarding off on the bridge again, in case
+# writes the masks again before each start of the container service) and
+# hidden in the container's own view, every device but cameras. Any doubt
+# fails closed. Finally it switches forwarding off on the bridge again, in case
 # something switched ip_forward off and on since boot, and rejects .onion
 # virtual addresses inside the container's own network namespace (LXC_PID
 # is the container's first process): Tor answers Android's lookups of
@@ -64,10 +65,24 @@ if grep -q 'androidboot\.' "${CMDLINE}"; then fail "${CMDLINE} names androidboot
 # LXC's device list allows nothing until an "a" rule turns it into a deny list.
 [ "$(grep -E '^lxc\.cgroup2\.devices\.' "${CONFIG}")" = "$(printf '%s\n' 'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm')" ] \
     || fail "the container's device rules are not exactly: allow a, then deny V4L2"
+case "${LXC_PID:-}" in
+    '' | *[!0-9]*) fail "no container PID (LXC_PID)" ;;
+esac
+# The container's own view. LXC has made its mounts in the container's
+# mount namespace and switched to its root before it runs this hook
+# (lxc_setup() in the child, then the start-host hook in the parent: LXC
+# 6.0, start.c), and /proc/LXC_PID/root is that root: a path under it is
+# what Android will find. (nsenter --mount would run the command from
+# Android's root file system, where nothing of the host's can run, and
+# nothing of Android's before its init.)
+VIEW="/proc/${LXC_PID}/root"
+[ -d "${VIEW}/sys/devices" ] || fail "cannot see the container's /sys/devices"
 # Hardware identifiers, as antumbra-waydroid finds and masks them (its
 # MASKED_NAMES, UEVENT_MARKERS, HIDDEN_DIR_MARKERS and MASKED_PROC): every
 # one there now must have its mask. Masks of devices that have gone since
-# are optional entries, which LXC skips. Each line: the kind, then the path.
+# are optional entries, which LXC skips; so does it one it fails to mount,
+# so each mask is also looked for in the container's view. Each line: the
+# kind, then the path.
 identifiers="$(
     find /sys/devices \( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 -o -name wwid -o -name cid -o -name uuid -o -name eeprom \) -type f 2>/dev/null \
         | sed 's/^/file /'
@@ -78,6 +93,31 @@ identifiers="$(
     find /sys/devices \( -name nvmem -o -name since_epoch \) -type f 2>/dev/null | sed 's/^/dir /; s|/[^/]*$||'
     if [ -f /proc/driver/rtc ]; then printf 'file %s\n' /proc/driver/rtc; fi
 )"
+hidden="$(printf '%s\n' "${identifiers}" | sed -n 's/^dir //p')"
+# under_hidden PATH: PATH is inside a directory hidden whole (whose own
+# check shows it empty), so not in the container at all: a nested nvmem
+# provider or RTC, whose mask LXC cannot mount.
+under_hidden() {
+    while IFS= read -r dir; do
+        [ -n "${dir}" ] || continue
+        case "$1" in "${dir}"/*) return 0 ;; esac
+    done <<HIDDEN
+${hidden}
+HIDDEN
+    return 1
+}
+# masked_in_view KIND PATH: the container sees nothing at PATH: a file is
+# /dev/null (bound there) or reads empty, a directory has nothing in it.
+masked_in_view() {
+    set -- "$1" "${VIEW}$2"
+    case "$1" in
+        file)
+            if [ -c "$2" ]; then [ "$(stat -L -c %t:%T -- "$2")" = 1:3 ]; return; fi
+            [ -f "$2" ] && [ "$(head -c 1 -- "$2" && echo .)" = . ] ;;
+        *) [ -d "$2" ] && [ "$(ls -A -- "$2" && echo .)" = . ] ;;
+    esac
+}
+count=0
 while read -r kind path; do
     [ -n "${path}" ] || continue
     case "${path}" in *[[:space:]\\]*) fail "cannot check the mask of ${path}" ;; esac
@@ -86,17 +126,17 @@ while read -r kind path; do
         *) entry="lxc.mount.entry = tmpfs ${path#/} tmpfs ro,nosuid,nodev,noexec,mode=0555,size=4k,optional 0 0" ;;
     esac
     grep -qxF "${entry}" "${CONFIG}" || fail "${path} is not masked in the container"
+    under_hidden "${path}" || masked_in_view "${kind}" "${path}" \
+        || fail "${path} is readable in the container: its mask did not take effect"
+    count=$((count + 1))
 done <<EOF
 ${identifiers}
 EOF
 
 sysctl -q "net.ipv4.conf.${BRIDGE}.forwarding=0" || fail "could not switch forwarding off on ${BRIDGE}"
 
-case "${LXC_PID:-}" in
-    '' | *[!0-9]*) fail "no container PID (LXC_PID)" ;;
-esac
 printf '%s\n' 'table ip antumbra_onion {}' 'flush table ip antumbra_onion' \
     'table ip antumbra_onion { chain output { type filter hook output priority filter; policy accept; ip daddr 127.192.0.0/10 reject; }; }' \
     | nsenter --target "${LXC_PID}" --net nft -f - || fail "could not block .onion virtual addresses inside Android"
-logger -t antumbra-waydroid -p daemon.info -- "Android container network checked: Tor only"
+logger -t antumbra-waydroid -p daemon.info -- "Android container checked: Tor only, ${count} hardware identifiers hidden in its view"
 exit 0

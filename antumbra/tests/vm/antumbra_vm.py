@@ -1630,6 +1630,13 @@ def android_phase(vm, rep, T, sh, out):
             break
         time.sleep(10)
     rep.check("android: the container runs (started by the session's waydroid session)", running, o.strip())
+    # The start-host hook passed for it, having found each identifier's
+    # mask in place in the container's own view (its root, after LXC's
+    # mounts): LXC skips an optional mask it fails to mount.
+    rc, o = sh("journalctl -b --no-pager -t antumbra-waydroid -o cat | "
+               "sed -n 's/^Android container checked: Tor only, \\([0-9]*\\) hardware identifiers hidden in its view$/\\1/p' | tail -n 1")
+    rep.check("android: the start-host hook found every hardware identifier masked in the container's own view",
+              running and rc == 0 and o.strip().isdigit() and int(o.strip()) > 0, o.strip() or "no such journal line")
     booted = False
     if running:
         deadline = time.monotonic() + T(2400)
@@ -1835,7 +1842,8 @@ def android_net_phase(vm, rep, T, sh, out):
     rc, o = sh("ip -4 -o addr show scope global | grep -vE ': (veth|waydroid-tor|lo)' | awk '{print $4}' | cut -d/ -f1 | head -n1")
     uplink = o.strip() if rc == 0 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", o.strip()) else "10.0.2.15"
     try:
-        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, UDHCPC_SCRIPT, ANDROID_UDHCPC_SH)
+        ok = guest_write(sh, "/run/antumbra-android-probe.py", ANDROID_PROBE_PY, "0644") and guest_write(sh, UDHCPC_SCRIPT, ANDROID_UDHCPC_SH) \
+            and guest_write(sh, "/run/antumbra-hooktest-ct.sh", HOOKTEST_STAND_IN_SH, "0644")
         rc, o = sh("ip netns add android-sim && ip link add vethandsim type veth peer name eth0 netns android-sim && "
                    "ip link set vethandsim master waydroid-tor && ip link set vethandsim up && ip -n android-sim link set lo up && "
                    f"ip -n android-sim link set eth0 address {ANDROID_MAC} && ip -n android-sim link set eth0 up && "
@@ -1854,10 +1862,11 @@ def android_net_phase(vm, rep, T, sh, out):
                       and lease == ["LEASE ip=10.200.2.2 subnet=255.255.255.252 router=10.200.2.1 dns=10.200.2.1 ntpsrv="],
                       " | ".join(lease) if lease else o.replace("\n", " | ")[-400:])
         # The start-host hook as LXC runs it for the container, LXC_PID a
-        # process in the stand-in's network namespace: it puts its .onion
-        # block there, as it does in Android's.
+        # process in the stand-in's network namespace (its mount namespace
+        # with the identifier masks): it puts its .onion block there, as it
+        # does in Android's.
         rc, o = sh(HOOKTEST_CONF +
-                   "P=$(ip netns exec android-sim sh -c 'sleep 1800 </dev/null >/dev/null 2>&1 & echo $!'); "
+                   "P=$(ip netns exec android-sim sh /run/antumbra-hooktest-ct.sh); "
                    "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; "
                    "echo hook=$?; ip netns exec android-sim nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'")
         rep.check("android-net: the start-host hook, run for the stand-in container, rejects .onion virtual addresses (127.192.0.0/10) in its network namespace",
@@ -1897,23 +1906,38 @@ def android_net_phase(vm, rep, T, sh, out):
            f"rm -f /run/antumbra/android-enabled /var/lib/misc/dnsmasq.waydroid0.leases /run/antumbra-hooktest.conf {UDHCPC_SCRIPT}; echo cleaned")
     # The start-host hook, run as LXC runs it, with the network in place and
     # with each piece of it missing. LXC_PID is a process in a network
-    # namespace of its own, where the hook puts its .onion block.
+    # namespace of its own, where the hook puts its .onion block, and a
+    # mount namespace with the identifier masks; a second stand-in lacks
+    # the mask of one identifier in sysfs, as when LXC fails to mount it.
     hook = "LXC_NAME=waydroid LXC_PID=$P LXC_CONFIG_FILE=/run/antumbra-hooktest.conf /usr/local/lib/antumbra-waydroid-start-host waydroid lxc start-host >/dev/null 2>&1; echo $?"
     good_conf = HOOKTEST_CONF
-    rc, o = sh("P=$(unshare -n sh -c 'sleep 600 </dev/null >/dev/null 2>&1 & echo $!'); " + good_conf +
+    stand_in = "unshare -n --mount --propagation private sh /run/antumbra-hooktest-ct.sh"
+    rc, o = sh(good_conf + f"P=$({stand_in}); "
                "sysctl -qw net.ipv4.conf.waydroid-tor.forwarding=1; "
                f"{hook}; cat /proc/sys/net/ipv4/conf/waydroid-tor/forwarding; "
                "echo onion=$(nsenter --target $P --net nft list table ip antumbra_onion | grep -c 'ip daddr 127.192.0.0/10 reject'); "
+               # the first file mask not inside a hidden directory (the hook
+               # rightly accepts an identifier hidden with its directory)
+               "M=$(awk '/^lxc\\.mount\\.entry = tmpfs sys\\// { h[++n] = $4 } "
+               "/^lxc\\.mount\\.entry = \\/dev\\/null sys\\/.*,optional 0 0$/ { f[++m] = $4 } "
+               "END { for (i = 1; i <= m; i++) { inside = 0; for (j = 1; j <= n; j++) if (index(f[i], h[j] \"/\") == 1) inside = 1; "
+               "if (!inside) { print \"/\" f[i]; exit } } }' /run/antumbra-hooktest.conf); "
+               f"Q=$({stand_in} \"$M\"); echo left=${{M:+sysfs}}; "
+               + hook.replace("LXC_PID=$P", "LXC_PID=$Q").replace(">/dev/null 2>&1", "2>/run/antumbra-hooktest.err >/dev/null")
+               + "; grep -c 'its mask did not take effect' /run/antumbra-hooktest.err; kill $Q; "
                f"nft flush chain ip antumbra-nat android; {hook}; nft -f /etc/nftables.conf; "
                f"nft delete rule inet antumbra forward handle $(nft -a list chain inet antumbra forward | sed -n 's/.*iifname \"waydroid-tor\" jump android_reject # handle //p'); {hook}; nft -f /etc/nftables.conf; "
                f"sysctl -qw net.ipv4.conf.waydroid-tor.route_localnet=1; {hook}; sysctl -qw net.ipv4.conf.waydroid-tor.route_localnet=0; "
                f"sed -i 's/waydroid-tor/waydroid0/' /run/antumbra-hooktest.conf; {hook}; "
                "printf 'lxc.net.0.type = none\\n' > /run/antumbra-hooktest.conf; "
                f"{hook}; rm -f /run/antumbra-hooktest.conf; {hook}; " + good_conf +
-               f"{hook.replace('LXC_PID=$P', 'LXC_PID=')}; kill $P; sleep 1; {hook}; rm -f /run/antumbra-hooktest.conf", timeout=120)
+               f"{hook.replace('LXC_PID=$P', 'LXC_PID=')}; kill $P; sleep 1; {hook}; "
+               "rm -f /run/antumbra-hooktest.conf /run/antumbra-hooktest.err /run/antumbra-hooktest-ct.sh", timeout=120)
     rep.check("android-net: start-host hook passes with the network in place (switches forwarding off, blocks .onion addresses in the container), "
-              "fails closed without each part of it and without the container's PID",
-              rc == 0 and o.strip().split("\n") == ["0", "0", "onion=1", "1", "1", "1", "1", "1", "1", "1", "1"], o.replace("\n", " "))
+              "fails closed where an identifier's mask did not take effect in the container, without each part of the network "
+              "and without the container's PID",
+              rc == 0 and o.strip().split("\n") == ["0", "0", "onion=1", "left=sysfs", "1", "1", "1", "1", "1", "1", "1", "1", "1", "1"],
+              o.replace("\n", " "))
     rc, o = sh("nft list chain ip antumbra-nat android | grep -c 'redirect to :9041'; nft list chain inet antumbra forward | grep -c 'jump android_reject'")
     rep.check("android-net: the firewall is whole again after the hook tests", rc == 0 and o.strip().split("\n") == ["1", "2"], o.replace("\n", " "))
     # Tor binds its listeners for Android when it is told to connect, and must
@@ -1965,6 +1989,26 @@ HOOKTEST_CONF = ("{ printf '%s\\n' 'lxc.net.0.type = veth' 'lxc.net.0.link = way
                  "/usr/local/lib/antumbra-waydroid --print-masks; } "
                  "> /run/antumbra-hooktest.conf; "
                  "[ -f /run/antumbra/android-cmdline ] || install -D -m 0644 /usr/share/antumbra/android/cmdline /run/antumbra/android-cmdline; ")
+# The stand-in container itself (run as /run/antumbra-hooktest-ct.sh in a
+# mount namespace of its own: ip netns exec, unshare --mount), as LXC
+# leaves the container's before the start-host hook, which looks at the
+# identifiers through its root: the masks of /run/antumbra-hooktest.conf
+# mounted (an optional one whose target is not there skipped), but those of
+# the paths given as arguments, as when LXC fails to mount one. It starts
+# the process for LXC_PID and prints its PID.
+HOOKTEST_STAND_IN_SH = r'''set -eu
+masks="$(awk '/^lxc\.mount\.entry = .*,optional 0 0$/ { print $3, $4, $6 }' /run/antumbra-hooktest.conf)"
+while read -r src dst opts; do
+    [ -n "${dst}" ] || continue
+    for leave in "$@"; do [ "/${dst}" != "${leave}" ] || continue 2; done
+    [ -e "/${dst}" ] || continue
+    if [ "${src}" = tmpfs ]; then mount -t tmpfs -o "${opts%,optional}" tmpfs "/${dst}"; else mount --bind /dev/null "/${dst}"; fi
+done <<EOF
+${masks}
+EOF
+sleep 1800 >/dev/null 2>&1 &
+echo $!
+'''
 DEVICE_MODES = ("for n in /dev/binder /dev/hwbinder /dev/vndbinder /dev/dri/renderD* /dev/fb* /dev/dma_heap/*; do "
                 "if [ -e \"$n\" ]; then stat -c '%n %a %U %G' \"$n\"; fi; done; echo end")
 
@@ -2158,26 +2202,54 @@ def persistence_phase(vm, rep, T, sh, out, run):
     lines = o.strip().split("\n") if rc == 0 else []
     rep.check(f"persistence: the volume is {'absent (create)' if create else 'present (unlock)'} at the Welcome screen",
               lines == (["none", "end"] if create else ["luks", "crypto_LUKS", "end"]), o.replace("\n", " "))
-    if not create:
-        # What the first run stored, read-only, before the applier unlocks it.
+
+    def first_run_stored():
+        """Whether the locked volume, opened read-only, holds what the first
+        run stored and nothing more: its Welcome settings (administration
+        on, no screen-lock passphrase hash), the file it wrote to
+        ~/Persistent, no staging directory of the applier's; and the
+        output."""
         rc, o = sh(f"printf %s {sh_quote(PERSISTENCE_PASSPHRASE)} > /run/antumbra-vm-key && chmod 0600 /run/antumbra-vm-key && "
                    "cryptsetup open --readonly --key-file /run/antumbra-vm-key /dev/disk/by-partlabel/ANTUMBRA_DATA antumbra_vmcheck && "
                    "mkdir -p /run/antumbra-vmcheck && mount -o ro,noload /dev/mapper/antumbra_vmcheck /run/antumbra-vmcheck && "
                    "{ ls -A /run/antumbra-vmcheck/welcome-settings | tr '\\n' ' '; echo; "
                    "grep -h '^ANTUMBRA_ADMIN_ENABLED=' /run/antumbra-vmcheck/welcome-settings/antumbra.admin; "
-                   f"cat /run/antumbra-vmcheck/{PERSISTENT_MARK.split('/home/amnesia/', 1)[1]}; }}; "
+                   f"cat /run/antumbra-vmcheck/{PERSISTENT_MARK.split('/home/amnesia/', 1)[1]}; "
+                   "if [ -e /run/antumbra-vmcheck/.antumbra-welcome-staging ]; then echo volume-staged-left; fi; }; "
                    "umount /run/antumbra-vmcheck; cryptsetup close antumbra_vmcheck; rm -f /run/antumbra-vm-key; echo end", timeout=int(T(900)))
         lines = o.strip().split("\n") if rc == 0 else []
         stored = lines[0].split() if lines else []
+        return (len(lines) == 4 and sorted(stored) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
+                and lines[1:] == ["ANTUMBRA_ADMIN_ENABLED=true", "antumbra-vm-run1", "end"]), o.replace("\n", " | ")[:400]
+
+    if not create:
+        # What the first run stored, read-only, before the applier unlocks it.
         rep.check("persistence: the volume kept the first run's Welcome settings (administration on), not the screen-lock passphrase, "
-                  "and the file written to ~/Persistent",
-                  len(lines) == 4 and sorted(stored) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
-                  and lines[1:] == ["ANTUMBRA_ADMIN_ENABLED=true", "antumbra-vm-run1", "end"], o.replace("\n", " | ")[:400])
+                  "and the file written to ~/Persistent; no staging directory left on it", *first_run_stored())
     choices = {"persistence": run, "persistence_passphrase": PERSISTENCE_PASSPHRASE, "network": "direct",
                "user_password": LOCK_PASSPHRASE if create else "", "admin": create}
     ok = guest_write(sh, "/run/antumbra-vm-settings.py", WRITE_SETTINGS_PY, "0644")
     if not create:
-        # A wrong passphrase first, as a user might type it: the Welcome
+        # A failure after unlocking first, as any fault later in the applier
+        # would cause (passwd failing): the Welcome screen hears of it, and by
+        # then Persistent Storage is locked again with nothing of that
+        # attempt on it, so that the next attempt needs the passphrase and
+        # the greeter writes it into a directory of its own, not the volume's.
+        rc, o = sh("if mount --bind /bin/false /usr/bin/passwd; then echo passwd-fails; "
+                   f"runuser -u antumbra-greeter -- python3 /run/antumbra-vm-settings.py {sh_quote(json.dumps(choices))} {int(T(900))}; "
+                   "umount /usr/bin/passwd && echo passwd-restored; fi; "
+                   "if [ -e /dev/mapper/antumbra_data ]; then echo volume-open; fi; "
+                   "for d in /var/lib/antumbra/persistence /var/lib/antumbra/settings/persistent /home/amnesia/Persistent; do "
+                   "if mountpoint -q \"$d\"; then echo \"mounted $d\"; fi; done; echo end", timeout=int(T(900)) + 120)
+        lines = o.strip().split("\n") if rc == 0 else []
+        rep.check("persistence: a failure after unlocking is reported to the Welcome screen, Persistent Storage locked again first",
+                  ok and len(lines) == 5 and lines[:2] == ["passwd-fails", "settings written"]
+                  and re.fullmatch(r"error: unexpected error \(line \d+, exit status \d+\)", lines[2]) is not None
+                  and lines[3:] == ["passwd-restored", "end"], o.replace("\n", " | ")[:400])
+        # passwd back, should that command have timed out and been interrupted
+        sh("if mountpoint -q /usr/bin/passwd; then umount /usr/bin/passwd; fi; echo ok")
+        rep.check("persistence: nothing of the failed attempt was saved on the volume", *first_run_stored())
+        # A wrong passphrase next, as a user might type it: the Welcome
         # screen hears of it and can start again; its report then stays
         # while the right passphrase is tried (an argon2id unlock), and must
         # not be taken for that attempt's.
@@ -2225,19 +2297,32 @@ def persistence_phase(vm, rep, T, sh, out, run):
     W = "/var/lib/antumbra/persistence/welcome-settings"
     rc, o = sh(f"stat -c '%n %U %a' {W}/*; grep -h '^ANTUMBRA_ADMIN_ENABLED=' {W}/antumbra.admin /var/lib/antumbra/settings/applied/antumbra.admin; "
                "ls -A /var/lib/antumbra/settings/transient | tr '\\n' ' '; echo; "
-               "test -e /var/lib/antumbra/settings/staged && echo staged-left; test -e /etc/sudoers.d/antumbra-admin && echo sudoers; "
+               "test -e /var/lib/antumbra/settings/staged && echo staged-left; "
+               "test -e /var/lib/antumbra/persistence/.antumbra-welcome-staging && echo volume-staged-left; "
+               "test -e /etc/sudoers.d/antumbra-admin && echo sudoers; "
                "passwd -S amnesia | cut -d' ' -f2; echo end", timeout=60)
     lines = o.strip().split("\n") if rc == 0 else []
     files = [l for l in lines if l.startswith(W)]
     admin = "true" if create else "false"
     rep.check("persistence: this boot's Welcome settings applied and saved on the volume (greeter-owned, no passphrase hash), "
-              "no passphrase left behind",
+              "no passphrase or staged copy left behind (the applier's staging directories gone, the volume's included)",
               sorted(l.split()[0].rsplit("/", 1)[1] for l in files) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
               and all(l.endswith(" antumbra-greeter 640") for l in files)
               and lines[len(files):len(files) + 2] == [f"ANTUMBRA_ADMIN_ENABLED={admin}"] * 2
-              and "passphrase" not in o and "staged-left" not in lines
+              and "passphrase" not in o and "staged-left" not in lines and "volume-staged-left" not in lines
               and ("sudoers" in lines) == create and lines[-2:] == (["P", "end"] if create else ["NP", "end"]),
               o.replace("\n", " | ")[:500])
+    # Persistent Storage already open (as when an attempt that failed could
+    # not lock it again) still asks for the passphrase.
+    rc, o = sh("printf %s 'not the passphrase' > /run/antumbra-vm-key && chmod 0600 /run/antumbra-vm-key && "
+               "/usr/local/sbin/antumbra-persistence unlock --passphrase-file /run/antumbra-vm-key 2>&1; echo rc=$?; "
+               f"printf %s {sh_quote(PERSISTENCE_PASSPHRASE)} > /run/antumbra-vm-key && "
+               "/usr/local/sbin/antumbra-persistence unlock --passphrase-file /run/antumbra-vm-key 2>&1; echo rc=$?; "
+               "rm -f /run/antumbra-vm-key; findmnt -no SOURCE /var/lib/antumbra/persistence", timeout=int(T(900)))
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check("persistence: unlocking the volume already open needs the passphrase all the same (a wrong one refused, the right one taken)",
+              lines[-5:] == ["antumbra-persistence: wrong passphrase", "rc=1", "Persistent Storage unlocked", "rc=0", "/dev/mapper/antumbra_data"],
+              o.replace("\n", " | ")[-300:])
     welcome_phase(vm, rep, T, sh, out, False)
     if create:
         rc, o = sh(f"runuser -u amnesia -- sh -c 'echo antumbra-vm-run1 > {PERSISTENT_MARK}' && sync && "

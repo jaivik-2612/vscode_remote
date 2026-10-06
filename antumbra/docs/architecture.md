@@ -657,20 +657,31 @@ answers once.
    can neither point root at another file nor swap one after the check.
    Then it unlocks or creates Persistent Storage and activates its
    features; copies this boot's settings to `settings/applied/`
-   (root-owned); with Persistent Storage, saves them on the volume (the
+   (root-owned); sets the user's password with `chpasswd -e` or deletes
+   it; installs the sudoers and polkit admin rules when asked; turns
+   Android apps on when asked; with Persistent Storage, saves this boot's
+   settings on the volume, last, once nothing else can fail (the
    "Welcome settings" feature, owned by the greeter user: whatever the
    greeter left under each name is renamed out to a root-only directory
    on the volume and removed there, and each copy is made there, already
    the greeter's and 0640, then renamed in, so that root never changes a
-   mode or owner, or follows a link, in the greeter's directory); sets the
-   user's password with `chpasswd -e` or deletes it; installs the sudoers
-   and polkit admin rules when asked; writes the marker; runs
-   `antumbra-unblock-network`. On a failure (a wrong passphrase, say, or
-   any command failing unexpectedly: an `ERR` trap) it removes
-   `welcome-done` and then writes `/run/antumbra/welcome-failed`, so
-   that its path unit does not start it again on settings it has already
-   consumed; the Welcome screen shows the error and writes everything
-   again on the next Start. The Welcome screen takes only a failure
+   mode or owner, or follows a link, in the greeter's directory); writes
+   the marker; runs `antumbra-unblock-network`. On a failure (a wrong
+   passphrase, say, or any command failing unexpectedly: an `ERR` trap)
+   it first locks Persistent Storage again if this attempt created or
+   unlocked it (`antumbra-persistence lock`): left open, the next attempt
+   would need no passphrase, and the volume's Welcome settings, still
+   mounted over the greeter's directory, would receive the next attempt's
+   files, the screen-lock passphrase's hash among them. If it cannot lock
+   it (a mount still in use), deactivating it, or a lazy unmount, has at
+   least taken the volume's settings off the greeter's directory, the
+   report says so, and `antumbra-persistence unlock` checks the
+   passphrase of a volume already open (`cryptsetup open
+   --test-passphrase`). Then it removes `welcome-done` and writes
+   `/run/antumbra/welcome-failed`, so that its path unit does not start
+   it again on settings it has already consumed; the Welcome screen shows
+   the error and writes everything again on the next Start. A failed
+   attempt saves nothing on the volume. The Welcome screen takes only a failure
    report other than the one there before it wrote (the earlier attempt's
    stays until the applier runs again), keeps Start insensitive until the
    applier answers, and writes nothing while `welcome-done` is still there
@@ -877,7 +888,14 @@ RAM. `config/hooks/56-session-android.sh` then:
    (`ExecStartPre=antumbra-waydroid --masks`), and stops with the
    container. The start-host hook looks for the same identifiers on its
    own and refuses to start the container if one that exists has no mask,
-   or if the command line bind or the device rules are missing. The
+   or if the command line bind or the device rules are missing. LXC skips
+   an optional mask it fails to mount and starts the container anyway, so
+   the hook also looks at each identifier as the container will see it,
+   through the container's root (`/proc/LXC_PID/root`: LXC has made its
+   mounts and switched to that root before it runs the hook), and refuses
+   the start unless each file there is `/dev/null` or reads empty and
+   each hidden directory is empty (an identifier inside a hidden
+   directory is not there at all). The
    container mounts a sysfs of its own network namespace, which has none
    of the host's network interfaces or Wi-Fi radios.
 3. In the session, `antumbra-android-session.path` starts `waydroid
@@ -922,7 +940,10 @@ Android apps: `~/.local/share/waydroid`, Android's apps and data), created
 by `antumbra-persistence enable android` the first time the user chooses
 "Keep Android apps and data" and mounted only in sessions with Android on
 and that choice made; only its top directory is chowned, so Android's
-own file owners survive. It also keeps Android's own usage history. Differences
+own file owners survive. It also keeps Android's own usage history.
+`unlock` asks for the passphrase even when the volume is open already
+(after an attempt at the Welcome screen that failed and could not lock it
+again): `cryptsetup open --test-passphrase`. Differences
 from Tails: no D-Bus service, no `nosymfollow` bind of `/` (roadmap), and
 OS updates currently erase the volume because they re-flash `userdata`.
 

@@ -47,17 +47,39 @@ SAVED_ON_VOLUME="${EXPORTED_PERSISTENT} antumbra.android"
 ANDROID_DIR=/usr/share/antumbra/android
 
 log() { logger -t antumbra-welcome -p daemon.info -- "$*" || true; echo "$*" >&2; }
+# Set from the moment this run creates or unlocks Persistent Storage until
+# the session may start (welcome-applied): a failure in between locks it again.
+LOCK_ON_FAILURE=
+# Set once this run has unlocked Persistent Storage itself.
+UNLOCKED_HERE=
 # On failure the welcome-done marker goes too: the path unit would otherwise
 # start this again at once, with the settings already consumed; the Welcome
 # screen shows the error and writes everything again on the next Start. The
 # marker goes first: once welcome-failed exists the Welcome screen lets the
 # user start again, and that new marker must stay. rm -r: whatever the
 # greeter left under that name (rm removes a link, never follows it).
+# Persistent Storage this run unlocked is locked again before that: left
+# open, the next attempt would get in with any passphrase (unlock does not
+# ask for one again), and with the volume's Welcome settings mounted over
+# the greeter's directory the Welcome screen would write that attempt's
+# files, the screen-lock passphrase's hash among them, onto the volume.
+# Should it not lock (a mount still in use), the volume's settings come off
+# the greeter's directory all the same (umount -l, if deactivating it did
+# not), and unlock checks the passphrase of a volume already open.
 fail() {
     trap - ERR
-    log "ERROR: $*"
+    local msg="$*"
+    log "ERROR: ${msg}"
+    if [ -n "${LOCK_ON_FAILURE}" ]; then
+        if [ -d "${VOLUME_STAGE}" ] && [ ! -L "${VOLUME_STAGE}" ]; then rm -rf -- "${VOLUME_STAGE}" || true; fi
+        if ! antumbra-persistence lock >&2; then
+            msg="${msg}; Persistent Storage could not be locked again"
+            log "ERROR: Persistent Storage could not be locked again"
+        fi
+        if mountpoint -q "${PERSISTENT}"; then umount -l "${PERSISTENT}" || true; fi
+    fi
     rm -rf -- "${TRANSIENT}/welcome-done" || true
-    printf '%s\n' "$*" > "${FAILED}" || true
+    printf '%s\n' "${msg}" > "${FAILED}" || true
     exit 1
 }
 trap 'fail "unexpected error (line ${LINENO}, exit status $?)"' ERR
@@ -134,14 +156,26 @@ activate_persistence() {
 case "${PERS_MODE:-none}" in
     create)
         [ -f "${PP}" ] || fail "no passphrase for creating Persistent Storage"
+        LOCK_ON_FAILURE=1
         antumbra-persistence create --passphrase-file "${PP}" || fail "creating Persistent Storage failed"
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "unlocking the new Persistent Storage failed"
         activate_persistence || fail "activating Persistent Storage failed"
+        UNLOCKED_HERE=1
         ;;
     unlock)
         [ -f "${PP}" ] || fail "no passphrase for unlocking Persistent Storage"
+        LOCK_ON_FAILURE=1
         antumbra-persistence unlock --passphrase-file "${PP}" || fail "wrong passphrase, or Persistent Storage is damaged"
         activate_persistence || fail "activating Persistent Storage failed"
+        UNLOCKED_HERE=1
+        ;;
+    none)
+        # Open here only if a failed attempt could not lock it again (its
+        # mapping in use, perhaps no longer mounted where the features came
+        # from): an amnesic session must not start with any of it in place.
+        if antumbra-persistence status --mapped 2>/dev/null; then
+            fail "Persistent Storage is still open from a failed attempt; restart to start without it"
+        fi
         ;;
 esac
 if [ -f "${PP}" ]; then shred -u "${PP}" 2>/dev/null || rm -f "${PP}"; fi
@@ -158,39 +192,6 @@ done
 for f in tails.network antumbra.android; do
     if [ -e "${APPLIED}/${f}" ]; then chmod 0644 "${APPLIED}/${f}"; fi
 done
-# "Welcome settings" feature: this boot's settings replace the stored ones,
-# and no screen-lock passphrase hash stays there. The directory is the
-# greeter user's, so root only renames in it: whatever the greeter left
-# under each name (a file, a link, a directory) is moved out to
-# ${VOLUME_STAGE} and removed there, and each copy is made there, already
-# the greeter's and 0640, then moved in. A rename never follows a link, so
-# nothing root does lands outside the directory. Saving is best effort.
-save_on_volume() {
-    local f="$1"
-    if [ -e "${VOLUME_SETTINGS}/${f}" ] || [ -L "${VOLUME_SETTINGS}/${f}" ]; then
-        mv -fT -- "${VOLUME_SETTINGS}/${f}" "${VOLUME_STAGE}/old.${f}" || return 1
-        rm -rf -- "${VOLUME_STAGE:?}/old.${f}" || return 1
-    fi
-    case " ${SAVED_ON_VOLUME} " in *" ${f} "*) ;; *) return 0 ;; esac
-    [ -f "${STAGE}/${f}" ] || return 0
-    install -m 0640 -o "${GREETER_USER}" -g "${GREETER_USER}" -- "${STAGE}/${f}" "${VOLUME_STAGE}/${f}" || return 1
-    mv -fT -- "${VOLUME_STAGE}/${f}" "${VOLUME_SETTINGS}/${f}"
-}
-if antumbra-persistence status --quiet 2>/dev/null && [ -d "${VOLUME_SETTINGS}" ]; then
-    if rm -rf -- "${VOLUME_STAGE}" && mkdir -m 0700 -- "${VOLUME_STAGE}"; then
-        for f in ${SAVED_ON_VOLUME} tails.password; do
-            save_on_volume "${f}" || log "could not save ${f} on Persistent Storage, or remove what was there"
-        done
-        rm -rf -- "${VOLUME_STAGE}" || true
-    else
-        log "could not save the Welcome settings on Persistent Storage"
-    fi
-fi
-# The staged copies (the screen-lock passphrase's hash among them) are not
-# needed past this point: remove them now rather than when the script exits,
-# which is after the network has come up. (Not cleanup: that also drops the
-# ERR trap, which must stay for the steps below.)
-drop_staged
 
 # --- Passphrase, administration -------------------------------------------------------------
 rm -f "${SUDOERS}" "${POLKIT}"
@@ -218,8 +219,48 @@ if [ "${ANDROID}" = "true" ]; then
     log "Android apps enabled for this session"
 fi
 
+# --- "Welcome settings" feature ------------------------------------------------------------
+# This boot's settings replace the stored ones, and no screen-lock
+# passphrase hash stays there. Saved last, once nothing else can fail, so
+# that an attempt that fails leaves the volume as it was. The directory is
+# the greeter user's, so root only renames in it: whatever the greeter left
+# under each name (a file, a link, a directory) is moved out to
+# ${VOLUME_STAGE} and removed there, and each copy is made there, already
+# the greeter's and 0640, then moved in. A rename never follows a link, so
+# nothing root does lands outside the directory. Saving is best effort.
+save_on_volume() {
+    local f="$1"
+    if [ -e "${VOLUME_SETTINGS}/${f}" ] || [ -L "${VOLUME_SETTINGS}/${f}" ]; then
+        mv -fT -- "${VOLUME_SETTINGS}/${f}" "${VOLUME_STAGE}/old.${f}" || return 1
+        rm -rf -- "${VOLUME_STAGE:?}/old.${f}" || return 1
+    fi
+    case " ${SAVED_ON_VOLUME} " in *" ${f} "*) ;; *) return 0 ;; esac
+    [ -f "${STAGE}/${f}" ] || return 0
+    install -m 0640 -o "${GREETER_USER}" -g "${GREETER_USER}" -- "${STAGE}/${f}" "${VOLUME_STAGE}/${f}" || return 1
+    mv -fT -- "${VOLUME_STAGE}/${f}" "${VOLUME_SETTINGS}/${f}"
+}
+# Only a volume this run unlocked: one left open by a failed attempt is not
+# the user's choice for this session.
+if [ -n "${UNLOCKED_HERE}" ] && antumbra-persistence status --quiet 2>/dev/null && [ -d "${VOLUME_SETTINGS}" ]; then
+    if rm -rf -- "${VOLUME_STAGE}" && mkdir -m 0700 -- "${VOLUME_STAGE}"; then
+        for f in ${SAVED_ON_VOLUME} tails.password; do
+            save_on_volume "${f}" || log "could not save ${f} on Persistent Storage, or remove what was there"
+        done
+        rm -rf -- "${VOLUME_STAGE}" || true
+    else
+        log "could not save the Welcome settings on Persistent Storage"
+    fi
+fi
+
+# The staged copies (the screen-lock passphrase's hash among them) are not
+# needed past this point: remove them now rather than when the script exits,
+# which is after the network has come up. (Not cleanup: that also drops the
+# ERR trap, which must stay for the steps below.)
+drop_staged
+
 # --- Network: unblock drivers (MAC spoofing fires per interface) ---------------------------
 touch "${MARKER}"
+LOCK_ON_FAILURE=
 /usr/local/lib/antumbra-unblock-network || log "network unblock reported an error (see journal)"
 rm -rf -- "${TRANSIENT}/welcome-done"
 log "welcome settings applied"

@@ -10,15 +10,17 @@ veth (10.200.1.1), config/rootfs/etc/nftables.conf loaded, and stand-ins
 for Tor's two listeners for Android: a TCP acceptor on 10.200.2.1:9041, and
 a DNS server on 10.200.2.1:5354 that, like Tor's AutomapHostsOnResolve,
 answers a .onion name with an address in 127.192.0.0/10. A second
-namespace on the bridge stands in for the container. The start-host hook
-runs for it as LXC runs it (LXC_PID one of its processes), then it runs
-android_probe_list of tests/vm/antumbra_vm.py, and judge_android_probes
-decides, as in the VM's --android-net run.
+namespace on the bridge stands in for the container, with a mount
+namespace where this machine's identifier masks are mounted as LXC mounts
+them. The start-host hook runs for it as LXC runs it (LXC_PID one of its
+processes), and must refuse stand-ins where a mask did not take effect;
+then it runs android_probe_list of tests/vm/antumbra_vm.py, and
+judge_android_probes decides, as in the VM's --android-net run.
 
 Run by tests/lint.sh. Needs unprivileged user namespaces, or root. Where the
 build host lacks something the lab itself needs (network or mount
-namespaces, a tmpfs, the bridge or veth driver, nftables or the reject
-expression the hook loads), it says what and exits 0: only the checks
+namespaces, a tmpfs, bind mounts over sysfs, the bridge or veth driver,
+nftables or the reject expression the hook loads), it says what and exits 0: only the checks
 themselves fail. --nft and --hook take other versions of the two files.
 """
 import argparse
@@ -34,7 +36,6 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -50,6 +51,32 @@ REJECT_PROBE = ("table ip antumbra_lab_probe { chain output { type filter hook o
 # The exit status of the hook's wrapper when its mount namespace could not
 # be set up (the hook itself exits 0 or 1).
 HOOK_SETUP_FAILED = 125
+# The stand-in container's namespaces as LXC leaves the container's before
+# the start-host hook: a network namespace, and a mount namespace with the
+# identifier masks mounted, /dev/null over each file and an empty read-only
+# tmpfs (OPTIONS) over each directory, as optional entries: one whose
+# target is not there (inside a directory hidden whole) is skipped. The
+# paths in LEAVE (space-separated) keep no mask, as when LXC fails to
+# mount one. Arguments: OPTIONS LEAVE, then kind and path pairs. It says
+# "ready" and goes on as the container's first process.
+STAND_IN_SH = r'''
+set -eu
+options="$1" leave=" $2 "
+shift 2
+while [ $# -gt 0 ]; do
+    kind="$1" path="$2"
+    shift 2
+    case "${leave}" in *" ${path} "*) continue ;; esac
+    [ -e "${path}" ] || continue
+    if [ "${kind}" = file ]; then
+        mount --bind /dev/null "${path}"
+    else
+        mount -t tmpfs -o "${options}" antumbra-lab-mask "${path}"
+    fi
+done
+echo ready
+exec sleep 600
+'''
 
 
 class Skip(Exception):
@@ -164,22 +191,29 @@ def checks(args, tmp, container):
         ruleset = ruleset.replace(f'"{user}"', str(uid))
     setup("nftables.conf does not load in this namespace (kernel modules?)", "nft", "-f", "-", stdin=ruleset)
     tor_stand_ins("127.198.154.224")
-    # The container: a process in a network namespace of its own on the bridge.
-    container.append(subprocess.Popen(["unshare", "-n", "sleep", "600"], env=dict(os.environ, PATH=PATH),
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True))
-    pid = container[0].pid
-    own = os.readlink("/proc/self/ns/net")
-    for _ in range(250):
-        if container[0].poll() is not None:
-            raise Skip(f"cannot create the container's network namespace (unshare -n): {container[0].stderr.read().strip()[:300]}")
-        try:
-            if os.readlink(f"/proc/{pid}/ns/net") != own:
-                break
-        except OSError:
-            pass
-        time.sleep(0.02)
-    else:
-        raise Skip("the container's network namespace did not appear")
+    # antumbra-waydroid's masks for this machine's hardware identifiers
+    # (which the hook finds on its own).
+    waydroid = load_antumbra_waydroid()
+    files, dirs = waydroid.identifier_paths()
+    masks = waydroid.mask_entries(files, dirs)
+    pairs = [a for p in files for a in ("file", p)] + [a for d in dirs for a in ("dir", d)]
+
+    def stand_in(leave=()):
+        """A stand-in container (STAND_IN_SH), every mask in place but those
+        of LEAVE; its first process's PID."""
+        p = subprocess.Popen(["unshare", "-n", "--mount", "--propagation", "private", "sh", "-c", STAND_IN_SH, "sh",
+                              waydroid.HIDE_OPTIONS, " ".join(leave), *pairs], env=dict(os.environ, PATH=PATH),
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        container.append(p)
+        if p.stdout.readline().strip() != "ready":
+            p.wait()
+            raise Skip("cannot create a stand-in container: network and mount namespaces with the identifier masks "
+                       f"(unshare -n --mount, mount --bind, mount -t tmpfs): {p.stderr.read().strip()[:300]}")
+        return p.pid
+
+    # The container: a process in a network namespace of its own on the
+    # bridge, its mount namespace with the masks in place.
+    pid = stand_in()
     ct = ("nsenter", "--target", str(pid), "--net")
     why = "cannot build the container's network"
     setup(why, "ip", "link", "add", "vethct", "type", "veth", "peer", "name", "eth0", "netns", str(pid))
@@ -192,16 +226,14 @@ def checks(args, tmp, container):
     setup(why, *ct, "ip", "route", "add", "default", "via", "10.200.2.1")
     # The start-host hook, as LXC runs it.
     # The configuration carries the identifier lines the hook also
-    # requires, with antumbra-waydroid's masks for this machine's
-    # hardware identifiers (which the hook finds on its own);
+    # requires, with antumbra-waydroid's masks;
     # the hook runs in a mount namespace of its own with a fresh /run
     # holding the image's generic kernel command line, where
     # antumbra-waydroid puts it.
     conf = os.path.join(tmp, "config")
-    masks = load_antumbra_waydroid().identifier_masks()
     generic = os.path.join(ROOT, "config", "rootfs-android", "usr", "share", "antumbra", "android", "cmdline")
 
-    def start_host(masks):
+    def start_host(masks, pid=pid):
         write(conf, "".join(l + "\n" for l in [
             "lxc.net.0.type = veth", "lxc.net.0.link = waydroid-tor",
             "lxc.mount.entry = /run/antumbra/android-cmdline proc/cmdline none bind,create=file 0 0",
@@ -225,6 +257,17 @@ def checks(args, tmp, container):
         results.append((f"lab: the start-host hook refuses a configuration without the mask of {masks[0].split()[3]}",
                         hook.returncode != 0 and "is not masked in the container" in hook.stderr,
                         f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l)))
+    # The configuration whole, but a mask not in place in the container's
+    # mount namespace (LXC skips an optional mask it fails to mount): a
+    # file's, and a directory's if this machine has one to hide. Not one
+    # inside a directory hidden whole: no mask can be mounted there.
+    for kind, paths in (("file", files), ("directory", dirs)):
+        left = [p for p in paths if not any(p.startswith(d + "/") for d in dirs)][:1]
+        if left:
+            hook = start_host(masks, pid=stand_in(left))
+            results.append((f"lab: the start-host hook refuses a container where the mask of a {kind} ({left[0]}) did not take effect",
+                            hook.returncode != 0 and f"{left[0]} is readable in the container: its mask did not take effect" in hook.stderr,
+                            f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l)))
     hook = start_host(masks)
     results.append((f"lab: the start-host hook passes for the stand-in container ({len(masks)} identifier masks)", hook.returncode == 0,
                     f"exit {hook.returncode} " + " ".join(l for l in hook.stderr.splitlines() if "refused" in l)))
