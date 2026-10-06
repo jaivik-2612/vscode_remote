@@ -1701,7 +1701,7 @@ def android_phase(vm, rep, T, sh, out):
     rc, o = sh(f"{in_android('/system/bin/ls -A /sys/firmware')} | wc -l; "
                f"{in_android('/system/bin/cat /proc/device-tree/model')} >/dev/null && echo model-readable || echo model-hidden")
     rep.check("android: /sys/firmware and /proc/device-tree are hidden from Android", rc == 0 and o.strip().split("\n") == ["0", "model-hidden"], o.replace("\n", " "))
-    android_identifier_checks(rep, sh)
+    android_identifier_checks(rep, T, sh)
     rc, o = sh(f"{in_android('/system/bin/ip -4 -o addr show eth0')}; {in_android('/system/bin/ip route show table all')} | grep -c '^default via 10.200.2.1 '; "
                "cat /var/lib/misc/dnsmasq.waydroid0.leases")
     rep.check("android: the container got 10.200.2.2 from the bridge's DHCP, default route via 10.200.2.1",
@@ -2086,14 +2086,14 @@ def android_boot_modes(rep, sh, out):
               rc == 0 and lines[-1:] == ["end"] and any(l.startswith("/dev/binder ") for l in lines), o.replace("\n", " | "))
 
 
-def android_identifier_checks(rep, sh):
+def android_identifier_checks(rep, T, sh):
     """With Android booted: no hardware identifier reaches it, and it has
     every device but cameras."""
     inside = ("printf 'cmdline=[%s]\\nserialno=[%s]\\nbootserial=[%s]\\n' \"$(cat /proc/cmdline)\" "
               "\"$(getprop ro.serialno)\" \"$(getprop ro.boot.serialno)\"")
     rc, o = sh(f"tr ' ' '\\n' < /proc/cmdline | grep -cx 'androidboot.serialno={TEST_SERIAL}'; "
                "printf 'generic=[%s]\\n' \"$(cat /run/antumbra/android-cmdline)\"; "
-               + in_android(f"/system/bin/sh -c {sh_quote(inside)}"), timeout=180)
+               + in_android(f"/system/bin/sh -c {sh_quote(inside)}"), timeout=T(180))
     f = dict(re.findall(r"^(\w+)=\[(.*)\]$", o, re.M)) if rc == 0 else {}
     rep.check("android: Android sees the generic kernel command line, not the host's with its serial number, and no serial property",
               rc == 0 and o.startswith("1\n") and "cmdline" in f and f.get("cmdline") == f.get("generic")
@@ -2102,7 +2102,7 @@ def android_identifier_checks(rep, sh):
     cat_f = in_android('/system/bin/cat "$f"', errors=True)
     rc, o = sh(f"for f in $({IDENTIFIER_FIND}); do printf '%s host=[%s] android=[%s]\\n' \"$f\" "
                "\"$(head -c 64 \"$f\" | tr -cd '[:alnum:]')\" "
-               f"\"$({cat_f} | head -c 64 | tr -cd '[:alnum:]')\"; done; echo end", timeout=300)
+               f"\"$({cat_f} | head -c 64 | tr -cd '[:alnum:]')\"; done; echo end", timeout=T(300))
     lines = o.strip().split("\n") if rc == 0 else []
     files = [l for l in lines if " host=[" in l]
     rep.check("android: every hardware identifier file in sysfs reads empty in Android (serial numbers, the disk's included; "
@@ -2120,7 +2120,7 @@ def android_identifier_checks(rep, sh):
                "printf 'dir %s host=[%s] android=[%s]\\n' \"$f\" \"$(ls -A \"$f\" | wc -l)\" "
                f"\"$({ls_f} | wc -l)\"; done; "
                "f=/proc/driver/rtc; printf 'proc %s host=[%s] android=[%s]\\n' \"$f\" \"$(wc -c < \"$f\")\" "
-               f"\"$({cat_f} | wc -c)\"; echo end", timeout=300)
+               f"\"$({cat_f} | wc -c)\"; echo end", timeout=T(300))
     lines = o.strip().split("\n") if rc == 0 else []
     uevents = [l for l in lines if l.startswith("uevent ")]
     dirs = [l for l in lines if l.startswith("dir ")]
@@ -2140,7 +2140,7 @@ def android_identifier_checks(rep, sh):
     inside = ("cat /sys/class/net/*/address; for p in /sys/class/ieee80211/*; do if [ -e \"$p\" ]; then echo wiphy=$p; fi; done; "
               "echo eth0=$(cat /sys/class/net/eth0/address); echo end")
     rc, o = sh("cat /sys/class/net/*/address | sort -u; echo ---; " + in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True),
-               timeout=120)
+               timeout=T(120))
     host, _, inside = o.partition("---")
     host_macs = {m for m in re.findall(r"^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$", host, re.M) if m != "00:00:00:00:00:00"}
     inside_lines = inside.strip().split("\n")
@@ -2150,7 +2150,7 @@ def android_identifier_checks(rep, sh):
               f"host {sorted(host_macs)}; android {inside_lines}"[:400])
     inside = ("if cat /dev/null; then echo null=ok; fi; mknod /dev/antumbra-v4l-test c 81 0 2>&1; "
               "cat /dev/antumbra-v4l-test 2>&1; rm -f /dev/antumbra-v4l-test; echo end")
-    rc, o = sh(in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True), timeout=120)
+    rc, o = sh(in_android(f"/system/bin/sh -c {sh_quote(inside)}", errors=True), timeout=T(120))
     rep.check("android: the container opens /dev/null but no V4L2 device (the device cgroup's deny list)",
               rc == 0 and "null=ok" in o.split("\n") and "Operation not permitted" in o and o.strip().endswith("end"),
               o.replace("\n", " | ")[:300])
@@ -2376,11 +2376,12 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
     out = os.path.join(vm.run, "smoke")
     os.makedirs(out, exist_ok=True)
 
-    def sh(cmd, timeout=120):
+    def sh(cmd, timeout=None):
         """(exit code, output); on a console failure (None, "") and a FAIL of its own,
-        so that no check can mistake an error message for output."""
+        so that no check can mistake an error message for output. Without a
+        timeout of its own, a command gets 120 seconds times the timeout scale."""
         try:
-            return vm.console.run(cmd, timeout=timeout)
+            return vm.console.run(cmd, timeout=T(120) if timeout is None else timeout)
         except Exception as e:  # noqa: BLE001
             # A timed-out command is still running in the guest's shell:
             # interrupt it, so that one slow command does not fail every
