@@ -141,11 +141,11 @@ permission. It is not an access control either:
   every client that is not a Flatpak access to all nodes, the camera nodes
   included;
 - the camera portal itself: once the session's one decision for host
-  programs is "allow" (a single tap on Allow, for Snapshot or for any
-  other program), every host program that asks the portal over the session
-  bus (`org.freedesktop.portal.Camera`: `AccessCamera`, then
-  `OpenPipeWireRemote`) gets a connected PipeWire file descriptor for the
-  cameras, without a prompt, for the rest of the session. The decision is
+  programs is Allow (stored as `yes`; a single tap on Allow, for Snapshot
+  or for any other program), every host program that asks the portal
+  over the session bus (`org.freedesktop.portal.Camera`: `AccessCamera`,
+  then `OpenPipeWireRemote`) gets a connected PipeWire file descriptor for
+  the cameras, without a prompt, for the rest of the session. The decision is
   kept in the portal's permission store
   (`org.freedesktop.impl.portal.PermissionStore`), which any program on
   the session bus can write, so a program can also give itself access

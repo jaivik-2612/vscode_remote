@@ -83,8 +83,9 @@ could not be confirmed from a primary source.
 
 - Tails 7.x is itself Debian 13 based (Tails 7.0, 2025-09-18; 7.14 on
   2026-09-30 with tor 0.4.9.13, Linux 6.12.111).
-- 128 of 128 package names Antumbra uses exist in trixie arm64, those of
-  Waydroid and its gbinder libraries in trixie-backports only
+- All 128 package names Antumbra uses exist for arm64 in trixie or its
+  backports: four of them (`waydroid`, `python3-gbinder`, `libgbinder1`,
+  `libglibutil1`) only in trixie-backports, the rest in trixie itself
   (`tests/check-packages.sh`). Notable versions: phosh 0.46.0, greetd
   0.10.3, tor 0.4.9.11, nftables 1.1.3, live-boot 1:20250815, apparmor
   4.1.0, qbootctl 0.2.2, rmtfs/tqftpserv/qrtr-tools/libqmi-utils present,

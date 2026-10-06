@@ -35,8 +35,8 @@ the pop-up motor, the cameras and Android apps.
   disables; mainline offers no free-fall sensor either. Do not keep the
   selfie camera open while walking, and do not push a raised camera down
   by hand: the driver reads the Hall sensors only for a course, for its
-  `status` file, around sleep, at boot and at power-off, so it does not
-  follow a push, and the push loads the idle gear train.
+  `status` file, around sleep, at boot and at power-off or reboot, so it
+  does not follow a push, and the push loads the idle gear train.
 - The front camera rises whenever the front sensor is powered, which makes
   it a physical indicator for that camera only. It is not a boundary
   against root, it can lag a few hundred milliseconds behind around

@@ -93,8 +93,9 @@ config/rootfs/          files installed over the Debian root filesystem
 config/rootfs-android/  the Android-only part of those, installed only with ANTUMBRA_ANDROID=1
 config/hooks/           scripts run inside the root filesystem at build time
 config/packages/        package lists
-tests/                  lint harness, package checker, unit tests, VM smoke test, pop-up motor
-                        model and sleep test, Android network lab, OnePlus camera scanner
+tests/                  lint harness, package checker, unit tests, Welcome screen self-test, VM smoke
+                        test, pop-up motor model and sleep test, Android network lab, OnePlus camera
+                        scanner
 vendor/tails/           the Tails sources this derives from, with provenance
 docs/
 ```
