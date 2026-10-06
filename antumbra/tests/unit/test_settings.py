@@ -146,6 +146,28 @@ class BridgesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^Unsupported bridge type: conjure\\."):
             S.bridge_lines(["conjure 192.0.2.9:80 0123456789ABCDEF0123456789ABCDEF01234567"])
 
+    def test_ipv6_bridges(self):
+        # Tor connects to a plain bridge's address, lyrebird to an obfs2,
+        # obfs3 or obfs4 bridge's: with IPv6 off these are refused, saying
+        # which address. bridges.torproject.org gives such lines when asked
+        # for IPv6 bridges.
+        fp = "0123456789ABCDEF0123456789ABCDEF01234567"
+        for line, address in ((f"[2001:db8::5]:443 {fp}", "[2001:db8::5]:443"),
+                              (f"2001:db8::5 {fp}", "2001:db8::5"),
+                              (f"Bridge obfs4 [2001:db8::5]:443 {fp} cert=x iat-mode=0", "[2001:db8::5]:443"),
+                              (f"obfs3 [2001:db8::6]:80 {fp}", "[2001:db8::6]:80"),
+                              (f"obfs2 [::ffff:192.0.2.4]:443 {fp}", "[::ffff:192.0.2.4]:443")):
+            with self.subTest(line), self.assertRaises(ValueError) as cm:
+                S.bridge_lines([OBFS4, line])
+            self.assertEqual(str(cm.exception), S.IPV6_REFUSED.format(address=address))
+            self.assertTrue(str(cm.exception).startswith(f"{address} is an IPv6 address."))
+        # webtunnel and meek_lite connect to the server their arguments
+        # name; their address is a placeholder, an IPv6 one in the
+        # webtunnel lines bridges.torproject.org gives.
+        meek6 = MEEK.replace("192.0.2.18:80", "[2001:db8::2]:80")
+        self.assertEqual(S.bridge_lines([WEBTUNNEL, meek6, f"192.0.2.7:9001 {fp}", f"192.0.2.8 {fp}"]),
+                         [WEBTUNNEL, meek6, f"192.0.2.7:9001 {fp}", f"192.0.2.8 {fp}"])
+
     def test_the_welcome_screen_uses_them(self):
         with open(WELCOME, encoding="utf-8") as f:
             source = f.read()

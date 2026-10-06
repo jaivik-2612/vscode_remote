@@ -5,7 +5,7 @@ cannot write /etc/tor) and which made every 'direct' and 'bridges' exit
 with an error after the settings had taken effect. Every bridge transport
 it accepts has a pluggable transport in Tor's configuration
 (tor-pt-configuration-helper), and snowflake, which the firewall cannot
-carry, is refused saying why."""
+carry, is refused saying why, as is a bridge reached at an IPv6 address."""
 import importlib.machinery
 import importlib.util
 import io
@@ -21,6 +21,7 @@ ROOTFS = os.path.join(HERE, "..", "..", "config", "rootfs")
 SCRIPT = os.path.join(ROOTFS, "usr", "local", "sbin", "antumbra-tor-connect")
 HELPER = os.path.join(ROOTFS, "usr", "local", "lib", "tor-pt-configuration-helper")
 NFTABLES = os.path.join(ROOTFS, "etc", "nftables.conf")
+SYSCTL_IPV6 = os.path.join(ROOTFS, "etc", "sysctl.d", "disable_ipv6.conf")
 TOR_BROWSER_HOOK = os.path.join(HERE, "..", "..", "config", "hooks", "54-session-tor-browser.sh")
 sys.path.insert(0, os.path.join(ROOTFS, "usr", "lib", "python3", "dist-packages"))
 from antumbra import settings as S  # noqa: E402
@@ -159,6 +160,25 @@ class TorConnectTest(unittest.TestCase):
         self.assertEqual(rules, [
             'meta skuid "debian-tor" meta nfproto ipv4 tcp flags & (fin|syn|rst|ack) == syn ct state new accept',
             'meta skuid "debian-tor" meta nfproto ipv4 udp dport 53 accept'])
+
+    def test_ipv6_bridges_are_refused_saying_why(self):
+        line = "obfs4 [2001:db8::5]:443 0123456789ABCDEF0123456789ABCDEF01234567 cert=x iat-mode=0"
+        self.assertEqual(self.refused(f"{OBFS4}\nBridge {line}\n"), S.IPV6_REFUSED.format(address="[2001:db8::5]:443"))
+        # webtunnel's address is a placeholder: accepted
+        self.assertEqual(self.bridges(EXAMPLES["webtunnel"] + "\n"), ([EXAMPLES["webtunnel"]], ["0"]))
+
+    def test_ipv6_refusal_matches_the_system(self):
+        # The reason given holds while IPv6 is off on every interface but
+        # the loopback, and Tor's user may connect only over IPv4.
+        with open(SYSCTL_IPV6, encoding="utf-8") as f:
+            sysctl = dict(l.replace(" ", "").strip().split("=", 1) for l in f if "=" in l and not l.startswith("#"))
+        self.assertEqual(sysctl.get("net.ipv6.conf.all.disable_ipv6"), "1")
+        self.assertEqual(sysctl.get("net.ipv6.conf.default.disable_ipv6"), "1")
+        with open(NFTABLES, encoding="utf-8") as f:
+            rules = [l.strip() for l in f if 'skuid "debian-tor"' in l]
+        self.assertTrue(rules)
+        for rule in rules:
+            self.assertIn("meta nfproto ipv4", rule)
 
     def test_unknown_transports_are_refused(self):
         msg = self.refused("conjure 192.0.2.9:80 0123456789ABCDEF0123456789ABCDEF01234567\n")
