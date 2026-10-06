@@ -1995,7 +1995,7 @@ while read -r src dst opts; do
 done <<EOF
 ${masks}
 EOF
-sleep 1800 </dev/null >/dev/null 2>&1 &
+sleep 1800 >/dev/null 2>&1 &
 echo $!
 '''
 DEVICE_MODES = ("for n in /dev/binder /dev/hwbinder /dev/vndbinder /dev/dri/renderD* /dev/fb* /dev/dma_heap/*; do "

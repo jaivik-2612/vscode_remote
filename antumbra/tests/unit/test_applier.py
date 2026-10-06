@@ -74,6 +74,7 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+# shellcheck disable=SC2086 # the arguments, split again
 set -- ${args}
 case "${action}" in
     isLuks) [ -f "${VOL}.key" ] ;;
@@ -86,7 +87,7 @@ case "${action}" in
         if [ -e "/run/test/mapper/$2" ]; then echo "Device $2 already exists." >&2; exit 5; fi
         mkdir -p /run/test/mapper; : > "/run/test/mapper/$2" ;;
     close)
-        while IFS='|' read -r name src dest rest; do
+        while IFS='|' read -r name _src dest _rest; do
             case "${name}" in ''|'#'*) continue ;; esac
             if mountpoint -q "${dest}"; then echo "Device $1 is still in use." >&2; exit 5; fi
         done < /etc/antumbra/persistence-features.conf
@@ -99,7 +100,7 @@ esac
 MKFS_STUB = r"""#!/bin/sh
 set -eu
 for last in "$@"; do :; done
-[ "${last}" = @MAPPING@ ] && [ -e "${last}" ] || { echo "mkfs.ext4 (test): no device ${last}" >&2; exit 1; }
+if [ "${last}" != @MAPPING@ ] || [ ! -e "${last}" ]; then echo "mkfs.ext4 (test): no device ${last}" >&2; exit 1; fi
 rm -rf @VOL@
 mkdir @VOL@
 """
