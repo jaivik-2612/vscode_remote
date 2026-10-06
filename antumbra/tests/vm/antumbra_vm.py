@@ -650,8 +650,9 @@ def traffic_checks(vm, rep, T, sh, label, polls):
     # flow the firewall allows, as in Tails. (Sockets on 10.200.1.0/24 and
     # 10.200.2.0/30 are the confined applications' and Android's connections
     # to Tor's own listeners on this machine.)
-    dhcp = [l for l in socks if l.startswith("udp") and re.search(r":68\s+\S+:67\s", l)
-            and ('(("NetworkManager"' in l or re.search(r"\buid:0\b", l))]
+    # ss -e prints no uid: field for root's sockets (uid 0).
+    dhcp = [l for l in socks if l.startswith("udp") and re.search(r":68\s+\S+:67(\s|$)", l)
+            and ('(("NetworkManager"' in l or re.search(r"\buid:0\b", l) or not re.search(r"\buid:\d+\b", l))]
     tor_peers = {peer(l) for l in socks if tor_owned(l)} - {None}
     # A TIME-WAIT socket has no owner left; it is Tor's if its peer is.
     timewait = [l for l in socks if l.split()[1:2] == ["TIME-WAIT"] and peer(l) in (tor_peers | builtin | vm.tor_syns)]
