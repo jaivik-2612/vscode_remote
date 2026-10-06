@@ -5,12 +5,16 @@ namespace (needs root: in CI under sudo; skipped otherwise).
 Inside the namespace /etc, /usr and /var are overlays of the host's (writes
 land in a tmpfs), /run and /home are empty tmpfs mounts, and the image's
 users exist. The greeter's files are written by the Welcome screen's own
-settings module, owned by the greeter user. Stand-ins: the LUKS layer of
-antumbra-persistence (the volume is a directory, its passphrase a file;
-enable, activate and deactivate are the real script), the network unblock,
-systemctl and logger. chpasswd, passwd, install and stat are the host's.
+settings module, owned by the greeter user. antumbra-persistence is the
+real script, its partition and device-mapper paths moved into /run/test;
+below it, stand-ins for the LUKS layer: cryptsetup (the volume is a
+directory, its passphrase a file, an open mapping a file), mkfs.ext4, and
+mount for the mapping (a bind of the directory). Stand-ins too: the
+network unblock, systemctl and logger. chpasswd, passwd, install and stat
+are the host's.
 
-ANTUMBRA_TEST_APPLIER=PATH runs another copy of the applier (to show what
+ANTUMBRA_TEST_APPLIER=PATH runs another copy of the applier, and
+ANTUMBRA_TEST_PERSISTENCE=PATH another antumbra-persistence (to show what
 an older one does).
 """
 import json
@@ -27,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 OVERLAY = os.path.join(ROOT, "config", "rootfs")
 APPLIER = os.environ.get("ANTUMBRA_TEST_APPLIER") or os.path.join(OVERLAY, "usr", "local", "lib", "antumbra-apply-welcome-settings")
-PERSISTENCE = os.path.join(OVERLAY, "usr", "local", "sbin", "antumbra-persistence")
+PERSISTENCE = os.environ.get("ANTUMBRA_TEST_PERSISTENCE") or os.path.join(OVERLAY, "usr", "local", "sbin", "antumbra-persistence")
 FEATURES = os.path.join(OVERLAY, "etc", "antumbra", "persistence-features.conf")
 HOOK56 = os.path.join(ROOT, "config", "hooks", "56-session-android.sh")
 sys.path.insert(0, os.path.join(OVERLAY, "usr", "lib", "python3", "dist-packages"))
@@ -38,29 +42,87 @@ SECRET = "/etc/antumbra-test-root-only"
 SECRET_TEXT = "root-only secret\n"
 USERS = {"amnesia": 61910, "antumbra-greeter": 61911}
 
-PERSISTENCE_STUB = r"""#!/bin/sh
-# Test stand-in for antumbra-persistence: the LUKS volume is the directory
-# VOL, its passphrase the file VOL.key; enable/activate/deactivate are the
-# real script.
+# antumbra-persistence: the real script (antumbra-persistence.real), each
+# call logged.
+PERSISTENCE_LOGGER = r"""#!/bin/sh
+echo "$*" >> /run/test/persistence.log
+exec /usr/local/lib/antumbra-persistence.real "$@"
+"""
+# Where the real script's partition and device-mapper paths are moved.
+PART_LINE = ("PART=/dev/disk/by-partlabel/ANTUMBRA_DATA", "PART=/run/test/ANTUMBRA_DATA")
+MAPPER_DIR = ("/dev/mapper/", "/run/test/mapper/")
+MAPPING = "/run/test/mapper/antumbra_data"
+# The LUKS layer below it. The volume's file system is the directory VOL,
+# its passphrase the file VOL.key; an open mapping is a file in
+# /run/test/mapper, which cannot be closed while its file system is still
+# mounted (on the volume's mount point or a feature's).
+CRYPTSETUP_STUB = r"""#!/bin/sh
 set -eu
 VOL=@VOL@
-MNT=/var/lib/antumbra/persistence
-echo "$*" >> /run/test/persistence.log
-case "$1" in
-    create)
-        [ "$2" = --passphrase-file ] && [ -s "$3" ] || exit 2
-        rm -rf "${VOL}"; mkdir -p "${VOL}"; cat "$3" > "${VOL}.key"
-        while IFS='|' read -r name src dest owner mode default; do
+echo "$*" >> /run/test/cryptsetup.log
+action="$1"
+shift
+key="" test="" args=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --key-file) key="$2"; shift ;;
+        --test-passphrase) test=1 ;;
+        --batch-mode) ;;
+        --type|--label|--pbkdf|--pbkdf-memory|--pbkdf-force-iterations) shift ;;
+        -*) echo "cryptsetup (test): unknown option $1" >&2; exit 2 ;;
+        *) args="${args} $1" ;;
+    esac
+    shift
+done
+set -- ${args}
+case "${action}" in
+    isLuks) [ -f "${VOL}.key" ] ;;
+    luksFormat) cat "${key}" > "${VOL}.key" ;;
+    open)
+        if [ ! -f "${VOL}.key" ] || ! cmp -s "${key}" "${VOL}.key"; then
+            echo "No key available with this passphrase." >&2; exit 2
+        fi
+        [ -z "${test}" ] || exit 0
+        if [ -e "/run/test/mapper/$2" ]; then echo "Device $2 already exists." >&2; exit 5; fi
+        mkdir -p /run/test/mapper; : > "/run/test/mapper/$2" ;;
+    close)
+        while IFS='|' read -r name src dest rest; do
             case "${name}" in ''|'#'*) continue ;; esac
-            [ "${default}" != off ] || continue
-            mkdir -p "${VOL}/${src}"; chown "${owner}" "${VOL}/${src}"; chmod "${mode}" "${VOL}/${src}"
-        done < /etc/antumbra/persistence-features.conf ;;
-    unlock)
-        [ "$2" = --passphrase-file ] && [ -f "${VOL}.key" ] && cmp -s "$3" "${VOL}.key" || exit 1
-        mkdir -p "${MNT}"; mountpoint -q "${MNT}" || mount --bind "${VOL}" "${MNT}" ;;
-    status) mountpoint -q "${MNT}" ;;
-    *) exec /usr/local/lib/antumbra-persistence.real "$@" ;;
+            if mountpoint -q "${dest}"; then echo "Device $1 is still in use." >&2; exit 5; fi
+        done < /etc/antumbra/persistence-features.conf
+        if mountpoint -q /var/lib/antumbra/persistence; then echo "Device $1 is still in use." >&2; exit 5; fi
+        rm "/run/test/mapper/$1" ;;
+    *) echo "cryptsetup (test): unexpected ${action}" >&2; exit 2 ;;
 esac
+"""
+# A new file system on the open mapping: VOL emptied.
+MKFS_STUB = r"""#!/bin/sh
+set -eu
+for last in "$@"; do :; done
+[ "${last}" = @MAPPING@ ] && [ -e "${last}" ] || { echo "mkfs.ext4 (test): no device ${last}" >&2; exit 1; }
+rm -rf @VOL@
+mkdir @VOL@
+"""
+# Mounting the open mapping binds VOL; anything else is the real mount.
+MOUNT_STUB = r"""#!/bin/sh
+for last in "$@"; do :; done
+case " $* " in
+    *" @MAPPING@ "*)
+        [ -e @MAPPING@ ] || { echo "mount (test): @MAPPING@ does not exist" >&2; exit 32; }
+        exec @MOUNT@ --bind @VOL@ "${last}" ;;
+esac
+exec @MOUNT@ "$@"
+"""
+# umount: while /run/test/settings-busy exists, the Welcome settings'
+# mount point is busy (only a lazy unmount takes it off).
+UMOUNT_STUB = r"""#!/bin/sh
+if [ -e /run/test/settings-busy ]; then
+    case " $* " in
+        *" -l "*) ;;
+        *" /var/lib/antumbra/settings/persistent "*) echo "umount: /var/lib/antumbra/settings/persistent: target is busy." >&2; exit 32 ;;
+    esac
+fi
+exec @UMOUNT@ "$@"
 """
 RECORDER = """#!/bin/sh
 echo "$*" >> /run/test/{name}.log
@@ -211,9 +273,27 @@ def inner(spec_path, out_path):
 
     # The applier, antumbra-persistence (the real one behind the stand-in), stand-ins
     vol = os.path.join(scratch, "volume")
+    persistence = sources["persistence"]
+    for old, new in (PART_LINE, MAPPER_DIR):
+        if old not in persistence:
+            raise SystemExit(f"antumbra-persistence no longer has {old}: update the test's LUKS stand-ins")
+        persistence = persistence.replace(old, new)
+    luks = {"@VOL@": vol, "@MAPPING@": MAPPING, "@MOUNT@": shutil.which("mount", path="/usr/sbin:/usr/bin:/sbin:/bin"),
+            "@UMOUNT@": shutil.which("umount", path="/usr/sbin:/usr/bin:/sbin:/bin")}
+
+    def fill(text):
+        for k, v in luks.items():
+            text = text.replace(k, v)
+        return text
+
     write("/usr/local/lib/antumbra-apply-welcome-settings", sources["applier"], 0o755)
-    write("/usr/local/lib/antumbra-persistence.real", sources["persistence"], 0o755)
-    write("/usr/local/sbin/antumbra-persistence", PERSISTENCE_STUB.replace("@VOL@", vol), 0o755)
+    write("/usr/local/lib/antumbra-persistence.real", persistence, 0o755)
+    write("/usr/local/sbin/antumbra-persistence", PERSISTENCE_LOGGER, 0o755)
+    for name, text in (("cryptsetup", CRYPTSETUP_STUB), ("mkfs.ext4", MKFS_STUB), ("mount", MOUNT_STUB), ("umount", UMOUNT_STUB)):
+        write(f"/usr/local/sbin/{name}", fill(text), 0o755)
+    write(PART_LINE[1].split("=", 1)[1], "", 0o600)     # the partition
+    if spec.get("settings_busy"):
+        write("/run/test/settings-busy", "")
     write("/usr/local/lib/antumbra-unblock-network", RECORDER.format(name="unblock"), 0o755)
     write("/usr/bin/systemctl", RECORDER.format(name="systemctl"), 0o755)
     write("/usr/bin/logger", RECORDER.format(name="logger"), 0o755)
@@ -253,17 +333,22 @@ def inner(spec_path, out_path):
             write(os.path.join(vol, "welcome-settings", name, "inside"), "x\n", 0o640, greeter, greeter)
             os.chown(os.path.join(vol, "welcome-settings", name), greeter, greeter)
 
-    # What the Welcome screen writes, as the greeter user
-    m = S.WelcomeSettings()
-    for k, val in spec["settings"].items():
-        setattr(m, k, val)
-    tmp = tempfile.mkdtemp(dir=scratch)
-    m.write(tmp)
-    for d in ("persistent", "transient"):
-        for n in os.listdir(os.path.join(tmp, d)):
-            dst = f"{SETTINGS}/{d}/{n}"
-            shutil.copy2(os.path.join(tmp, d, n), dst)
-            os.chown(dst, greeter, greeter)
+    def greeter_writes(settings):
+        """What the Welcome screen writes, as the greeter user, into its
+        directories (wherever they are now); the directory it wrote first."""
+        m = S.WelcomeSettings()
+        for k, val in settings.items():
+            setattr(m, k, val)
+        tmp = tempfile.mkdtemp(dir=scratch)
+        m.write(tmp)
+        for d in ("persistent", "transient"):
+            for n in os.listdir(os.path.join(tmp, d)):
+                dst = f"{SETTINGS}/{d}/{n}"
+                shutil.copy2(os.path.join(tmp, d, n), dst)
+                os.chown(dst, greeter, greeter)
+        return tmp
+
+    tmp = greeter_writes(spec["settings"])
     for rel in spec.get("remove", []):
         os.unlink(f"{SETTINGS}/{rel}")
     for rel in spec.get("symlink_to_secret", []):
@@ -286,6 +371,36 @@ def inner(spec_path, out_path):
         r2 = subprocess.run(["/usr/local/lib/antumbra-apply-welcome-settings"], env=env, capture_output=True, text=True, timeout=120)
         rerun = {"transient_before": transient_before, "rc": r2.returncode, "stderr": r2.stderr,
                  "marker": os.path.exists("/run/antumbra/welcome-applied")}
+
+    def volume_state():
+        """Persistent Storage now: open, mounted, its features in place, and
+        what its Welcome settings directory holds."""
+        return {"mapped": os.path.exists(MAPPING), "mounted": os.path.ismount(MNT),
+                "settings_mounted": os.path.ismount(SETTINGS + "/persistent"),
+                "persistent_folder_mounted": os.path.ismount("/home/amnesia/Persistent"),
+                "settings": listing(os.path.join(vol, "welcome-settings")),
+                "stage_left": os.path.lexists(os.path.join(vol, ".antumbra-welcome-staging"))}
+
+    retry = None
+    if spec.get("retry"):
+        # The Welcome screen's next attempt after a failure (the fault that
+        # caused it gone): the greeter writes its settings again, into its
+        # directories as they are now, and the applier runs again.
+        after_failure = volume_state()
+        with open("/run/antumbra/welcome-failed", encoding="utf-8") as f:
+            after_failure["failed"] = f.read().strip()
+        for name in spec.get("stubs", {}):
+            os.unlink(f"/usr/local/sbin/{name}")
+        tmp2 = greeter_writes(spec["retry"])
+        written = volume_state()
+        r2 = subprocess.run(["/usr/local/lib/antumbra-apply-welcome-settings"], env=env, capture_output=True, text=True, timeout=120)
+        with open("/etc/shadow", encoding="utf-8") as f:
+            amnesia_hash = [l.split(":")[1] for l in f if l.startswith("amnesia:")][0]
+        retry = {"after_failure": after_failure, "greeter_wrote": written, "after": volume_state(),
+                 "rc": r2.returncode, "stderr": r2.stderr, "marker": os.path.exists("/run/antumbra/welcome-applied"),
+                 "failed": open("/run/antumbra/welcome-failed", encoding="utf-8").read().strip() if os.path.exists("/run/antumbra/welcome-failed") else None,
+                 "applied": listing(SETTINGS + "/applied"), "amnesia_hash": amnesia_hash,
+                 "written_hash": S.read_setting(os.path.join(tmp2, "persistent", "tails.password"), "TAILS_USER_PASSWORD")}
 
     def log(name):
         try:
@@ -335,6 +450,7 @@ def inner(spec_path, out_path):
         "leaks": leaks, "secret_intact": secret_now == SECRET_TEXT, "rerun": rerun,
         "secret_mode": stat.S_IMODE(os.stat(SECRET).st_mode), "race": log("race"),
         "volume_stage_left": os.path.lexists(os.path.join(vol, ".antumbra-welcome-staging")),
+        "retry": retry, "cryptsetup": log("cryptsetup"),
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -485,6 +601,80 @@ class ApplierTest(unittest.TestCase):
         self.assertFalse(res["marker"])
         self.assertEqual(res["unblock"], [])
         self.assertFalse(res["stage_left"], "the staging directory was left behind")
+
+    # An earlier boot's settings on the volume, for the retries below.
+    STORED = {"tails.network": "TAILS_NETWORK=false\nANTUMBRA_TOR_MODE=offline\n", "antumbra.admin": "ANTUMBRA_ADMIN_ENABLED=true\n"}
+
+    def assertLocked(self, state, settings=None):
+        """Persistent Storage closed, nothing of it mounted, and its Welcome
+        settings what an earlier boot stored (SETTINGS) or nothing."""
+        self.assertFalse(state["mapped"] or state["mounted"] or state["settings_mounted"] or state["persistent_folder_mounted"],
+                         f"Persistent Storage left open or in place: {state}")
+        self.assertFalse(state["stage_left"])
+        self.assertEqual({n: f.get("text") for n, f in (state["settings"] or {}).items()}, settings or {})
+
+    def test_failure_after_unlocking_locks_the_volume_again(self):
+        # Something failing after Persistent Storage was unlocked (here
+        # chpasswd): the volume is locked again before the Welcome screen
+        # hears of the failure, and nothing of that attempt stays on it. The
+        # next attempt then needs the passphrase again (the volume left open,
+        # any passphrase got in), and the greeter writes it into its own
+        # directory (the volume's was still mounted there: the screen-lock
+        # passphrase's hash landed on the volume).
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": self.PP, "user_password": "lock passphrase", "admin": True},
+                               volume={"passphrase": self.PP, "stored": self.STORED}, stubs={"chpasswd": "#!/bin/sh\nexit 3\n"},
+                               retry={"persistence": "unlock", "persistence_passphrase": "not the passphrase", "user_password": "another"})
+        self.assertEqual(res["rc"], 1, self.diag)
+        retry = res["retry"]
+        self.assertRegex(retry["after_failure"]["failed"], r"^unexpected error \(line \d+, exit status 3\)$")
+        self.assertLocked(retry["after_failure"], self.STORED)
+        self.assertIn("lock", res["persistence"])
+        self.assertLocked(retry["greeter_wrote"], self.STORED)
+        self.assertEqual(retry["rc"], 1, retry["stderr"])
+        self.assertEqual(retry["failed"], "wrong passphrase, or Persistent Storage is damaged")
+        self.assertFalse(retry["marker"])
+        self.assertLocked(retry["after"], self.STORED)
+
+    def test_retry_after_a_failure(self):
+        # The same failure, then the right passphrase: the second attempt's
+        # settings are applied and saved, and no passphrase hash ever was.
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": self.PP, "user_password": "lock passphrase", "admin": True},
+                               volume={"passphrase": self.PP, "stored": self.STORED}, stubs={"chpasswd": "#!/bin/sh\nexit 3\n"},
+                               retry={"persistence": "unlock", "persistence_passphrase": self.PP, "user_password": "another"})
+        retry = res["retry"]
+        self.assertLocked(retry["after_failure"], self.STORED)
+        self.assertLocked(retry["greeter_wrote"], self.STORED)
+        self.assertEqual(retry["rc"], 0, retry["stderr"])
+        self.assertTrue(retry["marker"])
+        self.assertTrue(retry["after"]["mapped"] and retry["after"]["settings_mounted"])
+        v = retry["after"]["settings"]
+        self.assertEqual(sorted(v), ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"])
+        self.assertEqual(self.value(v, "antumbra.admin", "ANTUMBRA_ADMIN_ENABLED"), "false")
+        self.assertEqual(self.value(v, "tails.network", "TAILS_NETWORK"), "true")
+        self.assertTrue(retry["written_hash"].startswith("$6$"))
+        self.assertEqual(retry["amnesia_hash"], retry["written_hash"])
+
+    def test_retry_needs_the_passphrase_when_the_volume_could_not_be_locked(self):
+        # Locking it again fails (the Welcome settings' mount point busy, so
+        # the mapping stays in use): the Welcome screen is told; the volume's
+        # settings are no longer on the greeter's directory all the same (a
+        # lazy unmount); and a next attempt with the wrong passphrase is
+        # refused (an open mapping let any passphrase in).
+        res = self.run_applier({"persistence": "unlock", "persistence_passphrase": self.PP, "user_password": "lock passphrase"},
+                               volume={"passphrase": self.PP, "stored": self.STORED}, stubs={"chpasswd": "#!/bin/sh\nexit 3\n"},
+                               settings_busy=True,
+                               retry={"persistence": "unlock", "persistence_passphrase": "not the passphrase", "user_password": "another"})
+        retry = res["retry"]
+        self.assertRegex(retry["after_failure"]["failed"],
+                         r"^unexpected error \(line \d+, exit status 3\); Persistent Storage could not be locked again$")
+        self.assertTrue(retry["after_failure"]["mapped"])
+        self.assertFalse(retry["after_failure"]["settings_mounted"])
+        self.assertEqual({n: f.get("text") for n, f in retry["greeter_wrote"]["settings"].items()}, self.STORED)
+        self.assertEqual(retry["rc"], 1, retry["stderr"])
+        self.assertTrue(retry["failed"].startswith("wrong passphrase, or Persistent Storage is damaged"), retry["failed"])
+        self.assertFalse(retry["marker"])
+        self.assertFalse(retry["after"]["settings_mounted"])
+        self.assertEqual({n: f.get("text") for n, f in retry["after"]["settings"].items()}, self.STORED)
 
     def test_unlock_wrong_passphrase(self):
         res = self.run_applier({"persistence": "unlock", "persistence_passphrase": "not the passphrase"},

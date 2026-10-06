@@ -74,6 +74,14 @@ low-power mode, the self-check, Tor bootstrap, shutdown behaviour.
   user, not over D-Bus as Tails' `tps` does.
 - Persistent Storage features are bind mounts without Tails' `nosymfollow`
   protection, and OS updates erase the volume (full re-flash).
+- When applying the Welcome screen's settings fails after Persistent
+  Storage was unlocked, the applier locks it again before the Welcome
+  screen can start again. If that fails too (a mount of it still in use;
+  the error then says "Persistent Storage could not be locked again"),
+  the volume stays open until a restart: a new attempt still needs the
+  passphrase, and the volume's Welcome settings are unmounted from the
+  greeter's directory (lazily if need be), but restarting is the clean
+  way out.
 - Audio routing uses Debian's generic ALSA UCM profiles, not the port's
   device-specific ones; sound may need manual mixer settings.
 - `htpdate` time synchronisation needs Tor to bootstrap first; the

@@ -72,7 +72,13 @@ cmd_unlock() {
     local pf="$1" dev
     dev="$(resolve_part)"
     cryptsetup isLuks "${dev}" || die "no LUKS volume on ${dev}"
-    [ -e "/dev/mapper/${MAPPER}" ] || cryptsetup open --key-file "${pf}" "${dev}" "${MAPPER}"
+    if [ -e "/dev/mapper/${MAPPER}" ]; then
+        # Open already (an attempt that failed could not lock it again):
+        # the passphrase must be right all the same.
+        cryptsetup open --test-passphrase --key-file "${pf}" "${dev}" || die "wrong passphrase"
+    else
+        cryptsetup open --key-file "${pf}" "${dev}" "${MAPPER}"
+    fi
     mkdir -p "${MNT}"
     mountpoint -q "${MNT}" || mount -o noatime,nodev,nosuid "/dev/mapper/${MAPPER}" "${MNT}"
     echo "Persistent Storage unlocked"
