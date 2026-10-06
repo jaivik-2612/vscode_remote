@@ -256,6 +256,20 @@ class StaleOutputsTest(BuildOut):
                        '"${ROUT}"/filesystem.squashfs{,.verity,.roothash,.sha256}', "\nremove_built_images\n"):
             self.assertNotEqual(src.find(needle), -1, needle)
             self.assertLess(src.find(needle), start, needle)
+            # Before the tree: a run that stops while the tree is being
+            # deleted leaves no build-flags behind.
+            self.assertLess(src.find(needle), src.index('\nrm -rf "${ROOT}"\n'), needle)
+
+    def test_rootfs_writes_build_flags_last(self):
+        # Every step of rootfs.sh that can fail comes before build-flags is
+        # written, so a run that fails after deleting it leaves none.
+        src = read(os.path.join(BUILD, "rootfs.sh"))
+        written = src.index('> "${ROUT}/build-flags"')
+        self.assertEqual(src.count('"${ROUT}/build-flags"'), 2)    # deleted, then written
+        for step in ("\nmmdebstrap \\\n", "\nrecord_device_firmware ", 'die "initramfs was not generated',
+                     'cp "${ROOT}/boot/initrd.img-${KREL}" "${ROUT}/initrd.img"'):
+            self.assertLess(src.index(step), written, step)
+        self.assertNotIn("die ", src[written:])
 
     def squashfs(self, **env):
         # squashfs.sh insists on root; id answers 0 so it runs as anyone.
