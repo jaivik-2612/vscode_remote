@@ -432,6 +432,9 @@ class GuestScanTest(unittest.TestCase):
         self.assertTrue(results[self.vm.ONEPLUS_SCAN][1].startswith(f"the scan was stopped at its limit ({limit} s) after 1672 s"),
                         results[self.vm.ONEPLUS_SCAN][1])
         self.assertTrue(results[control][0])
+        # killed before its limit (the OOM killer, say): not "stopped at its limit"
+        results, _, _, _ = self.run_checks(scan="scan: exit 137 after 300 s")
+        self.assertEqual(results[self.vm.ONEPLUS_SCAN], (False, "scanner exit 137"))
         # no status line: the scan did not run as asked
         results, _, _, _ = self.run_checks(scan="python3: can't open file")
         self.assertFalse(results[self.vm.ONEPLUS_SCAN][0])

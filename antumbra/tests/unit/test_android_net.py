@@ -418,6 +418,32 @@ class TrafficChecksTest(unittest.TestCase):
             ok, detail = self.phase(vm, fake, "with Android", capture + [relay], self.GUARDS[:1])
             self.assertEqual((ok, detail), (False, "not Tor's: 198.51.100.20:443; the record of Tor's SYNs could not be read"))
 
+    def test_the_record_is_loaded_before_the_network(self):
+        vm = load_harness()
+        for nft_ok in (True, False):
+            sent = []
+
+            def sh(cmd, timeout=120):
+                sent.append(cmd)
+                if cmd == "id -u debian-tor":
+                    return 0, "107"
+                if "base64 -d > /run/antumbra-vm-tor-syns.nft" in cmd:
+                    return 0, "written"
+                if cmd.startswith("nft -f /run/antumbra-vm-tor-syns.nft"):
+                    return (0, "1") if nft_ok else (1, "Error: Could not process rule")
+                return None, ""
+            rep = vm.Report()
+            vm.tor_syn_record_start(rep, sh)
+            self.assertEqual([ok for _, ok, _, _ in rep.results], [nft_ok])
+            self.assertTrue(sent[-1].startswith("nft -f /run/antumbra-vm-tor-syns.nft"), sent)
+        # the table written is the one for Tor's UID
+        self.assertIn("meta skuid 107 tcp flags & (syn | ack) == syn add @syns", vm.tor_syn_table("107"))
+        # welcome_phase loads it before the tap that brings the network up
+        src = read("tests", "vm", "antumbra_vm.py")
+        body = src[src.index("def welcome_phase("):src.index("\ndef ", src.index("def welcome_phase(") + 1)]
+        self.assertLess(body.index("tor_syn_record_start(rep, sh)"), body.index("vm.tap(*target)"))
+        self.assertLess(body.index("android_net_phase(vm, rep, T, sh, out)"), body.index("tor_syn_record_stop(sh)"))
+
     @unittest.skipUnless(os.geteuid() == 0 and shutil.which("nft") and shutil.which("unshare"), "needs root, nft and unshare")
     def test_the_record_holds_only_tor_s_syns(self):
         # The record's table in a network namespace of its own: a SYN from

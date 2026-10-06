@@ -564,12 +564,15 @@ def tor_syn_table(uid):
 def tor_syn_record_start(rep, sh):
     rc, o = sh("id -u debian-tor")
     uid = o.strip() if rc == 0 and o.strip().isdigit() else None
-    ok = uid is not None and guest_write(sh, "/run/antumbra-vm-tor-syns.nft", tor_syn_table(uid), "0600")
-    if ok:
-        rc, o = sh(f"nft -f /run/antumbra-vm-tor-syns.nft && nft list chain ip {TOR_SYN_TABLE} output | grep -c 'add @syns'")
-        ok = rc == 0 and o.strip() == "1"
+    if uid is None:
+        ok, detail = False, "no user ID for debian-tor: " + o.strip()[-200:]
+    elif not guest_write(sh, "/run/antumbra-vm-tor-syns.nft", tor_syn_table(uid), "0600"):
+        ok, detail = False, "could not write the table to the guest"
+    else:
+        rc, o = sh(f"nft -f /run/antumbra-vm-tor-syns.nft 2>&1 && nft list chain ip {TOR_SYN_TABLE} output | grep -c 'add @syns'")
+        ok, detail = rc == 0 and o.strip() == "1", f"SYNs of UID {uid}" if rc == 0 and o.strip() == "1" else o.strip()[-200:]
     rep.check("harness: the guest kernel records where Tor's sockets send TCP SYNs (an nft set of the harness's own), "
-              "from before the network comes up", ok, o.strip()[-200:])
+              "from before the network comes up", ok, detail)
 
 
 def tor_syn_record(sh):
@@ -882,7 +885,7 @@ def oneplus_scan_checks(rep, T, sh):
     found = "\n".join(lines[1:]).strip()
     if status is None:
         detail = "no status from the scan: " + flat(o)
-    elif status.group(1) in ("124", "137"):
+    elif status.group(1) == "124" or (status.group(1) == "137" and int(status.group(2)) >= limit):
         print(f"camera: the image scan was stopped at its limit, {limit} s", flush=True)
         detail = f"the scan was stopped at its limit ({limit} s) after {status.group(2)} s" + (": " + flat(found) if found else "")
     else:
