@@ -14,6 +14,9 @@
 # clean-up, which runs in the same service. antumbra-waydroid-stopped.service
 # waits for that clean-up, then stops the service; the next
 # "waydroid session start" starts it again through D-Bus.
+# While the whole system stops, systemd is stopping the container service
+# already (its ExecStopPost runs), and refuses to start anything new.
+if [ "$(systemctl is-system-running 2>/dev/null)" = stopping ]; then exit 0; fi
 systemctl --no-block start antumbra-waydroid-stopped.service \
     || logger -t antumbra-waydroid -p daemon.warning -- "could not start antumbra-waydroid-stopped.service"
 # Waydroid's "/dev/null" hook comes next and fails, as it always did.
