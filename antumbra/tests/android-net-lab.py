@@ -10,15 +10,17 @@ veth (10.200.1.1), config/rootfs/etc/nftables.conf loaded, and stand-ins
 for Tor's two listeners for Android: a TCP acceptor on 10.200.2.1:9041, and
 a DNS server on 10.200.2.1:5354 that, like Tor's AutomapHostsOnResolve,
 answers a .onion name with an address in 127.192.0.0/10. A second
-namespace on the bridge stands in for the container. The start-host hook
-runs for it as LXC runs it (LXC_PID one of its processes), then it runs
-android_probe_list of tests/vm/antumbra_vm.py, and judge_android_probes
-decides, as in the VM's --android-net run.
+namespace on the bridge stands in for the container, with a mount
+namespace where this machine's identifier masks are mounted as LXC mounts
+them. The start-host hook runs for it as LXC runs it (LXC_PID one of its
+processes), and must refuse stand-ins where a mask did not take effect;
+then it runs android_probe_list of tests/vm/antumbra_vm.py, and
+judge_android_probes decides, as in the VM's --android-net run.
 
 Run by tests/lint.sh. Needs unprivileged user namespaces, or root. Where the
 build host lacks something the lab itself needs (network or mount
-namespaces, a tmpfs, the bridge or veth driver, nftables or the reject
-expression the hook loads), it says what and exits 0: only the checks
+namespaces, a tmpfs, bind mounts over sysfs, the bridge or veth driver,
+nftables or the reject expression the hook loads), it says what and exits 0: only the checks
 themselves fail. --nft and --hook take other versions of the two files.
 """
 import argparse
