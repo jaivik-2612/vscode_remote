@@ -219,6 +219,24 @@ class DeviceFirmwareRecordTest(BuildOut):
         self.assertEqual(read(self.listing), "".join(f"{hashlib.sha256(files[n]).hexdigest()}  ./{n}\n"
                                                      for n in sorted(files)))
 
+    def test_symbolic_links_alone_are_no_firmware(self):
+        # Hook 60 copies them, but they hold no firmware: the decision
+        # follows the list, which has regular files only.
+        outside = os.path.join(self.t, "elsewhere.bin")
+        write(outside, b"not in the image")
+        os.makedirs(os.path.join(self.fw, "qcom"))
+        os.symlink(outside, os.path.join(self.fw, "qcom", "a640_gmu.bin"))
+        os.symlink("missing.bin", os.path.join(self.fw, "qcom", "a640_sqe.fw"))
+        os.symlink(self.t, os.path.join(self.fw, "ath10k"))
+        self.assertEqual(self.record(), "DEVICE_FIRMWARE=\n")
+        self.assertFalse(os.path.exists(self.listing))
+
+    def test_a_link_is_not_listed_its_target_is(self):
+        write(os.path.join(self.fw, "qcom", "sm8150", "a640_zap.mbn"), b"zap")
+        os.symlink("sm8150/a640_zap.mbn", os.path.join(self.fw, "qcom", "a640_zap.mbn"))
+        self.assertEqual(self.record(), "DEVICE_FIRMWARE=1\n")
+        self.assertEqual(read(self.listing), f"{hashlib.sha256(b'zap').hexdigest()}  ./qcom/sm8150/a640_zap.mbn\n")
+
 
 # common.sh's helpers, with build/out in the test's directory.
 COMMON_DRIVER = r"""
