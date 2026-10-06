@@ -981,6 +981,21 @@ def camera_phase(vm, rep, T, sh, out):
     rep.check("camera: the camera decision for host programs is stored as yes", decision == "yes", decision_detail)
     shot("camera-after-prompt.png")
 
+    # 8b. What the planned Tor Browser confinement must also deny (camera.md,
+    #     "Who can use the cameras"): from the browser's network namespace,
+    #     as amnesia, without opening a camera device or PipeWire's socket,
+    #     the camera portal hands over a connected PipeWire file descriptor
+    #     once the session's one decision for host programs is yes.
+    rc, o = sh("ip netns exec tbb " + AS_AMNESIA + "busctl --user --json=short call org.freedesktop.portal.Desktop "
+               "/org/freedesktop/portal/desktop org.freedesktop.portal.Camera OpenPipeWireRemote 'a{sv}' 0 2>&1", timeout=60)
+    try:
+        reply = json.loads(o.strip().split("\n")[-1]) if rc == 0 else {}
+    except ValueError:
+        reply = {}
+    rep.check("camera: from Tor Browser's network namespace the camera portal gives amnesia a PipeWire connection "
+              "(the gap the planned browser profile must close, camera.md)",
+              isinstance(reply, dict) and reply.get("type") == "h", flat(o))
+
     # 9. Second start: the portal grants access without asking, Snapshot
     #    streams, and the preview shows vimc's colour bars.
     start_snapshot()

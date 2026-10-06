@@ -360,6 +360,33 @@ class VmHarnessTest(unittest.TestCase):
             self.assertEqual(sorted(r.stdout.splitlines()), sorted(h.format(scan=scan) for h in self.vm.NOPC_FIXTURE_HITS))
 
 
+class CameraAccessDocsTest(unittest.TestCase):
+    """Wherever the docs describe the planned Tor Browser confinement for the
+    cameras (devices and PipeWire's socket), they must also name the camera
+    portal and its permission store: the portal hands any host program a
+    connected PipeWire file descriptor over the session bus once the
+    session's single decision for host programs is yes, and any session
+    process can write that decision."""
+
+    def paragraphs(self, text):
+        # blank-line paragraphs, split further at list items and table rows
+        for block in re.split(r"\n\s*\n", text):
+            yield from (" ".join(p.split()) for p in re.split(r"\n(?=\s*(?:[-*] |\d+\. |\|))", block))
+
+    def test_planned_confinement_covers_the_camera_portal(self):
+        found = 0
+        for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
+            if not name.endswith(".md"):
+                continue
+            for p in self.paragraphs(read(os.path.join(ROOT, "docs", name))):
+                if "PipeWire socket" in p:
+                    found += 1
+                    self.assertIn("camera portal", p, f"{name}: {p[:200]}")
+                    self.assertIn("permission store", p.lower(), f"{name}: {p[:200]}")
+        # camera.md, roadmap.md, known-issues.md, threat-model.md
+        self.assertGreaterEqual(found, 4)
+
+
 class OnePlusScannerTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
