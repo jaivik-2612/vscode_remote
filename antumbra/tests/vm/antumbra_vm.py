@@ -2170,26 +2170,52 @@ def persistence_phase(vm, rep, T, sh, out, run):
     lines = o.strip().split("\n") if rc == 0 else []
     rep.check(f"persistence: the volume is {'absent (create)' if create else 'present (unlock)'} at the Welcome screen",
               lines == (["none", "end"] if create else ["luks", "crypto_LUKS", "end"]), o.replace("\n", " "))
-    if not create:
-        # What the first run stored, read-only, before the applier unlocks it.
+
+    def first_run_stored():
+        """Whether the locked volume, opened read-only, holds what the first
+        run stored and nothing more: its Welcome settings (administration
+        on, no screen-lock passphrase hash), the file it wrote to
+        ~/Persistent, no staging directory of the applier's; and the
+        output."""
         rc, o = sh(f"printf %s {sh_quote(PERSISTENCE_PASSPHRASE)} > /run/antumbra-vm-key && chmod 0600 /run/antumbra-vm-key && "
                    "cryptsetup open --readonly --key-file /run/antumbra-vm-key /dev/disk/by-partlabel/ANTUMBRA_DATA antumbra_vmcheck && "
                    "mkdir -p /run/antumbra-vmcheck && mount -o ro,noload /dev/mapper/antumbra_vmcheck /run/antumbra-vmcheck && "
                    "{ ls -A /run/antumbra-vmcheck/welcome-settings | tr '\\n' ' '; echo; "
                    "grep -h '^ANTUMBRA_ADMIN_ENABLED=' /run/antumbra-vmcheck/welcome-settings/antumbra.admin; "
-                   f"cat /run/antumbra-vmcheck/{PERSISTENT_MARK.split('/home/amnesia/', 1)[1]}; }}; "
+                   f"cat /run/antumbra-vmcheck/{PERSISTENT_MARK.split('/home/amnesia/', 1)[1]}; "
+                   "if [ -e /run/antumbra-vmcheck/.antumbra-welcome-staging ]; then echo volume-staged-left; fi; }; "
                    "umount /run/antumbra-vmcheck; cryptsetup close antumbra_vmcheck; rm -f /run/antumbra-vm-key; echo end", timeout=int(T(900)))
         lines = o.strip().split("\n") if rc == 0 else []
         stored = lines[0].split() if lines else []
+        return (len(lines) == 4 and sorted(stored) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
+                and lines[1:] == ["ANTUMBRA_ADMIN_ENABLED=true", "antumbra-vm-run1", "end"]), o.replace("\n", " | ")[:400]
+
+    if not create:
+        # What the first run stored, read-only, before the applier unlocks it.
         rep.check("persistence: the volume kept the first run's Welcome settings (administration on), not the screen-lock passphrase, "
-                  "and the file written to ~/Persistent",
-                  len(lines) == 4 and sorted(stored) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
-                  and lines[1:] == ["ANTUMBRA_ADMIN_ENABLED=true", "antumbra-vm-run1", "end"], o.replace("\n", " | ")[:400])
+                  "and the file written to ~/Persistent; no staging directory left on it", *first_run_stored())
     choices = {"persistence": run, "persistence_passphrase": PERSISTENCE_PASSPHRASE, "network": "direct",
                "user_password": LOCK_PASSPHRASE if create else "", "admin": create}
     ok = guest_write(sh, "/run/antumbra-vm-settings.py", WRITE_SETTINGS_PY, "0644")
     if not create:
-        # A wrong passphrase first, as a user might type it: the Welcome
+        # A failure after unlocking first, as any fault later in the applier
+        # would cause (passwd failing): the Welcome screen hears of it, and by
+        # then Persistent Storage is locked again with nothing of that
+        # attempt on it, so that the next attempt needs the passphrase and
+        # the greeter writes it into a directory of its own, not the volume's.
+        rc, o = sh("if mount --bind /bin/false /usr/bin/passwd; then echo passwd-fails; "
+                   f"runuser -u antumbra-greeter -- python3 /run/antumbra-vm-settings.py {sh_quote(json.dumps(choices))} {int(T(900))}; "
+                   "umount /usr/bin/passwd && echo passwd-restored; fi; "
+                   "if [ -e /dev/mapper/antumbra_data ]; then echo volume-open; fi; "
+                   "for d in /var/lib/antumbra/persistence /var/lib/antumbra/settings/persistent /home/amnesia/Persistent; do "
+                   "if mountpoint -q \"$d\"; then echo \"mounted $d\"; fi; done; echo end", timeout=int(T(900)) + 120)
+        lines = o.strip().split("\n") if rc == 0 else []
+        rep.check("persistence: a failure after unlocking is reported to the Welcome screen, Persistent Storage locked again first",
+                  ok and len(lines) == 5 and lines[:2] == ["passwd-fails", "settings written"]
+                  and re.fullmatch(r"error: unexpected error \(line \d+, exit status \d+\)", lines[2]) is not None
+                  and lines[3:] == ["passwd-restored", "end"], o.replace("\n", " | ")[:400])
+        rep.check("persistence: nothing of the failed attempt was saved on the volume", *first_run_stored())
+        # A wrong passphrase next, as a user might type it: the Welcome
         # screen hears of it and can start again; its report then stays
         # while the right passphrase is tried (an argon2id unlock), and must
         # not be taken for that attempt's.
@@ -2237,19 +2263,32 @@ def persistence_phase(vm, rep, T, sh, out, run):
     W = "/var/lib/antumbra/persistence/welcome-settings"
     rc, o = sh(f"stat -c '%n %U %a' {W}/*; grep -h '^ANTUMBRA_ADMIN_ENABLED=' {W}/antumbra.admin /var/lib/antumbra/settings/applied/antumbra.admin; "
                "ls -A /var/lib/antumbra/settings/transient | tr '\\n' ' '; echo; "
-               "test -e /var/lib/antumbra/settings/staged && echo staged-left; test -e /etc/sudoers.d/antumbra-admin && echo sudoers; "
+               "test -e /var/lib/antumbra/settings/staged && echo staged-left; "
+               "test -e /var/lib/antumbra/persistence/.antumbra-welcome-staging && echo volume-staged-left; "
+               "test -e /etc/sudoers.d/antumbra-admin && echo sudoers; "
                "passwd -S amnesia | cut -d' ' -f2; echo end", timeout=60)
     lines = o.strip().split("\n") if rc == 0 else []
     files = [l for l in lines if l.startswith(W)]
     admin = "true" if create else "false"
     rep.check("persistence: this boot's Welcome settings applied and saved on the volume (greeter-owned, no passphrase hash), "
-              "no passphrase left behind",
+              "no passphrase or staged copy left behind (the applier's staging directories gone, the volume's included)",
               sorted(l.split()[0].rsplit("/", 1)[1] for l in files) == ["antumbra.admin", "antumbra.android", "tails.bridges", "tails.macspoof", "tails.network"]
               and all(l.endswith(" antumbra-greeter 640") for l in files)
               and lines[len(files):len(files) + 2] == [f"ANTUMBRA_ADMIN_ENABLED={admin}"] * 2
-              and "passphrase" not in o and "staged-left" not in lines
+              and "passphrase" not in o and "staged-left" not in lines and "volume-staged-left" not in lines
               and ("sudoers" in lines) == create and lines[-2:] == (["P", "end"] if create else ["NP", "end"]),
               o.replace("\n", " | ")[:500])
+    # Persistent Storage already open (as when an attempt that failed could
+    # not lock it again) still asks for the passphrase.
+    rc, o = sh("printf %s 'not the passphrase' > /run/antumbra-vm-key && chmod 0600 /run/antumbra-vm-key && "
+               "/usr/local/sbin/antumbra-persistence unlock --passphrase-file /run/antumbra-vm-key 2>&1; echo rc=$?; "
+               f"printf %s {sh_quote(PERSISTENCE_PASSPHRASE)} > /run/antumbra-vm-key && "
+               "/usr/local/sbin/antumbra-persistence unlock --passphrase-file /run/antumbra-vm-key 2>&1; echo rc=$?; "
+               "rm -f /run/antumbra-vm-key; findmnt -no SOURCE /var/lib/antumbra/persistence", timeout=int(T(900)))
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check("persistence: unlocking the volume already open needs the passphrase all the same (a wrong one refused, the right one taken)",
+              lines[-5:] == ["antumbra-persistence: wrong passphrase", "rc=1", "Persistent Storage unlocked", "rc=0", "/dev/mapper/antumbra_data"],
+              o.replace("\n", " | ")[-300:])
     welcome_phase(vm, rep, T, sh, out, False)
     if create:
         rc, o = sh(f"runuser -u amnesia -- sh -c 'echo antumbra-vm-run1 > {PERSISTENT_MARK}' && sync && "

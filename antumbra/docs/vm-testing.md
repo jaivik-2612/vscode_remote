@@ -324,12 +324,19 @@ and checks that the volume is LUKS2 with argon2id, unlocked and mounted,
 with `~/Persistent`, the Welcome settings, the network connections and
 `/var/lib/tca` bound from it; that this boot's settings were applied and
 saved on the volume, owned by the greeter user, without the passphrase's
-hash; that no Persistent Storage passphrase was left behind; that
+hash; that no Persistent Storage passphrase was left behind, and no
+staging directory of the applier's (`settings/staged`, and
+`.antumbra-welcome-staging` on the volume); that unlocking the volume
+while it is open still refuses a wrong passphrase (both runs); that
 administration and the passphrase are in force; and that a file written
 to `~/Persistent` lands on the volume. The second run (`--keep-disk`)
 checks that the partition holds a LUKS volume, opens it read-only first
 to check what the first run stored (administration on, no passphrase
-hash, the file in `Persistent`), tries "Unlock" with a wrong passphrase
+hash, the file in `Persistent`, no staging directory of the applier's),
+tries "Unlock" with the right passphrase while `passwd` fails (bound to
+`/bin/false`), which must reach the Welcome screen as an unexpected
+error with Persistent Storage locked again by then and, read-only again,
+nothing of that attempt on the volume, tries "Unlock" with a wrong passphrase
 (the error reaches the Welcome screen's wait, `welcome-done` and the
 passphrase are gone so that it can start again), then chooses "Unlock"
 with the right one, no screen-lock passphrase and administration off
