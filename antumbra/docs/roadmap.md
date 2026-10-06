@@ -11,8 +11,10 @@ In order of importance.
    cost Wi-Fi).
 3. **Welcome screen hardening**: pass the Persistent Storage passphrase
    over a root D-Bus service (the Tails `tps` model) instead of a file;
-   adopt Tails' `nosymfollow` bind-mount protection; an "export my
-   Persistent Storage" flow before updates.
+   unlock Persistent Storage before Start, so that the Welcome screen
+   shows the stored settings, as Tails' does; adopt Tails' `nosymfollow`
+   bind-mount protection; an "export my Persistent Storage" flow before
+   updates.
 4. **In-place updates** that keep Persistent Storage: write the new live
    partition and boot image from the running system to the inactive
    slot, mark success with `qbootctl` only after a good boot.
@@ -35,7 +37,8 @@ In order of importance.
 7. **Unsafe Browser** for captive portals, in the clearnet namespace.
 8. **Bluetooth opt-in session** with a random address before power-on
    (the driver stack works on the 6.17 line).
-9. **Audio**: the port's UCM profiles for the TFA9874 amplifiers.
+9. **Audio**: the port's UCM profiles for the TFA9874 amplifiers; a
+   per-session microphone mute switch.
 10. **Sensors**: evaluate shipping Debian unstable's iio-sensor-proxy with
     the SSC backend behind a polkit gate, if the SLPI firmware can be
     obtained by the user.
@@ -47,6 +50,6 @@ In order of importance.
     mainline status is comparable.
 14. **Android apps** (experimental, `ANTUMBRA_ANDROID=1`): validation on
     the phone; Waydroid's AppArmor profiles in enforce mode; binder for
-    Android only (not every local user); `.onion` and per-app Tor
-    isolation inside Android; pinning the extracted images' hashes; newer
-    images when Waydroid publishes them.
+    Android only (not every local user, as while the container runs);
+    `.onion` services (refused inside Android for now) and per-app Tor
+    isolation inside Android; newer images when Waydroid publishes them.
