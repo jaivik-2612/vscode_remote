@@ -93,6 +93,9 @@ the pop-up motor, the cameras and Android apps.
   root-only directory and shreds, not over D-Bus as Tails' `tps` does.
 - Persistent Storage features are bind mounts without Tails' `nosymfollow`
   protection, and OS updates erase the volume (full re-flash).
+- Persistent Storage has none of Tails' features for Tor Browser
+  bookmarks, Electrum wallets (`~/.electrum`) or software installed with
+  APT, so these are lost at every restart (`architecture.md`, section 12).
 - When applying the Welcome screen's settings fails after Persistent
   Storage was created or unlocked, the applier locks it again before the
   Welcome screen can start again, and the volume's stored Welcome

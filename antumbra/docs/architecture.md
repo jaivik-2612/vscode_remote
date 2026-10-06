@@ -996,16 +996,24 @@ in sessions with Android on and that choice made; only its top directory
 is chowned, so Android's own file owners survive. It also keeps Android's
 own usage history.
 
-Two of Tails' features are missing. Dotfiles keeps nothing yet:
-activation symlinks every entry of a `dotfiles` directory on the volume
-into the home, but that directory is not in the features file, so
-creation does not make it and only root can add it. Tor bridges, which
-keeps the directory of Tails' Tor Connection assistant (`/var/lib/tca`),
-is not a feature, since that assistant is not ported. Bridge lines
-entered at the Welcome screen are saved only with the Welcome settings,
-which this version does not read back (section 10), so they are entered
-again at every boot. A volume created by an earlier image, which had
-that feature, keeps an empty `tca` directory that nothing mounts.
+Of Tails' fourteen features, Antumbra has five: the Persistent folder,
+the Welcome Screen settings, Network connections, GnuPG and SSH client.
+Seven are not ported: Tor Browser bookmarks, Additional Software,
+Printers, Thunderbird, Electrum, Flatpak and Pidgin. Tor Browser and
+Electrum are in the image and APT works through Tor (section 11), so Tor
+Browser's bookmarks, Electrum's wallets in `~/.electrum` and packages
+installed with APT do not survive a reboot; the applications of the
+other four are not in the image. Two more need a note. Dotfiles keeps
+nothing yet: activation symlinks every entry of a `dotfiles` directory
+on the volume into the home, but that directory is not in the features
+file, so creation does not make it and only root can add it. Tor bridges
+(Tails' TorConfiguration, which keeps `/var/lib/tca`, the directory of
+Tails' Tor Connection assistant) is not a feature, since that assistant
+is not ported. Bridge lines entered at the Welcome screen are saved only
+with the Welcome settings, which this version does not read back
+(section 10), so they are entered again at every boot. A volume created
+by an earlier image, which had that feature, keeps an empty `tca`
+directory that nothing mounts.
 
 `unlock` asks for the passphrase even when the volume is open already
 (after an attempt at the Welcome screen that failed and could not lock it

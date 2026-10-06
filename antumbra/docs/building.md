@@ -35,11 +35,35 @@ is idempotent.
 | fetch | `fetch-sources.sh` | `build/cache/`: kernel tree at the pinned commit, the port's 27 patches and config, avbtool and the mkbootimg tools, the port's DTBO and vbmeta, Tor Browser (SHA-256 and OpenPGP verified); with `ANTUMBRA_ANDROID=1` also the Waydroid images of the profile's variant (each zip pinned by SHA-256 and size, each extracted image by size, CRC-32 and SHA-256, checked again on every run, cached or not) and F-Droid (SHA-256, OpenPGP and APK certificate verified) |
 | kernel | `kernel.sh` | `build/out/kernel/`: raw arm64 `Image`, DTB, stripped modules tarball, config, kernel release, ASLR sysctl values |
 | libcamera (optional) | `libcamera.sh` (root) | only with `ANTUMBRA_LIBCAMERA_LOCAL=1`: `build/out/libcamera-repo/`, the port's patched libcamera 0.7.2 as arm64 packages in a local apt repository (`camera.md`) |
-| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt`, `build-flags` (what the tree was built with, which later steps check: the device profile, the debug, minimal and Android knobs, whether the port's libcamera and the builder's firmware were installed, and the kernel release; deleted with the old tree before mmdebstrap runs, so a failed run leaves none) and, with the builder's firmware, `firmware.sha256` (each firmware file with its SHA-256) |
+| rootfs | `rootfs.sh` (root) | `build/work/rootfs/` tree; `build/out/rootfs/initrd.img`, `packages.txt`, `build-flags` (what the tree was built with, below) and, with the builder's firmware, `firmware.sha256` (each firmware file with its SHA-256) |
 | squashfs | `squashfs.sh` (root) | `filesystem.squashfs` (xz, arm BCJ), `.verity` hash tree, `.roothash`; `ANTUMBRA_VERITY` (1 or 0) added to `build-flags` |
 | image | `image.sh` | `userdata.simg`: 4096-byte-sector GPT sized to the physical partition, live partition + empty Persistent Storage partition, as an Android sparse image |
 | bootimg | `bootimg.sh` | `boot.img`: header v2, cmdline with the verity root hash, unsigned AVB footer, exactly 96 MiB |
-| release | `release.sh` | `build/out/release/antumbra-<version>-oneplus-hotdog/` with checksums, manifest and optional minisign signature; refuses a `build-flags` that does not record whether the image has device firmware (one an older `rootfs.sh` wrote: run the rootfs step again) |
+| release | `release.sh` | `build/out/release/antumbra-<version>-oneplus-hotdog/` with checksums, manifest and optional minisign signature; checks `build-flags` first (below) |
+
+`build-flags` records the device profile, the debug, minimal and Android
+knobs, whether the port's libcamera and the builder's firmware were
+installed, and the kernel release; `squashfs.sh` adds `ANTUMBRA_VERITY`.
+`squashfs.sh`, `image.sh`, `bootimg.sh` and `release.sh` refuse a missing
+`build-flags` or one for another profile, and `bootimg.sh`, `vm.sh` and
+`vm-bundle.sh` an `ANTUMBRA_VERITY` other than the one recorded.
+`release.sh` also refuses a debug build, a kernel release other than
+`build/out/kernel`'s, a `build-flags` that does not record whether the
+image has device firmware (one an older `rootfs.sh` wrote: run the rootfs
+step again) and one that does not record `ANTUMBRA_VERITY` (`squashfs.sh`
+has not completed). Its manifest states whether dm-verity is on and
+whether the images contain device firmware, and mentions the port's
+libcamera and Android apps when they are in the image. Nothing reads the
+minimal knob: a minimal build is packaged like any other, and its
+manifest does not say what it is.
+
+Just before mmdebstrap runs, `rootfs.sh` deletes the old tree, its
+`build-flags`, `firmware.sha256`, initramfs and squashfs, and the images
+built from them, so if mmdebstrap or a build hook fails there is no
+`build-flags` and the steps after it refuse to go on. A run that fails
+earlier, on a missing input for example, leaves the old tree and all of
+these as they were. `squashfs.sh` likewise deletes the images built from
+the previous squashfs.
 
 `rootfs.sh` does not install `config/rootfs` and `config/rootfs-android`
 as they are checked out: it stages copies in `build/work/overlay/`, owned
@@ -119,7 +143,8 @@ Git records only the modes 0644 and 0755, so `make lint` does not read
 the checkout's modes: it stages both overlays as `rootfs.sh` does and
 checks the copies (0440 for the sudoers files, 0600 for usbguard's rules
 and the Tor control cookie, nothing group- or world-writable), and fails
-if `rootfs.sh` copies an overlay into the image straight from `config/`.
+if `rootfs.sh` syncs an overlay tree in from `config/` instead of the
+staged copy.
 A fresh clone passes without any `chmod`.
 
 Some of these skip on a build host that cannot run them, and say so:
