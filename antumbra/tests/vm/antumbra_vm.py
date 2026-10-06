@@ -828,6 +828,80 @@ def pw_cameras(sh):
     return rows
 
 
+ONEPLUS_SCAN = ("camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image "
+                "(inside packages, archives, compressed files and Waydroid's images included)")
+# The root file system below the overlay, whose size the scan's limit follows.
+LIVE_SQUASHFS = "/run/live/rootfs/filesystem.squashfs"
+
+
+def scan_limit(T, mib, inodes):
+    """Seconds the guest scan may take: 600 s, 0.6 s per MiB of squashfs
+    and 5 ms per inode, times the timeout scale. The scanner reads the head
+    of every file and parses Waydroid's images, and the guest kernel
+    decompresses what it reads; for the --android image (1270 MiB, about
+    62 000 inodes) this gives 1672 s, about twice the slowest estimate
+    under full emulation (850 s). Without a size, the limit of an image
+    twice as large as that."""
+    if mib is None or inodes is None:
+        mib, inodes = 2540, 124000
+    return int(T(round(600 + 0.6 * mib + 0.005 * inodes)))
+
+
+def oneplus_scan_checks(rep, T, sh):
+    """No OnePlus camera software anywhere in the image (the same scanner
+    tests/lint.sh runs over the source tree): file names, and contents
+    inside packages, bundles, archives, compressed files, the initramfs and
+    disk images, Waydroid's system.img and vendor.img included. Then its
+    positive control."""
+    def flat(o, n=300):
+        return o.strip().replace("\n", " | ")[:n]
+
+    scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
+    copied = (put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner)
+              and put_file(sh, "/tmp/antumbra-nopc-fixture.py", NOPC_FIXTURE.encode()))
+    if not copied:
+        rep.check(ONEPLUS_SCAN, False, "could not copy the scanner and its fixture to the guest")
+        return
+    # Its limit, from the size of the root file system (squashfs reports
+    # its image size as used and its inode count as inodes used). The guest
+    # stops the scan at that limit (and kills it 30 s later), well before
+    # the console stops waiting, so a scan that runs too long fails alone
+    # instead of answering the commands after it. Its output goes to /run,
+    # which --xdev leaves out.
+    rc, o = sh(f"df -B1M --output=used,iused {LIVE_SQUASHFS} | tail -n 1", timeout=60)
+    m = re.fullmatch(r"\s*(\d+)\s+(\d+)\s*", o) if rc == 0 else None
+    mib, inodes = (int(m.group(1)), int(m.group(2))) if m else (None, None)
+    limit = scan_limit(T, mib, inodes)
+    print(f"camera: scanning the image ({mib if m else '?'} MiB of squashfs, {inodes if m else '?'} inodes), "
+          f"limit {limit} s", flush=True)
+    rc, o = sh(f"S=$(date +%s); timeout -k 30 {limit} python3 /tmp/antumbra-no-oneplus-camera.py --xdev / "
+               "> /run/antumbra-nopc.out 2>&1; R=$?; echo \"scan: exit $R after $(( $(date +%s) - S )) s\"; "
+               "cat /run/antumbra-nopc.out; rm -f /run/antumbra-nopc.out", timeout=limit + 30 + T(120))
+    lines = o.strip().split("\n") if rc == 0 else []
+    status = re.fullmatch(r"scan: exit (\d+) after (\d+) s", lines[0].strip()) if lines else None
+    found = "\n".join(lines[1:]).strip()
+    if status is None:
+        detail = "no status from the scan: " + flat(o)
+    elif status.group(1) in ("124", "137"):
+        print(f"camera: the image scan was stopped at its limit, {limit} s", flush=True)
+        detail = f"the scan was stopped at its limit ({limit} s) after {status.group(2)} s" + (": " + flat(found) if found else "")
+    else:
+        print(f"camera: the image scan took {status.group(2)} s (limit {limit} s)", flush=True)
+        detail = flat(found) or (f"none found in {status.group(2)} s" if status.group(1) == "0" else f"scanner exit {status.group(1)}")
+    rep.check(ONEPLUS_SCAN, status is not None and status.group(1) == "0" and not found, detail)
+    # 5b. The positive control, after the scan: the same scanner in the
+    #     guest finds a OnePlus camera APK inside an ext4 image like
+    #     Waydroid's and inside a zstd-compressed XAPK.
+    rc, o = sh("rm -rf /tmp/antumbra-nopc && python3 /tmp/antumbra-nopc-fixture.py /tmp/antumbra-nopc "
+               "&& { python3 /tmp/antumbra-no-oneplus-camera.py /tmp/antumbra-nopc/scan; echo \"scanner exit $?\"; }; "
+               "rm -rf /tmp/antumbra-nopc", timeout=300)
+    lines = [line.rstrip("\r") for line in o.strip().split("\n")] if rc == 0 else []
+    want = [h.format(scan="/tmp/antumbra-nopc/scan") for h in NOPC_FIXTURE_HITS]
+    rep.check("camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK",
+              lines[:1] == ["fixture ready"] and lines[-1:] == ["scanner exit 1"] and sorted(lines[1:-1]) == sorted(want),
+              flat(o))
+
+
 def camera_phase(vm, rep, T, sh, out):
     """The camera path on vimc. Without a session: the driver, udev's names
     for its nodes, libcamera's camera list, the packages, no OnePlus camera
@@ -895,31 +969,8 @@ def camera_phase(vm, rep, T, sh, out):
     rep.check("camera: Snapshot, libcamera 0.7 with its IPA modules from one build, PipeWire's libcamera plugin "
               "at PipeWire's version; no Megapixels",
               ok, ", ".join(f"{k} {v}" for k, v in sorted(pk.items())) + f"; megapixels {o2.strip() or '?'}")
-    # 5. No OnePlus camera software anywhere in the image (the same scanner
-    #    tests/lint.sh runs over the source tree): file names, and contents
-    #    inside packages, bundles, archives, compressed files, the initramfs
-    #    and disk images, Waydroid's system.img and vendor.img included.
-    name = ("camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image "
-            "(inside packages, archives, compressed files and Waydroid's images included)")
-    scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
-    copied = (put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner)
-              and put_file(sh, "/tmp/antumbra-nopc-fixture.py", NOPC_FIXTURE.encode()))
-    if copied:
-        rc, o = sh("python3 /tmp/antumbra-no-oneplus-camera.py --xdev /", timeout=900)
-        rep.check(name, rc == 0 and not o.strip(), flat(o) or "none found")
-        # 5b. The positive control, after the scan: the same scanner in the
-        #     guest finds a OnePlus camera APK inside an ext4 image like
-        #     Waydroid's and inside a zstd-compressed XAPK.
-        rc, o = sh("rm -rf /tmp/antumbra-nopc && python3 /tmp/antumbra-nopc-fixture.py /tmp/antumbra-nopc "
-                   "&& { python3 /tmp/antumbra-no-oneplus-camera.py /tmp/antumbra-nopc/scan; echo \"scanner exit $?\"; }; "
-                   "rm -rf /tmp/antumbra-nopc", timeout=300)
-        lines = [line.rstrip("\r") for line in o.strip().split("\n")] if rc == 0 else []
-        want = [h.format(scan="/tmp/antumbra-nopc/scan") for h in NOPC_FIXTURE_HITS]
-        rep.check("camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK",
-                  lines[:1] == ["fixture ready"] and lines[-1:] == ["scanner exit 1"] and sorted(lines[1:-1]) == sorted(want),
-                  flat(o))
-    else:
-        rep.check(name, False, "could not copy the scanner and its fixture to the guest")
+    # 5. No OnePlus camera software anywhere in the image.
+    oneplus_scan_checks(rep, T, sh)
 
     # --- In the amnesia session ------------------------------------------------
     rc, o = sh("pgrep -u amnesia -xc phosh", timeout=30)
