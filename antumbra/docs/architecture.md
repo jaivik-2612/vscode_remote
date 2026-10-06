@@ -356,15 +356,23 @@ Debian's Tor AppArmor abstraction keeps matching, and Tails'
 `tor-pt-configuration-helper` writes the `ClientTransportPlugin` line and
 turns the seccomp sandbox off only when a transport is in use. Antumbra's
 copy of the helper adds meek_lite to Tails' obfs2, obfs3, obfs4 and
-webtunnel in that line, so plain bridges (an address first) and obfs2,
-obfs3, obfs4, webtunnel and meek_lite bridges work; `BRIDGE_TRANSPORTS`
-in `antumbra.settings`, the Welcome screen's settings module, names the
-same transports, and `tests/unit/test_tor_connect.py` checks that they
-match. Snowflake bridges do not work: snowflake reaches its proxies
-through WebRTC over UDP, and the firewall lets `debian-tor` make only TCP
-connections and DNS queries (section 8.1). The Welcome screen and
-`antumbra-tor-connect` refuse a snowflake line with that reason, and any
-other bridge type (conjure, say) as unsupported.
+webtunnel in that line, so Tor has a transport for every bridge Antumbra
+accepts: plain bridges (an address first) and obfs2, obfs3, obfs4,
+webtunnel and meek_lite bridges. No webtunnel or meek_lite bridge has
+connected on the phone yet (`hardware-validation.md`, item 17).
+`BRIDGE_TRANSPORTS` in `antumbra.settings`, the Welcome screen's settings
+module, names the same transports, and `tests/unit/test_tor_connect.py`
+checks that they match. Plain, obfs2, obfs3 and obfs4 bridges must have
+IPv4 addresses: Tor connects to a plain bridge's address and lyrebird to
+an obfs bridge's, and IPv6 is off and the firewall gives Tor no IPv6
+(sections 8.1 and 8.3). A webtunnel or meek_lite bridge's address is
+only a placeholder, often an IPv6 one: it connects to the server its
+arguments name. Snowflake bridges do not work: snowflake reaches its
+proxies through WebRTC over UDP, and the firewall lets `debian-tor` make
+only TCP connections and DNS queries (section 8.1). The Welcome screen
+and `antumbra-tor-connect` refuse a snowflake line, and a plain or obfs
+bridge with an IPv6 address (`IPV6_REFUSED`), each with that reason, and
+any other bridge type (conjure, say) as unsupported.
 
 Connecting: Tails' Tor Connection assistant is not ported yet. The
 Welcome screen records the mode (automatic, bridges with the lines given,

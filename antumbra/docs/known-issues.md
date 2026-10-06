@@ -75,13 +75,18 @@ the pop-up motor, the cameras and Android apps.
   Welcome screen chose offline mode, until the next network connection
   comes up, when the Welcome screen's choice is applied again; it is not
   saved anywhere.
-- Bridges: plain, obfs4, webtunnel, meek_lite, obfs2 and obfs3 bridges
-  work. Snowflake bridges do not: snowflake needs UDP, and the firewall
-  lets Tor make only TCP connections and DNS queries. The Welcome screen
-  refuses a snowflake line at Start, saying so, and any other bridge type
-  as unsupported. Its bridge field is a single line, but bridges pasted
-  one per line are all kept; bridges typed there go separated by `;`.
-  They are entered again at every boot (next item).
+- Bridges: plain, obfs4, obfs2 and obfs3 bridges must have IPv4
+  addresses: IPv6 is off and the firewall gives Tor no IPv6, so the
+  Welcome screen refuses a bridge with an IPv6 address at Start, saying
+  so. webtunnel and meek_lite bridges are accepted and have a transport,
+  but no webtunnel or meek_lite bridge has connected on the phone yet
+  (`hardware-validation.md`, item 17). Snowflake bridges do not work:
+  snowflake needs UDP, and the firewall lets Tor make only TCP
+  connections and DNS queries. The Welcome screen refuses a snowflake
+  line at Start, saying so, and any other bridge type as unsupported.
+  Its bridge field is a single line, but bridges pasted one per line
+  are all kept; bridges typed there go separated by `;`. They are
+  entered again at every boot (next item).
 - The Welcome screen does not show the settings saved in Persistent
   Storage: the volume is unlocked only after Start, so every question,
   bridges included, is answered again at each boot. The volume keeps

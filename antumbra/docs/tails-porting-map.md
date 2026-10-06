@@ -15,7 +15,7 @@ saying what changed; "re-implemented" means rewritten for the phone.
 | Tor unit drop-ins | `tor@default.service.d/*` | verbatim | verbatim |
 | Control-port filter | `onion-grater` + `etc/onion-grater.d/*.yml` | verbatim | verbatim |
 | Tor bootstrap flag | `tails-wait-until-tor-has-bootstrapped`, `tails-tor-has-bootstrapped*`, `tor_wait_until_bootstrapped`, `tor_variable` | verbatim | verbatim |
-| Pluggable transports | from the Tor Browser tarball; `tor-pt-configuration-helper` | lyrebird from the aarch64 tarball as `/usr/bin/obfs4proxy`; helper adapted (meek_lite added to its transports); snowflake refused: it needs UDP, which the firewall allows Tor only for DNS | adapted |
+| Pluggable transports | from the Tor Browser tarball; `tor-pt-configuration-helper` | lyrebird from the aarch64 tarball as `/usr/bin/obfs4proxy`; helper adapted (meek_lite added to its transports; no webtunnel or meek_lite bridge has connected on the phone yet, `hardware-validation.md` item 17); plain and obfs bridges with IPv6 addresses refused, since IPv6 is off; snowflake refused: it needs UDP, which the firewall allows Tor only for DNS | adapted |
 | Tor Connection assistant (tca) | `tca`, `tca-portal` | not ported; `antumbra-tor-connect` (direct/bridges/status/disconnect) and the Welcome screen's bridge field | re-implemented, reduced |
 | Time sync | `htpdate` (Perl), `htpdate.service`, pools, tmpfiles | verbatim | verbatim |
 | Pre-Tor clock fix | `tails-get-network-time` as `clearnet` | user `clearnet` and firewall rules kept; the script is not wired to a prompt yet | pending |
