@@ -241,9 +241,10 @@ the security side. None of this has run on the phone yet
   what is stored; Android's data stays on the volume, unused.
 - Every session sets Android up again (`waydroid init`). Without
   Persistent Storage, Android also boots for the first time and F-Droid
-  is installed again, which takes a while (unmeasured on the phone; in
-  the VM, under full emulation, Android's boot alone took about 24
-  minutes).
+  is installed again, which takes a while (unmeasured on the phone; under
+  the VM's full emulation, Android's boot alone took about 22 minutes in
+  the one run that completed it, where its timeouts were scaled by hand
+  part-way through: `vm-testing.md`, "Android apps").
 - Android's own timeouts: when system_server's Watchdog reaches its
   half-way mark, it asks for native stack dumps of vold and the HALs and
   gives each 2 seconds. A dump that takes longer kills the dumped process

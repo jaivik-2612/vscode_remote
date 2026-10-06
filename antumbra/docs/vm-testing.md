@@ -356,10 +356,15 @@ Yama's `ptrace_scope=2` is not the cause: `debuggerd -b` of a HAL, run
 by hand, succeeded and the HAL survived. So in a virtual machine
 `antumbra-waydroid` sets `ro.hw_timeout_multiplier=10`, as emulators do,
 and the run checks it once Android has booted; the phone keeps Android's
-own timeouts (`known-issues.md`, "Android apps"). With it, Android
-reported `sys.boot_completed=1` about 24 minutes after the container
-started (the guest had been up for 1968 seconds); the file indexer's
-restart loop, since switched off (hook 52), slowed those runs too.
+own timeouts (`known-issues.md`, "Android apps"). In the run that found
+this, the multiplier was set by hand about 9 minutes into Android's boot,
+after HALs had died of SIGPIPE and Android's framework had restarted
+twice, and the framework was then restarted; Android reported
+`sys.boot_completed=1` about 22 minutes after its init started (the
+guest had been up for about 1960 seconds). How long Android takes to
+boot with `antumbra-waydroid` setting the multiplier from the start has
+not been measured yet. The file indexer's restart loop, since switched
+off (hook 52), slowed those runs too.
 Installing F-Droid then takes minutes more: `antumbra-fdroid-install`
 waits up to 15 minutes after `waydroid app install` for Android to list
 the package.
