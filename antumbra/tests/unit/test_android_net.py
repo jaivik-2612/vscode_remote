@@ -25,6 +25,7 @@ import termios
 import threading
 import types
 import unittest
+import unittest.mock
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 HARNESS = os.path.join(ROOT, "tests", "vm", "antumbra_vm.py")
@@ -229,6 +230,7 @@ class ConsoleAttachTest(unittest.TestCase):
     def test_waydroid_shell_with_redirections(self):
         self.assertEqual(self.console.run("for k in a b; do echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null "
                                           "| tr -d '\\r' | tail -n 1); done"), (0, "a=0\nb=0"))
+
 
 
 class HarnessAttachUseTest(unittest.TestCase):
@@ -569,21 +571,34 @@ class LabSkipTest(unittest.TestCase):
     """tests/android-net-lab.py on build hosts that lack a kernel feature it
     needs: it says so and exits 0 (lint goes on), while a hook that really
     fails is still a failure. Each run binds a shim over one of the lab's
-    tools in a mount namespace of its own."""
+    tools in a mount namespace of its own.
+
+    These tests need a host where the lab itself runs. Where it cannot (no
+    user or network namespaces, a tool or a driver missing), they skip with
+    the reason instead of failing for the very host gaps they are about."""
 
     @classmethod
     def setUpClass(cls):
+        for tool in ("ip", "nft", "nsenter", "mount", "unshare"):
+            if not shutil.which(tool, path=LAB_PATH):
+                raise unittest.SkipTest(f"{tool} not installed")
         cls.ns = ["unshare", "--mount", "--propagation", "private"] if os.geteuid() == 0 else \
             ["unshare", "-Ur", "--mount", "--propagation", "private"]
         net = ["unshare", "-n", "true"] if os.geteuid() == 0 else ["unshare", "-Urn", "true"]
         for probe in (cls.ns + ["true"], net):
-            if subprocess.run(probe, capture_output=True).returncode != 0:
-                raise unittest.SkipTest(f"cannot run {' '.join(probe)} here")
-        for tool in ("ip", "nft", "nsenter", "mount", "unshare"):
-            if not shutil.which(tool, path=LAB_PATH):
-                raise unittest.SkipTest(f"{tool} not installed")
+            r = subprocess.run(probe, capture_output=True, text=True, env=dict(os.environ, PATH=LAB_PATH))
+            if r.returncode != 0:
+                raise unittest.SkipTest(f"cannot run {' '.join(probe)} here: {r.stderr.strip()[:200]}")
+        # The lab as it is, on this host. Where it skips (a driver or a
+        # kernel feature missing), a shim shows nothing and a failing hook is
+        # never reached: these tests skip too, with its reason.
+        cls.plain = cls.lab()
+        if cls.plain[1].startswith("skipped: "):
+            raise unittest.SkipTest("the lab cannot run on this host: " + cls.plain[1].splitlines()[0][len("skipped: "):])
 
-    def lab(self, shim=None, hook=None):
+    @classmethod
+    def shimmed(cls, argv, shim=None, cwd=None):
+        """(exit status, output) of ARGV run with SHIM bound over its tool."""
         with tempfile.TemporaryDirectory() as d:
             script = "set -e\n"
             if shim:
@@ -596,10 +611,27 @@ class LabSkipTest(unittest.TestCase):
                 open(keep, "w").close()
                 script += f"mount --bind {real} {keep}\nmount --bind {fake} {real}\n"
             script += 'exec "$@"\n'
-            argv = [sys.executable, LAB] + (["--hook", hook] if hook else [])
-            r = subprocess.run(self.ns + ["sh", "-c", script, "sh"] + argv, capture_output=True, text=True, timeout=300,
-                               env=dict(os.environ, PATH=LAB_PATH))
+            r = subprocess.run(cls.ns + ["sh", "-c", script, "sh"] + argv, capture_output=True, text=True, timeout=600,
+                               cwd=cwd, env=dict(os.environ, PATH=LAB_PATH, PYTHONDONTWRITEBYTECODE="1"))
         return r.returncode, r.stdout + r.stderr
+
+    @classmethod
+    def lab(cls, shim=None, hook=None):
+        return cls.shimmed([sys.executable, LAB] + (["--hook", hook] if hook else []), shim)
+
+    def test_these_tests_skip_where_the_lab_cannot_run(self):
+        # This class itself on a build host without the bridge driver, where
+        # the lab says "skipped: ..." and exits 0: its tests must skip with
+        # the lab's reason, not fail for the host gap they are about.
+        tests = [f"test_android_net.LabSkipTest.{t}" for t in
+                 ("test_missing_kernel_features_skip", "test_a_failing_hook_still_fails", "test_passes_with_every_feature")]
+        rc, out = self.shimmed([sys.executable, "-m", "unittest", "-v"] + tests, "bridge",
+                               cwd=os.path.dirname(os.path.abspath(__file__)))
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"\nOK \(skipped=\d+\)\n", out)
+        self.assertIn("the lab cannot run on this host: ", out)
+        self.assertIn("Unknown device type", out)
+        self.assertNotIn("FAIL", out)
 
     def test_missing_kernel_features_skip(self):
         for shim, says in (("bridge", "Unknown device type"), ("tmpfs", "permission denied"),
@@ -628,11 +660,59 @@ class LabSkipTest(unittest.TestCase):
                     self.assertNotIn("skipped", out)
 
     def test_passes_with_every_feature(self):
-        rc, out = self.lab()
+        rc, out = self.plain   # the run setUpClass made
         self.assertEqual(rc, 0, out)
         self.assertNotIn("skipped", out)
         self.assertNotIn("[FAIL]", out)
         self.assertGreaterEqual(out.count("[PASS]"), 8, out)
+
+
+class LabSkipSetupTest(unittest.TestCase):
+    """LabSkipTest's setup on build hosts where the lab cannot run,
+    simulated (so this runs on any host): it skips with the reason, it never
+    errors, and it does not skip where the lab runs or fails."""
+
+    def setup_on(self, missing=(), refused=False, lab=(0, "[PASS] lab\n")):
+        real_which = shutil.which
+
+        def which(tool, mode=os.F_OK | os.X_OK, path=None):
+            return None if tool in missing else real_which(tool, mode, path)
+
+        def run(argv, **kw):
+            if argv[0] in missing:
+                raise FileNotFoundError(2, "No such file or directory", argv[0])
+            return subprocess.CompletedProcess(argv, 1 if refused else 0, "",
+                                               "unshare: unshare failed: Operation not permitted\n" if refused else "")
+
+        class Host(LabSkipTest):
+            @classmethod
+            def lab(cls, shim=None, hook=None):
+                return lab
+        with unittest.mock.patch("shutil.which", which), unittest.mock.patch("subprocess.run", run):
+            try:
+                Host.setUpClass()
+            except unittest.SkipTest as e:
+                return str(e), None
+        return None, getattr(Host, "plain", None)
+
+    def test_host_gaps_skip(self):
+        for case, kw, reason in (
+                ("no unshare", {"missing": ("unshare",)}, "unshare not installed"),
+                ("no nft", {"missing": ("nft",)}, "nft not installed"),
+                ("no namespaces", {"refused": True}, "here: unshare: unshare failed: Operation not permitted"),
+                ("no bridge driver", {"lab": (0, "skipped: cannot build the lab's network (ip link add waydroid-tor type bridge): "
+                                                "Error: Unknown device type.\n")},
+                 "the lab cannot run on this host: cannot build the lab's network (ip link add waydroid-tor type bridge): "
+                 "Error: Unknown device type.")):
+            with self.subTest(case):
+                skipped, _ = self.setup_on(**kw)
+                self.assertIsNotNone(skipped)
+                self.assertTrue(skipped.endswith(reason), skipped)
+
+    def test_a_lab_that_runs_or_fails_is_not_skipped(self):
+        for lab in ((0, "[PASS] lab: x\n"), (1, "[FAIL] lab: the start-host hook passes\n")):
+            with self.subTest(lab[1]):
+                self.assertEqual(self.setup_on(lab=lab), (None, lab))
 
 
 if __name__ == "__main__":
