@@ -5,8 +5,9 @@
 Any Debian 13 or Ubuntu 24.04 machine. On x86_64 the root-filesystem
 steps run the arm64 Debian maintainer scripts under `qemu-user-static`
 (about three times slower than native); a native arm64 host needs no
-emulation. Root is required for `rootfs.sh` and `squashfs.sh` (chroots,
-file ownership); everything else runs as a user.
+emulation. Root is required for `rootfs.sh`, `squashfs.sh` and the
+optional `libcamera.sh` (chroots, file ownership); everything else runs
+as a user.
 
 ```sh
 sudo apt-get install -y mmdebstrap debian-archive-keyring qemu-user-static binfmt-support arch-test \
