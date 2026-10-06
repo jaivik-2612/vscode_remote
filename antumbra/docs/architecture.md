@@ -984,8 +984,12 @@ this means is in `threat-model.md`. When the container stops (`waydroid
 session stop`, logout, Android shutting down), its post-stop hook starts
 `antumbra-waydroid-stopped.service`, which waits for Waydroid's own
 clean-up and stops the container service; the service's `ExecStopPost`
-puts binder and the DMA-BUF heaps back to 0600 and lets udev re-apply
-its modes to the render node and the framebuffers. While the whole system
+puts binder back to 0600 and every node Waydroid opened back to the mode
+`antumbra-waydroid --save-device-modes` recorded before the boot's first
+container start (`/run/antumbra/android-device-modes`; a node without a
+record loses other users' access). udev cannot do this: it sets no mode
+for framebuffers or DMA-BUF heaps, and in the VM a change event left the
+render node and `/dev/fb0` open to every user. While the whole system
 shuts down the hook starts nothing: systemd is stopping the container
 service already, and its `ExecStopPost` runs. The next `waydroid
 session start` (the "Android" launcher) starts the service again through

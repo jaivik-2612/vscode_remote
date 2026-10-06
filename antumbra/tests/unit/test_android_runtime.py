@@ -334,7 +334,7 @@ class IdentifiersTest(unittest.TestCase):
         # Devices come and go: the container service writes the masks for
         # what is there before it starts, and it stops with the container.
         dropin = read("config", "rootfs-android", "etc", "systemd", "system", "waydroid-container.service.d", "antumbra.conf")
-        self.assertEqual(re.findall(r"(?m)^ExecStartPre=(.*)$", dropin), ["/usr/local/lib/antumbra-waydroid --masks"])
+        self.assertEqual(re.findall(r"(?m)^ExecStartPre=(.*)$", dropin)[0], "/usr/local/lib/antumbra-waydroid --masks")
         source = read("config", "rootfs-android", "usr", "local", "lib", "antumbra-waydroid")
         self.assertIn('if sys.argv[1:] == ["--masks"]:\n        masks_main()', source)
 
@@ -394,19 +394,61 @@ class AndroidStopTest(unittest.TestCase):
 
     def test_devices_closed_when_the_service_stops(self):
         dropin = read("config", "rootfs-android", "etc", "systemd", "system", "waydroid-container.service.d", "antumbra.conf")
+        starts = re.findall(r"(?m)^ExecStartPre=(.*)$", dropin)
         stops = re.findall(r"(?m)^ExecStopPost=(.*)$", dropin)
         self.assertIn("/bin/chmod 0600 /dev/binder /dev/hwbinder /dev/vndbinder", stops)
-        # udev has no rule for dma_heap (no MODE, so a change event changes
-        # nothing): Waydroid's 0777 must be undone explicitly.
-        udev_rules = ""
-        for top in ("rootfs", "rootfs-android"):
-            for d in ("etc/udev/rules.d", "usr/lib/udev/rules.d"):
-                p = os.path.join(ROOT, "config", top, d)
-                for n in (os.listdir(p) if os.path.isdir(p) else []):
-                    udev_rules += read("config", top, d, n)
-        if 'SUBSYSTEM=="dma_heap"' not in udev_rules:
-            self.assertFalse([s for s in stops if "subsystem-match=dma_heap" in s], "a udev trigger cannot restore dma_heap's mode")
-            self.assertIn("-/usr/bin/find /dev/dma_heap -mindepth 1 -maxdepth 1 -type c -exec /bin/chmod 0600 {} +", stops)
+        # Not "-": a failed restore must show as the service's failure.
+        self.assertIn("/usr/local/lib/antumbra-waydroid --save-device-modes", starts)
+        self.assertIn("/usr/local/lib/antumbra-waydroid --restore-device-modes", stops)
+        # udev sets no mode for framebuffers or DMA-BUF heaps, so a change
+        # event cannot undo Waydroid's 0777.
+        self.assertFalse([s for s in stops if "udevadm trigger" in s])
+
+    def test_waydroids_nodes_are_the_ones_recorded(self):
+        # The nodes set_permissions() in Waydroid's container manager opens.
+        m = load_antumbra_waydroid()
+        src = read("build", "work", "qemu-virt", "rootfs", "usr", "lib", "waydroid", "tools", "actions", "container_manager.py") \
+            if os.path.exists(os.path.join(ROOT, "build", "work", "qemu-virt", "rootfs", "usr", "lib", "waydroid")) else None
+        if src is None:
+            self.skipTest("no built root filesystem with Waydroid")
+        for path in re.findall(r'^\s*"(/(?:dev|sys)/[^"]+)",', src, re.M):
+            self.assertIn(path, m.OPENED_NODES)
+        for pattern in re.findall(r'glob\.glob\("([^"]+)"\)', src):
+            self.assertIn(pattern, m.OPENED_GLOBS)
+
+    def test_device_modes_saved_once_and_restored(self):
+        m = load_antumbra_waydroid()
+        with tempfile.TemporaryDirectory() as root:
+            def node(rel, mode):
+                path = os.path.join(root, rel)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                open(path, "w").close()
+                os.chmod(path, mode)
+                return path
+            render = node("dev/dri/renderD128", 0o660)
+            fb = node("dev/fb0", 0o660)
+            heap = node("dev/dma_heap/system", 0o600)
+            binder = node("dev/binder", 0o600)
+            node("dev/dri/card0", 0o660)  # not opened by Waydroid
+            state = os.path.join(root, "run", "antumbra", "android-device-modes")
+            m.save_device_modes(root, state)
+            self.assertEqual(stat.S_IMODE(os.stat(state).st_mode), 0o600)
+            for path in (render, fb, heap, binder):
+                os.chmod(path, 0o777)  # Waydroid's container start
+            # A second start must not record Waydroid's modes.
+            m.save_device_modes(root, state)
+            late = node("dev/fb1", 0o777)  # appeared after the record
+            m.restore_device_modes(root, state)
+            self.assertEqual({p: stat.S_IMODE(os.stat(p).st_mode) for p in (render, fb, heap, binder, late)},
+                             {render: 0o660, fb: 0o660, heap: 0o600, binder: 0o600, late: 0o770})
+            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(root, "dev/dri/card0")).st_mode), 0o660)
+            # Without a record, no node stays open to other users.
+            os.unlink(state)
+            for path in (render, fb):
+                os.chmod(path, 0o777)
+            m.restore_device_modes(root, state)
+            self.assertEqual(stat.S_IMODE(os.stat(render).st_mode), 0o770)
+            self.assertEqual(stat.S_IMODE(os.stat(fb).st_mode), 0o770)
 
 
 class ImagePinsTest(unittest.TestCase):

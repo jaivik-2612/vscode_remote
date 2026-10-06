@@ -30,8 +30,11 @@ session it can start Android.
   antumbra-waydroid --masks         # the masks again, for what is there now
                                     # (ExecStartPre= of waydroid-container.service)
   antumbra-waydroid --print-masks   # print the mask entries for this machine
+  antumbra-waydroid --save-device-modes     # ExecStartPre= of waydroid-container.service
+  antumbra-waydroid --restore-device-modes  # ExecStopPost= of waydroid-container.service
 """
 import configparser
+import glob
 import os
 import re
 import stat
@@ -46,6 +49,17 @@ IMAGES = "/usr/share/waydroid-extra/images"
 ANDROID_DIR = "/usr/share/antumbra/android"
 LXC_PROFILE = "/etc/apparmor.d/lxc/lxc-waydroid"
 READY = "/run/antumbra/android-ready"
+# The device nodes Waydroid opens to every user when the container starts
+# (set_permissions() in its container_manager.py, 0777, recursively for a
+# directory; the binder devices 0666). Their modes are recorded before the
+# first container start of the boot and put back when the container service
+# stops: udev cannot do it, as it sets no mode for framebuffers or DMA-BUF
+# heaps, and a change event left even the render node world-writable.
+OPENED_NODES = ("/dev/binder", "/dev/hwbinder", "/dev/vndbinder", "/dev/ashmem", "/dev/sw_sync",
+                "/sys/kernel/debug/sync/sw_sync", "/dev/Vcodec", "/dev/MTK_SMI", "/dev/mdp_sync",
+                "/dev/mtk_cmdq", "/dev/graphics", "/dev/pvr_sync", "/dev/ion")
+OPENED_GLOBS = ("/dev/dri/renderD*", "/dev/fb*", "/dev/dma_heap/*")
+DEVICE_MODES = "/run/antumbra/android-device-modes"
 # ro.hw_timeout_multiplier in a virtual machine (see properties()): QEMU's
 # software emulation runs Android about ten times slower than the phone.
 VM_TIMEOUT_MULTIPLIER = 10
@@ -339,9 +353,63 @@ def masks_main():
         fail(problem)
 
 
+def opened_nodes(root="/"):
+    """The paths Waydroid opens to every user that exist under ROOT, a
+    directory's contents included (Waydroid runs chmod -R)."""
+    paths = [os.path.join(root, p.lstrip("/")) for p in OPENED_NODES]
+    for pattern in OPENED_GLOBS:
+        paths += sorted(glob.glob(os.path.join(root, pattern.lstrip("/"))))
+    found = []
+    for path in paths:
+        if os.path.islink(path) or not os.path.exists(path):
+            continue
+        found.append(path)
+        if os.path.isdir(path):
+            for top, dirs, files in os.walk(path):
+                found += [os.path.join(top, n) for n in sorted(dirs) + sorted(files)
+                          if not os.path.islink(os.path.join(top, n))]
+    return found
+
+
+def save_device_modes(root="/", state=DEVICE_MODES):
+    """Record the modes before the boot's first container start; later starts
+    keep that record, so a mode Waydroid left behind is never recorded."""
+    if os.path.exists(state):
+        return
+    os.makedirs(os.path.dirname(state), exist_ok=True)
+    tmp = state + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for path in opened_nodes(root):
+            f.write(f"{stat.S_IMODE(os.lstat(path).st_mode):o} {path}\n")
+    os.replace(tmp, state)
+
+
+def restore_device_modes(root="/", state=DEVICE_MODES):
+    """Put the recorded modes back; a node without a record (none was made,
+    or it appeared later) loses the access Waydroid gave every other user."""
+    recorded = {}
+    try:
+        with open(state, encoding="utf-8") as f:
+            for line in f:
+                mode, path = line.rstrip("\n").split(" ", 1)
+                recorded[path] = int(mode, 8)
+    except FileNotFoundError:
+        log(f"no record of the device modes ({state}); taking other users' access away")
+    for path in opened_nodes(root):
+        mode = recorded.get(path)
+        if mode is None:
+            mode = stat.S_IMODE(os.lstat(path).st_mode) & ~0o007
+        os.chmod(path, mode)
+
+
 if __name__ == "__main__":
     if sys.argv[1:] == ["--masks"]:
         masks_main()
+    elif sys.argv[1:] == ["--save-device-modes"]:
+        save_device_modes()
+    elif sys.argv[1:] == ["--restore-device-modes"]:
+        restore_device_modes()
     elif sys.argv[1:] == ["--print-masks"]:
         print("".join(e + "\n" for e in identifier_masks()), end="")
     elif sys.argv[1:]:

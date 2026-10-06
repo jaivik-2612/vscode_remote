@@ -65,9 +65,10 @@ sections 8.5 and 11.1). While they are on:
   `~/.local/share/waydroid/data`. Waydroid also opens the GPU render node,
   the DMA-BUF heaps and the framebuffers to every user (0777). Once the
   container stops (Android stopped in the session, or logout), Waydroid's
-  container service is stopped too: the binder devices and the DMA-BUF
-  heaps go back to 0600 and udev re-applies its modes to the render node
-  and the framebuffers. Binder itself is kernel attack surface with a long
+  container service is stopped too: the binder devices go back to 0600
+  and every node Waydroid opened gets back the mode it had before the
+  boot's first container start (recorded then). Binder itself is kernel
+  attack surface with a long
   history of bugs.
 - **Waydroid's D-Bus service** accepts Stop, Freeze, Unfreeze and
   GetSession from any local user (Start checks the caller), so any process

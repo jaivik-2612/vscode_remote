@@ -264,7 +264,8 @@ section 11.1). The VM covers the network and the setup
 53. `waydroid session stop`: the container stops and stays stopped;
     within a minute `waydroid-container.service` is inactive, the binder
     devices and `/dev/dma_heap/*` are 0600 again, and `/dev/dri/renderD128`
-    and `/dev/fb0` have udev's modes again (compare `stat -c '%n %a %G'`
+    and `/dev/fb0` have their modes from before Android's first start again
+    (`/run/antumbra/android-device-modes`; compare `stat -c '%n %a %G'`
     with a boot without Android). The "Android" launcher starts Android
     again.
 54. "Keep Android apps and data": install an app, reboot, unlock with the

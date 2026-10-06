@@ -458,6 +458,22 @@ class VM:
             return None
         return xs // n, ys // n
 
+    @staticmethod
+    def changed_fraction(before, after, step=8, tol=48):
+        """Share of sampled pixels that differ by more than TOL between two
+        pixels() results of the same size."""
+        (w, h, a), (w2, h2, b) = before, after
+        if (w, h) != (w2, h2):
+            return 1.0
+        changed = total = 0
+        for y in range(0, h, step):
+            for x in range(0, w, step):
+                i = (y * w + x) * 3
+                total += 1
+                if max(abs(a[i] - b[i]), abs(a[i + 1] - b[i + 1]), abs(a[i + 2] - b[i + 2])) > tol:
+                    changed += 1
+        return changed / total if total else 0.0
+
     def distinct_colors(self, step=8):
         """How many distinct (coarsely quantised) colours the display shows:
         a black or text-console screen has few, a rendered UI many."""
@@ -1721,14 +1737,22 @@ def android_phase(vm, rep, T, sh, out):
                "echo $k=$(waydroid shell -- settings get global $k </dev/null 2>/dev/null | tr -d '\\r' | tail -n 1); done", timeout=T(240))
     rep.check("android: provisioned: no captive-portal probes, no Private DNS, no network time",
               done and rc == 0 and o.strip().split("\n") == ["captive_portal_mode=0", "private_dns_mode=off", "auto_time=0", "auto_time_zone=0"], o.replace("\n", " "))
+    # Android's window must cover most of the screen: the session alone
+    # (wallpaper, app grid) has plenty of colours too, so the screen is
+    # compared with what it showed just before.
+    try:
+        session_screen = vm.pixels()
+    except Exception:  # noqa: BLE001
+        session_screen = None
     sh(f"runuser -u amnesia -- env {AMNESIA_ENV} setsid -f waydroid show-full-ui >/dev/null 2>&1; echo started", timeout=T(60))
     time.sleep(T(90))
     try:
         vm.screenshot(os.path.join(out, "android-full-ui.png"))
-        colors = vm.distinct_colors()
-        rep.check("android: full UI drawn (screenshot)", colors > 24, f"{colors} distinct colours -> {out}/android-full-ui.png")
+        changed = vm.changed_fraction(session_screen, vm.pixels()) if session_screen else 0.0
+        rep.check("android: full UI drawn (Android's window covers most of the screen)", changed > 0.5,
+                  f"{changed:.0%} of the screen changed -> {out}/android-full-ui.png")
     except Exception as e:  # noqa: BLE001
-        rep.check("android: full UI drawn (screenshot)", False, str(e)[:300])
+        rep.check("android: full UI drawn (Android's window covers most of the screen)", False, str(e)[:300])
     fdroid = False
     deadline = time.monotonic() + T(1200)
     while time.monotonic() < deadline:
@@ -1753,8 +1777,11 @@ def android_phase(vm, rep, T, sh, out):
         time.sleep(T(120))
         try:
             vm.screenshot(os.path.join(out, "android-fdroid.png"))
-        except Exception:  # noqa: BLE001
-            pass
+            changed = vm.changed_fraction(session_screen, vm.pixels()) if session_screen else 0.0
+            rep.check("android: F-Droid's window shown (most of the screen differs from the session's)", changed > 0.5,
+                      f"{changed:.0%} of the screen differs -> {out}/android-fdroid.png")
+        except Exception as e:  # noqa: BLE001
+            rep.check("android: F-Droid's window shown (most of the screen differs from the session's)", False, str(e)[:300])
         after = android_counters(sh)
         rep.check("android: F-Droid's index fetch went to Tor's TransPort for Android (firewall counter)",
                   before is not None and after is not None and after[1] > before[1], f"TCP redirects {before and before[1]} -> {after and after[1]}")
@@ -1819,13 +1846,21 @@ def android_phase(vm, rep, T, sh, out):
     running, o = android_restart_session(T, sh)
     rep.check("android: the container starts again once the rules are back, with a device plugged in since (a dm device with a UUID)",
               plugged and running, o.replace("\n", " "))
-    cat_f = in_android('/system/bin/cat "$f"', errors=True)
-    rc, o = sh(f"f=/sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid; "
-               "grep -cxF \"lxc.mount.entry = /dev/null ${f#/} none bind,ro,optional 0 0\" /var/lib/waydroid/lxc/waydroid/config; "
-               f"printf 'android=[%s]\\n' \"$({cat_f} | wc -c)\"", timeout=T(120)) \
-        if plugged and running else (None, "not plugged in or not running")
+    # Right after the start lxc-attach can fail (its message, not the
+    # file, would be read): read until Android answers. "ok" marks a
+    # successful cat; the file's content follows, printable characters only.
+    cat_f = in_android('/system/bin/sh -c \'/system/bin/cat "$0" && echo ok\' "$f"', errors=True)
+    rc, o = None, "not plugged in or not running"
+    deadline = time.monotonic() + T(300)
+    while plugged and running and time.monotonic() < deadline:
+        rc, o = sh(f"f=/sys/devices/virtual/block/$(basename \"$(readlink -f /dev/mapper/{HOTPLUG_DM})\")/dm/uuid; "
+                   "grep -cxF \"lxc.mount.entry = /dev/null ${f#/} none bind,ro,optional 0 0\" /var/lib/waydroid/lxc/waydroid/config; "
+                   f"printf 'android=[%s]\\n' \"$({cat_f} | tr -cd '[:print:]\\n' | tr '\\n' ' ')\"", timeout=T(120))
+        if rc is not None and "lxc-attach" not in o:
+            break
+        time.sleep(10)
     rep.check("android: the device plugged in since Android was prepared has its mask, and Android reads its UUID empty",
-              rc == 0 and o.strip().split("\n") == ["1", "android=[0]"], o.replace("\n", " "))
+              rc == 0 and o.strip().split("\n") == ["1", "android=[ok ]"] and HOTPLUG_UUID not in o, o.replace("\n", " ")[:300])
     stopped = False
     if running:
         sh(f"runuser -u amnesia -- env {AMNESIA_ENV} timeout 120 waydroid session stop >/dev/null 2>&1; echo stopped", timeout=T(180))
