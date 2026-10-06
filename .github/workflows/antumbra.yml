@@ -64,7 +64,14 @@ jobs:
           python3 -c "import sys; d=bytearray(0x40); d[0x38:0x3c]=b'ARM\x64'; sys.stdout.buffer.write(bytes(d)+b'\0'*4096)" > build/out/kernel/Image
           printf 'placeholder' > build/out/kernel/sm8150-oneplus-hotdog.dtb
           printf 'placeholder' > build/out/rootfs/initrd.img
-          echo 0.0.0-ci > build/out/kernel/kernel.release
+          # The stamps bootimg.sh checks, as kernel.sh, rootfs.sh and squashfs.sh
+          # (with ANTUMBRA_VERITY=0) write them; a kernel release ends in the
+          # profile's KERNEL_LOCALVERSION.
+          KREL=0.0.0-antumbra
+          echo "${KREL}" > build/out/kernel/kernel.release
+          printf '%s\n' ANTUMBRA_DEVICE=oneplus-hotdog "KERNEL_RELEASE=${KREL}" > build/out/kernel/profile
+          printf '%s\n' ANTUMBRA_DEVICE=oneplus-hotdog ANTUMBRA_DEBUG= ANTUMBRA_MINIMAL= ANTUMBRA_ANDROID= \
+            ANTUMBRA_LIBCAMERA_LOCAL= DEVICE_FIRMWARE= "KERNEL_RELEASE=${KREL}" ANTUMBRA_VERITY=0 > build/out/rootfs/build-flags
           ANTUMBRA_VERITY=0 build/bootimg.sh
 
   rootfs-minimal:

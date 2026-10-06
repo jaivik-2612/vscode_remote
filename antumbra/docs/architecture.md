@@ -356,15 +356,24 @@ Debian's Tor AppArmor abstraction keeps matching, and Tails'
 `tor-pt-configuration-helper` writes the `ClientTransportPlugin` line and
 turns the seccomp sandbox off only when a transport is in use. Antumbra's
 copy of the helper adds meek_lite to Tails' obfs2, obfs3, obfs4 and
-webtunnel in that line, so plain bridges (an address first) and obfs2,
-obfs3, obfs4, webtunnel and meek_lite bridges work; `BRIDGE_TRANSPORTS`
-in `antumbra.settings`, the Welcome screen's settings module, names the
-same transports, and `tests/unit/test_tor_connect.py` checks that they
-match. Snowflake bridges do not work: snowflake reaches its proxies
-through WebRTC over UDP, and the firewall lets `debian-tor` make only TCP
-connections and DNS queries (section 8.1). The Welcome screen and
-`antumbra-tor-connect` refuse a snowflake line with that reason, and any
-other bridge type (conjure, say) as unsupported.
+webtunnel in that line, so Tor has a transport for every bridge Antumbra
+accepts: plain bridges (an address first) and obfs2, obfs3, obfs4,
+webtunnel and meek_lite bridges. No bridge of any type has connected
+through Antumbra yet, in the VM or on the phone
+(`hardware-validation.md`, item 17).
+`BRIDGE_TRANSPORTS` in `antumbra.settings`, the Welcome screen's settings
+module, names the same transports, and `tests/unit/test_tor_connect.py`
+checks that they match. Plain, obfs2, obfs3 and obfs4 bridges must have
+IPv4 addresses: Tor connects to a plain bridge's address and lyrebird to
+an obfs bridge's, and IPv6 is off and the firewall gives Tor no IPv6
+(sections 8.1 and 8.3). A webtunnel or meek_lite bridge's address is
+only a placeholder, often an IPv6 one: it connects to the server its
+arguments name. Snowflake bridges do not work: snowflake reaches its
+proxies through WebRTC over UDP, and the firewall lets `debian-tor` make
+only TCP connections and DNS queries (section 8.1). The Welcome screen
+and `antumbra-tor-connect` refuse a snowflake line, and a plain or obfs
+bridge with an IPv6 address (`IPV6_REFUSED`), each with that reason, and
+any other bridge type (conjure, say) as unsupported.
 
 Connecting: Tails' Tor Connection assistant is not ported yet. The
 Welcome screen records the mode (automatic, bridges with the lines given,
@@ -917,11 +926,14 @@ RAM. `config/hooks/56-session-android.sh` then:
    from subdirectories), writes `waydroid.cfg` (overlays off, since the
    root is already an overlayfs; the Waydroid image's own generic product
    values from `/usr/share/antumbra/android/product.prop`; multi-window
-   mode; density 480 on the phone and 320 in the VM; in a VM software
-   rendering, which Waydroid turns into ANGLE on SwiftShader), runs
-   `waydroid init` and `waydroid upgrade -o`, copies the generic kernel
-   command line to `/run/antumbra/android-cmdline` (writable, because
-   Android's first-stage init may chmod `/proc/cmdline`), masks the
+   mode; density 480 on the phone and 320 in the VM; in a VM also
+   software rendering, which Waydroid turns into ANGLE on SwiftShader,
+   and Android's timeouts scaled tenfold, `ro.hw_timeout_multiplier=10`,
+   as emulators set it, without which Android does not boot under full
+   emulation, as `vm-testing.md` explains), runs `waydroid init` and
+   `waydroid upgrade -o`, copies the generic kernel command line to
+   `/run/antumbra/android-cmdline` (writable, because Android's
+   first-stage init may chmod `/proc/cmdline`), masks the
    hardware identifiers in sysfs and procfs in the generated
    configuration, checks it, starts the container service and writes
    `/run/antumbra/android-ready`. The masks: read-only binds of
@@ -958,8 +970,10 @@ RAM. `config/hooks/56-session-android.sh` then:
    grid, after Antumbra's "Android" launcher (Android's full-screen
    interface; Waydroid's own launcher, which offers to download images, is
    hidden). `antumbra-fdroid-install` installs F-Droid unless it is
-   already there, and `antumbra-waydroid-provision` (root) applies the
-   settings of section 8.5 inside Android.
+   already there: it waits up to 40 minutes for Android to answer, then
+   up to 15 for the installation (its unit allows 60 in all);
+   `antumbra-waydroid-provision` (root) applies the settings of section
+   8.5 inside Android.
 
 The binder devices are static, root-only (0600) nodes; binderfs stays off
 because it can be mounted from an unprivileged user namespace. While

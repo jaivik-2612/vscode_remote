@@ -55,7 +55,11 @@ be exercised without the phone. It is a test target, not a release target:
   `config/packages/vm-debug.list` adds `libcamera-tools` (`cam`). The phone
   has neither, and its kernel does not build `vimc`.
 - The display is a virtio GPU rendered in software; expect the Welcome
-  screen to take a minute or two to appear under emulation.
+  screen to take a minute or two to appear under emulation. Screenshots
+  show artifacts of the VM that the phone does not have: a black square
+  in the top-left corner (the pointer, under software rendering), in one
+  screenshot black patches over the top bar's clock, and the battery
+  indicator at 0% (the VM has no battery).
 
 ## Building
 
@@ -297,7 +301,10 @@ the container runs, its start-host hook having found every hardware
 identifier masked in the container's own view (its journal line), and
 Android reports `sys.boot_completed=1` (the
 harness waits 40 minutes times the timeout scale; software emulation is
-slow), the generic Waydroid identity,
+slow, see below; if Android does not boot, the run saves Waydroid's log
+and the units' journals as `android-boot-failure.txt` and Android's log
+as `android-logcat.txt`), the generic Waydroid identity, Android's
+timeouts scaled for emulation (`ro.hw_timeout_multiplier=10`),
 `/sys/firmware` and `/proc/device-tree` hidden, that Android's
 `/proc/cmdline` is the generic one and neither it nor `ro.serialno` or
 `ro.boot.serialno` shows the test serial, that every hardware identifier
@@ -310,8 +317,11 @@ sysfs, that the container can open `/dev/null` but not a V4L2 device node
 it creates, the DHCP lease
 and route, the provisioning
 (captive-portal checks, Private DNS and network time off), a screenshot
-of Android's full UI (`android-full-ui.png`), F-Droid installed and
-listed in the app grid's "Android" folder, F-Droid's index fetch counted
+of Android's full UI (`android-full-ui.png`), F-Droid installed (the
+harness waits 20 minutes times the timeout scale, and saves the
+installer's journal as `android-fdroid-install.txt` if F-Droid is
+missing) and listed in the app grid's "Android" folder, F-Droid's index
+fetch counted
 at Tor's TransPort for Android, Android's resolver mapping a `.onion` name
 into 127.192.0.0/10 with no answer to a ping there (Android's own
 `ping`, output saved as `android-onion-ping.txt`; should it get no
@@ -335,6 +345,30 @@ tty (`in_android`): given a tty, lxc-attach switches to a terminal proxy
 that sends the output to `/dev/tty` instead of a pipe and flushes the
 console's pending input, the harness's status marker with it.
 
+Under QEMU's full emulation Android does not boot with its own timeouts.
+When system_server's Watchdog reaches its half-way mark, it asks for
+native stack dumps of vold and the HALs and gives each 2 seconds. Under
+emulation every dump took longer, the dumped process (vold, the
+hwcomposer, gralloc, light, power and vibrator HALs, `system_suspend`)
+died of SIGPIPE when the requester gave up, and vold's death rebooted
+Android (vold has `reboot_on_failure`), which stopped the container.
+Yama's `ptrace_scope=2` is not the cause: `debuggerd -b` of a HAL, run
+by hand, succeeded and the HAL survived. So in a virtual machine
+`antumbra-waydroid` sets `ro.hw_timeout_multiplier=10`, as emulators do,
+and the run checks it once Android has booted; the phone keeps Android's
+own timeouts (`known-issues.md`, "Android apps"). In the run that found
+this, the multiplier was set by hand about 9 minutes into Android's boot,
+after HALs had died of SIGPIPE and Android's framework had restarted
+twice, and the framework was then restarted; Android reported
+`sys.boot_completed=1` about 22 minutes after its init started (the
+guest had been up for about 1960 seconds). How long Android takes to
+boot with `antumbra-waydroid` setting the multiplier from the start has
+not been measured yet. The file indexer's restart loop, since switched
+off (hook 52), slowed those runs too.
+Installing F-Droid then takes minutes more: `antumbra-fdroid-install`
+waits up to 15 minutes after `waydroid app install` for Android to list
+the package.
+
 To check the `android` Persistent Storage feature by hand: run with
 `--keep-disk`, create Persistent Storage and turn on both Android
 switches, install an app from F-Droid, power off, start again with
@@ -342,7 +376,8 @@ switches, install an app from F-Droid, power off, start again with
 Android apps and data" off and see a fresh Android.
 
 What the VM cannot tell about Android: performance and memory use on the
-phone, the 32-bit half of the `arm64` images, the Adreno GPU under
+phone, whether Android's own timeouts hold there (the VM scales them
+tenfold), the 32-bit half of the `arm64` images, the Adreno GPU under
 Android (the VM renders in software), audio and the microphone, the
 on-screen layout at the phone's density, and suspend with Android
 running.

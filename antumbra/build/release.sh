@@ -67,6 +67,10 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     else
         printf 'dm-verity: off (built with ANTUMBRA_VERITY=0; the root filesystem is not verified at boot)\n\n'
     fi
+    # A minimal build (ANTUMBRA_MINIMAL, any value but empty, as rootfs.sh reads it).
+    if [ -n "$(stamp_value "${FLAGS}" ANTUMBRA_MINIMAL)" ]; then
+        printf '%s\n\n' "This is a minimal build (ANTUMBRA_MINIMAL=$(stamp_value "${FLAGS}" ANTUMBRA_MINIMAL)), made to validate the build pipeline: it has only the base, network and amnesia package lists, and no Phosh, applications or Tor Browser."
+    fi
     printf '## Files\n\n'
     # shellcheck disable=SC2016  # backticks are Markdown, not command substitution
     printf -- '- `%s-boot.img`: slot-B boot image (kernel, initramfs, DTB), built by Antumbra.\n' "${NAME}"

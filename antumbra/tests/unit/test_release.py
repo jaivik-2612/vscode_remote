@@ -152,6 +152,17 @@ class ReleaseManifestTest(BuildOut):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("dm-verity: off (built with ANTUMBRA_VERITY=0;", self.manifest())
 
+    def test_minimal_build_is_stated(self):
+        r = self.release()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("minimal build", self.manifest())
+        self.flags["ANTUMBRA_MINIMAL"] = "1"
+        r = self.release()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("This is a minimal build (ANTUMBRA_MINIMAL=1), made to validate the build pipeline: it has only "
+                      "the base, network and amnesia package lists, and no Phosh, applications or Tor Browser.\n\n## Files\n",
+                      self.manifest())
+
     def test_local_libcamera_comes_with_the_source_offer(self):
         r = self.release()
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -178,9 +189,11 @@ class ReleaseManifestTest(BuildOut):
         self.assertIn("FDROID_APK_SHA256=", m)
 
 
-# rootfs.sh's record_device_firmware, defined from the script (not its main part).
+# rootfs.sh's record_device_firmware, defined from the script (not its main
+# part), with common.sh's warn and ANTUMBRA_FIRMWARE_DIR.
 FIRMWARE_DRIVER = r"""
 set -euo pipefail
+source "$ROOT/build/lib/common.sh"
 eval "$(sed -n '/^record_device_firmware() {/,/^}/p' "$ROOT/build/rootfs.sh")"
 record_device_firmware "$T/firmware" "$T/firmware.sha256"
 printf 'DEVICE_FIRMWARE=%s\n' "$DEVICE_FIRMWARE"
@@ -194,14 +207,29 @@ class DeviceFirmwareRecordTest(BuildOut):
         os.makedirs(self.fw)
         self.listing = os.path.join(self.t, "firmware.sha256")
 
-    def record(self):
-        r = subprocess.run(["bash", "-c", FIRMWARE_DRIVER], env=self.env(), capture_output=True, text=True, timeout=60)
+    NO_FIRMWARE = "ANTUMBRA_FIRMWARE_DIR holds no firmware files"
+
+    def record(self, firmware_dir=False):
+        """DEVICE_FIRMWARE as the driver prints it; its warnings in
+        self.warnings. FIRMWARE_DIR: ANTUMBRA_FIRMWARE_DIR given or not."""
+        env = self.env(ANTUMBRA_FIRMWARE_DIR=self.fw) if firmware_dir else self.env()
+        r = subprocess.run(["bash", "-c", FIRMWARE_DRIVER, "rootfs.sh"], env=env, capture_output=True, text=True,
+                           timeout=60)
         self.assertEqual(r.returncode, 0, r.stderr)
+        self.warnings = r.stderr
         return r.stdout
 
     def test_empty_tree_is_no_firmware(self):
         self.assertEqual(self.record(), "DEVICE_FIRMWARE=\n")
         self.assertFalse(os.path.exists(self.listing))
+        # Without ANTUMBRA_FIRMWARE_DIR rootfs.sh has said so already.
+        self.assertEqual(self.warnings, "")
+
+    def test_firmware_dir_without_firmware_files_is_warned_about(self):
+        write(os.path.join(self.fw, "MANIFEST.sha256"), f"{'0' * 64}  ./qcom/a640_gmu.bin\n")
+        os.symlink("missing.bin", os.path.join(self.fw, "a640_sqe.fw"))
+        self.assertEqual(self.record(firmware_dir=True), "DEVICE_FIRMWARE=\n")
+        self.assertIn(self.NO_FIRMWARE, self.warnings)
 
     def test_manifest_alone_is_no_firmware(self):
         # fetch-firmware.sh's MANIFEST.sha256 is not installed by hook 60.
@@ -215,9 +243,29 @@ class DeviceFirmwareRecordTest(BuildOut):
         for name, data in files.items():
             write(os.path.join(self.fw, name), data)
         write(os.path.join(self.fw, "MANIFEST.sha256"), "not firmware\n")
-        self.assertEqual(self.record(), "DEVICE_FIRMWARE=1\n")
+        self.assertEqual(self.record(firmware_dir=True), "DEVICE_FIRMWARE=1\n")
         self.assertEqual(read(self.listing), "".join(f"{hashlib.sha256(files[n]).hexdigest()}  ./{n}\n"
                                                      for n in sorted(files)))
+        self.assertEqual(self.warnings, "")
+
+    def test_symbolic_links_alone_are_no_firmware(self):
+        # Hook 60 copies them, but they hold no firmware: the decision
+        # follows the list, which has regular files only.
+        outside = os.path.join(self.t, "elsewhere.bin")
+        write(outside, b"not in the image")
+        os.makedirs(os.path.join(self.fw, "qcom"))
+        os.symlink(outside, os.path.join(self.fw, "qcom", "a640_gmu.bin"))
+        os.symlink("missing.bin", os.path.join(self.fw, "qcom", "a640_sqe.fw"))
+        os.symlink(self.t, os.path.join(self.fw, "ath10k"))
+        self.assertEqual(self.record(firmware_dir=True), "DEVICE_FIRMWARE=\n")
+        self.assertFalse(os.path.exists(self.listing))
+        self.assertIn(self.NO_FIRMWARE, self.warnings)
+
+    def test_a_link_is_not_listed_its_target_is(self):
+        write(os.path.join(self.fw, "qcom", "sm8150", "a640_zap.mbn"), b"zap")
+        os.symlink("sm8150/a640_zap.mbn", os.path.join(self.fw, "qcom", "a640_zap.mbn"))
+        self.assertEqual(self.record(), "DEVICE_FIRMWARE=1\n")
+        self.assertEqual(read(self.listing), f"{hashlib.sha256(b'zap').hexdigest()}  ./qcom/sm8150/a640_zap.mbn\n")
 
 
 # common.sh's helpers, with build/out in the test's directory.
@@ -256,6 +304,20 @@ class StaleOutputsTest(BuildOut):
                        '"${ROUT}"/filesystem.squashfs{,.verity,.roothash,.sha256}', "\nremove_built_images\n"):
             self.assertNotEqual(src.find(needle), -1, needle)
             self.assertLess(src.find(needle), start, needle)
+            # Before the tree: a run that stops while the tree is being
+            # deleted leaves no build-flags behind.
+            self.assertLess(src.find(needle), src.index('\nrm -rf "${ROOT}"\n'), needle)
+
+    def test_rootfs_writes_build_flags_last(self):
+        # Every step of rootfs.sh that can fail comes before build-flags is
+        # written, so a run that fails after deleting it leaves none.
+        src = read(os.path.join(BUILD, "rootfs.sh"))
+        written = src.index('> "${ROUT}/build-flags"')
+        self.assertEqual(src.count('"${ROUT}/build-flags"'), 2)    # deleted, then written
+        for step in ("\nmmdebstrap \\\n", "\nrecord_device_firmware ", 'die "initramfs was not generated',
+                     'cp "${ROOT}/boot/initrd.img-${KREL}" "${ROUT}/initrd.img"'):
+            self.assertLess(src.index(step), written, step)
+        self.assertNotIn("die ", src[written:])
 
     def squashfs(self, **env):
         # squashfs.sh insists on root; id answers 0 so it runs as anyone.
