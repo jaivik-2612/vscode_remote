@@ -44,6 +44,11 @@ A release directory contains:
 | `antumbra-<v>-dtbo.img` (25165824 bytes) | `dtbo_b` | hotdog-linux-bringup release, hash-pinned |
 | `antumbra-<v>-vbmeta-disabled.img` (65536 bytes) | `vbmeta_b` | hotdog-linux-bringup release, hash-pinned |
 | `SHA256SUMS`, optionally `SHA256SUMS.minisig` | | |
+| `MANIFEST.md` (the build, its pinned inputs and packages), `INSTALL.md` (this document) | | built by Antumbra |
+
+A compressed userdata image larger than 1900 MiB comes in pieces,
+`antumbra-<v>-userdata.simg.zst.part000`, `.part001` and so on;
+`flash.sh` joins them itself.
 
 Verify first:
 
@@ -76,6 +81,7 @@ fastboot flash dtbo_b   antumbra-<v>-dtbo.img
 fastboot flash boot_b   antumbra-<v>-boot.img
 fastboot reboot fastboot
 fastboot getvar is-userspace     # yes
+cat antumbra-<v>-userdata.simg.zst.part* > antumbra-<v>-userdata.simg.zst   # only if it came in pieces
 zstd -d antumbra-<v>-userdata.simg.zst
 fastboot -S 128M flash userdata antumbra-<v>-userdata.simg
 fastboot reboot bootloader
