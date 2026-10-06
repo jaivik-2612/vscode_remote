@@ -286,8 +286,9 @@ through the Welcome screen's own module, run as the greeter user (the
 same files, byte for byte, as the Welcome screen writes: a passphrase
 typed through QMP into GTK password rows under software emulation would
 test the keyboard path rather than Persistent Storage), wait for the
-root applier, then press "Start Antumbra", which starts the session as
-after a logout, and run the usual session and network checks.
+root applier as the Welcome screen does, then press "Start Antumbra",
+which starts the session as after a logout, and run the usual session
+and network checks.
 
 The first run (fresh disk) checks that the partition had no volume,
 chooses "Create" with a screen-lock passphrase and administration on,
@@ -300,8 +301,12 @@ administration and the passphrase are in force; and that a file written
 to `~/Persistent` lands on the volume. The second run (`--keep-disk`)
 checks that the partition holds a LUKS volume, opens it read-only first
 to check what the first run stored (administration on, no passphrase
-hash, the file in `Persistent`), then chooses "Unlock" with no
-screen-lock passphrase and administration off, and checks that the
+hash, the file in `Persistent`), tries "Unlock" with a wrong passphrase
+(the error reaches the Welcome screen's wait, `welcome-done` and the
+passphrase are gone so that it can start again), then chooses "Unlock"
+with the right one, no screen-lock passphrase and administration off
+(the wrong attempt's report, still there, must not be taken for this
+one's), and checks that the
 volume was unlocked, that this boot's settings were applied and replaced
 the stored ones (administration off, no passphrase, no sudoers rule), and
 that `~/Persistent` still holds the file. The run takes longer than

@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "config", "rootfs", "usr", "lib", "python3", "dist-packages"))
@@ -89,6 +90,86 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(oct(os.stat(f).st_mode & 0o777), oct(0o600))
         with open(f) as fh:
             self.assertEqual(fh.read(), "secret passphrase")
+
+
+class RetryTest(unittest.TestCase):
+    """Starting again after the applier failed (a wrong passphrase): the
+    earlier failure report stays until the applier runs again."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp()
+        self.applied = os.path.join(self.root, "welcome-applied")
+        self.failed = os.path.join(self.root, "welcome-failed")
+        self.settings = os.path.join(self.root, "settings")
+
+    def tearDown(self):
+        shutil.rmtree(self.root)
+
+    def report(self, text):
+        with open(self.failed, "w") as f:
+            f.write(text + "\n")
+
+    def wait(self, stale, timeout):
+        S.wait_for_applier(stale, timeout=timeout, applied=self.applied, failed=self.failed, poll=0.05)
+
+    def later(self, delay, action):
+        t = threading.Timer(delay, action)
+        t.start()
+        self.addCleanup(t.join)
+
+    def submit(self):
+        m = S.WelcomeSettings()
+        m.persistence, m.persistence_passphrase = "unlock", "the right passphrase"
+        return S.submit(m, self.settings, failed=self.failed)
+
+    def test_an_earlier_report_is_not_this_attempts(self):
+        self.report("wrong passphrase, or Persistent Storage is damaged")
+        stale = self.submit()
+        self.assertIsNotNone(stale)
+        with self.assertRaisesRegex(RuntimeError, "^timed out"):
+            self.wait(stale, 0.4)
+
+    def test_success_after_an_earlier_failure(self):
+        self.report("wrong passphrase, or Persistent Storage is damaged")
+        stale = self.submit()
+        # The applier starts: it removes the old report, then succeeds.
+        self.later(0.15, lambda: os.unlink(self.failed))
+        self.later(0.3, lambda: open(self.applied, "w").close())
+        self.wait(stale, 5)
+
+    def test_a_new_failure_is_reported(self):
+        self.report("wrong passphrase, or Persistent Storage is damaged")
+        stale = self.submit()
+        self.later(0.15, lambda: os.unlink(self.failed))
+        self.later(0.3, lambda: self.report("activating Persistent Storage failed"))
+        with self.assertRaisesRegex(RuntimeError, "^activating Persistent Storage failed$"):
+            self.wait(stale, 5)
+        # Rewritten in place, without being removed first, it is new too.
+        stale = S.failure_report_id(self.failed)
+        self.later(0.1, lambda: self.report("unexpected error (line 1, exit status 1)"))
+        with self.assertRaisesRegex(RuntimeError, r"^unexpected error"):
+            self.wait(stale, 5)
+
+    def test_no_second_write_while_the_applier_has_the_first(self):
+        # After a time-out, Start again while the applier still has the
+        # first attempt (welcome-done still there): nothing is written.
+        self.submit()
+        done = os.path.join(self.settings, "transient", "welcome-done")
+        passphrase = os.path.join(self.settings, "transient", "antumbra.persistence-passphrase")
+        os.unlink(passphrase)
+        self.assertIsNone(self.submit())
+        self.assertFalse(os.path.exists(passphrase))
+        os.unlink(done)                       # the applier finished with it
+        self.submit()
+        self.assertTrue(os.path.exists(passphrase))
+
+    def test_the_welcome_screen_uses_them(self):
+        path = os.path.join(os.path.dirname(__file__), "..", "..", "config", "rootfs", "usr", "bin", "antumbra-welcome")
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        self.assertIn("S.wait_for_applier(S.submit(self.model))", source)
+        self.assertNotIn("welcome-failed", source)
+        self.assertNotIn("self.model.write()", source)
 
 
 if __name__ == "__main__":

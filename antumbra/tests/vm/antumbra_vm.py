@@ -1937,15 +1937,22 @@ def sh_quote(s):
 PERSISTENCE_PASSPHRASE = "antumbra vm persistence"   # at least 12 characters, as the Welcome screen asks
 LOCK_PASSPHRASE = "vm-lock-passphrase"
 PERSISTENT_MARK = "/home/amnesia/Persistent/antumbra-vm-run1"
-# The Welcome screen's own module writes the settings, as the greeter user.
+# The Welcome screen's own module writes the settings, as the greeter user,
+# and waits for the applier as the Welcome screen does on Start (at most
+# argv[2] seconds): "applied", or "error: " and the applier's message.
 WRITE_SETTINGS_PY = r'''
 import json, sys
 from antumbra import settings as S
 m = S.WelcomeSettings()
 for k, v in json.loads(sys.argv[1]).items():
     setattr(m, k, v)
-m.write()
-print("settings written")
+stale = S.submit(m)
+print("settings written", flush=True)
+try:
+    S.wait_for_applier(stale, timeout=float(sys.argv[2]))
+    print("applied")
+except RuntimeError as e:
+    print(f"error: {e}")
 '''
 
 
@@ -1980,19 +1987,28 @@ def persistence_phase(vm, rep, T, sh, out, run):
     choices = {"persistence": run, "persistence_passphrase": PERSISTENCE_PASSPHRASE, "network": "direct",
                "user_password": LOCK_PASSPHRASE if create else "", "admin": create}
     ok = guest_write(sh, "/run/antumbra-vm-settings.py", WRITE_SETTINGS_PY, "0644")
+    if not create:
+        # A wrong passphrase first, as a user might type it: the Welcome
+        # screen hears of it and can start again; its report then stays
+        # while the right passphrase is tried (an argon2id unlock), and must
+        # not be taken for that attempt's.
+        wrong = dict(choices, persistence_passphrase="not the passphrase")
+        rc, o = sh(f"runuser -u antumbra-greeter -- python3 /run/antumbra-vm-settings.py {sh_quote(json.dumps(wrong))} {int(T(900))}; "
+                   "ls -A /var/lib/antumbra/settings/transient | tr '\\n' ' '; echo; "
+                   "if [ -e /run/antumbra/welcome-applied ]; then echo applied-marker; fi; echo end", timeout=int(T(900)) + 120)
+        lines = o.strip().split("\n") if rc == 0 else []
+        rep.check("persistence: a wrong passphrase is reported to the Welcome screen, which can start again (no welcome-done, "
+                  "no passphrase left)",
+                  ok and lines[:2] == ["settings written", "error: wrong passphrase, or Persistent Storage is damaged"]
+                  and len(lines) == 4 and "welcome-done" not in lines[2] and "passphrase" not in lines[2] and lines[3] == "end",
+                  o.replace("\n", " | ")[:300])
     rc, o = sh("runuser -u antumbra-greeter -- python3 /run/antumbra-vm-settings.py "
-               f"{sh_quote(json.dumps(choices))}", timeout=120)
-    rep.check(f"persistence: Welcome settings for '{run}' written as the greeter user", ok and rc == 0 and o.strip().endswith("settings written"), o.strip()[-200:])
-    applied = None
-    deadline = time.monotonic() + T(1500)
-    while time.monotonic() < deadline:
-        rc, o = sh("if [ -e /run/antumbra/welcome-applied ]; then echo applied; elif [ -e /run/antumbra/welcome-failed ]; then "
-                   "echo failed: $(cat /run/antumbra/welcome-failed); else echo waiting; fi", timeout=60)
-        if rc == 0 and o.strip() != "waiting":
-            applied = o.strip()
-            break
-        time.sleep(10)
-    rep.check(f"persistence: the applier {'created' if create else 'unlocked'} Persistent Storage and applied the settings", applied == "applied", str(applied))
+               f"{sh_quote(json.dumps(choices))} {int(T(1500))}", timeout=int(T(1500)) + 120)
+    lines = o.strip().split("\n") if rc == 0 else []
+    rep.check(f"persistence: Welcome settings for '{run}' written as the greeter user", ok and lines[:1] == ["settings written"], o.strip()[-200:])
+    applied = lines[1] if len(lines) == 2 else None
+    rep.check(f"persistence: the applier {'created' if create else 'unlocked'} Persistent Storage and applied the settings"
+              + ("" if create else ", the wrong passphrase's report notwithstanding"), applied == "applied", str(applied))
     if applied != "applied":
         rc, o = sh("journalctl -b --no-pager -u antumbra-apply-welcome-settings -t antumbra-welcome | tail -n 60", timeout=60)
         save_text(out, "persistence-applier.txt", o)

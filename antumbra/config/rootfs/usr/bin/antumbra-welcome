@@ -13,7 +13,6 @@ import os
 import sys
 import tempfile
 import threading
-import time
 
 import gi
 
@@ -227,15 +226,13 @@ class WelcomeWindow(Adw.ApplicationWindow):
                 GLib.idle_add(self.finish_demo, root)
                 return
             if not os.path.exists(S.APPLIED_MARKER):
-                self.model.write()
-                deadline = time.monotonic() + 600
-                while not os.path.exists(S.APPLIED_MARKER):
-                    if os.path.exists("/run/antumbra/welcome-failed"):
-                        with open("/run/antumbra/welcome-failed", encoding="utf-8") as f:
-                            raise RuntimeError(f.read().strip() or "settings could not be applied")
-                    if time.monotonic() > deadline:
-                        raise RuntimeError("timed out waiting for the settings to be applied")
-                    time.sleep(0.5)
+                # After a failure (a wrong passphrase) the user starts again;
+                # the earlier report stays until the applier runs again, so
+                # only a report other than the one there now is this
+                # attempt's. Start stays insensitive until the applier is
+                # done, and nothing is written again while it has not
+                # finished an attempt (after a time-out).
+                S.wait_for_applier(S.submit(self.model))
             from antumbra.greetd import Greetd
             env = ["XDG_SESSION_TYPE=wayland", "XDG_CURRENT_DESKTOP=Phosh:GNOME",
                    "XDG_SESSION_DESKTOP=phosh", "GDMSESSION=phosh"]

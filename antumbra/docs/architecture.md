@@ -658,14 +658,23 @@ answers once.
    Then it unlocks or creates Persistent Storage and activates its
    features; copies this boot's settings to `settings/applied/`
    (root-owned); with Persistent Storage, saves them on the volume (the
-   "Welcome settings" feature, owned by the greeter user); sets the user's
-   password with `chpasswd -e` or deletes it; installs the sudoers and
-   polkit admin rules when asked; writes the marker; runs
-   `antumbra-unblock-network`. On a failure (a wrong passphrase, say) it
-   writes `/run/antumbra/welcome-failed` and removes `welcome-done`, so
+   "Welcome settings" feature, owned by the greeter user: whatever the
+   greeter left under each name is renamed out to a root-only directory
+   on the volume and removed there, and each copy is made there, already
+   the greeter's and 0640, then renamed in, so that root never changes a
+   mode or owner, or follows a link, in the greeter's directory); sets the
+   user's password with `chpasswd -e` or deletes it; installs the sudoers
+   and polkit admin rules when asked; writes the marker; runs
+   `antumbra-unblock-network`. On a failure (a wrong passphrase, say, or
+   any command failing unexpectedly: an `ERR` trap) it removes
+   `welcome-done` and then writes `/run/antumbra/welcome-failed`, so
    that its path unit does not start it again on settings it has already
    consumed; the Welcome screen shows the error and writes everything
-   again on the next Start. What is applied is always what the Welcome
+   again on the next Start. The Welcome screen takes only a failure
+   report other than the one there before it wrote (the earlier attempt's
+   stays until the applier runs again), keeps Start insensitive until the
+   applier answers, and writes nothing while `welcome-done` is still there
+   (after a time-out). What is applied is always what the Welcome
    screen showed this boot: the volume is unlocked only after Start, so
    the Welcome screen cannot show the stored settings, and stored settings
    that silently replaced this boot's choice (offline mode, MAC address
