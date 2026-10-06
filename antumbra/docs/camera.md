@@ -134,15 +134,48 @@ permission. It is not an access control either:
   nothing;
 - PipeWire's access module and WirePlumber's default access policy give
   every client that is not a Flatpak access to all nodes, the camera nodes
-  included.
+  included;
+- the camera portal itself: once the session's one decision for host
+  programs is "allow" (a single tap on Allow, for Snapshot or for any
+  other program), every host program that asks the portal over the session
+  bus (`org.freedesktop.portal.Camera`: `AccessCamera`, then
+  `OpenPipeWireRemote`) gets a connected PipeWire file descriptor for the
+  cameras, without a prompt, for the rest of the session. The decision is
+  kept in the portal's permission store
+  (`org.freedesktop.impl.portal.PermissionStore`), which any program on
+  the session bus can write, so a program can also give itself access
+  without any prompt at all.
 
 So any program running as `amnesia`, Tor Browser and anything that
 compromises it included, can use the cameras without a prompt. Enforcement
-needs Tor Browser confined: an AppArmor profile that denies
-`/dev/video*`, `/dev/media*`, `/dev/v4l-subdev*` and the PipeWire socket
-(`/run/user/1000/pipewire-0`). The image has no Tor Browser profile yet;
-it is planned (`roadmap.md`). The physical pop-up remains the only signal
-for the front camera.
+needs Tor Browser confined, and the confinement has to close all three
+ways in: an AppArmor profile that denies `/dev/video*`, `/dev/media*`,
+`/dev/v4l-subdev*` and the PipeWire socket (`/run/user/1000/pipewire-0`),
+and that also denies the browser's session-bus calls to the camera portal
+and to the permission store. Rules for the devices and the socket alone
+are not enough: the portal hands the browser an already connected PipeWire
+file descriptor, so the browser never opens a camera device or PipeWire's
+socket by path. For example:
+
+```
+deny dbus send bus=session path=/org/freedesktop/portal/desktop interface=org.freedesktop.portal.Camera,
+deny dbus send bus=session interface=org.freedesktop.impl.portal.PermissionStore,
+```
+
+Better, the profile allows the session bus only for the names the browser
+needs. AppArmor's D-Bus rules are enforced by the bus daemon: the image's
+`dbus-daemon` is built with AppArmor support and the 6.17 kernel
+advertises AppArmor D-Bus mediation, so session-bus rules in the profile
+should apply; the profile's own tests have to show that they do. The other
+way is Tails' plan, a Flatpak sandbox: the portal then knows the browser
+by its own application id and keeps a separate decision for it, and
+Flatpak's D-Bus proxy keeps it away from the permission store. A
+bubblewrap sandbox that is not a Flatpak still counts as a host program
+for the portal. The image has no Tor Browser profile yet; it is planned
+(`roadmap.md`). The VM camera checks call the portal as `amnesia` from
+inside the browser's network namespace and expect a PipeWire connection
+(`vm-testing.md`). The physical pop-up remains the only signal for the
+front camera.
 
 ## Why there is no OnePlus Camera
 
@@ -172,10 +205,21 @@ Technical:
   pop-up with it anyway.
 
 None of it is needed: the kernel raises the pop-up for any application.
-`tests/no-oneplus-camera.py` looks for OnePlus camera software (by file
-name, and by package name inside any Android package) and for Qualcomm's
-camera HAL files. `tests/lint.sh` runs it over the source tree and the VM
-camera checks run it over the image.
+`tests/no-oneplus-camera.py` looks for OnePlus camera software and
+Qualcomm's camera HAL files by file name (also with a compression suffix),
+and for OnePlus Android packages by package name, whatever their file
+name. It looks inside everything that can hold them, without mounting or
+extracting anything, recursively: APKs, APEXes, XAPK, APKS and APKM
+bundles and their split APKs, app bundles, zip, tar and cpio archives (the
+initramfs), gzip, xz, bzip2 and zstd files, and ext2/3/4, EROFS and
+Android sparse images, Waydroid's `system.img` and `vendor.img` among
+them. A file in one of those formats that it cannot read entirely (an
+EROFS image with compressed files, an Android super image or OTA payload,
+an encrypted zip member, nesting deeper than eight levels) is reported,
+so the check fails closed. `tests/lint.sh` runs it over the source tree;
+the VM camera checks run it in the guest over the root file system, then
+over a small fixture it must flag (a OnePlus camera APK inside an ext4
+image and inside a zstd-compressed XAPK).
 
 ## Optional: the port's patched libcamera
 

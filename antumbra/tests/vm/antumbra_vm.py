@@ -682,6 +682,38 @@ exec timeout 900 stdbuf -oL busctl --user --json=short monitor \\
     --match "type='method_call',interface='org.freedesktop.impl.portal.Access',member='AccessDialog'"
 """
 
+# The OnePlus camera scanner's positive control, run in the guest with the
+# guest's own Python, mke2fs and zstd: in DIR/scan, an ext4 image like
+# Waydroid's holding a renamed APK whose manifest names com.oneplus.camera
+# beside a free one, and a zstd-compressed XAPK bundle. NOPC_FIXTURE_HITS is
+# exactly what the scanner must print for it.
+NOPC_FIXTURE = r'''
+import io, json, os, subprocess, sys, zipfile
+out = sys.argv[1]
+def apk(package):
+    b = io.BytesIO()
+    with zipfile.ZipFile(b, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("AndroidManifest.xml", b"\x03\x00\x08\x00" + package.encode("utf-16-le"))
+        z.writestr("classes.dex", b"dex\n035\x00" + bytes(64))
+    return b.getvalue()
+def put(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(data)
+put(os.path.join(out, "src", "system", "app", "Renamed", "Renamed.apk"), apk("com.oneplus.camera"))
+put(os.path.join(out, "src", "system", "app", "F-Droid", "F-Droid.apk"), apk("org.fdroid.fdroid"))
+os.makedirs(os.path.join(out, "scan"))
+subprocess.run(["mke2fs", "-q", "-F", "-t", "ext4", "-O", "^64bit,^metadata_csum", "-d", os.path.join(out, "src"),
+                os.path.join(out, "scan", "android.img"), "4M"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+b = io.BytesIO()
+with zipfile.ZipFile(b, "w") as z:
+    z.writestr("manifest.json", json.dumps({"package_name": "com.oneplus.camera"}))
+    z.writestr("base.apk", apk("com.oneplus.camera"))
+subprocess.run(["zstd", "-q", "-o", os.path.join(out, "scan", "bundle.zst"), "-"], input=b.getvalue(), check=True)
+print("fixture ready")
+'''
+NOPC_FIXTURE_HITS = ["{scan}/android.img!/system/app/Renamed/Renamed.apk", "{scan}/bundle.zst", "{scan}/bundle.zst!/base.apk"]
+
 # vimc's sensors draw the 75% colour bars by default. A pixel counts as one
 # of the bars' hues by which channels are high (>= 120) and low (<= 80).
 BAR_HUES = {("h", "h", "l"): "yellow", ("l", "h", "h"): "cyan", ("l", "h", "l"): "green",
@@ -804,14 +836,30 @@ def camera_phase(vm, rep, T, sh, out):
               "at PipeWire's version; no Megapixels",
               ok, ", ".join(f"{k} {v}" for k, v in sorted(pk.items())) + f"; megapixels {o2.strip() or '?'}")
     # 5. No OnePlus camera software anywhere in the image (the same scanner
-    #    tests/lint.sh runs over the source tree).
-    name = "camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image"
+    #    tests/lint.sh runs over the source tree): file names, and contents
+    #    inside packages, bundles, archives, compressed files, the initramfs
+    #    and disk images, Waydroid's system.img and vendor.img included.
+    name = ("camera: no OnePlus/OxygenOS camera app or Qualcomm camera HAL file in the image "
+            "(inside packages, archives, compressed files and Waydroid's images included)")
     scanner = open(os.path.join(ROOT, "tests", "no-oneplus-camera.py"), "rb").read()
-    if put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner):
+    copied = (put_file(sh, "/tmp/antumbra-no-oneplus-camera.py", scanner)
+              and put_file(sh, "/tmp/antumbra-nopc-fixture.py", NOPC_FIXTURE.encode()))
+    if copied:
         rc, o = sh("python3 /tmp/antumbra-no-oneplus-camera.py --xdev /", timeout=900)
         rep.check(name, rc == 0 and not o.strip(), flat(o) or "none found")
+        # 5b. The positive control, after the scan: the same scanner in the
+        #     guest finds a OnePlus camera APK inside an ext4 image like
+        #     Waydroid's and inside a zstd-compressed XAPK.
+        rc, o = sh("rm -rf /tmp/antumbra-nopc && python3 /tmp/antumbra-nopc-fixture.py /tmp/antumbra-nopc "
+                   "&& { python3 /tmp/antumbra-no-oneplus-camera.py /tmp/antumbra-nopc/scan; echo \"scanner exit $?\"; }; "
+                   "rm -rf /tmp/antumbra-nopc", timeout=300)
+        lines = [line.rstrip("\r") for line in o.strip().split("\n")] if rc == 0 else []
+        want = [h.format(scan="/tmp/antumbra-nopc/scan") for h in NOPC_FIXTURE_HITS]
+        rep.check("camera: the scanner finds a OnePlus camera APK inside an ext4 image and inside a zstd-compressed XAPK",
+                  lines[:1] == ["fixture ready"] and lines[-1:] == ["scanner exit 1"] and sorted(lines[1:-1]) == sorted(want),
+                  flat(o))
     else:
-        rep.check(name, False, "could not copy the scanner to the guest")
+        rep.check(name, False, "could not copy the scanner and its fixture to the guest")
 
     # --- In the amnesia session ------------------------------------------------
     rc, o = sh("pgrep -u amnesia -xc phosh", timeout=30)
@@ -941,6 +989,21 @@ def camera_phase(vm, rep, T, sh, out):
     decision, decision_detail = portal_decision()
     rep.check("camera: the camera decision for host programs is stored as yes", decision == "yes", decision_detail)
     shot("camera-after-prompt.png")
+
+    # 8b. What the planned Tor Browser confinement must also deny (camera.md,
+    #     "Who can use the cameras"): from the browser's network namespace,
+    #     as amnesia, without opening a camera device or PipeWire's socket,
+    #     the camera portal hands over a connected PipeWire file descriptor
+    #     once the session's one decision for host programs is yes.
+    rc, o = sh("ip netns exec tbb " + AS_AMNESIA + "busctl --user --json=short call org.freedesktop.portal.Desktop "
+               "/org/freedesktop/portal/desktop org.freedesktop.portal.Camera OpenPipeWireRemote 'a{sv}' 0 2>&1", timeout=60)
+    try:
+        reply = json.loads(o.strip().split("\n")[-1]) if rc == 0 else {}
+    except ValueError:
+        reply = {}
+    rep.check("camera: from Tor Browser's network namespace the camera portal gives amnesia a PipeWire connection "
+              "(the gap the planned browser profile must close, camera.md)",
+              isinstance(reply, dict) and reply.get("type") == "h", flat(o))
 
     # 9. Second start: the portal grants access without asking, Snapshot
     #    streams, and the preview shows vimc's colour bars.

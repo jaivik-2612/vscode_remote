@@ -8,14 +8,20 @@ every input of the optional libcamera rebuild must be pinned; the VM's
 virtual camera must stay out of the phone's kernel; the OnePlus camera
 scanner must find what it is meant to find. See docs/camera.md.
 """
+import bz2
+import gzip
 import importlib.util
 import io
 import json
+import lzma
 import os
+import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
 import zipfile
@@ -333,6 +339,53 @@ class VmHarnessTest(unittest.TestCase):
             f.flush()
             subprocess.run(["dash", "-n", f.name], check=True)
 
+    def test_oneplus_scanner_positive_control(self):
+        # The fixture the camera checks build in the guest, built here: the
+        # scanner must print exactly NOPC_FIXTURE_HITS for it.
+        path = os.environ.get("PATH", "") + ":/usr/sbin:/sbin"
+        for tool in ("mke2fs", "zstd"):
+            if not shutil.which(tool, path=path):
+                self.skipTest(f"{tool} not installed")
+        with tempfile.TemporaryDirectory() as d:
+            script = os.path.join(d, "fixture.py")
+            with open(script, "w") as f:
+                f.write(self.vm.NOPC_FIXTURE)
+            r = subprocess.run([sys.executable, script, os.path.join(d, "nopc")], capture_output=True, text=True,
+                               env=dict(os.environ, PATH=path))
+            self.assertEqual((r.returncode, r.stdout), (0, "fixture ready\n"), r.stderr)
+            scan = os.path.join(d, "nopc", "scan")
+            r = subprocess.run([sys.executable, os.path.join(ROOT, "tests", "no-oneplus-camera.py"), scan],
+                               capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1, r.stderr)
+            self.assertEqual(sorted(r.stdout.splitlines()), sorted(h.format(scan=scan) for h in self.vm.NOPC_FIXTURE_HITS))
+
+
+class CameraAccessDocsTest(unittest.TestCase):
+    """Wherever the docs describe the planned Tor Browser confinement for the
+    cameras (devices and PipeWire's socket), they must also name the camera
+    portal and its permission store: the portal hands any host program a
+    connected PipeWire file descriptor over the session bus once the
+    session's single decision for host programs is yes, and any session
+    process can write that decision."""
+
+    def paragraphs(self, text):
+        # blank-line paragraphs, split further at list items and table rows
+        for block in re.split(r"\n\s*\n", text):
+            yield from (" ".join(p.split()) for p in re.split(r"\n(?=\s*(?:[-*] |\d+\. |\|))", block))
+
+    def test_planned_confinement_covers_the_camera_portal(self):
+        found = 0
+        for name in sorted(os.listdir(os.path.join(ROOT, "docs"))):
+            if not name.endswith(".md"):
+                continue
+            for p in self.paragraphs(read(os.path.join(ROOT, "docs", name))):
+                if "PipeWire socket" in p:
+                    found += 1
+                    self.assertIn("camera portal", p, f"{name}: {p[:200]}")
+                    self.assertIn("permission store", p.lower(), f"{name}: {p[:200]}")
+        # camera.md, roadmap.md, known-issues.md, threat-model.md
+        self.assertGreaterEqual(found, 4)
+
 
 class OnePlusScannerTest(unittest.TestCase):
     @classmethod
@@ -379,11 +432,294 @@ class OnePlusScannerTest(unittest.TestCase):
         self.touch("usr", "share", "libcamera", "ipa", "simple", "imx471.yaml")
         self.touch("usr", "lib", "firmware", "qcom", "sm8150", "oneplus", "hotdog", "venus.mbn")
         self.apk("F-Droid.apk", "org.fdroid.fdroid")
+        self.apk("OpenCamera.apk", "net.sourceforge.opencamera")   # free software, not op*camera*
         self.assertEqual(self.nopc.scan(self.tmp, False, set()), [])
 
     def test_skip(self):
         self.touch("build", "cache", "CAMERA_ICP.elf")
         self.assertEqual(self.nopc.scan(self.tmp, False, {os.path.join(self.tmp, "build", "cache")}), [])
+
+    # --- Packages in bundles, archives, compressed files and disk images ------
+    def write(self, rel, data):
+        path = os.path.join(self.tmp, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    def scan(self, path=None):
+        return set(self.nopc.scan(path or self.tmp, False, set()))
+
+    def tool(self, name):
+        path = shutil.which(name, path=os.environ.get("PATH", "") + ":/usr/sbin:/sbin")
+        if not path:
+            self.skipTest(f"{name} not installed")
+        return path
+
+    def test_finds_packages_in_bundles(self):
+        camera = apk_bytes("com.oneplus.camera")
+        # XAPK: the package name in manifest.json, and the APK inside
+        xapk = self.write("camera.xapk", zip_bytes([("manifest.json", json.dumps({"package_name": "com.oneplus.camera"}).encode()),
+                                                    ("base.apk", camera), ("icon.png", b"\x89PNG")]))
+        hits = {xapk, xapk + "!/base.apk"}
+        # APKS (bundletool, SAI): split APKs under splits/, nothing in toc.pb
+        apks = self.write("camera.apks", zip_bytes([("toc.pb", b"\x0a\x00"), ("splits/base-master.apk", camera),
+                                                    ("splits/base-arm64_v8a.apk", apk_bytes("com.oneplus.camera", split=True))]))
+        hits |= {apks + "!/splits/base-master.apk", apks + "!/splits/base-arm64_v8a.apk"}
+        # APKM (APKMirror): info.json and the APKs
+        apkm = self.write("camera.apkm", zip_bytes([("info.json", json.dumps({"pname": "com.oneplus.camera"}).encode()),
+                                                    ("base.apk", camera)]))
+        hits |= {apkm, apkm + "!/base.apk"}
+        # An app bundle: its manifest is protobuf, the name in UTF-8
+        hits.add(self.write("camera.aab", zip_bytes([("base/manifest/AndroidManifest.xml", b"\x0a\x12com.oneplus.camera")])))
+        # A lone split APK under any name
+        hits.add(self.write("split_config.arm64_v8a.apk", apk_bytes("com.oneplus.camera", split=True)))
+        self.assertEqual(self.scan(), hits)
+
+    def test_finds_compressed_and_archived_files(self):
+        camera = apk_bytes("com.oneplus.camera")
+        hits = {
+            # by name, also with a compression suffix
+            self.write("vendor/lib64/camera.qcom.so.xz", lzma.compress(b"\x7fELF" + bytes(64))),
+            self.write("vendor/lib64/libmpbase.so.zst", b"\x28\xb5\x2f\xfd"),
+            self.write("app/OPCamera.apk.gz", gzip.compress(camera)),
+            # by content: a renamed APK compressed four ways
+            self.write("data/a.bin.gz", gzip.compress(camera)),
+            self.write("data/a.bin.xz", lzma.compress(camera)),
+            self.write("data/a.bin.bz2", bz2.compress(camera)),
+        }
+        tar = self.write("data/vendor.tar", tar_bytes([("vendor/lib64/camera.qcom.so", b"\x7fELF"), ("vendor/etc/a.txt", b"text")]))
+        hits.add(tar + "!/vendor/lib64/camera.qcom.so")
+        txz = self.write("data/apps.tar.xz", lzma.compress(tar_bytes([("app/x.apk", camera)])))
+        hits.add(txz + "!/app/x.apk")
+        zf = self.write("data/blobs.zip", zip_bytes([("lib/libcamxexternalformatutils.so", b"\x7fELF"), ("README", b"text")]))
+        hits.add(zf + "!/lib/libcamxexternalformatutils.so")
+        if shutil.which("zstd"):
+            zst = self.write("data/a.bin.zst", subprocess.run(["zstd", "-q", "-c"], input=camera, capture_output=True,
+                                                              check=True).stdout)
+            tzst = self.write("data/apps.tar.zst", subprocess.run(["zstd", "-q", "-c"], input=tar_bytes([("app/y.apk", camera)]),
+                                                                  capture_output=True, check=True).stdout)
+            hits |= {zst, tzst + "!/app/y.apk"}
+        self.assertEqual(self.scan(), hits)
+
+    def test_finds_firmware_in_an_initramfs(self):
+        # An early uncompressed archive, then the main one compressed, as
+        # initramfs-tools writes them.
+        early = cpio_bytes([("kernel/x86/microcode/AuthenticAMD.bin", b"ucode data")])
+        main = cpio_bytes([("usr/lib/firmware/qcom/sm8150/CAMERA_ICP.elf", b"\x7fELF"), ("init", b"#!/bin/sh\n"),
+                           ("usr/lib/modules/x.apk", apk_bytes("com.oneplus.camera"))])
+        img = self.write("boot/initrd.img", early + bytes(512) + gzip.compress(main))
+        self.assertEqual(self.scan(), {img + "!/usr/lib/firmware/qcom/sm8150/CAMERA_ICP.elf", img + "!/usr/lib/modules/x.apk"})
+
+    def android_tree(self, root, oneplus=True):
+        """A small /system tree, like Waydroid's images; with ONEPLUS, a
+        renamed OnePlus camera APK and an APEX whose payload image holds
+        another one. Returns the paths (inside the image) that must be found."""
+        def put(rel, data):
+            path = os.path.join(root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(data)
+        rnd = random.Random(7)
+        put("system/app/F-Droid/F-Droid.apk", apk_bytes("org.fdroid.fdroid"))
+        put("system/app/Camera2/Camera2.apk", apk_bytes("com.android.camera2"))
+        put("system/framework/framework.jar", zip_bytes([("classes.dex", rnd.randbytes(70000))], zipfile.ZIP_STORED))
+        put("system/lib64/libbig.so", rnd.randbytes(300 * 1024 + 123))   # indirect blocks on 1 KiB ext2
+        with open(os.path.join(root, "system", "lib64", "libholes.so"), "wb") as f:
+            for i in range(17):      # holes: an ext4 extent tree with an index level, block map holes
+                f.seek(i * 65536)    # (none at the end: mke2fs -d loses a final hole with inline_data)
+                f.write(rnd.randbytes(4096 if i < 16 else 100))
+        put("system/etc/tiny.txt", b"inline candidate\n")
+        put("system/usr/share/doc.txt.gz", gzip.compress(b"documentation\n" * 100))
+        for i in range(300):
+            put(f"system/usr/many/file{i:04d}.txt", f"{i}\n".encode())
+        payload_src = os.path.join(self.tmp, "payload-src")
+        inner, data = ("app/Inner/Inner.apk", apk_bytes("com.oneplus.camera")) if oneplus else ("etc/x.txt", b"x\n")
+        os.makedirs(os.path.dirname(os.path.join(payload_src, inner)))
+        with open(os.path.join(payload_src, inner), "wb") as f:
+            f.write(data)
+        if oneplus:
+            put("system/app/Renamed/Renamed.apk", apk_bytes("com.oneplus.camera"))
+        payload = os.path.join(self.tmp, "apex_payload.img")
+        subprocess.run([self.tool("mke2fs"), "-q", "-F", "-t", "ext4", "-d", payload_src, payload, "1M"], check=True,
+                       capture_output=True)
+        with open(payload, "rb") as f:
+            put("system/apex/com.android.foo.apex", zip_bytes([("AndroidManifest.xml", apk_manifest("com.android.foo")),
+                                                               ("apex_payload.img", f.read())], zipfile.ZIP_STORED))
+        os.unlink(payload)
+        shutil.rmtree(payload_src)
+        return {"/system/app/Renamed/Renamed.apk",
+                "/system/apex/com.android.foo.apex!/apex_payload.img!/app/Inner/Inner.apk"} if oneplus else set()
+
+    def images(self, src):
+        """{image path: mkfs description}: ext2/3/4 variants, a sparse image
+        and uncompressed EROFS variants of SRC."""
+        mke2fs = self.tool("mke2fs")
+        out = {}
+        variants = {
+            "ext4.img": ["-t", "ext4"],                                       # 64bit, metadata_csum, extents
+            "waydroid.img": ["-t", "ext4", "-O", "^64bit,^metadata_csum"],     # the Waydroid images' features
+            "ext2-1k.img": ["-t", "ext2", "-b", "1024"],                       # block maps, indirect blocks
+            "inline.img": ["-t", "ext4", "-O", "inline_data", "-I", "256"],    # small files and dirs in the inode
+        }
+        for name, opts in variants.items():
+            path = os.path.join(self.tmp, "images", name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            subprocess.run([mke2fs, "-q", "-F", *opts, "-d", src, path, "16M"], check=True, capture_output=True)
+            out[path] = " ".join(opts)
+        # hashed directories (dir_index)
+        htree = os.path.join(self.tmp, "images", "htree.img")
+        shutil.copy(os.path.join(self.tmp, "images", "ext4.img"), htree)
+        rc = subprocess.run([self.tool("e2fsck"), "-fyD", htree], capture_output=True).returncode
+        self.assertIn(rc, (0, 1))
+        out[htree] = "e2fsck -D"
+        if shutil.which("img2simg"):
+            sparse = os.path.join(self.tmp, "images", "ext4.simg")
+            subprocess.run(["img2simg", os.path.join(self.tmp, "images", "waydroid.img"), sparse], check=True, capture_output=True)
+            out[sparse] = "img2simg"
+        if shutil.which("mkfs.erofs"):
+            # (chunks smaller than the holes in libholes.so: erofs-utils 1.7.1
+            # writes chunk tables that even its own fsck.erofs extracts wrongly)
+            for name, opts in {"erofs.img": [], "erofs-ext.img": ["-Eforce-inode-extended"],
+                               "erofs-noinline.img": ["-Enoinline_data"], "erofs-chunks.img": ["--chunksize=65536"]}.items():
+                path = os.path.join(self.tmp, "images", name)
+                subprocess.run(["mkfs.erofs", "--quiet", *opts, path, src], check=True, capture_output=True)
+                out[path] = "mkfs.erofs " + " ".join(opts)
+        return out
+
+    def test_finds_oneplus_camera_apps_in_android_images(self):
+        src = os.path.join(self.tmp, "src")
+        inside = self.android_tree(src)
+        images = self.images(src)
+        shutil.rmtree(src)
+        expected = {img + "!" + p for img in images for p in inside}
+        self.assertEqual(self.scan(os.path.join(self.tmp, "images")), expected)
+
+    def test_waydroid_like_images_are_clean(self):
+        src = os.path.join(self.tmp, "src")
+        self.assertEqual(self.android_tree(src, oneplus=False), set())
+        self.images(src)
+        shutil.rmtree(src)
+        self.assertEqual(self.scan(), set())
+
+    def test_image_readers_return_every_file(self):
+        # The scanner sees every file of an image with its exact content.
+        src = os.path.join(self.tmp, "src")
+        self.android_tree(src)
+        want = {}
+        for dirpath, _, files in os.walk(src):
+            for name in files:
+                with open(os.path.join(dirpath, name), "rb") as f:
+                    want[os.path.relpath(os.path.join(dirpath, name), src)] = f.read()
+        for img, how in self.images(src).items():
+            with open(img, "rb") as f:
+                kind = self.nopc.sniff(f.read(self.nopc.HEAD))
+                if kind == "sparse":
+                    f = self.nopc.buffered(self.nopc.sparse_image(f))
+                    kind = self.nopc.sniff(self.nopc.read_at(f, 0, self.nopc.HEAD))
+                fs = self.nopc.Ext(f) if kind == "ext" else self.nopc.Erofs(f)
+                got, stack = {}, [("", fs.root())]
+                while stack:
+                    path, d = stack.pop()
+                    for name, child in fs.listdir(d):
+                        p = (path + "/" + name.decode()).lstrip("/")
+                        if child.is_dir():
+                            stack.append((p, child))
+                        elif child.is_reg():
+                            got[p] = self.nopc.buffered(fs.open(child)).read()
+                got.pop("lost+found", None)
+                self.assertEqual(sorted(got), sorted(want), how)
+                for p in want:
+                    self.assertEqual(got[p], want[p], f"{how}: {p}")
+
+    def test_fails_closed_on_what_it_cannot_read(self):
+        unreadable = [
+            self.write("super.img", bytes(4096) + b"gDla" + struct.pack("<I", 52) + bytes(200)),
+            self.write("payload.bin", b"CrAU" + struct.pack(">Q", 2) + bytes(200)),
+            self.write("damaged.gz", b"\x1f\x8b\x08\x00" + bytes(40)),
+        ]
+        # an encrypted member: set the flag in the local and central headers
+        z = bytearray(zip_bytes([("lib/x.so", b"\x7fELF data")]))
+        for sig, off in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+            i = z.index(sig)
+            z[i + off] |= 1
+        unreadable.append(self.write("encrypted.zip", bytes(z)))
+        # containers nested more than MAX_DEPTH deep
+        nested = apk_bytes("org.example")
+        for _ in range(getattr(self.nopc, "MAX_DEPTH", 8) + 2):
+            nested = gzip.compress(nested)
+        unreadable.append(self.write("nested.gz", nested))
+        src = os.path.join(self.tmp, "src")
+        os.makedirs(src)
+        with open(os.path.join(src, "x.apk"), "wb") as f:
+            f.write(apk_bytes("com.oneplus.camera"))
+        with open(os.path.join(src, "notes.txt"), "w") as f:
+            f.write("compressible\n" * 10000)
+        img = os.path.join(self.tmp, "full.img")
+        subprocess.run([self.tool("mke2fs"), "-q", "-F", "-t", "ext4", "-d", src, img, "4M"], check=True, capture_output=True)
+        with open(img, "rb") as f:
+            unreadable.append(self.write("truncated.img", f.read(64 * 1024)))
+        os.unlink(img)
+        if shutil.which("mkfs.erofs"):
+            subprocess.run(["mkfs.erofs", "--quiet", "-zlz4", os.path.join(self.tmp, "compressed.erofs"), src],
+                           check=True, capture_output=True)
+            unreadable.append(os.path.join(self.tmp, "compressed.erofs"))
+        shutil.rmtree(src)
+        hits = self.scan()
+        for path in unreadable:
+            self.assertTrue([h for h in hits if h.startswith(path) and "cannot inspect" in h], (path, hits))
+        if shutil.which("mkfs.erofs"):
+            self.assertTrue([h for h in hits if "compressed.erofs: cannot inspect" in h and "compressed EROFS file" in h], hits)
+
+    def test_no_false_alarm_on_ext_magic_in_other_data(self):
+        # A file with the ext2 magic at its offset but no superblock around it
+        data = bytearray(random.Random(3).randbytes(8192))
+        data[1080:1082] = b"\x53\xef"
+        self.write("blob.bin", bytes(data))
+        self.write("notes.txt", b"070701 is not a cpio header on its own\n" * 10)
+        self.assertEqual(self.scan(), set())
+
+
+def apk_manifest(package):
+    # binary manifests store strings as UTF-16LE
+    return b"\x03\x00\x08\x00" + package.encode("utf-16-le")
+
+
+def apk_bytes(package, split=False):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("AndroidManifest.xml", apk_manifest(package) + (b"s\x00p\x00l\x00i\x00t\x00" if split else b""))
+        z.writestr("classes.dex", b"dex\n035\x00" + bytes(64))
+    return buf.getvalue()
+
+
+def zip_bytes(members, compression=zipfile.ZIP_DEFLATED):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression) as z:
+        for name, data in members:
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def tar_bytes(members):
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w") as t:
+        for name, data in members:
+            ti = tarfile.TarInfo(name)
+            ti.size = len(data)
+            t.addfile(ti, io.BytesIO(data))
+    return buf.getvalue()
+
+
+def cpio_bytes(members):
+    """A newc cpio archive of regular files."""
+    out = []
+    for ino, (name, data, mode) in enumerate([(n, d, 0o100644) for n, d in members] + [("TRAILER!!!", b"", 0)], 1):
+        nb = name.encode() + b"\x00"
+        fields = [ino, mode, 0, 0, 1, 0, len(data), 0, 0, 0, 0, len(nb), 0]
+        out.append(b"070701" + b"".join(b"%08X" % v for v in fields) + nb + bytes(-(110 + len(nb)) % 4)
+                   + data + bytes(-len(data) % 4))
+    return b"".join(out)
 
 
 if __name__ == "__main__":

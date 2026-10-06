@@ -21,8 +21,13 @@ In order of importance.
 6. **Tor Browser confinement**: an AppArmor profile for the launcher and
    the browser, and Tails' Flatpak-based sandbox when it is portable. The
    profile must deny the camera devices (`/dev/video*`, `/dev/media*`,
-   `/dev/v4l-subdev*`) and the PipeWire socket: until then the browser
-   can use the cameras without a prompt (`camera.md`).
+   `/dev/v4l-subdev*`), the PipeWire socket, and the browser's session-bus
+   calls to the camera portal (`org.freedesktop.portal.Camera`) and to the
+   portal's permission store (`org.freedesktop.impl.portal.PermissionStore`),
+   or allow the session bus only for the names the browser needs: the
+   portal hands out connected PipeWire file descriptors, which no device
+   or socket rule sees. Until then the browser can use the cameras without
+   a prompt (`camera.md`).
 7. **Unsafe Browser** for captive portals, in the clearnet namespace.
 8. **Bluetooth opt-in session** with a random address before power-on
    (the driver stack works on the 6.17 line).

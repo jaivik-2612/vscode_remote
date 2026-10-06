@@ -147,12 +147,18 @@ key the WirePlumber rules match); `cam -l` lists the camera; Snapshot,
 libcamera 0.7 with its IPA modules from the same build and PipeWire's
 libcamera plugin at PipeWire's version are installed, and Megapixels is
 not; no OnePlus camera software or Qualcomm camera HAL file is anywhere in
-the image (`tests/no-oneplus-camera.py`, run in the guest). With
+the image, inside packages, archives, compressed files, the initramfs and
+Waydroid's Android images included (`tests/no-oneplus-camera.py`, run in
+the guest), and the same scanner in the guest does flag a OnePlus camera
+APK placed in a small ext4 image and in a zstd-compressed XAPK. With
 `--through-welcome` it goes on in the amnesia session: PipeWire offers the
 camera as a libcamera node and has no V4L2 camera device or node; the first
 Snapshot start makes the camera portal ask through Phosh's Access dialog
 (seen on the session bus) and gets no stream meanwhile; once the decision
-is stored as "allow", Snapshot streams, the preview shows `vimc`'s colour
+is stored as "allow", the portal also gives `amnesia` a PipeWire
+connection when called from inside Tor Browser's network namespace (the
+gap the planned browser profile must close, `camera.md`), Snapshot
+streams, the preview shows `vimc`'s colour
 bars (under full emulation the first frame takes a few minutes: Snapshot
 draws 1920x1080 frames in software and drops most as late, so the harness
 polls the display for up to five minutes times the timeout scale), the shortcut `t` saves a JPEG to `~/Pictures/Camera`, and the stream
