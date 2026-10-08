@@ -26,11 +26,20 @@ python3 tests/kernel/popup_gate_model.py || fail=1
 
 step "nftables ruleset (nft -c)"
 # The ruleset names system users that only exist in the image; map them to
-# numeric ids for the host-side syntax check.
+# numeric ids for the host-side syntax check. nft -c still builds its cache
+# over netlink, which needs CAP_NET_ADMIN: as root directly, otherwise
+# through passwordless sudo (CI runners) or in a user and network namespace
+# of its own.
 TMPNFT="$(mktemp)"
 sed -e 's/"debian-tor"/9001/g; s/"htp"/1101/g; s/"clearnet"/1102/g; s/"_apt"/9002/g; s/"proxy"/13/g; s/"nobody"/65534/g; s/"root"/0/g' \
     config/rootfs/etc/nftables.conf > "${TMPNFT}"
-nft -c -f "${TMPNFT}" && echo "nftables.conf: syntax OK" || fail=1
+if [ "$(id -u)" -eq 0 ]; then NFT=(nft)
+elif sudo -n true 2>/dev/null; then NFT=(sudo -n nft)
+elif unshare -rn true 2>/dev/null; then NFT=(unshare -rn nft)
+else NFT=(); fi
+if [ "${#NFT[@]}" -eq 0 ]; then
+    echo "nft -c needs CAP_NET_ADMIN: run as root, with passwordless sudo, or where unprivileged user namespaces work"; fail=1
+elif "${NFT[@]}" -c -f "${TMPNFT}"; then echo "nftables.conf: syntax OK"; else fail=1; fi
 rm -f "${TMPNFT}"
 
 step "Android's network (namespace lab: the firewall, the start-host hook, the VM's probes)"
@@ -38,11 +47,15 @@ python3 tests/android-net-lab.py || fail=1
 
 step "tor configuration (tor --verify-config)"
 TMPTOR="$(mktemp -d)"
-{ printf 'DataDirectory %s\nUser %s\n' "${TMPTOR}" "$(id -un)"; grep -v '^User ' config/rootfs/etc/tor/torrc; } > "${TMPTOR}/torrc"
-if tor --verify-config -f "${TMPTOR}/torrc" --hush >/dev/null 2>"${TMPTOR}/err"; then echo "torrc: valid"; else cat "${TMPTOR}/err"; fail=1; fi
+# User only as root: tor switches to it even for --verify-config, and an
+# ordinary user cannot (setgroups fails: "Problem with User value").
+# tor logs to stdout, so both streams go to the error file.
+{ printf 'DataDirectory %s\n' "${TMPTOR}"; [ "$(id -u)" -ne 0 ] || printf 'User %s\n' "$(id -un)"
+  grep -v '^User ' config/rootfs/etc/tor/torrc; } > "${TMPTOR}/torrc"
+if tor --verify-config -f "${TMPTOR}/torrc" --hush >"${TMPTOR}/err" 2>&1; then echo "torrc: valid"; else cat "${TMPTOR}/err"; fail=1; fi
 # Images with Android apps: the same plus the listeners hook 56 appends.
 cat config/rootfs-android/usr/share/antumbra/android/torrc >> "${TMPTOR}/torrc"
-if tor --verify-config -f "${TMPTOR}/torrc" --hush >/dev/null 2>"${TMPTOR}/err"; then echo "torrc with Android: valid"; else cat "${TMPTOR}/err"; fail=1; fi
+if tor --verify-config -f "${TMPTOR}/torrc" --hush >"${TMPTOR}/err" 2>&1; then echo "torrc with Android: valid"; else cat "${TMPTOR}/err"; fail=1; fi
 rm -rf "${TMPTOR}"
 
 step "systemd units (systemd-analyze verify)"
@@ -70,7 +83,8 @@ echo "cmdline base length: ${CMDLEN}"
 
 step "YAML (yamllint)"
 if command -v yamllint >/dev/null 2>&1; then
-    yamllint -d '{extends: default, rules: {line-length: {max: 160}, truthy: disable, document-start: disable}}' ../.github/workflows/antumbra.yml || fail=1
+    yamllint -d '{extends: default, rules: {line-length: {max: 160}, truthy: disable, document-start: disable}}' \
+        ../.github/workflows/antumbra.yml ../.github/workflows/antumbra-release.yml || fail=1
 else
     echo "yamllint not installed; skipped"
 fi

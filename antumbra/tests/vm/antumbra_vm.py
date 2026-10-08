@@ -2628,6 +2628,48 @@ def smoke(vm, scale, stop_after, debug, through_welcome=False, tour=False, fresh
                 rep.check("storage: the guest wrote nothing to the disk", False, str(e)[:300])
     return rep
 
+def phone_firmware(vm, disk, timeout_scale=1.0, stop=True):
+    """The phone's own firmware (antumbra-phone-firmware) against real
+    OxygenOS partitions on a read-only test disk with 4096-byte sectors
+    (tests/vm/make-phone-firmware-disk.py): the loader must link the
+    kernel's names to the right bytes, copy the GPU's files out of the
+    vendor partition inside super, and change nothing on the disk."""
+    T = lambda s: s * timeout_scale  # noqa: E731
+    rep = Report()
+    sh = vm.console.run
+    try:
+        vm.console.wait_ready(T(600))
+        rc, o = sh("mkdir -p /run/fwtest && mount -o ro /dev/disk/by-partlabel/antumbra-test /run/fwtest && ls /run/fwtest", timeout=T(60))
+        rep.check("test disk: tools partition mounted", rc == 0, o.replace("\n", " "))
+        rc, o = sh("L=/usr/local/lib/antumbra-phone-firmware; [ -x $L ] && echo image || echo test-disk", timeout=T(30))
+        own = o.strip() == "image"
+        loader = "/usr/local/lib/antumbra-phone-firmware" if own else "/run/fwtest/antumbra-phone-firmware"
+        print("loader: " + ("the image's own" if own else "the test disk's copy (the image predates it)"), flush=True)
+        if own:
+            rc, o = sh("systemctl is-enabled antumbra-phone-firmware.service antumbra-phone-firmware-late.service; "
+                       "systemctl show -p ConditionResult --value antumbra-phone-firmware.service", timeout=T(30))
+            rep.check("units: enabled, and skipped in a VM (ConditionVirtualization=no)",
+                      o.split() == ["enabled", "enabled", "no"], o.replace("\n", " "))
+        rc, o = sh("modinfo -F filename erofs 2>/dev/null || { insmod /run/fwtest/erofs.ko && echo insmod test-disk; }", timeout=T(60))
+        rep.check("erofs module available", rc == 0, o.strip())
+        rc, o = sh(f"python3 {loader} --any-device --wait 20 2>&1", timeout=T(300))
+        rep.check("loader ran", rc == 0, o.replace("\n", " | ")[-600:])
+        rc, o = sh("python3 /run/fwtest/phone_firmware_check.py /run/fwtest/expected.json", timeout=T(600))
+        for line in o.splitlines():
+            m = re.match(r"(PASS|FAIL) ([^:]+): ?(.*)", line)
+            if m:
+                rep.check("firmware: " + m.group(2), m.group(1) == "PASS", m.group(3)[:300])
+        rep.check("in-guest check finished", rc in (0, 1) and "PASS status complete" in o, f"rc={rc}")
+        rc, o = sh(f"python3 {loader} --late --any-device --wait 1 >/dev/null 2>&1; "
+                   "python3 -c 'import json;print(json.load(open(\"/run/antumbra/phone-firmware/status.json\"))[\"complete\"])'; "
+                   "grep -c ' /run/antumbra/phone-firmware/mnt/modem ' /proc/mounts", timeout=T(120))
+        rep.check("a second (late) run changes nothing", o.split() == ["True", "1"], o.replace("\n", " "))
+    except Exception as e:  # noqa: BLE001
+        rep.check("phone firmware", False, str(e)[:300])
+    if stop:
+        vm.stop()
+    return rep
+
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -2645,6 +2687,8 @@ def main():
     android_mode.add_argument("--android-net", action="store_true",
                               help="implies --through-welcome: test Android's Tor-only network with a stand-in namespace, without Android")
     s.add_argument("vm_args", nargs="*")
+    pf = sub.add_parser("phone-firmware", help="the phone's own firmware against an OxygenOS test disk (make-phone-firmware-disk.py)")
+    pf.add_argument("disk"); pf.add_argument("--timeout-scale", type=float, default=1.0); pf.add_argument("--no-stop", action="store_true")
     w = sub.add_parser("wait"); w.add_argument("regex"); w.add_argument("--timeout", type=float, default=300)
     sh = sub.add_parser("shell"); sh.add_argument("command", nargs="+"); sh.add_argument("--timeout", type=float, default=120)
     sc = sub.add_parser("screenshot"); sc.add_argument("file")
@@ -2680,6 +2724,15 @@ def main():
             json.dump({"version": VERSION, "debug": debug, "timeout_scale": a.timeout_scale,
                        "cmdline": open(os.path.join(run_dir, "cmdline")).read().strip() if os.path.exists(os.path.join(run_dir, "cmdline")) else "",
                        "checks": [{"name": n, "ok": ok, "detail": d, "t": t} for n, ok, d, t in rep.results]}, f, indent=1)
+        sys.exit(1 if failed else 0)
+    if a.cmd == "phone-firmware":
+        vm.start(["--debug", "--no-net", "--extra-disk", a.disk])
+        rep = phone_firmware(vm, a.disk, a.timeout_scale, not a.no_stop)
+        failed = rep.failed()
+        print(f"\n{len(rep.results) - len(failed)}/{len(rep.results)} checks passed; run directory {run_dir}", flush=True)
+        os.makedirs(os.path.join(run_dir, "phone-firmware"), exist_ok=True)
+        with open(os.path.join(run_dir, "phone-firmware", "report.json"), "w") as f:
+            json.dump({"version": VERSION, "checks": [{"name": n, "ok": ok, "detail": d, "t": t} for n, ok, d, t in rep.results]}, f, indent=1)
         sys.exit(1 if failed else 0)
     if a.cmd == "wait":
         m = vm.serial.wait(a.regex, a.timeout); print(m.group(0)); return

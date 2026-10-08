@@ -1,6 +1,9 @@
 #!/bin/sh
-# Device firmware from the builder's own tree (never redistributed).
+# Device firmware: on the phone, read at boot from its own partitions
+# (antumbra-phone-firmware); optionally also the builder's own tree (never
+# redistributed).
 set -eu
+systemctl enable antumbra-phone-firmware.service antumbra-phone-firmware-late.service
 SRC=/run/antumbra-build/firmware
 if [ -d "${SRC}" ] && [ -n "$(ls -A "${SRC}" 2>/dev/null)" ]; then
     mkdir -p /lib/firmware

@@ -64,7 +64,7 @@ were established on its 6.16 kernel and only partly re-validated on the
 ## 3. System overview
 
 ```
- OnePlus bootloader (ABL, unlocked, slot B)
+ OnePlus bootloader (ABL, unlocked, Antumbra's slot, here B)
    │  loads boot_b: Android boot image v2 = Linux 6.17 Image + initramfs + DTB
    │  applies dtbo_b, consults vbmeta_b (verification disabled)
    ▼
@@ -118,13 +118,17 @@ size and exports it as an Android sparse image in which the empty regions
 are "don't care" chunks; fastboot writes only the live partition and the
 two GPT copies.
 
-Slot A keeps the user's Android boot and recovery. It is **not** an
-escape hatch for Android: booting the Android system there formats the
-shared `userdata` and erases Antumbra together with its Persistent
-Storage. The way back is the slot-B backup that `flash.sh` makes, or the
-OnePlus MSM Download Tool.
+Antumbra goes into the slot Android is not running from (slot B when
+Android runs from A, as in the port's tests): OxygenOS 12 updates with
+Virtual A/B, which keeps Android's system partitions only for its current
+slot, so that slot's boot images stay Android's way back. It is **not**
+an escape hatch while Antumbra is installed: booting the Android system
+formats the shared `userdata` and erases Antumbra together with its
+Persistent Storage. Going back to Android is `fastboot set_active` on
+Android's slot plus a factory reset from its recovery
+(`flashing.md`), or the OnePlus MSM Download Tool.
 
-Boot-critical partitions, all in slot B:
+Boot-critical partitions, all in Antumbra's slot (`_b` below):
 
 | Partition | Size | Content |
 |---|---|---|
@@ -1104,8 +1108,10 @@ that OnePlus and Qualcomm do not license for redistribution. Debian's
 `firmware-qcom-soc` provides only `qcom/a630_sqe.fw` of what this phone
 needs. Therefore:
 
-- Published Antumbra images contain **no** device firmware. The build
-  copies firmware from a directory the builder provides
+- Published Antumbra images contain **no** device firmware. On the phone
+  it comes from the phone itself, at every boot (section 14.1).
+- A builder may instead put firmware into the image: the build copies
+  firmware from a directory the builder provides
   (`ANTUMBRA_FIRMWARE_DIR`), populated by `build/fetch-firmware.sh` from
   the community mirror the port uses, pinned by commit and per-file
   SHA-256, for the user's own device, after an explicit acknowledgement
@@ -1126,6 +1132,69 @@ needs. Therefore:
   maps (kernel pd-mapper used), the NFC configuration, `ipa_fws.mbn` (IPA
   disabled), and the per-unit calibration from the `persist` partition.
 
+### 14.1 Device firmware from the phone
+
+The OnePlus 7T Pro already carries every signed image the mainline
+drivers need, in the partitions OxygenOS mounts for the same purpose
+(its `vendor/etc/fstab.qcom`). Measured on OxygenOS 12 F.22, the build the
+port validated:
+
+| Linux name (device tree, drivers) | On the phone | Form |
+|---|---|---|
+| `qcom/sm8150/oneplus/hotdog/adsp.mbn`, `modem.mbn` (also `cdsp`, `venus`) | `modem_<slot>` (FAT), `image/` | split: `.mdt` plus `.bNN` segments |
+| `qcom/sm8150/oneplus/hotdog/wlanmdsp.mbn` (served to the modem by tqftpserv) | `modem_<slot>`, `image/` | one file |
+| `ath10k/WCN3990/hw1.0/board-2.bin` | `modem_<slot>`, `image/bdwlan.*` (34 board files) | built from them |
+| `ath10k/WCN3990/hw1.0/firmware-5.bin` | not on the phone: 60 bytes of feature flags, no code | generated |
+| `qca/crbtfw21.tlv`, `qca/crnv21.bin` | `bluetooth_<slot>` (FAT), `image/` | one file each |
+| `qcom/sm8150/oneplus/hotdog/a640_zap.mbn`, `qcom/a640_gmu.bin`, `qcom/a630_sqe.fw` | `vendor_<slot>`, a logical partition inside `super` (EROFS) | the zap shader split and as one `.elf` |
+
+Built that way from F.22's partitions, every file is byte for byte the
+community mirror's (`device/oneplus-hotdog/firmware/firmware-files.sha256`),
+except the zap shader, whose signature differs from the mirror's copy.
+
+`antumbra-phone-firmware.service` runs it early: `DefaultDependencies=no`,
+before `systemd-udevd` and `systemd-udev-trigger`, so before the
+remoteproc driver probes and the audio DSP boots (remoteproc asks for its
+image once and does not retry), and long before rmtfs starts the modem,
+the Wi-Fi driver is allowed to load, and the compositor first opens the
+GPU (the zap shader is requested then, and again on every open while it
+failed). `/usr/local/lib/antumbra-phone-firmware`:
+
+1. Leaves every other device alone (device tree `oneplus,hotdog`). Takes
+   the booted slot from `androidboot.slot_suffix`, then the other one: a
+   slot's bootloader, TrustZone and firmware come from the same update.
+   Finds partitions by their GPT names in sysfs, waiting up to 10 s.
+2. Mounts `modem_<slot>` and `bluetooth_<slot>` read-only (`ro`,
+   `nodev,nosuid,noexec`, files root-only) for the whole session:
+   remoteproc reloads its image after a crash, and tqftpserv serves the
+   modem whenever it starts. The block devices are set read-only first.
+3. Under `/run/antumbra/phone-firmware/lib` (root-only), links every
+   entry of the modem partition's `image/` under the device tree's prefix
+   `qcom/sm8150/oneplus/hotdog/` (where tqftpserv also looks), adds
+   `<name>.mbn` for each split `<name>.mdt` (the kernel's MDT loader
+   takes the device tree's `.mbn` name, sees a split image and loads
+   `<name>.bNN` beside it), writes `board-2.bin` (ath10k-bdencoder's
+   layout, one board per `bdwlan` file) and `firmware-5.bin`, and links the
+   Bluetooth files under `qca/`.
+4. Reads `super`'s logical-partition metadata (liblp format; both copies,
+   checksums verified), maps `vendor_<slot>` with a read-only
+   device-mapper linear table, mounts it read-only (EROFS, a module only
+   this service loads by name; ext4 with `noload` after custom ROMs),
+   copies the three GPU files, and removes the mount and the mapping.
+5. Writes that directory to `firmware_class.path` last: the kernel then
+   looks there first, file by file, before `/lib/firmware`.
+6. Records what it found in `/run/antumbra/phone-firmware/status.json`.
+   If a partition was missing, `antumbra-phone-firmware-late.service`
+   tries again after udev's coldplug, before rmtfs and tqftpserv, and
+   starts the audio DSP if it stayed offline.
+
+Nothing is ever written to the phone's partitions, `persist` (the
+per-unit calibration and Wi-Fi MAC) is never opened, and no file leaves
+RAM. A phone whose firmware partitions were wiped or replaced has no
+Wi-Fi, sound or graphics acceleration under Antumbra; the status file
+says what is missing. Tested in the VM against OxygenOS F.22's own
+partition images (`vm-testing.md`, "The phone's own firmware").
+
 ## 15. Build pipeline and reproducibility
 
 ```
@@ -1139,7 +1208,7 @@ build/build.sh                      orchestrates; every step is idempotent and r
   squashfs.sh (root)                mksquashfs xz/arm BCJ with fixed times; dm-verity hash tree and root hash
   image.sh                          ext4 live partition (mke2fs -d), GPT at the physical size (systemd-repart), img2simg -s
   bootimg.sh                        mkbootimg v2 + verity hash on the cmdline + avbtool footer, then unpack_bootimg checks
-  release.sh                        boot.img, userdata.simg.zst (split under 2 GiB), DTBO/vbmeta copies, SHA256SUMS, MANIFEST, minisign
+  release.sh                        boot.img, userdata.simg (split under 2 GiB if larger), DTBO/vbmeta copies, SHA256SUMS, MANIFEST, minisign
 build/flash.sh                      guided fastboot/fastbootd flashing with identity, size and backup checks
 build/verify-release.sh             signature and hash verification for downloads
 build/vm.sh, build/vm-bundle.sh     run the qemu-virt test build in QEMU; package it as a self-contained bundle
@@ -1176,7 +1245,7 @@ Welcome screen and in camera, Android and Persistent Storage modes
 
 ## 16. Updates
 
-Version 1 updates are full re-flashes of `boot_b` and `userdata` with
+Version 1 updates are full re-flashes of the boot image and `userdata` with
 `build/flash.sh`, after `build/verify-release.sh` checks the release's
 signature (minisign) and hashes. This erases Persistent Storage; the user
 exports it first. The designed path to in-place updates mirrors Tails'

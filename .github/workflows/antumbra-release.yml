@@ -1,0 +1,415 @@
+name: Antumbra release (OnePlus 7T Pro)
+
+# Builds the complete OnePlus 7T Pro (hotdog) release of Antumbra on
+# GitHub's native arm64 runners and attaches it to a DRAFT GitHub release,
+# which only people with write access to the repository can see until
+# someone publishes it. Three jobs:
+#   kernel   native arm64, no root: kernel.sh, plus the kernel's source
+#   image    native arm64, build steps as root: rootfs, squashfs, image,
+#            bootimg, release, and the checks that the release holds no
+#            device firmware and stays under GitHub's 2 GiB asset limit
+#   publish  the only job with write access: creates or updates the draft
+# "Re-run failed jobs" re-runs only what failed; the kernel job's
+# artifacts are kept for the run.
+#
+# Nothing here passes ANTUMBRA_FIRMWARE_DIR: the images contain no
+# proprietary device firmware (docs/legal.md, "Firmware").
+
+on:
+  workflow_dispatch:
+    inputs:
+      android:
+        description: 'Include Android apps (Waydroid, the LineageOS 20 images, F-Droid)'
+        type: boolean
+        default: true
+      tag:
+        description: 'Release tag (empty: v<VERSION>, with -no-android appended when Android is off)'
+        type: string
+        default: ''
+      title:
+        description: 'Release title (empty: "Antumbra <VERSION> for the OnePlus 7T Pro")'
+        type: string
+        default: ''
+      prerelease:
+        description: 'Mark the release as a pre-release'
+        type: boolean
+        default: true
+      kernel_source:
+        description: 'Attach the kernel source the boot image was built from (GPL-2.0)'
+        type: boolean
+        default: true
+  # Pushing a tag antumbra-v* builds with the defaults above (Android apps
+  # in, kernel source attached, pre-release) and drafts a release for that
+  # tag. workflow_dispatch runs only from the default branch; a tag works
+  # from any branch.
+  push:
+    tags:
+      - 'antumbra-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: antumbra-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # A tag push has no inputs: it takes the defaults.
+  BUILD_ANDROID: ${{ github.event_name == 'push' || inputs.android }}
+  BUILD_KERNEL_SOURCE: ${{ github.event_name == 'push' || inputs.kernel_source }}
+  ANTUMBRA_DEVICE: oneplus-hotdog
+  # A release build: no debug, not minimal, dm-verity on, no device
+  # firmware, Debian's libcamera (release.sh refuses a debug build).
+  ANTUMBRA_DEBUG: ''
+  ANTUMBRA_MINIMAL: ''
+  ANTUMBRA_VERITY: '1'
+  ANTUMBRA_FIRMWARE_DIR: ''
+  ANTUMBRA_LIBCAMERA_LOCAL: ''
+  ANTUMBRA_KERNEL_TOOLCHAIN: llvm
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  kernel:
+    name: Kernel (native arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.setup.outputs.version }}
+      kernel_release: ${{ steps.build.outputs.kernel_release }}
+    defaults:
+      run:
+        shell: bash   # bash -eo pipefail
+        working-directory: antumbra
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Build environment
+        id: setup
+        run: |
+          # One timestamp for every job: the commit's (lib/common.sh does the same).
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "${GITHUB_ENV}"
+          echo "version=$(tr -d '[:space:]' < VERSION)" >> "${GITHUB_OUTPUT}"
+          uname -a; nproc; free -h; df -h /
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq git curl ca-certificates python3 make bc bison flex \
+            libssl-dev libelf-dev kmod cpio patch tar zstd xz-utils clang lld llvm
+          clang --version | head -n1; ld.lld --version
+
+      - name: Fetch the kernel tree, the port's patches and the boot tools
+        # No Tor Browser and (ANTUMBRA_ANDROID unset) no Android images: the image job fetches those.
+        run: build/fetch-sources.sh --skip-tor-browser
+
+      - name: Build the kernel
+        id: build
+        run: |
+          build/kernel.sh
+          echo "kernel_release=$(cat build/out/kernel/kernel.release)" >> "${GITHUB_OUTPUT}"
+          ls -la build/out/kernel
+
+      - name: Kernel source as built (patched tree, configuration)
+        if: env.BUILD_KERNEL_SOURCE == 'true'
+        run: |
+          krel="$(cat build/out/kernel/kernel.release)"
+          src="${RUNNER_TEMP}/antumbra-${{ steps.setup.outputs.version }}-linux-${krel}-source.tar.xz"
+          cp build/out/kernel/config build/cache/kernel/.config.antumbra
+          tar -C build/cache --exclude=kernel/.git --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
+            --owner=0 --group=0 --numeric-owner -cf - kernel | xz -T0 -6 > "${src}"
+          rm -f build/cache/kernel/.config.antumbra
+          ls -la "${src}"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: kernel
+          path: antumbra/build/out/kernel/
+          if-no-files-found: error
+          retention-days: 5
+
+      - uses: actions/upload-artifact@v6
+        if: env.BUILD_KERNEL_SOURCE == 'true'
+        with:
+          name: kernel-source
+          path: ${{ runner.temp }}/antumbra-*-source.tar.xz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 5
+
+  image:
+    name: Root filesystem, images, release files (native arm64)
+    needs: kernel
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 300
+    env:
+      ANTUMBRA_ANDROID: ${{ (github.event_name == 'push' || inputs.android) && '1' || '' }}
+    defaults:
+      run:
+        shell: bash   # bash -eo pipefail
+        working-directory: antumbra
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Free disk space
+        run: |
+          df -h /
+          # Preinstalled toolchains this build never uses (not all exist on the arm64 image).
+          for d in /usr/local/lib/android /opt/hostedtoolcache /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+                   /usr/local/share/boost /usr/local/share/powershell /usr/share/swift /opt/microsoft /usr/lib/jvm; do
+            if [ -d "${d}" ]; then echo "removing ${d}"; sudo rm -rf "${d}"; fi
+          done
+          if command -v docker >/dev/null 2>&1; then sudo docker system prune -af >/dev/null 2>&1 || true; fi
+          df -h /
+
+      - name: Build directories and environment
+        run: |
+          # Build on /mnt if it is a separate, larger file system, else in the checkout.
+          base="${GITHUB_WORKSPACE}/antumbra/build"
+          if mountpoint -q /mnt && [ "$(stat -c %d /)" != "$(stat -c %d /mnt)" ] \
+             && [ "$(df -B1M --output=avail /mnt | tail -n1)" -gt "$(df -B1M --output=avail / | tail -n1)" ]; then
+            base=/mnt/antumbra
+            sudo mkdir -p "${base}"; sudo chown "$(id -u):$(id -g)" "${base}"
+          fi
+          mkdir -p "${base}/cache" "${base}/out" "${base}/work"
+          {
+            echo "ANTUMBRA_CACHE=${base}/cache"
+            echo "ANTUMBRA_OUT=${base}/out"
+            echo "ANTUMBRA_WORK=${base}/work"
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+          } >> "${GITHUB_ENV}"
+          avail_gb="$(df -BG --output=avail "${base}" | tail -n1 | tr -dc 0-9)"
+          echo "building in ${base} (${avail_gb} GB free); this job's build files peak near 9 GB"
+          [ "${avail_gb}" -ge 14 ] || echo "::warning::only ${avail_gb} GB free in ${base}"
+
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          # systemd-repart is part of Ubuntu 24.04's systemd package (apt selects it).
+          sudo apt-get install -y -qq mmdebstrap debian-archive-keyring squashfs-tools e2fsprogs \
+            android-sdk-libsparse-utils systemd-repart cryptsetup-bin zstd python3 git curl \
+            ca-certificates gpg gpgv unzip openssl xz-utils
+          sudo apt-get clean
+          mmdebstrap --version; systemd-repart --version | head -n1; mksquashfs -version | head -n1
+
+      - name: Debian archive keyring with the trixie keys
+        # Ubuntu 24.04's debian-archive-keyring (2023.4ubuntu1) has the keys up to
+        # bookworm. trixie's Release files are still signed with the bookworm key
+        # too, but that ends when Debian retires it; trixie's own keyring package,
+        # pinned by the SHA-256 in trixie's Packages index, has all of them.
+        # Only the keyring file rootfs.sh uses is replaced.
+        run: |
+          deb="${RUNNER_TEMP}/debian-archive-keyring_2025.1_all.deb"
+          curl -fsSL --retry 3 -o "${deb}" \
+              https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb \
+            || curl -fsSL --retry 3 -o "${deb}" \
+              https://snapshot.debian.org/archive/debian/20260711T022200Z/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb
+          echo "9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac  ${deb}" | sha256sum -c -
+          dpkg-deb -x "${deb}" "${RUNNER_TEMP}/keyring"
+          sudo install -m 0644 "${RUNNER_TEMP}/keyring/usr/share/keyrings/debian-archive-keyring.gpg" \
+            /usr/share/keyrings/debian-archive-keyring.gpg
+
+      - name: Restore pinned downloads
+        # Hash-pinned inputs only: fetch-sources.sh checks every file's SHA-256
+        # (and signature) again, cached or not.
+        id: dlcache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            ${{ env.ANTUMBRA_CACHE }}/waydroid/arm64/system.zip
+            ${{ env.ANTUMBRA_CACHE }}/waydroid/arm64/vendor.zip
+            ${{ env.ANTUMBRA_CACHE }}/tor-browser/tor-browser-linux-aarch64-*.tar.xz
+            ${{ env.ANTUMBRA_CACHE }}/tor-browser/tor-browser-linux-aarch64-*.tar.xz.asc
+          key: antumbra-downloads-android-${{ env.BUILD_ANDROID }}-${{ hashFiles('antumbra/device/oneplus-hotdog/sources.lock') }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: kernel
+          path: ${{ env.ANTUMBRA_OUT }}/kernel
+
+      - name: Fetch and verify the pinned inputs (no kernel tree)
+        run: sudo -E build/fetch-sources.sh --skip-kernel
+
+      - name: Save pinned downloads
+        if: steps.dlcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ${{ env.ANTUMBRA_CACHE }}/waydroid/arm64/system.zip
+            ${{ env.ANTUMBRA_CACHE }}/waydroid/arm64/vendor.zip
+            ${{ env.ANTUMBRA_CACHE }}/tor-browser/tor-browser-linux-aarch64-*.tar.xz
+            ${{ env.ANTUMBRA_CACHE }}/tor-browser/tor-browser-linux-aarch64-*.tar.xz.asc
+          key: ${{ steps.dlcache.outputs.cache-primary-key }}
+
+      - name: Drop the Waydroid zips (the extracted, verified images stay)
+        run: sudo rm -f "${ANTUMBRA_CACHE}"/waydroid/*/*.zip; df -h "${ANTUMBRA_WORK}"
+
+      - name: Root filesystem (mmdebstrap, native arm64)
+        run: sudo -E build/rootfs.sh
+
+      - name: No device firmware in the root filesystem
+        run: |
+          flags="${ANTUMBRA_OUT}/rootfs/build-flags"
+          cat "${flags}"
+          grep -qx 'DEVICE_FIRMWARE=' "${flags}" || { echo "::error::build-flags records device firmware"; exit 1; }
+          grep -qx 'ANTUMBRA_DEBUG=' "${flags}" || { echo "::error::debug build"; exit 1; }
+          grep -qx "ANTUMBRA_ANDROID=${ANTUMBRA_ANDROID}" "${flags}" || { echo "::error::ANTUMBRA_ANDROID mismatch"; exit 1; }
+          # None of the files of the community firmware mirror, by SHA-256: every
+          # file under /usr/lib/firmware and every *.mbn anywhere in the tree.
+          root="${ANTUMBRA_WORK}/rootfs"
+          cut -d' ' -f1 device/oneplus-hotdog/firmware/firmware-files.sha256 | sort -u > "${RUNNER_TEMP}/mirror.sha256"
+          sudo find "${root}" -xdev -type f \( -path "${root}/usr/lib/firmware/*" -o -name '*.mbn' \) -print0 \
+            | sudo xargs -0 -r sha256sum | cut -d' ' -f1 | sort -u > "${RUNNER_TEMP}/image.sha256"
+          echo "$(wc -l < "${RUNNER_TEMP}/image.sha256") firmware and *.mbn files checked"
+          if comm -12 "${RUNNER_TEMP}/mirror.sha256" "${RUNNER_TEMP}/image.sha256" | grep .; then
+            echo "::error::the root filesystem contains device firmware from the mirror (hashes above)"; exit 1
+          fi
+          echo "no file of device/oneplus-hotdog/firmware/firmware-files.sha256 in the image"
+
+      - name: Drop the cached Android images (the tree has its own copies)
+        run: sudo rm -rf "${ANTUMBRA_CACHE}/waydroid" "${ANTUMBRA_WORK}/build-input"; df -h "${ANTUMBRA_WORK}"
+
+      - name: Squashfs and dm-verity
+        run: sudo -E build/squashfs.sh
+
+      - name: Drop the root filesystem tree (the squashfs holds it)
+        run: sudo rm -rf "${ANTUMBRA_WORK}/rootfs"; df -h "${ANTUMBRA_WORK}"
+
+      - name: Userdata image (sparse)
+        # As root: veritysetup leaves the .verity and .roothash files 0600 root.
+        run: |
+          sudo -E build/image.sh
+          sudo rm -rf "${ANTUMBRA_WORK}/live" "${ANTUMBRA_WORK}/live.ext4"
+
+      - name: Boot image
+        run: sudo -E build/bootimg.sh
+
+      - name: Release files
+        run: sudo -E build/release.sh
+
+      - name: Check the release files
+        run: |
+          rel="${ANTUMBRA_OUT}/release/antumbra-$(tr -d '[:space:]' < VERSION)-oneplus-hotdog"
+          sudo -E build/verify-release.sh "${rel}"
+          grep -qF 'The images contain no proprietary device firmware.' "${rel}/MANIFEST.md" \
+            || { echo "::error::MANIFEST.md does not say the images are firmware-free"; exit 1; }
+          if [ -n "${ANTUMBRA_ANDROID}" ]; then grep -qF 'This build includes Android apps' "${rel}/MANIFEST.md"; fi
+          limit=$((2 * 1024 * 1024 * 1024))
+          for f in "${rel}"/*; do
+            size="$(stat -c %s "${f}")"
+            printf '%12d  %s\n' "${size}" "$(basename "${f}")"
+            [ "${size}" -lt "${limit}" ] || { echo "::error::$(basename "${f}") is not under 2 GiB"; exit 1; }
+          done
+          echo "RELEASE_DIR=${rel}" >> "${GITHUB_ENV}"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release
+          path: ${{ env.RELEASE_DIR }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 5
+
+      - name: Disk use
+        if: always()
+        run: df -h / /mnt 2>/dev/null || df -h /
+
+  publish:
+    name: Draft GitHub release
+    needs: [kernel, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.kernel.outputs.version }}
+      KERNEL_RELEASE: ${{ needs.kernel.outputs.kernel_release }}
+      INPUT_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      INPUT_TITLE: ${{ inputs.title }}
+      ANDROID: ${{ github.event_name == 'push' || inputs.android }}
+      PRERELEASE: ${{ github.event_name == 'push' || inputs.prerelease }}
+      TAG_PUSHED: ${{ github.event_name == 'push' }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release
+          path: dist
+
+      - uses: actions/download-artifact@v7
+        if: env.BUILD_KERNEL_SOURCE == 'true'
+        with:
+          name: kernel-source
+          path: dist
+
+      - name: Tag, title and notes
+        run: |
+          if [ "${ANDROID}" = true ]; then
+            suffix=''; apps='Android apps (Waydroid, LineageOS 20, F-Droid): included, off until turned on at the Welcome screen.'
+          else
+            suffix='-no-android'; apps='Android apps: not included.'
+          fi
+          tag="${INPUT_TAG:-v${VERSION}${suffix}}"
+          [[ "${tag}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "::error::invalid tag '${tag}'"; exit 1; }
+          title="${INPUT_TITLE:-Antumbra ${VERSION} for the OnePlus 7T Pro}"
+          { echo "TAG=${tag}"; echo "TITLE=${title}"; } >> "${GITHUB_ENV}"
+          (cd dist && sha256sum -c SHA256SUMS)
+          {
+            echo "Antumbra ${VERSION} for the OnePlus 7T Pro (hotdog, HD1913), kernel ${KERNEL_RELEASE}."
+            echo "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from ${GITHUB_SHA}."
+            echo
+            echo "- ${apps}"
+            echo "- The images contain no proprietary device firmware (docs/legal.md, \"Firmware\")." \
+              "On the phone, Antumbra reads it at every boot from the phone's own partitions, read-only."
+            echo "- Install: read INSTALL.md first; it erases the phone's userdata partition and replaces slot B."
+            echo "- Verify the downloads: \`sha256sum -c SHA256SUMS\`. MANIFEST.md lists the pinned inputs and every Debian package with its version."
+            if ls dist/*-source.tar.xz >/dev/null 2>&1; then
+              echo "- The kernel's corresponding source (patched tree and .config.antumbra) is attached."
+            fi
+            echo "- Sources of the Debian packages: snapshot.debian.org, by the versions in MANIFEST.md."
+            if [ "${ANDROID}" = true ]; then
+              echo "- The Android images are Waydroid's LineageOS 20 builds, unmodified; their sources:" \
+                "https://github.com/LineageOS and https://github.com/waydroid (docs/legal.md, \"Android apps\")."
+            fi
+          } > "${RUNNER_TEMP}/notes.md"
+          cat "${RUNNER_TEMP}/notes.md"; ls -la dist
+
+      - name: Create or update the draft release
+        run: |
+          mapfile -t files < <(find dist -maxdepth 1 -type f | sort)
+          if state="$(gh release view "${TAG}" --json isDraft --jq .isDraft 2>/dev/null)"; then
+            [ "${state}" = true ] || { echo "::error::release ${TAG} is already published; choose another tag"; exit 1; }
+            echo "updating draft ${TAG}"
+            # Assets of an earlier attempt that this one does not have go first.
+            gh release view "${TAG}" --json assets --jq '.assets[].name' | while read -r name; do
+              [ -f "dist/${name}" ] || gh release delete-asset "${TAG}" "${name}" --yes
+            done
+            gh release upload "${TAG}" "${files[@]}" --clobber
+            edit=(--draft --title "${TITLE}" --notes-file "${RUNNER_TEMP}/notes.md" --prerelease="${PRERELEASE}")
+            [ "${TAG_PUSHED}" = true ] || edit+=(--target "${GITHUB_SHA}")
+            gh release edit "${TAG}" "${edit[@]}"
+          else
+            args=(--draft --title "${TITLE}" --notes-file "${RUNNER_TEMP}/notes.md")
+            # A pushed tag already names its commit.
+            [ "${TAG_PUSHED}" = true ] || args+=(--target "${GITHUB_SHA}")
+            [ "${PRERELEASE}" != true ] || args+=(--prerelease)
+            gh release create "${TAG}" "${args[@]}" "${files[@]}"
+          fi
+
+      - name: Check the uploaded assets
+        run: |
+          gh release view "${TAG}" --json isDraft,assets \
+            --jq '"draft: \(.isDraft)", (.assets[] | "\(.size)\t\(.name)")' | tee "${RUNNER_TEMP}/remote.txt"
+          grep -qx 'draft: true' "${RUNNER_TEMP}/remote.txt"
+          for f in dist/*; do
+            want="$(printf '%s\t%s' "$(stat -c %s "${f}")" "$(basename "${f}")")"
+            grep -qxF "${want}" "${RUNNER_TEMP}/remote.txt" || { echo "::error::$(basename "${f}") missing or wrong size"; exit 1; }
+          done
+          gh release view "${TAG}" --json url --jq .url

@@ -191,3 +191,21 @@ package check on every push, assembles a boot image with the pinned
 tools from a placeholder kernel, initramfs and build stamps (dm-verity
 off), and on manual dispatch builds the kernel and a minimal root
 filesystem on a native arm64 runner.
+
+The release workflow (`.github/workflows/antumbra-release.yml`, manual
+dispatch; a push that changes the file only registers it, so that `gh
+workflow run antumbra-release.yml --ref BRANCH` works on a branch other
+than the default one) builds the complete phone release on GitHub's
+native arm64 runners: the kernel in one job (as a user), the root
+filesystem, squashfs, images and release files in another (every build
+step as root: `veritysetup` leaves the `.verity` and `.roothash` files
+readable by root only, and `image.sh` and `bootimg.sh` read them). It
+stops when `build-flags` records device firmware, when a file under
+`/usr/lib/firmware` or any `*.mbn` file in the root filesystem has the
+SHA-256 of a file in
+`device/oneplus-hotdog/firmware/firmware-files.sha256`, or when a release
+file is 2 GiB or larger, and attaches the files, and the kernel source
+the boot image was built from, to a draft GitHub release that only the
+repository's writers see until someone publishes it. Inputs: Android apps
+on or off, the tag, the title, pre-release, and whether to attach the
+kernel source.

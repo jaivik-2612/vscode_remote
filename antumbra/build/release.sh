@@ -1,8 +1,8 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Package a release set: boot image, sparse userdata image, the port's
-# validated DTBO and vbmeta companions, checksums, manifest and an optional
-# minisign signature.
+# Package a release set: boot image, sparse userdata image (in 1900 MiB
+# parts if it is larger), the port's validated DTBO and vbmeta companions,
+# checksums, manifest and an optional minisign signature.
 #
 # Inputs : build/out/boot.img, build/out/userdata.simg, build/cache/device-assets/,
 #          build/out/rootfs/{build-flags,firmware.sha256,packages.txt} (rootfs.sh;
@@ -15,7 +15,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 [ "${IMAGE_OUTPUT:-sparse}" = "sparse" ] || die "this step is for the phone profile only (ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} builds a QEMU disk; see docs/vm-testing.md)"
 
-require_tools zstd split sha256sum
+require_tools split sha256sum
 ensure_dirs
 NAME="antumbra-${ANTUMBRA_VERSION}-oneplus-hotdog"
 REL="${OUT}/release/${NAME}"
@@ -52,10 +52,18 @@ esac
 cp "${OUT}/boot.img" "${REL}/${NAME}-boot.img"
 cp "${CACHE}/device-assets/dtbo.img" "${REL}/${NAME}-dtbo.img"
 cp "${CACHE}/device-assets/vbmeta-disabled.img" "${REL}/${NAME}-vbmeta-disabled.img"
-zstd -q -T0 -19 "${OUT}/userdata.simg" -o "${REL}/${NAME}-userdata.simg.zst"
-# GitHub release assets must stay under 2 GiB.
-if [ "$(stat -c %s "${REL}/${NAME}-userdata.simg.zst")" -gt $((1900 * 1048576)) ]; then
-    ( cd "${REL}" && split -b 1900M -d -a 3 "${NAME}-userdata.simg.zst" "${NAME}-userdata.simg.zst.part" && rm "${NAME}-userdata.simg.zst" )
+# The sparse userdata image ships as it is: it holds an xz-compressed
+# squashfs, which zstd -19 shrank by 0.5% (233746732 to 232621503 bytes for
+# 0.1.0-alpha.1), at the price of a decompression step before every flash.
+# GitHub release assets must stay under 2 GiB: a larger image is split into
+# 1900 MiB parts, which flash.sh joins (INSTALL.md says how to by hand); the
+# manifest gives the whole image's SHA-256.
+cp "${OUT}/userdata.simg" "${REL}/${NAME}-userdata.simg"
+USERDATA_SHA256="$(sha256sum "${REL}/${NAME}-userdata.simg" | cut -d' ' -f1)"
+USERDATA_SPLIT=''
+if [ "$(stat -c %s "${REL}/${NAME}-userdata.simg")" -gt $((1900 * 1048576)) ]; then
+    ( cd "${REL}" && split -b 1900M -d -a 3 "${NAME}-userdata.simg" "${NAME}-userdata.simg.part" && rm "${NAME}-userdata.simg" )
+    USERDATA_SPLIT=1
 fi
 cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
 {
@@ -75,13 +83,17 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     # shellcheck disable=SC2016  # backticks are Markdown, not command substitution
     printf -- '- `%s-boot.img`: slot-B boot image (kernel, initramfs, DTB), built by Antumbra.\n' "${NAME}"
     # shellcheck disable=SC2016
-    printf -- '- `%s-userdata.simg[.zst]`: sparse userdata image (live partition + empty Persistent Storage partition), built by Antumbra.\n' "${NAME}"
+    printf -- '- `%s-userdata.simg`: sparse userdata image (live partition + empty Persistent Storage partition), built by Antumbra; SHA-256 `%s`.\n' "${NAME}" "${USERDATA_SHA256}"
+    if [ -n "${USERDATA_SPLIT}" ]; then
+        # shellcheck disable=SC2016
+        printf -- '  It comes in 1900 MiB parts, `%s-userdata.simg.part000`, `.part001` and so on, to stay under the 2 GiB limit for GitHub release assets: join them in order into `%s-userdata.simg` before flashing (INSTALL.md).\n' "${NAME}" "${NAME}"
+    fi
     # shellcheck disable=SC2016
     printf -- '- `%s-dtbo.img`, `%s-vbmeta-disabled.img`: unchanged copies of the hotdog-linux-bringup release assets (%s), pinned by SHA-256 in device/oneplus-hotdog/sources.lock.\n\n' "${NAME}" "${NAME}" "$(lock_get PORT_TAG)"
     if [ "${FIRMWARE}" = "1" ]; then
         printf '%s\n\n' "The userdata image contains proprietary device firmware: the files the builder supplied with ANTUMBRA_FIRMWARE_DIR, listed under \"Device firmware\" below. Qualcomm and OnePlus do not license it for redistribution, so this release is for the builder's own phone only and must not be published (Antumbra's docs/legal.md, \"Firmware\"). See INSTALL.md."
     else
-        printf 'The images contain no proprietary device firmware. See INSTALL.md.\n\n'
+        printf '%s\n\n' "The images contain no proprietary device firmware. On the phone, Antumbra reads it at every boot from the phone's own partitions (modem, bluetooth, and vendor inside super), read-only (antumbra-phone-firmware). See INSTALL.md."
     fi
     # The port's patched libcamera (ANTUMBRA_LIBCAMERA_LOCAL=1): its source must be offered with it.
     if [ "$(stamp_value "${FLAGS}" ANTUMBRA_LIBCAMERA_LOCAL)" = "1" ]; then

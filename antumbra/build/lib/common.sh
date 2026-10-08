@@ -212,6 +212,24 @@ fetch() {
     mv "${dest}.part" "${dest}"
 }
 
+# fetch_first DEST URL... : download from the first URL that answers,
+# atomically, following redirects (for inputs that move between hosts).
+fetch_first() {
+    local dest="$1" url
+    shift
+    require_tools curl
+    mkdir -p "$(dirname "${dest}")"
+    for url in "$@"; do
+        if curl -fsSL --retry 3 --retry-delay 2 -o "${dest}.part" "${url}"; then
+            mv "${dest}.part" "${dest}"
+            return 0
+        fi
+        warn "download failed: ${url}"
+    done
+    rm -f "${dest}.part"
+    die "download failed: $*"
+}
+
 # fetch_verified URL DEST SHA256 : download unless the verified file exists.
 fetch_verified() {
     local url="$1" dest="$2" sha="$3"

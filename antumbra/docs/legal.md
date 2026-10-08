@@ -88,7 +88,13 @@ modem and video engine. Qualcomm and OnePlus do not license it for
 redistribution. Consequently:
 
 - Antumbra never commits firmware to this repository and never includes it
-  in a published image. `release.sh` packages the images the build
+  in a published image. On the phone, `antumbra-phone-firmware` reads the
+  firmware at every boot from the phone's own partitions (the copies
+  OxygenOS itself uses), read-only, and keeps it in RAM: nothing is
+  redistributed, and nothing of it is written anywhere. The one file it
+  writes that the phone does not have, ath10k's `firmware-5.bin`, holds no
+  code, only 60 bytes of feature flags that Antumbra generates.
+- `release.sh` packages the images the build
   produced plus two hash-pinned device-tree/vbmeta assets from the port's
   public release. An image built with `ANTUMBRA_FIRMWARE_DIR` carries the
   builder's firmware in its root filesystem, and `release.sh` packages it

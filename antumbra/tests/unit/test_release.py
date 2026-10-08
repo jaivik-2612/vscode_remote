@@ -109,8 +109,16 @@ class ReleaseManifestTest(BuildOut):
         with open(os.path.join(self.rel, f"{NAME}-boot.img"), "rb") as f:
             self.assertEqual(f.read(), self.boot)
         sums = read(os.path.join(self.rel, "SHA256SUMS"))
-        for name in ("MANIFEST.md", f"{NAME}-userdata.simg.zst", f"{NAME}-dtbo.img"):
+        for name in ("MANIFEST.md", f"{NAME}-userdata.simg", f"{NAME}-dtbo.img"):
             self.assertIn(f"  {name}\n", sums)
+        # The sparse image ships as it is (its squashfs is already compressed),
+        # byte for byte, with its hash in the manifest; fastboot flashes it directly.
+        with open(os.path.join(self.out, "userdata.simg"), "rb") as f:
+            simg = f.read()
+        with open(os.path.join(self.rel, f"{NAME}-userdata.simg"), "rb") as f:
+            self.assertEqual(f.read(), simg)
+        self.assertIn(hashlib.sha256(simg).hexdigest(), m)
+        self.assertIn("reads it at every boot from the phone's own partitions", m)
 
     def test_firmware_is_listed_and_warned_about(self):
         self.flags["DEVICE_FIRMWARE"] = "1"

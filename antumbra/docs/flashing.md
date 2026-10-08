@@ -1,113 +1,167 @@
 # Flashing Antumbra onto a OnePlus 7T Pro
 
 Read all of this first. The procedure replaces the phone's `userdata`
-partition and slot B. It follows, step for step, what the hotdog mainline
-port validated on hardware.
+partition and the boot images of one A/B slot: the slot Android is *not*
+running from. It follows what the hotdog mainline port validated on
+hardware. Antumbra itself has not yet been booted on a phone by its
+authors: expect problems, and use a phone you can afford to restore.
+
+A step-by-step guide to the same procedure for Windows, macOS and Linux,
+written for non-experts, is `docs/antumbra-install-guide.pdf` in the
+repository.
 
 ## Before you start
 
 - **Device**: OnePlus 7T Pro **HD1913** (European). The Indian HD1911 and
-  the T-Mobile HD1925 have never booted the complete mainline port.
-  `fastboot getvar product` must say `msmnile`.
-- **Bootloader unlocked** (OnePlus: OEM unlocking in Developer options,
-  then `fastboot oem unlock`; this wipes the phone). The orange
-  "device has been unlocked and can't be trusted" screen at every boot is
-  expected and permanent.
-- **Firmware baseline**: the port's images were validated on top of
-  OxygenOS 12 firmware (the vbmeta asset derives from OxygenOS 12 F.22).
-  If the phone runs older firmware, update it to the last OxygenOS 12 build
-  first.
-- **A recovery that offers fastbootd** must be in the active slot
-  (stock OxygenOS recovery or LineageOS recovery). `fastboot reboot
-  fastboot` must land in fastbootd; if it does not, install a compatible
-  recovery first. Flashing `userdata` from the bootloader instead of
-  fastbootd stalls on this device and must not be attempted.
+  the North American HD1917 run the same software line but have never
+  booted the complete mainline port; the T-Mobile 7T Pro 5G McLaren
+  (HD1925) is a different phone and is not supported. Check the model on
+  the label or the box: Settings can show `HD1911` on a phone that once
+  ran LineageOS, and `fastboot getvar product` says `msmnile` on the
+  OnePlus 7 Pro and 7T as well. `flash.sh` also checks every partition
+  size.
+- **OxygenOS 12, build F.22**: the port's images were validated on top of
+  its firmware (the vbmeta asset is F.22's). Update the phone to F.22
+  (Settings, System, System updates, or a local install of the full
+  package), let it finish, and restart Android once more: OxygenOS 12
+  updates with Virtual A/B, and fastbootd refuses `userdata` while an
+  update is still being merged.
+- **Bootloader unlocked**: Developer options (tap *Build number* seven
+  times), turn on *OEM unlocking* and *USB debugging*, then from the
+  bootloader `fastboot oem unlock` and confirm on the phone with the
+  volume and power keys. This erases the phone. A warning that the
+  bootloader is unlocked then shows at every boot; it is expected and
+  permanent. Do not lock the bootloader again while Antumbra is installed.
+- **A recovery that offers fastbootd** must be in the active slot (stock
+  OxygenOS recovery, which Android needs anyway, or LineageOS recovery).
+  `fastboot reboot fastboot` must land in fastbootd. Flashing `userdata`
+  from the bootloader instead of fastbootd stalls on this device and must
+  not be attempted.
 - **Everything in `userdata` is destroyed**: Android's user data and any
-  existing Antumbra Persistent Storage. Export what you need.
-- **Slot A is not a safe way back to Android**: it keeps Android's boot and
-  recovery, but booting the Android *system* there will detect the foreign
-  `userdata` and format it, erasing Antumbra and its Persistent Storage.
-  The way back is the backup made below (restoring `boot_b`, `dtbo_b`,
-  `vbmeta_b`) plus a fresh Android `userdata`, or the OnePlus MSM Download
-  Tool (EDL mode, Vol Up + Vol Down + USB; wipes everything and relocks).
+  existing Antumbra Persistent Storage. Back up what you need.
+- **Device firmware**: the images contain none (`legal.md`). At every boot
+  Antumbra reads the signed firmware the mainline drivers need (audio and
+  modem DSPs, Wi-Fi, Bluetooth, the GPU's zap shader) from the phone's own
+  partitions, read-only: `modem` and `bluetooth` of the slot it booted,
+  and `vendor` inside `super` (`architecture.md`, "Device firmware from
+  the phone"). A phone whose partitions were wiped or replaced by another
+  system has no Wi-Fi under Antumbra.
 - **Never send commands to a device that enumerates as 05c6:9008 or
-  05c6:900e** (Qualcomm EDL) unless you are deliberately using the MSM tool.
+  05c6:900e** (Qualcomm EDL) unless you are deliberately using the MSM
+  Download Tool.
 
 ## Files
 
-A release directory contains:
+A release contains:
 
 | File | Partition | Origin |
 |---|---|---|
-| `antumbra-<v>-boot.img` (100663296 bytes) | `boot_b` | built by Antumbra |
-| `antumbra-<v>-userdata.simg[.zst]` | `userdata` (fastbootd) | built by Antumbra |
-| `antumbra-<v>-dtbo.img` (25165824 bytes) | `dtbo_b` | hotdog-linux-bringup release, hash-pinned |
-| `antumbra-<v>-vbmeta-disabled.img` (65536 bytes) | `vbmeta_b` | hotdog-linux-bringup release, hash-pinned |
+| `antumbra-<v>-oneplus-hotdog-boot.img` (100663296 bytes) | `boot_<slot>` | built by Antumbra |
+| `antumbra-<v>-oneplus-hotdog-userdata.simg` | `userdata` (fastbootd) | built by Antumbra |
+| `antumbra-<v>-oneplus-hotdog-dtbo.img` (25165824 bytes) | `dtbo_<slot>` | hotdog-linux-bringup release, hash-pinned |
+| `antumbra-<v>-oneplus-hotdog-vbmeta-disabled.img` (65536 bytes) | `vbmeta_<slot>` | hotdog-linux-bringup release, hash-pinned |
 | `SHA256SUMS`, optionally `SHA256SUMS.minisig` | | |
-| `MANIFEST.md` (the build, its pinned inputs and packages, and whether the userdata image holds device firmware, listing the files if it does), `INSTALL.md` (this document) | | built by Antumbra |
+| `MANIFEST.md` (the build, its pinned inputs and packages, and whether the userdata image holds device firmware), `INSTALL.md` (this document) | | built by Antumbra |
 
-A compressed userdata image larger than 1900 MiB comes in pieces,
-`antumbra-<v>-userdata.simg.zst.part000`, `.part001` and so on;
-`flash.sh` joins them itself.
+Never mix files of different releases: the boot image's command line
+names the userdata image's file systems.
 
-Verify first:
+A userdata image larger than 1900 MiB comes in pieces,
+`antumbra-<v>-oneplus-hotdog-userdata.simg.part000`, `.part001` and so on
+(GitHub release files must be under 2 GiB); `flash.sh` joins them
+itself, and `MANIFEST.md` gives the SHA-256 of the joined image. Releases
+up to 0.1.0-alpha.1 shipped the image zstd-compressed (`.simg.zst`,
+possibly in `.part` pieces too); `flash.sh` still accepts those, and by
+hand they need `zstd -d` after joining.
+
+Verify first (Linux; on macOS `shasum -a 256 -c SHA256SUMS`, on Windows
+`certutil -hashfile <file> SHA256` for each file):
 
 ```sh
 build/verify-release.sh antumbra-<v>-oneplus-hotdog [minisign-public-key]
 ```
 
-## The guided script
+## The guided script (Linux)
 
 ```sh
 build/flash.sh --release antumbra-<v>-oneplus-hotdog
 ```
 
 It checks the device identity, the unlocked state and every partition
-size, backs up `boot_b`, `dtbo_b` and `vbmeta_b` with `fastboot fetch`
-into `./antumbra-backup-<date>/`, flashes the three slot-B images from
-the bootloader, reboots into fastbootd, writes `userdata` in bounded
-128 MiB transfers, makes slot B active and reboots. `--dry-run` prints
-the commands instead. Keep the backup directory.
+size, and reads which slot Android runs from; Antumbra goes into the
+other one. Before writing anything it starts fastbootd once to make sure
+it works and that no OxygenOS update is pending. It then flashes the
+slot's vbmeta, dtbo and boot images from the bootloader, writes
+`userdata` from fastbootd in bounded 128 MiB transfers, makes the slot
+active and reboots. `--dry-run` prints the commands instead.
+
+There is no backup step: this phone's bootloader and stock fastbootd do
+not support `fastboot fetch`, and none is needed, because Android's own
+slot is never written (`--backup` tries `fetch` on bootloaders that have
+it).
 
 ## By hand
 
+First find out which slot Android runs from; Antumbra goes into the
+other one. Below, `X` is that other slot: `b` if `current-slot` says
+`a`, and `a` if it says `b`.
+
 ```sh
 fastboot devices
-fastboot getvar product          # msmnile
 fastboot getvar unlocked         # yes
-fastboot fetch boot_b boot_b.img && fastboot fetch dtbo_b dtbo_b.img && fastboot fetch vbmeta_b vbmeta_b.img
-fastboot flash vbmeta_b antumbra-<v>-vbmeta-disabled.img
-fastboot flash dtbo_b   antumbra-<v>-dtbo.img
-fastboot flash boot_b   antumbra-<v>-boot.img
+fastboot getvar current-slot     # a  -> use X=b;   b -> use X=a
+fastboot reboot fastboot
+fastboot getvar is-userspace     # yes: fastbootd works
+fastboot getvar snapshot-update-status   # none (if it says snapshotted or merging: stop, see above)
+fastboot reboot bootloader
+fastboot flash vbmeta_X antumbra-<v>-oneplus-hotdog-vbmeta-disabled.img
+fastboot flash dtbo_X   antumbra-<v>-oneplus-hotdog-dtbo.img
+fastboot flash boot_X   antumbra-<v>-oneplus-hotdog-boot.img
 fastboot reboot fastboot
 fastboot getvar is-userspace     # yes
-cat antumbra-<v>-userdata.simg.zst.part* > antumbra-<v>-userdata.simg.zst   # only if it came in pieces
-zstd -d antumbra-<v>-userdata.simg.zst
-fastboot -S 128M flash userdata antumbra-<v>-userdata.simg
+cat antumbra-<v>-oneplus-hotdog-userdata.simg.part* > antumbra-<v>-oneplus-hotdog-userdata.simg   # only if it came in pieces
+fastboot -S 128M flash userdata antumbra-<v>-oneplus-hotdog-userdata.simg
 fastboot reboot bootloader
-fastboot set_active b
+fastboot set_active X
 fastboot reboot
 ```
 
-The first boot takes longer. The bootloader counts boot attempts: if the
-system never reaches its services, after seven attempts the phone falls
-back to slot A (which will offer recovery, and will format `userdata` if
-you let Android start).
+The first boot takes longer. The bootloader counts boot attempts, but
+do not count on it falling back to Android's slot when they run out: the
+port saw it stay on the failed slot (a red error screen) or fall back to
+an unusable one. If the phone does not reach Antumbra's Welcome screen,
+hold Power and Volume Up for about ten seconds to switch it off, start
+the bootloader with Power, Volume Up and Volume Down, and either try
+again (`fastboot set_active X`, which restores the attempts) or go back
+to Android (below).
 
 ## Updating
 
-Version 1 updates are full re-flashes of `boot_b` and `userdata`. They
-erase Persistent Storage: export it first (copy `~/Persistent` and
-anything else you need to an encrypted external medium), flash, recreate.
-In-place updates that keep the Persistent Storage partition are on the
-roadmap.
+Version 1 updates are full re-flashes of the boot image and `userdata`
+into Antumbra's slot. They erase Persistent Storage: export it first
+(copy `~/Persistent` and anything else you need to an encrypted external
+medium), flash, recreate. In-place updates that keep the Persistent
+Storage partition are on the roadmap.
+
+Once the phone starts Antumbra, `fastboot getvar current-slot` names
+*Antumbra's* slot, not Android's: an update goes into that current slot
+(`flash.sh --update`; by hand, `X` is the current slot). Installing "into
+the other slot" again would overwrite Android's.
 
 ## Going back to Android
 
-1. From fastboot: `fastboot flash boot_b boot_b.img`, `fastboot flash
-   dtbo_b dtbo_b.img`, `fastboot flash vbmeta_b vbmeta_b.img` from your
-   backup, then `fastboot set_active a` (or `b`, whichever held Android).
-2. Boot the Android recovery and perform a factory reset so `userdata` is
-   re-created for Android.
-3. If anything is wrong, the OnePlus MSM Download Tool for your exact
-   variant restores the phone to stock from EDL mode.
+Android's own slot was never written, so:
+
+1. From the bootloader: `fastboot set_active <Android's slot>` (the
+   `current-slot` you noted before installing).
+2. Start the recovery (in the bootloader's menu, choose *Recovery mode*
+   with the volume keys and confirm with Power) and run its factory reset
+   (the option that wipes or formats data), so `userdata` is created
+   again for Android. Without it Android finds Antumbra's `userdata` and
+   formats it itself.
+3. Android starts as it was before, minus its data. Antumbra's images stay
+   in the other slot, where they do no harm, until an OxygenOS update
+   rewrites that slot.
+4. If anything is wrong, the OnePlus MSM Download Tool for your exact
+   variant restores the phone to stock from EDL mode (Windows only; it
+   erases everything and locks the bootloader again).

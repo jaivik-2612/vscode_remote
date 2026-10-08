@@ -122,12 +122,21 @@ fetch_device_assets() {
 # Tor Browser (alpha channel: the only Linux aarch64 build)
 # ---------------------------------------------------------------------------
 fetch_tor_browser() {
-    local dest="${CACHE}/tor-browser" ver tarball fpr keyurl gnupghome
+    local dest="${CACHE}/tor-browser" ver tarball fpr keyurl gnupghome archive sha
     ver="$(lock_get TORBROWSER_VERSION)"
     tarball="${dest}/tor-browser-linux-aarch64-${ver}.tar.xz"
+    # dist.torproject.org keeps only the current releases; every release
+    # stays on archive.torproject.org. The SHA-256 pin decides either way.
+    archive="https://archive.torproject.org/tor-package-archive/torbrowser/${ver}/$(basename "${tarball}")"
+    sha="$(lock_get TORBROWSER_SHA256)"
     mkdir -p "${dest}"
-    fetch_verified "$(lock_get TORBROWSER_URL)" "${tarball}" "$(lock_get TORBROWSER_SHA256)"
-    [ -f "${tarball}.asc" ] || fetch "$(lock_get TORBROWSER_SIG_URL)" "${tarball}.asc"
+    if [ -f "${tarball}" ] && [ "$(sha256sum "${tarball}" | cut -d' ' -f1)" = "${sha}" ]; then
+        log "cached: $(basename "${tarball}")"
+    else
+        fetch_first "${tarball}" "$(lock_get TORBROWSER_URL)" "${archive}"
+        sha256_check "${tarball}" "${sha}"
+    fi
+    [ -f "${tarball}.asc" ] || fetch_first "${tarball}.asc" "$(lock_get TORBROWSER_SIG_URL)" "${archive}.asc"
     printf '%s\n' "${ver}" > "${dest}/version"
 
     # OpenPGP verification against the Tor Browser Developers signing key.

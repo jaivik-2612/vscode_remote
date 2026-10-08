@@ -62,6 +62,9 @@ E2FSPROGS_FAKE_TIME="${SOURCE_DATE_EPOCH}" mke2fs -q -t ext4 -F -d "${LIVE}" \
     -E lazy_itable_init=0,lazy_journal_init=0,hash_seed="${LIVE_FS_UUID}" \
     "${LIVE_EXT4}" "${LIVE_MIB}M"
 log "live partition: ${LIVE_MIB} MiB ext4, label ANTUMBRA_LIVE, UUID ${LIVE_FS_UUID}"
+# The ext4 holds the copy now (it is the size of the squashfs, 1.5 GB with
+# Android apps).
+rm -rf "${LIVE}"
 
 # --- GPT sized to the physical userdata partition --------------------------------
 REPART="${WORK}/repart.d"
@@ -89,6 +92,9 @@ systemd-repart --empty=create --size="${USERDATA_PARTITION_SIZE}" --sector-size=
     --seed="${DISK_UUID}" --definitions="${REPART}" --dry-run=no --offline=yes --no-pager "${RAW}" >/dev/null
 [ "$(stat -c %s "${RAW}")" -eq "${USERDATA_PARTITION_SIZE}" ] || die "userdata.img is not ${USERDATA_PARTITION_SIZE} bytes"
 log "GPT written: $(systemd-repart --sector-size=4096 --definitions="${REPART}" --dry-run=yes --no-pager "${RAW}" 2>/dev/null | grep -E 'ANTUMBRA_(LIVE|DATA)' | awk '{print $1, $(NF-1), $NF}' | tr '\n' ';')"
+# CopyBlocks= copied the ext4 into the image; the definitions that name it
+# have been read for the last time above.
+rm -f "${LIVE_EXT4}"
 
 if [ "${IMAGE_OUTPUT}" = "vmdisk" ]; then
     # --- QEMU disk: an outer GPT whose only partition is named "userdata" ----------------
@@ -124,8 +130,7 @@ else
     img2simg -s "${RAW}" "${SIMG}" 4096
     rm -f "${RAW}"
     SIMG_SIZE="$(stat -c %s "${SIMG}")"
-    LIVE_SIZE="$(stat -c %s "${LIVE_EXT4}")"
-    [ "${SIMG_SIZE}" -lt $((LIVE_SIZE + 64 * 1048576)) ] || die "sparse image unexpectedly large (${SIMG_SIZE} bytes): holes were not preserved"
+    [ "${SIMG_SIZE}" -lt $((LIVE_BYTES + 64 * 1048576)) ] || die "sparse image unexpectedly large (${SIMG_SIZE} bytes): holes were not preserved"
     sha256sum "${SIMG}" > "${SIMG}.sha256"
     log "userdata.simg: ${SIMG_SIZE} bytes (sparse; expands to ${USERDATA_PARTITION_SIZE} on the device)"
 fi

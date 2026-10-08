@@ -471,6 +471,39 @@ the VM with simulated GPIOs (`GPIO_SIM`), a GPIO-driven PWM for STEP
 driver is checked by review and on the phone
 (`docs/hardware-validation.md`).
 
+## The phone's own firmware
+
+`antumbra-phone-firmware` (`architecture.md`, "Device firmware from the
+phone") reads the phone's `modem`, `bluetooth` and `vendor` partitions.
+The VM tests it against the real partitions of OxygenOS F.22, the build
+the port validated, on a second disk shaped like the phone's UFS: a GPT
+with 4096-byte sectors, attached read-only.
+
+The OxygenOS images are proprietary and never committed. Extract
+`modem.img`, `bluetooth.img` and `vendor.img` from OnePlus's full OTA
+package for the HD1913 (F.22) with any `payload.bin` extractor, and
+`firmware/a640_zap.elf` from the vendor image for its hash, then:
+
+```sh
+tests/vm/make-phone-firmware-disk.py --modem modem.img --bluetooth bluetooth.img \
+    --vendor vendor.img --zap-sha256 "$(sha256sum a640_zap.elf | cut -d' ' -f1)" \
+    --kernel-build build/work/qemu-virt/kernel-build phone-fw-disk.img
+tests/vm/antumbra_vm.py phone-firmware phone-fw-disk.img --timeout-scale 2
+```
+
+The disk holds `modem_a` (an empty FAT, to be passed over), `modem_b`,
+`bluetooth_b`, and `super` with liblp metadata in which `vendor_b` lies
+in two extents stored out of order next to a decoy `vendor_a`. A
+debug image runs the loader as on the phone (`--any-device`; the units
+themselves are skipped in a VM), and `tests/vm/phone_firmware_check.py`
+then reads every file the kernel will ask for the way the kernel's MDT
+loader assembles it, compares it with the community mirror's SHA-256
+(F.22 reproduces all of them; the zap shader with vendor's own), and
+checks that the two FAT partitions stay mounted read-only, that the
+vendor mapping is gone, that `firmware_class.path` names the tree, and
+that the three partitions are byte for byte unchanged. An image built
+before the loader existed takes it, and `erofs.ko`, from the test disk.
+
 ## What the first VM runs found
 
 Booting the full image and pressing Start exposed these defects, all fixed
@@ -518,5 +551,6 @@ Anything that needs the phone's hardware: the display panel, touch, the
 modem policy (`antumbra-modem-radio-off`), the Wi-Fi driver and its
 firmware, audio routing, the cameras themselves (CAMSS, the sensors, the
 pop-up motor, image quality, whether PipeWire can hold the CAMSS graph),
-the bootloader (slot B, AVB), battery and thermal behaviour.
+the bootloader (A/B slots, AVB), whether the remoteprocs accept the
+phone's own firmware, battery and thermal behaviour.
 `docs/hardware-validation.md` keeps that list.

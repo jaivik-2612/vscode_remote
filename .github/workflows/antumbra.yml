@@ -95,11 +95,14 @@ jobs:
         run: build/kernel.sh
       - name: Minimal root filesystem, squashfs, images
         working-directory: antumbra
+        # All as root: veritysetup leaves the .verity and .roothash files
+        # readable by root only, and image.sh and bootimg.sh read them.
         run: |
-          sudo --preserve-env=ANTUMBRA_MINIMAL,SOURCE_DATE_EPOCH env ANTUMBRA_MINIMAL=1 build/rootfs.sh
-          sudo env ANTUMBRA_MINIMAL=1 build/squashfs.sh
-          ANTUMBRA_MINIMAL=1 build/image.sh
-          ANTUMBRA_MINIMAL=1 build/bootimg.sh
+          export ANTUMBRA_MINIMAL=1 SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          sudo -E build/rootfs.sh
+          sudo -E build/squashfs.sh
+          sudo -E build/image.sh
+          sudo -E build/bootimg.sh
       - name: Summary
         working-directory: antumbra
         run: ls -la build/out build/out/rootfs

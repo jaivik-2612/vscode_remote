@@ -10,8 +10,8 @@ kernel messages visible and does not quiet the console, and it is refused
 by `release.sh` so it cannot leak into a release. `flash.sh` takes a
 release directory, so flash a debug build by hand (`flashing.md`, "By
 hand") with `build/out/boot.img`, `build/out/userdata.simg` and the
-port's DTBO and vbmeta from `build/cache/device-assets/`, after backing
-up slot B as described there. Keep the slot-B backup. Items 46-56 need an
+port's DTBO and vbmeta from `build/cache/device-assets/`, into the slot
+Android is not running from, as described there. Items 46-56 need an
 image built with `ANTUMBRA_ANDROID=1`; item 43 compares the default
 libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
 
@@ -24,10 +24,21 @@ libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
    exists after boot; `findmnt /` shows `overlay`).
 3. dm-verity: `dmsetup table` shows a verity device for the squashfs; a
    build with `ANTUMBRA_VERITY=0` boots too.
-4. `qbootctl -n b` reports the slot successful after the first full boot.
-5. Reboot loops: if the kernel panics early, slot B's retry counter falls
-   and after seven attempts the bootloader switches to slot A. Confirm the
-   counter behaviour and restore with `fastboot set_active b`.
+4. `qbootctl -n <slot>` reports Antumbra's slot successful after the
+   first full boot.
+5. Reboot loops: if the kernel panics early, the slot's retry counter
+   falls. The port saw the bootloader stay on the failed slot or fall back
+   to an unusable one rather than to Android: record what it does, and
+   restore with `fastboot set_active <slot>`.
+6. The phone's own firmware: `antumbra-phone-firmware --status` (or
+   `/run/antumbra/phone-firmware/status.json`) reports `modem`,
+   `bluetooth` and `vendor` found in the booted slot and `complete`;
+   `cat /sys/module/firmware_class/parameters/path` names
+   `/run/antumbra/phone-firmware/lib`; `dmesg` shows the `adsp` and
+   `modem` remoteprocs `is now up`, ath10k reading `board-2.bin`, and no
+   "Unable to load" for `a630_sqe.fw`, `a640_gmu.bin` or the zap shader;
+   `glxinfo -B` or `vulkaninfo --summary` names Freedreno/Turnip, not
+   llvmpipe.
 
 ## Display, input, session
 

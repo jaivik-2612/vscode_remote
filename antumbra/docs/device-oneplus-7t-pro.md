@@ -53,6 +53,9 @@ Antumbra can expect:
 
 ## Partitions Antumbra touches
 
+Antumbra's slot is the one Android is not running from (`flashing.md`);
+`_b` below.
+
 | Partition | Size | Content |
 |---|---|---|
 | `boot_b` | 100663296 | Antumbra boot image |
@@ -60,9 +63,11 @@ Antumbra can expect:
 | `vbmeta_b` | 65536 | the port's vbmeta with verification disabled (flags 3) |
 | `userdata` | 232382812160 | nested 4096-byte-sector GPT: `ANTUMBRA_LIVE` (ext4, read-only, squashfs inside) and `ANTUMBRA_DATA` (LUKS2 Persistent Storage, created on first use) |
 
-Untouched: `boot_a`, `dtbo_a`, `vbmeta_a`, both recoveries, Android's
-`super`, `persist`, modem storage (`modemst1/2`, `fsg`, read-only through
-`rmtfs -r`).
+Untouched: Android's slot (`boot_a`, `dtbo_a`, `vbmeta_a` here), both
+recoveries, `persist`, and modem storage (`modemst1/2`, `fsg`, read-only
+through `rmtfs -r`). Read only, at every boot, for the device firmware:
+`modem_b`, `bluetooth_b` and the `vendor` partition inside `super`
+(`architecture.md`, "Device firmware from the phone").
 
 ## Boot modes
 

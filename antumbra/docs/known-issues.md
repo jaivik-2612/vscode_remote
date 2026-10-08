@@ -1,6 +1,6 @@
 # Known issues and gaps
 
-Version 0.1.0-alpha.1. Everything here is as of the state of the mainline
+Version 0.1.0-alpha.2. Everything here is as of the state of the mainline
 port in August 2026 and of this repository; see `roadmap.md` for plans.
 
 ## Not yet validated on hardware
@@ -272,9 +272,13 @@ the security side. None of this has run on the phone yet
 - The kernel is validated to build with LLVM only (the port's recipe).
 - The release includes the port's DTBO and vbmeta assets as-is; Antumbra
   cannot yet regenerate them.
-- Without the builder's own firmware tree the image has no display
-  acceleration, Wi-Fi or audio. With it, the firmware is in the image and
-  in the release `release.sh` makes from it: such a release is for the
+- The device firmware comes from the phone's own partitions at boot
+  (`architecture.md`, "Device firmware from the phone"). That has been
+  tested in the VM against OxygenOS F.22's partition images, not on a
+  phone. A phone whose `modem`, `bluetooth` or `vendor` partitions were
+  wiped or replaced has no Wi-Fi, sound or graphics acceleration; the
+  status file says which is missing. A builder can still put the firmware
+  into the image (`ANTUMBRA_FIRMWARE_DIR`); such a release is for the
   builder's own phone only, as its manifest says (`legal.md`).
 - Images built with `ANTUMBRA_LIBCAMERA_LOCAL=1` are not reproducible:
   libcamera signs its IPA modules with a key generated at each build

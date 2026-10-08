@@ -14,6 +14,8 @@
 #          --smp N        virtual CPUs (default 3)
 #          --append ARGS  extra kernel command-line arguments
 #          --disk-serial S  the disk's serial number (default: none), as the phone's UFS has one
+#          --extra-disk F   attach raw image F read-only as a second disk with 4096-byte
+#                         sectors (the phone-firmware test: tests/vm/make-phone-firmware-disk.py)
 #
 # Inputs : build/out/qemu-virt/{kernel/Image,rootfs/initrd.img,rootfs/filesystem.squashfs.roothash,vm-disk.img}
 #          device/qemu-virt/cmdline.txt
@@ -25,10 +27,10 @@ export ANTUMBRA_DEVICE="${ANTUMBRA_DEVICE:-qemu-virt}"
 source "$(dirname "${BASH_SOURCE[0]}")/lib/common.sh"
 [ "${IMAGE_OUTPUT}" = "vmdisk" ] || die "ANTUMBRA_DEVICE=${ANTUMBRA_DEVICE} is not a VM profile"
 
-usage() { sed -n '4,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '4,22p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 
 MODE="${1:-}"; [ $# -gt 0 ] && shift
-DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=4096; SMP=3; EXTRA_APPEND=""; DISK_SERIAL=""
+DEBUG="${ANTUMBRA_DEBUG:-}"; VNC=""; NET=1; KEEP_DISK=""; MEMORY=4096; SMP=3; EXTRA_APPEND=""; DISK_SERIAL=""; EXTRA_DISK=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --debug) DEBUG=1 ;;
@@ -40,6 +42,8 @@ while [ $# -gt 0 ]; do
         --append) EXTRA_APPEND="$2"; shift ;;
         --disk-serial) DISK_SERIAL="$2"; shift
                        [[ "${DISK_SERIAL}" =~ ^[A-Za-z0-9]{1,20}$ ]] || die "--disk-serial: 1 to 20 letters and digits" ;;
+        --extra-disk) EXTRA_DISK="$(realpath "$2")"; shift
+                      [ -f "${EXTRA_DISK}" ] || die "--extra-disk: no such file" ;;
         -h|--help) usage; exit 0 ;;
         --) shift; break ;;
         *) break ;;
@@ -139,6 +143,11 @@ ARGS=(
     -qmp "unix:${RUN}/qmp.sock,server=on,wait=off"
     -no-reboot
 )
+if [ -n "${EXTRA_DISK}" ]; then
+    # Read-only: what the guest does to it can never change the file.
+    ARGS+=(-drive "if=none,id=extra0,file=${EXTRA_DISK},format=raw,readonly=on"
+           -device "virtio-blk-pci,drive=extra0,logical_block_size=4096,physical_block_size=4096")
+fi
 if [ -n "${NET}" ]; then
     # User-mode networking: the guest sees 10.0.2.0/24, a gateway and a DNS
     # forwarder at 10.0.2.3 (a leak target the firewall must block). Every
