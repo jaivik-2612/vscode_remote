@@ -121,7 +121,7 @@ if [ -n "${ANTUMBRA_FIRMWARE_DIR}" ]; then
     copy_as_root "${ANTUMBRA_FIRMWARE_DIR}" "${INPUT}/firmware"
     log "firmware tree included from ${ANTUMBRA_FIRMWARE_DIR}"
 else
-    warn "no ANTUMBRA_FIRMWARE_DIR: the image will have no device firmware (display, Wi-Fi and audio will not work)"
+    warn "no ANTUMBRA_FIRMWARE_DIR: the image has no device firmware of its own; on the phone antumbra-phone-firmware reads it from the phone's partitions at boot"
 fi
 cat > "${INPUT}/run-hooks.sh" <<'RUNHOOKS'
 #!/bin/sh

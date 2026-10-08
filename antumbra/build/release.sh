@@ -66,6 +66,10 @@ if [ "$(stat -c %s "${REL}/${NAME}-userdata.simg")" -gt $((1900 * 1048576)) ]; t
     USERDATA_SPLIT=1
 fi
 cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
+# The step-by-step guide for Windows, macOS and Linux (docs/install-guide/).
+if [ -f "${ANTUMBRA_ROOT}/docs/antumbra-install-guide.pdf" ]; then
+    cp "${ANTUMBRA_ROOT}/docs/antumbra-install-guide.pdf" "${REL}/antumbra-install-guide.pdf"
+fi
 {
     printf '# Antumbra %s for the OnePlus 7T Pro (hotdog)\n\n' "${ANTUMBRA_VERSION}"
     printf 'Built %s from commit %s.\n\n' "$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)" "$(git -C "${ANTUMBRA_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"

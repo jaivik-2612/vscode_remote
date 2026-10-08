@@ -385,8 +385,8 @@ jobs:
             echo "- The images contain no device firmware that is not licensed for redistribution (only Debian's firmware packages;" \
               "docs/legal.md, \"Firmware\"). On the phone, Antumbra reads the rest at every boot from the phone's own partitions, read-only."
             echo "- Install: read INSTALL.md first. It erases the phone's userdata partition and replaces the boot, dtbo and vbmeta" \
-              "images of the slot Android does not run from; Android's slot is never written. The install guide for Windows, macOS" \
-              "and Linux is antumbra/docs/antumbra-install-guide.pdf in the repository at this tag."
+              "images of the slot Android does not run from; Android's slot is never written. The step-by-step guide for Windows," \
+              "macOS and Linux is antumbra-install-guide.pdf, attached here."
             echo "- Verify the downloads: \`sha256sum -c SHA256SUMS\`. MANIFEST.md lists the pinned inputs and every Debian package with its version."
             if ls dist/*-source.tar.xz >/dev/null 2>&1; then
               echo "- The kernel's corresponding source (patched tree and .config.antumbra) is attached."

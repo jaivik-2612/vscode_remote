@@ -7,8 +7,8 @@ hardware. Antumbra itself has not yet been booted on a phone by its
 authors: expect problems, and use a phone you can afford to restore.
 
 A step-by-step guide to the same procedure for Windows, macOS and Linux,
-written for non-experts, is `docs/antumbra-install-guide.pdf` in the
-repository.
+written for non-experts, is `antumbra-install-guide.pdf` in the release
+(`docs/antumbra-install-guide.pdf` in the repository).
 
 ## Before you start
 
@@ -79,6 +79,7 @@ A release contains:
 | `antumbra-<v>-oneplus-hotdog-vbmeta-disabled.img` (65536 bytes) | `vbmeta_<slot>` | hotdog-linux-bringup release, hash-pinned |
 | `SHA256SUMS`, optionally `SHA256SUMS.minisig` | | |
 | `MANIFEST.md` (the build, its pinned inputs and packages, and whether the userdata image holds device firmware), `INSTALL.md` (this document) | | built by Antumbra |
+| `antumbra-install-guide.pdf` (the step-by-step guide) | | built by Antumbra |
 
 Never mix files of different releases: the boot image's command line
 names the userdata image's file systems.
