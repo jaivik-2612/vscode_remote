@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Assemble the Android boot image for slot B of the OnePlus 7T Pro.
+# Assemble the Android boot image for Antumbra's slot of the OnePlus 7T Pro.
 #
 # Inputs : build/out/kernel/{Image,sm8150-oneplus-hotdog.dtb}
 #          build/out/rootfs/initrd.img            (rootfs.sh)

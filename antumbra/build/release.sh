@@ -81,7 +81,7 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     fi
     printf '## Files\n\n'
     # shellcheck disable=SC2016  # backticks are Markdown, not command substitution
-    printf -- '- `%s-boot.img`: slot-B boot image (kernel, initramfs, DTB), built by Antumbra.\n' "${NAME}"
+    printf -- '- `%s-boot.img`: boot image (kernel, initramfs, DTB) for Antumbra'"'"'s slot, the one Android does not run from (INSTALL.md); built by Antumbra.\n' "${NAME}"
     # shellcheck disable=SC2016
     printf -- '- `%s-userdata.simg`: sparse userdata image (live partition + empty Persistent Storage partition), built by Antumbra; SHA-256 `%s`.\n' "${NAME}" "${USERDATA_SHA256}"
     if [ -n "${USERDATA_SPLIT}" ]; then
@@ -93,7 +93,7 @@ cp "${ANTUMBRA_ROOT}/docs/flashing.md" "${REL}/INSTALL.md"
     if [ "${FIRMWARE}" = "1" ]; then
         printf '%s\n\n' "The userdata image contains proprietary device firmware: the files the builder supplied with ANTUMBRA_FIRMWARE_DIR, listed under \"Device firmware\" below. Qualcomm and OnePlus do not license it for redistribution, so this release is for the builder's own phone only and must not be published (Antumbra's docs/legal.md, \"Firmware\"). See INSTALL.md."
     else
-        printf '%s\n\n' "The images contain no proprietary device firmware. On the phone, Antumbra reads it at every boot from the phone's own partitions (modem, bluetooth, and vendor inside super), read-only (antumbra-phone-firmware). See INSTALL.md."
+        printf '%s\n\n' "The images contain no device firmware that is not licensed for redistribution: only Debian's firmware packages, under their own licences. On the phone, Antumbra reads the rest at every boot from the phone's own partitions (modem, bluetooth, and vendor inside super), read-only (antumbra-phone-firmware). See INSTALL.md."
     fi
     # The port's patched libcamera (ANTUMBRA_LIBCAMERA_LOCAL=1): its source must be offered with it.
     if [ "$(stamp_value "${FLAGS}" ANTUMBRA_LIBCAMERA_LOCAL)" = "1" ]; then

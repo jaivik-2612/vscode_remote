@@ -103,7 +103,7 @@ class ReleaseManifestTest(BuildOut):
         r = self.release()
         self.assertEqual(r.returncode, 0, r.stderr)
         m = self.manifest()
-        self.assertIn("The images contain no proprietary device firmware.", m)
+        self.assertIn("The images contain no device firmware that is not licensed for redistribution", m)
         self.assertNotIn("Device firmware", m)
         self.assertNotIn("do not publish", r.stderr)
         with open(os.path.join(self.rel, f"{NAME}-boot.img"), "rb") as f:
@@ -118,7 +118,7 @@ class ReleaseManifestTest(BuildOut):
         with open(os.path.join(self.rel, f"{NAME}-userdata.simg"), "rb") as f:
             self.assertEqual(f.read(), simg)
         self.assertIn(hashlib.sha256(simg).hexdigest(), m)
-        self.assertIn("reads it at every boot from the phone's own partitions", m)
+        self.assertIn("reads the rest at every boot from the phone's own partitions", m)
 
     def test_firmware_is_listed_and_warned_about(self):
         self.flags["DEVICE_FIRMWARE"] = "1"
@@ -130,7 +130,7 @@ class ReleaseManifestTest(BuildOut):
         m = self.manifest()
         self.assertIn("The userdata image contains proprietary device firmware", m)
         self.assertIn("must not be published", m)
-        self.assertNotIn("no proprietary device firmware", m)
+        self.assertNotIn("no device firmware that is not licensed", m)
         self.assertIn(f"## Device firmware (/lib/firmware, 2 files, not redistributable)\n\n```\n{listing}```\n", m)
         self.assertIn("this release contains your device firmware", r.stderr)
 

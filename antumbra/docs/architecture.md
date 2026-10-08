@@ -107,7 +107,7 @@ userdata (physical Android partition, 232,382,812,160 bytes; written from fastbo
 Why `userdata` and not `super`: the port records three reasons. A short
 image written to the 15 GB `super` left its backup GPT in the middle of
 the partition, which the kernel rejected; `userdata` leaves Android's
-`super`, both recoveries and slot A untouched; and `userdata` has the
+`super`, both recoveries and Android's slot untouched; and `userdata` has the
 capacity. For either target, writing has to go through fastbootd in
 128 MiB chunks, because the bootloader's fastboot stalls on large
 transfers.
@@ -248,8 +248,10 @@ No proprietary firmware is in the initramfs, so `boot.img` is a
 publishable artifact. Slot marking is **not** done in the initramfs:
 Debian's `qbootctl.service` runs `qbootctl -m` once `multi-user.target`
 is reached. If the system fails before that point, the bootloader's
-retry counter is left to count down and after seven failed boots the
-phone falls back to slot A's recovery.
+retry counter counts down; the port saw the bootloader then stay on the
+failed slot or fall back to an unusable one, so do not count on it
+returning to Android's slot: from fastboot, `fastboot set_active` selects
+a slot again (`flashing.md`).
 
 The initramfs contains **no** USB gadget networking, no DHCP server, no
 serial console and no shell. The postmarketOS initramfs the port uses
@@ -1152,6 +1154,15 @@ Built that way from F.22's partitions, every file is byte for byte the
 community mirror's (`device/oneplus-hotdog/firmware/firmware-files.sha256`),
 except the zap shader, whose signature differs from the mirror's copy.
 
+Antumbra runs on its own slot's bootloader, TrustZone and modem firmware.
+After an A/B update that slot holds the build from *before* the update,
+so `flashing.md` asks for F.22 to be installed twice, once into each
+slot; where that is not done, Antumbra runs on an older OxygenOS 12 (or
+11) chain than the one the port validated. `vendor` is usually not in
+Antumbra's slot at all: with Virtual A/B, `super` holds Android's slot's
+`vendor`, and the GPU files come from there (the status file names the
+partition used).
+
 `antumbra-phone-firmware.service` runs it early: `DefaultDependencies=no`,
 before `systemd-udevd` and `systemd-udev-trigger`, so before the
 remoteproc driver probes and the audio DSP boots (remoteproc asks for its
@@ -1161,8 +1172,9 @@ GPU (the zap shader is requested then, and again on every open while it
 failed). `/usr/local/lib/antumbra-phone-firmware`:
 
 1. Leaves every other device alone (device tree `oneplus,hotdog`). Takes
-   the booted slot from `androidboot.slot_suffix`, then the other one: a
-   slot's bootloader, TrustZone and firmware come from the same update.
+   the booted slot from `androidboot.slot_suffix` (else from qbootctl's
+   active slot, else slot B), then the other one: a slot's bootloader,
+   TrustZone and firmware come from the same update.
    Finds partitions by their GPT names in sysfs, waiting up to 10 s.
 2. Mounts `modem_<slot>` and `bluetooth_<slot>` read-only (`ro`,
    `nodev,nosuid,noexec`, files root-only) for the whole session:

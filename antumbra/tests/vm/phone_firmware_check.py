@@ -82,6 +82,9 @@ def main(expected_path):
     for kind, slot in expected["slots"].items():
         got = (status.get(kind) or {}).get("slot")
         check(f"{kind} from slot {slot}", got == slot, f"got {got}")
+    for key, want in expected.get("vendor", {}).items():
+        got = (status.get("vendor") or {}).get(key)
+        check(f"vendor {key} {want}", got == want, f"got {got}")
     with open("/sys/module/firmware_class/parameters/path") as f:
         param = f.read()
     check("firmware_class.path", param == LIB + "\n", repr(param))  # sysfs adds the newline
@@ -103,6 +106,10 @@ def main(expected_path):
         opts = mounts.get(os.path.join(BASE, "mnt", kind))
         check(f"{kind} stays mounted read-only", bool(opts) and "ro" in opts, ",".join(opts or []))
     check("vendor unmounted again", os.path.join(BASE, "mnt", "vendor") not in mounts)
+    for name in ("modem_b", "bluetooth_b"):
+        dev = os.path.realpath(f"/dev/disk/by-partlabel/{name}")
+        with open(f"/sys/class/block/{os.path.basename(dev)}/ro") as f:
+            check(f"{name} set read-only", f.read().strip() == "1", dev)
     check("vendor mapping removed", not os.path.exists("/dev/mapper/antumbra-phone-vendor"))
 
     for name, want in sorted(expected["partitions"].items()):

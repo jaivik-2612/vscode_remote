@@ -245,17 +245,27 @@ class LinkFarm(unittest.TestCase):
 
 
 class Slots(unittest.TestCase):
-    def order(self, cmdline):
-        with mock.patch("builtins.open", mock.mock_open(read_data=cmdline)):
-            return pf.slot_order()
+    def booted(self, cmdline, qbootctl=""):
+        result = mock.Mock(stdout=qbootctl)
+        with mock.patch("builtins.open", mock.mock_open(read_data=cmdline)), \
+                mock.patch.object(pf.subprocess, "run", return_value=result) as run:
+            return pf.booted_slot(), run
+
+    def test_booted_slot(self):
+        self.assertEqual(self.booted("quiet androidboot.slot_suffix=_a")[0], "_a")
+        self.assertEqual(self.booted("androidboot.slot=b")[0], "_b")
+        # Not on the command line: qbootctl's active slot (GPT attributes).
+        self.assertEqual(self.booted("quiet", "Active slot: _a\n")[0], "_a")
+        self.assertEqual(self.booted("quiet", "Active slot: b\n")[0], "_b")
+        self.assertIsNone(self.booted("androidboot.slot_suffix=_c", "nonsense")[0])
+        _, run = self.booted("androidboot.slot_suffix=_b")
+        run.assert_not_called()
 
     def test_slot_order(self):
-        self.assertEqual(self.order("quiet androidboot.slot_suffix=_a"), ["_a", "_b"])
-        self.assertEqual(self.order("androidboot.slot_suffix=_b"), ["_b", "_a"])
-        self.assertEqual(self.order("androidboot.slot=a"), ["_a", "_b"])
-        # Antumbra lives in slot B: the default when the bootloader says nothing.
-        self.assertEqual(self.order("quiet"), ["_b", "_a"])
-        self.assertEqual(self.order("androidboot.slot_suffix=_c"), ["_b", "_a"])
+        self.assertEqual(pf.slot_order("_a"), ["_a", "_b"])
+        self.assertEqual(pf.slot_order("_b"), ["_b", "_a"])
+        # Unknown: B first, where flash.sh puts Antumbra when Android runs from A.
+        self.assertEqual(pf.slot_order(None), ["_b", "_a"])
 
 
 class Main(unittest.TestCase):
@@ -275,6 +285,7 @@ class Main(unittest.TestCase):
 
     def run_main(self, modem, bluetooth, vendor, argv=("--any-device", "--wait", "0")):
         with mock.patch.object(pf, "partitions", return_value={}), \
+                mock.patch.object(pf, "booted_slot", return_value="_a"), \
                 mock.patch.object(pf, "collect_fat", side_effect=lambda kind, *a: modem if kind == "modem" else bluetooth), \
                 mock.patch.object(pf, "collect_vendor", return_value=vendor), \
                 mock.patch.object(pf, "start_offline_adsp") as kick:
@@ -286,6 +297,7 @@ class Main(unittest.TestCase):
         got = {"slot": "b", "files": ["x"]}
         status, kick = self.run_main(got, got, got)
         self.assertTrue(status["complete"])
+        self.assertEqual((status["booted_slot"], status["slots"]), ("a", ["a", "b"]))
         self.assertFalse(os.path.exists(pf.INCOMPLETE))
         with open(self.param) as f:
             self.assertEqual(f.read(), pf.LIB)  # no trailing newline: tqftpserv drops one byte
@@ -301,6 +313,27 @@ class Main(unittest.TestCase):
         self.assertTrue(status["complete"])
         self.assertFalse(os.path.exists(pf.INCOMPLETE))
         kick.assert_called_once()
+
+    def test_one_part_failing_does_not_stop_the_others(self):
+        got = {"slot": "b", "files": ["x"]}
+        with mock.patch.object(pf, "partitions", return_value={}), \
+                mock.patch.object(pf, "booted_slot", return_value=None), \
+                mock.patch.object(pf, "collect_fat", side_effect=OSError("I/O error")), \
+                mock.patch.object(pf, "collect_vendor", return_value=got):
+            self.assertEqual(pf.main(["--any-device", "--wait", "0"]), 0)
+        with open(pf.STATUS) as f:
+            status = json.load(f)
+        self.assertEqual((status["modem"], status["vendor"]), (None, got))
+        self.assertTrue(os.path.exists(pf.INCOMPLETE))   # so the late unit retries
+        with open(self.param) as f:
+            self.assertEqual(f.read(), pf.LIB)
+        self.assertEqual((status["booted_slot"], status["slots"]), (None, ["b", "a"]))
+
+    def test_slot_option(self):
+        got = {"slot": "a", "files": ["x"]}
+        status, _ = self.run_main(got, got, got, argv=("--any-device", "--wait", "0", "--slot", "b"))
+        self.assertEqual(status["slots"], ["b", "a"])
+        self.assertEqual(pf.main(["--any-device", "--slot", "c"]), 2)
 
     def test_other_devices_are_left_alone(self):
         with mock.patch.object(pf, "is_hotdog", return_value=False), mock.patch.object(pf, "partitions") as parts:

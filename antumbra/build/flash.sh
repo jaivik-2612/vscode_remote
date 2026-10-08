@@ -5,12 +5,15 @@
 # Mirrors the hardware-validated procedure of the hotdog-linux-bringup port:
 # bootloader fastboot for vbmeta, dtbo and boot of one slot; fastbootd
 # (userspace fastboot) with bounded 128 MiB transfers for userdata; that
-# slot made active. The slot is the one Android is not running from (slot B
-# when Android runs from A, as in the port's tests): OxygenOS 12 updates
-# with Virtual A/B, which keeps Android's system only for its current slot,
-# so that slot's boot images are Android's way back.
+# slot made active. Antumbra's slot is the one Android does not run from
+# (slot B when Android runs from A, as in the port's tests): OxygenOS 12
+# updates with Virtual A/B, which keeps Android's system only for its
+# current slot, so that slot's boot images are Android's way back and are
+# never written. Which slot is Android's is decided once, on the first
+# install, and remembered per phone (by serial number) on this computer:
+# after the first install the bootloader's current slot is Antumbra's.
 #
-# usage: flash.sh --release DIR [--update | --slot a|b] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
+# usage: flash.sh --release DIR [--android-slot a|b | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -21,13 +24,16 @@ source "${DEVICE_DIR}/bootimg.conf"
 
 usage() {
     cat <<USAGE
-usage: flash.sh --release DIR [--update | --slot a|b] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
+usage: flash.sh --release DIR [--android-slot a|b | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
 
   --release DIR     directory with the release files (output of release.sh, or a download)
-                    By default the phone runs Android: Antumbra goes into the other slot.
-  --update          the phone runs Antumbra (its slot is the current one): replace it there
-  --slot a|b        install into this slot; the current slot only with --update
-  --backup          first save boot_b/dtbo_b/vbmeta_b with 'fastboot fetch'; the OnePlus
+                    Antumbra goes into the slot that is not Android's, which is never written.
+                    First install: Android is running, so its slot is the current one; it is
+                    remembered for this phone in ~/.local/share/antumbra/.
+  --android-slot a|b  Android's slot, the current-slot you noted before the first install
+                    (needed when this computer has no record of it)
+  --update          the phone runs Antumbra now: Android's slot is the other one
+  --backup          first save the target slot's boot/dtbo/vbmeta with 'fastboot fetch'; the OnePlus
                     7T Pro's bootloader and stock fastbootd do not support it, so this is
                     for bootloaders that do (INSTALL.md says how to go back without it)
   --backup-dir DIR  where --backup stores them (default: ./antumbra-backup-<date>)
@@ -36,13 +42,13 @@ usage: flash.sh --release DIR [--update | --slot a|b] [--backup [--backup-dir DI
 USAGE
 }
 
-REL='' BACKUP='' DO_BACKUP='' DRY='' YES='' WANT_SLOT='' UPDATE=''
+REL='' BACKUP='' DO_BACKUP='' DRY='' YES='' ANDROID_SLOT='' UPDATE=''
 while [ $# -gt 0 ]; do
     case "$1" in
         --release) REL="$2"; shift ;;
         --backup-dir) BACKUP="$2"; shift ;;
-        --slot) WANT_SLOT="$2"; shift
-                [[ "${WANT_SLOT}" =~ ^[ab]$ ]] || die "--slot: a or b" ;;
+        --android-slot) ANDROID_SLOT="$2"; shift
+                        [[ "${ANDROID_SLOT}" =~ ^[ab]$ ]] || die "--android-slot: a or b" ;;
         --update) UPDATE=1 ;;
         --backup) DO_BACKUP=1 ;;
         --skip-backup) ;;  # the default since fetch proved unsupported on this phone
@@ -111,9 +117,8 @@ fi
 cat <<WARNING
 
 ================================================================================
- This will REPLACE the boot, dtbo and vbmeta images of the slot Android is
- not running from, and the whole userdata partition of the connected
- OnePlus 7T Pro.
+ This will REPLACE the boot, dtbo and vbmeta images of the slot that is not
+ Android's, and the whole userdata partition of the connected OnePlus 7T Pro.
 
  * Everything in userdata is destroyed: Android user data AND any existing
    Antumbra Persistent Storage. Back up first.
@@ -123,15 +128,13 @@ cat <<WARNING
    back to Android's slot: select a slot yourself from fastboot (INSTALL.md).
  * The bootloader must already be unlocked; the unlocked-bootloader warning
    at every boot is expected and cannot be removed.
+ * Antumbra runs on the bootloader and firmware of its own slot: install
+   OxygenOS 12 F.22 into both slots first (INSTALL.md, "Before you start").
  * Only the HD1913 (EU) variant has been validated by the mainline port, and
    Antumbra itself has not yet been booted on a phone.
 ================================================================================
 
 WARNING
-if [ -z "${YES}" ] && [ -z "${DRY}" ]; then
-    read -r -p "Type FLASH to continue: " answer
-    [ "${answer}" = "FLASH" ] || die "aborted"
-fi
 
 # --- Device checks (bootloader fastboot) -------------------------------------------
 if [ -z "${DRY}" ]; then
@@ -142,32 +145,50 @@ if [ -z "${DRY}" ]; then
     UNLOCKED="$(getvar unlocked)"
     [ "${UNLOCKED}" = "yes" ] || die "bootloader is not unlocked (unlocked=${UNLOCKED})"
     CURRENT="$(getvar current-slot)"; CURRENT="${CURRENT#_}"
-    case "${CURRENT}" in
-        a) OTHER=b ;;
-        b) OTHER=a ;;
-        *) die "cannot read the current slot (current-slot=${CURRENT})" ;;
-    esac
-    # A first install starts from Android: Antumbra goes into the other slot.
-    # An update starts from Antumbra, whose slot is then the current one.
-    if [ -n "${UPDATE}" ]; then SLOT="${CURRENT}"; else SLOT="${OTHER}"; fi
-    if [ -n "${WANT_SLOT}" ]; then
-        [ "${WANT_SLOT}" != "${CURRENT}" ] || [ -n "${UPDATE}" ] \
-            || die "slot ${CURRENT} is the current one, Android's on a first install: use --update if the phone runs Antumbra"
-        SLOT="${WANT_SLOT}"
+    [[ "${CURRENT}" =~ ^[ab]$ ]] || die "cannot read the current slot (current-slot=${CURRENT})"
+    other() { [ "$1" = a ] && echo b || echo a; }
+    # Which slot is Android's. After the first install the current slot is
+    # Antumbra's (set_active), whether or not it ever booted, so the current
+    # slot is taken as Android's only on a first install, and only if it has
+    # booted successfully (Android marks its slot so; a failed Antumbra slot
+    # is not).
+    SERIAL="$(getvar serialno | tr -cd 'A-Za-z0-9')"
+    RECORD="${XDG_DATA_HOME:-${HOME}/.local/share}/antumbra/android-slot-${SERIAL:-unknown}"
+    RECORDED=''
+    [ ! -f "${RECORD}" ] || RECORDED="$(tr -cd ab < "${RECORD}" | head -c1)"
+    if [ -n "${ANDROID_SLOT}" ]; then
+        [ -z "${RECORDED}" ] || [ "${RECORDED}" = "${ANDROID_SLOT}" ] \
+            || die "--android-slot ${ANDROID_SLOT} contradicts the record for this phone (${RECORD}: ${RECORDED}); delete that file if it is wrong"
+    elif [ -n "${RECORDED}" ]; then
+        ANDROID_SLOT="${RECORDED}"
+    elif [ -n "${UPDATE}" ]; then
+        ANDROID_SLOT="$(other "${CURRENT}")"
+    else
+        SUCCESSFUL="$(getvar "slot-successful:${CURRENT}")"
+        [ "${SUCCESSFUL}" = "yes" ] || die "slot ${CURRENT} is current but has not booted successfully (slot-successful=${SUCCESSFUL:-unknown}), so it is not Android's running slot: probably Antumbra's from an earlier attempt. Run again with --android-slot <the current-slot you noted before the first install>, or --update"
+        ANDROID_SLOT="${CURRENT}"
     fi
+    SLOT="$(other "${ANDROID_SLOT}")"
+    mkdir -p "$(dirname "${RECORD}")"
+    printf '%s\n' "${ANDROID_SLOT}" > "${RECORD}"
     for p in boot_${SLOT}:${BOOT_PARTITION_SIZE} dtbo_${SLOT}:${DTBO_PARTITION_SIZE} vbmeta_${SLOT}:${VBMETA_PARTITION_SIZE} userdata:${USERDATA_PARTITION_SIZE}; do
         name="${p%%:*}"; want="${p##*:}"
         have="$(hex_or_dec "$(getvar "partition-size:${name}")")"
         [ "${have}" -eq "${want}" ] || die "partition ${name} is ${have} bytes on this device, expected ${want} (unsupported variant?)"
     done
-    if [ -n "${UPDATE}" ]; then
-        log "device checks passed (product ${PRODUCT}, unlocked); updating Antumbra in slot ${SLOT} (current slot ${CURRENT})"
-    else
-        log "device checks passed (product ${PRODUCT}, unlocked); Android runs from slot ${CURRENT}, Antumbra goes into slot ${SLOT}"
+    for s in a b; do
+        log "slot ${s}: successful=$(getvar "slot-successful:${s}") unbootable=$(getvar "slot-unbootable:${s}") retry-count=$(getvar "slot-retry-count:${s}")"
+    done
+    [ "$(getvar "slot-unbootable:${SLOT}")" != "yes" ] \
+        || warn "slot ${SLOT} is marked unbootable: an interrupted OxygenOS update may have left it half written; its bootloader and firmware are what Antumbra will run on"
+    log "device checks passed (product ${PRODUCT}, unlocked); Android's slot: ${ANDROID_SLOT} (remembered in ${RECORD}); Antumbra goes into slot ${SLOT}; current slot: ${CURRENT}"
+    if [ -z "${YES}" ]; then
+        read -r -p "Type ${SLOT} to write Antumbra into slot ${SLOT}: " answer
+        [ "${answer}" = "${SLOT}" ] || die "aborted"
     fi
 else
-    SLOT="${WANT_SLOT:-${SLOT}}"
-    log "dry run: assuming Android runs from the other slot, Antumbra goes into slot ${SLOT}"
+    SLOT="$( [ "${ANDROID_SLOT:-a}" = a ] && echo b || echo a )"
+    log "dry run: Android's slot ${ANDROID_SLOT:-a} assumed, Antumbra goes into slot ${SLOT}"
 fi
 
 # --- fastbootd works, and no OxygenOS update is pending -----------------------------

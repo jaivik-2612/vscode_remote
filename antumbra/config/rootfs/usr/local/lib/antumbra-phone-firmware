@@ -24,11 +24,13 @@ partitions. If a partition was missing, --late (after udev) tries again and
 starts the audio DSP if it stayed offline. docs/architecture.md, "Device
 firmware from the phone".
 
-usage: antumbra-phone-firmware [--late | --status] [--any-device] [--wait SECONDS]
+usage: antumbra-phone-firmware [--late | --status] [--any-device] [--wait SECONDS] [--slot a|b]
+       (--any-device and --slot are for tests: the VM, or a slot other than the booted one)
 """
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -284,22 +286,35 @@ def is_hotdog():
         return False
 
 
-def slot_order():
-    """The booted slot first (androidboot.slot_suffix from the bootloader;
-    without it B, where flash.sh puts Antumbra when Android runs from A),
-    then the other: a slot's bootloader, TrustZone and modem firmware come
-    from the same update."""
-    current = "_b"
+def booted_slot():
+    """The slot the bootloader started: androidboot.slot_suffix (or
+    androidboot.slot) on the command line, else the active slot qbootctl
+    reads from the boot partitions' GPT attributes, else None."""
     try:
         with open("/proc/cmdline") as f:
             for word in f.read().split():
                 key, _, value = word.partition("=")
                 if key == "androidboot.slot_suffix" and value in ("_a", "_b"):
-                    current = value
-                elif key == "androidboot.slot" and value in ("a", "b"):
-                    current = "_" + value
+                    return value
+                if key == "androidboot.slot" and value in ("a", "b"):
+                    return "_" + value
     except OSError:
         pass
+    try:
+        out = subprocess.run(["qbootctl", "-a"], capture_output=True, text=True, timeout=10).stdout
+        m = re.search(r"Active slot:\s*_?([ab])\b", out)
+        if m:
+            return "_" + m.group(1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def slot_order(booted=None):
+    """The booted slot first, then the other: a slot's bootloader, TrustZone
+    and modem firmware come from the same update. Unknown: B first, where
+    flash.sh puts Antumbra when Android runs from A."""
+    current = booted or "_b"
     return [current, "_a" if current == "_b" else "_b"]
 
 
@@ -352,8 +367,8 @@ def mount_fat(dev, where, required):
 
 def collect_fat(kind, parts, slots, required, link):
     where = os.path.join(MNT, kind)
-    if mounted(where):
-        return None
+    if mounted(where):  # a second run in the same boot starts afresh
+        run("umount", where)
     for s in slots:
         dev = parts.get(kind + s)
         if not dev:
@@ -366,7 +381,7 @@ def collect_fat(kind, parts, slots, required, link):
         if image:
             got = link(image, LIB)
             log(f"{kind}{s}: {', '.join(sorted(got))}")
-            return {"slot": s[1:], "files": sorted(got)}
+            return {"slot": s[1:], "partition": kind + s, "files": sorted(got)}
         log(f"{kind}{s}: no firmware in image/")
     return None
 
@@ -404,8 +419,8 @@ def collect_vendor(parts, slots):
             tried.add((name, table))
             got = _copy_vendor(name, table, where)
             if got:
-                log(f"{name}: {', '.join(sorted(got))}")
-                return {"slot": s[1:], "files": sorted(got)}
+                log(f"{name} (metadata slot {slot_number}): {', '.join(sorted(got))}")
+                return {"slot": s[1:], "partition": name, "metadata_slot": slot_number, "files": sorted(got)}
     return None
 
 
@@ -420,8 +435,11 @@ def ensure_erofs():
 
 def _copy_vendor(name, table, where):
     dm = "/dev/mapper/" + DM_NAME
-    run("dmsetup", "create", DM_NAME, "--readonly", "--noudevsync", input=table + "\n")
+    if mounted(where):
+        subprocess.run(["umount", where], capture_output=True)
+    remove_mapping()  # a stale one from an earlier run
     try:
+        run("dmsetup", "create", DM_NAME, "--readonly", "--noudevsync", input=table + "\n")
         run("dmsetup", "mknodes", DM_NAME)
         head = _read_dev(dm)(1024, 64)
         if head[:4] == struct.pack("<I", 0xE0F5E1E2):
@@ -507,22 +525,39 @@ def main(argv):
     os.makedirs(os.path.join(LIB, "qcom"), mode=0o700, exist_ok=True)
     os.makedirs(MNT, mode=0o700, exist_ok=True)
     status = load_status() if late else {}
-    slots = slot_order()
+    booted = booted_slot()
+    if "--slot" in argv:
+        value = argv[argv.index("--slot") + 1]
+        if value not in ("a", "b"):
+            log("--slot: a or b")
+            return 2
+        booted = "_" + value
+    slots = slot_order(booted)
+    status["booted_slot"] = booted[1:] if booted else None
     status["slots"] = [s[1:] for s in slots]
     wanted = [k for k in ("modem", "bluetooth") if not status.get(k)]
     if not status.get("vendor"):
         wanted.append("super")
-    parts = wait_partitions(wanted, wait)
-    if not status.get("modem"):
-        status["modem"] = collect_fat("modem", parts, slots, {"modem.mdt", "modem.mbn", "adsp.mdt", "adsp.mbn"}, link_modem)
-    if not status.get("bluetooth"):
-        status["bluetooth"] = collect_fat("bluetooth", parts, slots, {"crbtfw21.tlv", "crnv21.bin"}, link_bluetooth)
-    if not status.get("vendor"):
-        status["vendor"] = collect_vendor(parts, slots)
-    # Searched first, file by file; Debian's /lib/firmware stays behind it.
-    with open(FW_PATH_PARAM, "w") as f:
-        f.write(LIB)
-    save_status(status)
+    try:
+        parts = wait_partitions(wanted, wait)
+        collectors = (
+            ("modem", lambda: collect_fat("modem", parts, slots, {"modem.mdt", "modem.mbn", "adsp.mdt", "adsp.mbn"}, link_modem)),
+            ("bluetooth", lambda: collect_fat("bluetooth", parts, slots, {"crbtfw21.tlv", "crnv21.bin"}, link_bluetooth)),
+            ("vendor", lambda: collect_vendor(parts, slots)),
+        )
+        for kind, collect in collectors:
+            if status.get(kind):
+                continue
+            try:
+                status[kind] = collect()
+            except Exception as e:  # noqa: BLE001 - one part failing must not stop the others
+                log(f"{kind}: {e}")
+                status[kind] = None
+    finally:
+        # Searched first, file by file; Debian's /lib/firmware stays behind it.
+        with open(FW_PATH_PARAM, "w") as f:
+            f.write(LIB)
+        save_status(status)
     missing = [k for k in ("modem", "bluetooth", "vendor") if not status.get(k)]
     if missing:
         log("not found: " + ", ".join(missing) + " (Wi-Fi needs modem; graphics acceleration needs vendor)")

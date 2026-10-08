@@ -2664,10 +2664,29 @@ def phone_firmware(vm, disk, timeout_scale=1.0, stop=True):
                    "python3 -c 'import json;print(json.load(open(\"/run/antumbra/phone-firmware/status.json\"))[\"complete\"])'; "
                    "grep -c ' /run/antumbra/phone-firmware/mnt/modem ' /proc/mounts", timeout=T(120))
         rep.check("a second (late) run changes nothing", o.split() == ["True", "1"], o.replace("\n", " "))
+        # Booted from slot A this time: the empty modem_a and the decoy
+        # vendor_a come first and must be passed over, for slot B's files.
+        rc, o = sh("umount /run/antumbra/phone-firmware/mnt/modem /run/antumbra/phone-firmware/mnt/bluetooth; "
+                   f"rm -rf /run/antumbra/phone-firmware; python3 {loader} --any-device --wait 5 --slot a 2>&1", timeout=T(300))
+        rep.check("slot A first: the empty modem_a is passed over", "modem_a: no firmware in image/" in o, o.replace("\n", " | ")[-400:])
+        rep.check("slot A first: the decoy vendor_a is passed over", "vendor_a: neither EROFS nor ext4" in o, "")
+        rc, o = sh("python3 /run/fwtest/phone_firmware_check.py /run/fwtest/expected.json", timeout=T(600))
+        failed = [l for l in o.splitlines() if l.startswith("FAIL")]
+        rep.check("slot A first: every file still right, from slot B", rc == 0 and "PASS status complete" in o, "; ".join(failed)[:300])
     except Exception as e:  # noqa: BLE001
         rep.check("phone firmware", False, str(e)[:300])
     if stop:
         vm.stop()
+        # The disk is attached writable through an overlay: any block the
+        # guest wrote to the phone's partitions is in it.
+        try:
+            mp = json.loads(subprocess.run(["qemu-img", "map", "--output=json", os.path.join(vm.run, "extra.qcow2")],
+                                           capture_output=True, text=True, check=True).stdout)
+            written = [e for e in mp if e.get("depth") == 0 and (e.get("data") or e.get("zero"))]
+            rep.check("the guest wrote nothing to the phone's partitions", not written,
+                      "; ".join(f"{e['start']}+{e['length']}" for e in written[:10]) or "no block written to the overlay")
+        except Exception as e:  # noqa: BLE001
+            rep.check("the guest wrote nothing to the phone's partitions", False, str(e)[:300])
     return rep
 
 

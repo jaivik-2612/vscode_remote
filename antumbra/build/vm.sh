@@ -14,8 +14,9 @@
 #          --smp N        virtual CPUs (default 3)
 #          --append ARGS  extra kernel command-line arguments
 #          --disk-serial S  the disk's serial number (default: none), as the phone's UFS has one
-#          --extra-disk F   attach raw image F read-only as a second disk with 4096-byte
-#                         sectors (the phone-firmware test: tests/vm/make-phone-firmware-disk.py)
+#          --extra-disk F   attach raw image F as a second disk with 4096-byte sectors, through
+#                         a fresh copy-on-write overlay (run dir, extra.qcow2): F never changes,
+#                         and the overlay shows what the guest wrote (tests/vm/make-phone-firmware-disk.py)
 #
 # Inputs : build/out/qemu-virt/{kernel/Image,rootfs/initrd.img,rootfs/filesystem.squashfs.roothash,vm-disk.img}
 #          device/qemu-virt/cmdline.txt
@@ -144,8 +145,11 @@ ARGS=(
     -no-reboot
 )
 if [ -n "${EXTRA_DISK}" ]; then
-    # Read-only: what the guest does to it can never change the file.
-    ARGS+=(-drive "if=none,id=extra0,file=${EXTRA_DISK},format=raw,readonly=on"
+    # Writable, like the phone's UFS, through an overlay: the file never
+    # changes, and every block the guest writes lands in the overlay.
+    rm -f "${RUN}/extra.qcow2"
+    qemu-img create -q -f qcow2 -b "${EXTRA_DISK}" -F raw "${RUN}/extra.qcow2"
+    ARGS+=(-drive "if=none,id=extra0,file=${RUN}/extra.qcow2,format=qcow2,cache=writeback"
            -device "virtio-blk-pci,drive=extra0,logical_block_size=4096,physical_block_size=4096")
 fi
 if [ -n "${NET}" ]; then

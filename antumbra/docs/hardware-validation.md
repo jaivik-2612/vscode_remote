@@ -30,15 +30,18 @@ libcamera with an image built with `ANTUMBRA_LIBCAMERA_LOCAL=1`.
    falls. The port saw the bootloader stay on the failed slot or fall back
    to an unusable one rather than to Android: record what it does, and
    restore with `fastboot set_active <slot>`.
-6. The phone's own firmware: `antumbra-phone-firmware --status` (or
-   `/run/antumbra/phone-firmware/status.json`) reports `modem`,
-   `bluetooth` and `vendor` found in the booted slot and `complete`;
-   `cat /sys/module/firmware_class/parameters/path` names
-   `/run/antumbra/phone-firmware/lib`; `dmesg` shows the `adsp` and
-   `modem` remoteprocs `is now up`, ath10k reading `board-2.bin`, and no
-   "Unable to load" for `a630_sqe.fw`, `a640_gmu.bin` or the zap shader;
-   `glxinfo -B` or `vulkaninfo --summary` names Freedreno/Turnip, not
-   llvmpipe.
+The phone's own firmware (with the boot chain, before the numbered
+items below): `/usr/local/lib/antumbra-phone-firmware --status` (or
+`/run/antumbra/phone-firmware/status.json`) reports `complete`, `modem`
+and `bluetooth` found in the booted slot (`booted_slot`), and `vendor`
+found at all, usually as Android's slot's `vendor` (Virtual A/B keeps
+only that one in `super`; `partition` and `metadata_slot` say which);
+`cat /sys/module/firmware_class/parameters/path` names
+`/run/antumbra/phone-firmware/lib`; `dmesg` shows the `adsp` and `modem`
+remoteprocs `is now up`, ath10k reading `board-2.bin`, and no "Unable to
+load" for `a630_sqe.fw`, `a640_gmu.bin` or the zap shader; `glxinfo -B`
+or `vulkaninfo --summary` names Freedreno/Turnip, not llvmpipe. Note
+whether `androidboot.slot_suffix` is on `/proc/cmdline`.
 
 ## Display, input, session
 

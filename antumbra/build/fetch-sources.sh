@@ -106,7 +106,7 @@ fetch_avbtool() {
 }
 
 # ---------------------------------------------------------------------------
-# Hardware-validated slot-B companions from the port's release
+# Hardware-validated DTBO and vbmeta companions from the port's release
 # ---------------------------------------------------------------------------
 fetch_device_assets() {
     local dest="${CACHE}/device-assets"

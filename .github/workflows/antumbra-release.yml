@@ -90,7 +90,13 @@ jobs:
         run: |
           # One timestamp for every job: the commit's (lib/common.sh does the same).
           echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "${GITHUB_ENV}"
-          echo "version=$(tr -d '[:space:]' < VERSION)" >> "${GITHUB_OUTPUT}"
+          version="$(tr -d '[:space:]' < VERSION)"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          # A pushed tag names the version the files carry (VERSION feeds the
+          # file names, the manifest and the images' UUIDs).
+          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_NAME}" != "antumbra-v${version}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match antumbra/VERSION (${version}): push antumbra-v${version}"; exit 1
+          fi
           uname -a; nproc; free -h; df -h /
 
       - name: Install tools
@@ -294,8 +300,8 @@ jobs:
         run: |
           rel="${ANTUMBRA_OUT}/release/antumbra-$(tr -d '[:space:]' < VERSION)-oneplus-hotdog"
           sudo -E build/verify-release.sh "${rel}"
-          grep -qF 'The images contain no proprietary device firmware.' "${rel}/MANIFEST.md" \
-            || { echo "::error::MANIFEST.md does not say the images are firmware-free"; exit 1; }
+          grep -qF 'The images contain no device firmware that is not licensed for redistribution' "${rel}/MANIFEST.md" \
+            || { echo "::error::MANIFEST.md does not say the images hold no non-redistributable firmware"; exit 1; }
           if [ -n "${ANTUMBRA_ANDROID}" ]; then grep -qF 'This build includes Android apps' "${rel}/MANIFEST.md"; fi
           limit=$((2 * 1024 * 1024 * 1024))
           for f in "${rel}"/*; do
@@ -366,9 +372,11 @@ jobs:
             echo "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from ${GITHUB_SHA}."
             echo
             echo "- ${apps}"
-            echo "- The images contain no proprietary device firmware (docs/legal.md, \"Firmware\")." \
-              "On the phone, Antumbra reads it at every boot from the phone's own partitions, read-only."
-            echo "- Install: read INSTALL.md first; it erases the phone's userdata partition and replaces slot B."
+            echo "- The images contain no device firmware that is not licensed for redistribution (only Debian's firmware packages;" \
+              "docs/legal.md, \"Firmware\"). On the phone, Antumbra reads the rest at every boot from the phone's own partitions, read-only."
+            echo "- Install: read INSTALL.md first. It erases the phone's userdata partition and replaces the boot, dtbo and vbmeta" \
+              "images of the slot Android does not run from; Android's slot is never written. The install guide for Windows, macOS" \
+              "and Linux is antumbra/docs/antumbra-install-guide.pdf in the repository at this tag."
             echo "- Verify the downloads: \`sha256sum -c SHA256SUMS\`. MANIFEST.md lists the pinned inputs and every Debian package with its version."
             if ls dist/*-source.tar.xz >/dev/null 2>&1; then
               echo "- The kernel's corresponding source (patched tree and .config.antumbra) is attached."
@@ -384,6 +392,12 @@ jobs:
       - name: Create or update the draft release
         run: |
           mapfile -t files < <(find dist -maxdepth 1 -type f | sort)
+          # GitHub ignores --target for a tag that exists: a dispatched run must
+          # not attach this commit's files to a tag on another commit.
+          if [ "${TAG_PUSHED}" != true ] && tagged="$(gh api "repos/${GH_REPO}/commits/${TAG}" --jq .sha 2>/dev/null)" \
+             && [ -n "${tagged}" ] && [ "${tagged}" != "${GITHUB_SHA}" ]; then
+            echo "::error::tag ${TAG} exists at ${tagged}, not at ${GITHUB_SHA}: choose another tag"; exit 1
+          fi
           if state="$(gh release view "${TAG}" --json isDraft --jq .isDraft 2>/dev/null)"; then
             [ "${state}" = true ] || { echo "::error::release ${TAG} is already published; choose another tag"; exit 1; }
             echo "updating draft ${TAG}"

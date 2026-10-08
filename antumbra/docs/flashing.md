@@ -20,12 +20,28 @@ repository.
   ran LineageOS, and `fastboot getvar product` says `msmnile` on the
   OnePlus 7 Pro and 7T as well. `flash.sh` also checks every partition
   size.
-- **OxygenOS 12, build F.22**: the port's images were validated on top of
-  its firmware (the vbmeta asset is F.22's). Update the phone to F.22
-  (Settings, System, System updates, or a local install of the full
-  package), let it finish, and restart Android once more: OxygenOS 12
-  updates with Virtual A/B, and fastbootd refuses `userdata` while an
-  update is still being merged.
+- **OxygenOS 12, build F.22, in both slots**: Antumbra runs on the
+  bootloader, TrustZone and modem firmware of its own slot, and the port
+  validated F.22's (the vbmeta asset is F.22's). An A/B update writes only
+  the slot Android is not running from, so after updating to F.22 the
+  other slot, Antumbra's, still holds the previous build. Therefore:
+  update to F.22 (Settings, System, System updates), restart, then install
+  the F.22 full package once more with a local install (the full package
+  as the Oxygen Updater app downloads it; on OxygenOS 12 the *Local
+  install* entry is in the menu of Settings, About device, Up to date,
+  once Developer options are on). Check with `adb shell getprop
+  ro.boot.slot_suffix` before and after: the second install moves
+  Android to the other slot and leaves F.22 in both. Whether OxygenOS
+  accepts installing the build it already runs is unverified; if it
+  refuses, Antumbra runs on the previous build's chain, which nobody has
+  tested. After the last install, restart Android once more and wait:
+  OxygenOS 12 updates with Virtual A/B, and fastbootd refuses `userdata`
+  while an update is still being merged.
+- **Android's slot, written down**: `fastboot getvar current-slot` before
+  the first install names Android's slot. Antumbra's slot `X` is always
+  the other letter, on the first install, on a retry after a failed boot
+  and on every update. After the first install `current-slot` names
+  Antumbra's slot, so it can no longer tell you which one is Android's.
 - **Bootloader unlocked**: Developer options (tap *Build number* seven
   times), turn on *OEM unlocking* and *USB debugging*, then from the
   bootloader `fastboot oem unlock` and confirm on the phone with the
@@ -83,17 +99,26 @@ build/verify-release.sh antumbra-<v>-oneplus-hotdog [minisign-public-key]
 
 ## The guided script (Linux)
 
+`flash.sh` and `verify-release.sh` are in the repository, not in the
+release: clone it and check out the release's tag (`antumbra-v<v>`).
+
 ```sh
 build/flash.sh --release antumbra-<v>-oneplus-hotdog
 ```
 
 It checks the device identity, the unlocked state and every partition
-size, and reads which slot Android runs from; Antumbra goes into the
-other one. Before writing anything it starts fastbootd once to make sure
-it works and that no OxygenOS update is pending. It then flashes the
-slot's vbmeta, dtbo and boot images from the bootloader, writes
-`userdata` from fastbootd in bounded 128 MiB transfers, makes the slot
-active and reboots. `--dry-run` prints the commands instead.
+size, and works out Android's slot: on the first install the current one
+(refused unless it has booted successfully, as Android's running slot
+has), afterwards the one it remembered for this phone (by serial number,
+in `~/.local/share/antumbra/`). `--android-slot a|b` gives it explicitly,
+and `--update` says the phone runs Antumbra now. Antumbra goes into the
+other slot, never Android's; the script shows both slots' boot state and
+asks you to type the target slot's letter. Before writing anything it
+starts fastbootd once to make sure it works and that no OxygenOS update
+is pending. It then flashes the slot's vbmeta, dtbo and boot images from
+the bootloader, writes `userdata` from fastbootd in bounded 128 MiB
+transfers, makes the slot active and reboots. `--dry-run` prints the
+commands instead.
 
 There is no backup step: this phone's bootloader and stock fastbootd do
 not support `fastboot fetch`, and none is needed, because Android's own
@@ -102,14 +127,14 @@ it).
 
 ## By hand
 
-First find out which slot Android runs from; Antumbra goes into the
-other one. Below, `X` is that other slot: `b` if `current-slot` says
-`a`, and `a` if it says `b`.
+Below, `X` is Antumbra's slot: the letter that is not Android's (see
+"Before you start"). On the first install `current-slot` names Android's
+slot: `a` means `X=b`, `b` means `X=a`.
 
 ```sh
 fastboot devices
 fastboot getvar unlocked         # yes
-fastboot getvar current-slot     # a  -> use X=b;   b -> use X=a
+fastboot getvar current-slot     # first install: Android's slot; X is the other
 fastboot reboot fastboot
 fastboot getvar is-userspace     # yes: fastbootd works
 fastboot getvar snapshot-update-status   # none (if it says snapshotted or merging: stop, see above)
@@ -143,10 +168,12 @@ into Antumbra's slot. They erase Persistent Storage: export it first
 medium), flash, recreate. In-place updates that keep the Persistent
 Storage partition are on the roadmap.
 
-Once the phone starts Antumbra, `fastboot getvar current-slot` names
-*Antumbra's* slot, not Android's: an update goes into that current slot
-(`flash.sh --update`; by hand, `X` is the current slot). Installing "into
-the other slot" again would overwrite Android's.
+An update goes into the same slot `X`, the one that is not Android's.
+Once the phone has started Antumbra (or only tried to), `fastboot getvar
+current-slot` names Antumbra's slot, not Android's: do not pick "the
+other one" again, which would overwrite Android's. `flash.sh` remembers
+Android's slot per phone, and refuses a current slot that never booted
+successfully when it has no record (`--android-slot`, `--update`).
 
 ## Going back to Android
 

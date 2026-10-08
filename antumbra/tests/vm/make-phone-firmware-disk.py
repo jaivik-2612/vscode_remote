@@ -10,10 +10,12 @@ phone has them:
   modem_a        an empty FAT (a slot without firmware: must be passed over)
   modem_b        the OxygenOS modem image (FAT)
   bluetooth_b    the OxygenOS bluetooth image (FAT)
-  super          Android logical-partition metadata (liblp format, both
-                 metadata slots, primary and backup) with vendor_b, the
-                 OxygenOS vendor image (EROFS), in two extents stored out of
-                 order, and vendor_a, a decoy that is no file system
+  super          Android logical-partition metadata (liblp format, primary
+                 and backup) shaped like a Virtual A/B phone whose Android
+                 runs from slot B: metadata slot 0 lists vendor_b, the
+                 OxygenOS vendor image (EROFS) in two extents stored out of
+                 order, and vendor_a, a decoy that is no file system;
+                 metadata slot 1 lists no vendor at all
 
 The OxygenOS images are proprietary and never committed: extract them from
 OnePlus's full OTA for the HD1913 (F.22, the build the port validated) with
@@ -174,9 +176,11 @@ def main():
 
         # super: metadata at the start, vendor_b's second half first, then its first half.
         super_bytes = offset["super"][1]
-        meta = lp_metadata([("vendor_a", 0, 1), ("vendor_b", 1, 2)],
-                           [(8 * 256, decoy_at), (half, first_at), (rest, second_at)], super_bytes)
-        blob = bytearray(4096) + lp_geometry(65536, 2) * 2 + meta.ljust(65536, b"\0") * 4
+        meta0 = lp_metadata([("vendor_a", 0, 1), ("vendor_b", 1, 2)],
+                            [(8 * 256, decoy_at), (half, first_at), (rest, second_at)], super_bytes)
+        meta1 = lp_metadata([("system_b", 0, 1)], [(8 * 256, decoy_at)], super_bytes)
+        slots = meta0.ljust(65536, b"\0") + meta1.ljust(65536, b"\0")
+        blob = bytearray(4096) + lp_geometry(65536, 2) * 2 + slots * 2
         put("super", data=bytes(blob))
         with open(a.vendor, "rb") as v:
             first = v.read(half * SECTOR)
@@ -206,6 +210,7 @@ def main():
             },
             "partitions": dict.fromkeys(("modem_b", "bluetooth_b", "super")),
             "slots": {"modem": "b", "bluetooth": "b", "vendor": "b"},
+            "vendor": {"partition": "vendor_b", "metadata_slot": 0},
         }
         for n in expected["partitions"]:
             start, size = offset[n]

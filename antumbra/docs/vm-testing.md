@@ -477,7 +477,8 @@ driver is checked by review and on the phone
 phone") reads the phone's `modem`, `bluetooth` and `vendor` partitions.
 The VM tests it against the real partitions of OxygenOS F.22, the build
 the port validated, on a second disk shaped like the phone's UFS: a GPT
-with 4096-byte sectors, attached read-only.
+with 4096-byte sectors, attached writable through a copy-on-write
+overlay, so that any block the guest writes shows up in the overlay.
 
 The OxygenOS images are proprietary and never committed. Extract
 `modem.img`, `bluetooth.img` and `vendor.img` from OnePlus's full OTA
@@ -491,18 +492,24 @@ tests/vm/make-phone-firmware-disk.py --modem modem.img --bluetooth bluetooth.img
 tests/vm/antumbra_vm.py phone-firmware phone-fw-disk.img --timeout-scale 2
 ```
 
-The disk holds `modem_a` (an empty FAT, to be passed over), `modem_b`,
-`bluetooth_b`, and `super` with liblp metadata in which `vendor_b` lies
-in two extents stored out of order next to a decoy `vendor_a`. A
-debug image runs the loader as on the phone (`--any-device`; the units
-themselves are skipped in a VM), and `tests/vm/phone_firmware_check.py`
-then reads every file the kernel will ask for the way the kernel's MDT
-loader assembles it, compares it with the community mirror's SHA-256
-(F.22 reproduces all of them; the zap shader with vendor's own), and
-checks that the two FAT partitions stay mounted read-only, that the
-vendor mapping is gone, that `firmware_class.path` names the tree, and
-that the three partitions are byte for byte unchanged. An image built
-before the loader existed takes it, and `erofs.ko`, from the test disk.
+The disk holds `modem_a` (an empty FAT), `modem_b`, `bluetooth_b`, and
+`super` shaped like a Virtual A/B phone whose Android runs from slot B:
+metadata slot 0 lists `vendor_b` in two extents stored out of order next
+to a decoy `vendor_a`, and metadata slot 1 lists no vendor at all. In a
+debug image the loader runs from the shell after boot (`--any-device`;
+the units are skipped in a VM, so their early ordering is not what is
+tested here). `tests/vm/phone_firmware_check.py` then reads every file
+the kernel will ask for the way the kernel's MDT loader assembles it,
+compares it with the community mirror's SHA-256 (F.22 reproduces all of
+them; the zap shader with vendor's own), and checks that the two FAT
+partitions stay mounted read-only and their block devices are set
+read-only, that the vendor mapping is gone, that `firmware_class.path`
+names the tree, and that the partitions are byte for byte unchanged. A
+second pass in the same boot takes slot A first (`--slot a`): the empty
+`modem_a` and the decoy `vendor_a` must be passed over for slot B's
+files. After the VM stops, the overlay must hold no written block. An
+image built before the loader existed takes it, and `erofs.ko`, from the
+test disk (so its own `modprobe erofs` path is then not exercised).
 
 ## What the first VM runs found
 
