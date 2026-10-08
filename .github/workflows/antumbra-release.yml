@@ -23,7 +23,7 @@ on:
         type: boolean
         default: true
       tag:
-        description: 'Release tag (empty: v<VERSION>, with -no-android appended when Android is off)'
+        description: 'Release tag (empty: antumbra-v<VERSION>, with -no-android appended when Android is off)'
         type: string
         default: ''
       title:
@@ -38,13 +38,20 @@ on:
         description: 'Attach the kernel source the boot image was built from (GPL-2.0)'
         type: boolean
         default: true
-  # Pushing a tag antumbra-v* builds with the defaults above (Android apps
-  # in, kernel source attached, pre-release) and drafts a release for that
-  # tag. workflow_dispatch runs only from the default branch; a tag works
-  # from any branch.
+  # Pushing a tag antumbra-v<VERSION>, or a commit to any branch whose
+  # message contains "[build release]" and that changes VERSION or this
+  # file, builds with the defaults above (Android apps in, kernel source
+  # attached, pre-release) and drafts a release for the tag
+  # antumbra-v<VERSION> (created when the draft is published).
+  # workflow_dispatch runs only once the file is on the default branch.
   push:
     tags:
       - 'antumbra-v*'
+    branches:
+      - '**'
+    paths:
+      - 'antumbra/VERSION'
+      - '.github/workflows/antumbra-release.yml'
 
 permissions:
   contents: read
@@ -71,6 +78,9 @@ env:
 jobs:
   kernel:
     name: Kernel (native arm64)
+    if: >-
+      github.event_name != 'push' || github.ref_type == 'tag'
+      || contains(github.event.head_commit.message, '[build release]')
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     outputs:
@@ -94,7 +104,7 @@ jobs:
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           # A pushed tag names the version the files carry (VERSION feeds the
           # file names, the manifest and the images' UUIDs).
-          if [ "${GITHUB_EVENT_NAME}" = push ] && [ "${GITHUB_REF_NAME}" != "antumbra-v${version}" ]; then
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "antumbra-v${version}" ]; then
             echo "::error::tag ${GITHUB_REF_NAME} does not match antumbra/VERSION (${version}): push antumbra-v${version}"; exit 1
           fi
           uname -a; nproc; free -h; df -h /
@@ -338,11 +348,11 @@ jobs:
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ needs.kernel.outputs.version }}
       KERNEL_RELEASE: ${{ needs.kernel.outputs.kernel_release }}
-      INPUT_TAG: ${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+      INPUT_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
       INPUT_TITLE: ${{ inputs.title }}
       ANDROID: ${{ github.event_name == 'push' || inputs.android }}
       PRERELEASE: ${{ github.event_name == 'push' || inputs.prerelease }}
-      TAG_PUSHED: ${{ github.event_name == 'push' }}
+      TAG_PUSHED: ${{ github.ref_type == 'tag' }}
     steps:
       - uses: actions/download-artifact@v7
         with:
@@ -362,7 +372,7 @@ jobs:
           else
             suffix='-no-android'; apps='Android apps: not included.'
           fi
-          tag="${INPUT_TAG:-v${VERSION}${suffix}}"
+          tag="${INPUT_TAG:-antumbra-v${VERSION}${suffix}}"
           [[ "${tag}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "::error::invalid tag '${tag}'"; exit 1; }
           title="${INPUT_TITLE:-Antumbra ${VERSION} for the OnePlus 7T Pro}"
           { echo "TAG=${tag}"; echo "TITLE=${title}"; } >> "${GITHUB_ENV}"

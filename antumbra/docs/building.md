@@ -194,9 +194,13 @@ filesystem on a native arm64 runner.
 
 The release workflow (`.github/workflows/antumbra-release.yml`) starts
 when a tag `antumbra-v<VERSION>` is pushed, from any branch (`git tag
-antumbra-v0.1.0-alpha.2 && git push origin antumbra-v0.1.0-alpha.2`); the
-tag must match `VERSION`. A tag push takes the defaults: Android apps in,
-kernel source attached, pre-release, the pushed tag as the release's.
+antumbra-v0.1.0-alpha.2 && git push origin antumbra-v0.1.0-alpha.2`; the
+tag must match `VERSION`), or when a commit whose message contains
+`[build release]` and that changes `VERSION` or the workflow is pushed to
+any branch (for clients that may push only a branch). Both take the
+defaults: Android apps in, kernel source attached, pre-release, and the
+release tag `antumbra-v<VERSION>`, which GitHub creates when the draft is
+published.
 Manual dispatch with inputs (`gh workflow run antumbra-release.yml --ref
 BRANCH -f android=false`) works once the file is on the default branch or
 the workflow has run at least once. It builds the complete phone release on GitHub's
