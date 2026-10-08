@@ -25,7 +25,8 @@ repository.
   validated F.22's (the vbmeta asset is F.22's). An A/B update writes only
   the slot Android is not running from, so after updating to F.22 the
   other slot, Antumbra's, still holds the previous build. Therefore:
-  update to F.22 (Settings, System, System updates), restart, then install
+  update to F.22 (OxygenOS 12: Settings, About device, the version card;
+  OxygenOS 10 and 11: Settings, System, System updates), restart, then install
   the F.22 full package once more with a local install (the full package
   as the Oxygen Updater app downloads it; on OxygenOS 12 the *Local
   install* entry is in the menu of Settings, About device, Up to date,
@@ -103,17 +104,20 @@ build/verify-release.sh antumbra-<v>-oneplus-hotdog [minisign-public-key]
 release: clone it and check out the release's tag (`antumbra-v<v>`).
 
 ```sh
-build/flash.sh --release antumbra-<v>-oneplus-hotdog
+build/flash.sh --release antumbra-<v>-oneplus-hotdog --android-slot <Android's slot>
 ```
 
 It checks the device identity, the unlocked state and every partition
-size, and works out Android's slot: on the first install the current one
-(refused unless it has booted successfully, as Android's running slot
-has), afterwards the one it remembered for this phone (by serial number,
-in `~/.local/share/antumbra/`). `--android-slot a|b` gives it explicitly,
-and `--update` says the phone runs Antumbra now. Antumbra goes into the
-other slot, never Android's; the script shows both slots' boot state and
-asks you to type the target slot's letter. Before writing anything it
+size, and needs to know Android's slot: `--android-slot` with the letter
+you noted, or the record it keeps per phone (by serial number, in
+`~/.local/share/antumbra/`) after a run on this computer, or
+`--first-install`, which takes the current slot when the phone runs
+Android (refused unless that slot has booted successfully). Without any
+of them it stops rather than guess: once Antumbra is installed, nothing
+the phone reports tells its slot from Android's. `--update` says the
+phone runs Antumbra now. Antumbra goes into the other slot, never
+Android's; the script shows both slots' boot state and asks you to type
+the target slot's letter. Before writing anything it
 starts fastbootd once to make sure it works and that no OxygenOS update
 is pending. It then flashes the slot's vbmeta, dtbo and boot images from
 the bootloader, writes `userdata` from fastbootd in bounded 128 MiB
@@ -172,8 +176,8 @@ An update goes into the same slot `X`, the one that is not Android's.
 Once the phone has started Antumbra (or only tried to), `fastboot getvar
 current-slot` names Antumbra's slot, not Android's: do not pick "the
 other one" again, which would overwrite Android's. `flash.sh` remembers
-Android's slot per phone, and refuses a current slot that never booted
-successfully when it has no record (`--android-slot`, `--update`).
+Android's slot per phone on the computer that ran it, and without that
+record asks for `--android-slot`.
 
 ## Going back to Android
 

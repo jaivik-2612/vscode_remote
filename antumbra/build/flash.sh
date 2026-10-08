@@ -13,7 +13,7 @@
 # install, and remembered per phone (by serial number) on this computer:
 # after the first install the bootloader's current slot is Antumbra's.
 #
-# usage: flash.sh --release DIR [--android-slot a|b | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
+# usage: flash.sh --release DIR [--android-slot a|b | --first-install | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR
 # shellcheck source=lib/common.sh
@@ -24,14 +24,15 @@ source "${DEVICE_DIR}/bootimg.conf"
 
 usage() {
     cat <<USAGE
-usage: flash.sh --release DIR [--android-slot a|b | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
+usage: flash.sh --release DIR [--android-slot a|b | --first-install | --update] [--backup [--backup-dir DIR]] [--dry-run] [--yes]
 
   --release DIR     directory with the release files (output of release.sh, or a download)
                     Antumbra goes into the slot that is not Android's, which is never written.
-                    First install: Android is running, so its slot is the current one; it is
-                    remembered for this phone in ~/.local/share/antumbra/.
-  --android-slot a|b  Android's slot, the current-slot you noted before the first install
-                    (needed when this computer has no record of it)
+                    Android's slot is remembered per phone in ~/.local/share/antumbra/; without
+                    that record one of the next three options must say which it is.
+  --android-slot a|b  Android's slot: the current-slot you noted before the first install
+  --first-install   the phone runs Android now, so its slot is the current one (refused if
+                    that slot has not booted successfully)
   --update          the phone runs Antumbra now: Android's slot is the other one
   --backup          first save the target slot's boot/dtbo/vbmeta with 'fastboot fetch'; the OnePlus
                     7T Pro's bootloader and stock fastbootd do not support it, so this is
@@ -42,7 +43,7 @@ usage: flash.sh --release DIR [--android-slot a|b | --update] [--backup [--backu
 USAGE
 }
 
-REL='' BACKUP='' DO_BACKUP='' DRY='' YES='' ANDROID_SLOT='' UPDATE=''
+REL='' BACKUP='' DO_BACKUP='' DRY='' YES='' ANDROID_SLOT='' UPDATE='' FIRST=''
 while [ $# -gt 0 ]; do
     case "$1" in
         --release) REL="$2"; shift ;;
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
         --android-slot) ANDROID_SLOT="$2"; shift
                         [[ "${ANDROID_SLOT}" =~ ^[ab]$ ]] || die "--android-slot: a or b" ;;
         --update) UPDATE=1 ;;
+        --first-install) FIRST=1 ;;
         --backup) DO_BACKUP=1 ;;
         --skip-backup) ;;  # the default since fetch proved unsupported on this phone
         --dry-run) DRY=1 ;;
@@ -148,10 +150,11 @@ if [ -z "${DRY}" ]; then
     [[ "${CURRENT}" =~ ^[ab]$ ]] || die "cannot read the current slot (current-slot=${CURRENT})"
     other() { [ "$1" = a ] && echo b || echo a; }
     # Which slot is Android's. After the first install the current slot is
-    # Antumbra's (set_active), whether or not it ever booted, so the current
-    # slot is taken as Android's only on a first install, and only if it has
-    # booted successfully (Android marks its slot so; a failed Antumbra slot
-    # is not).
+    # Antumbra's (set_active, and once it has booted, marked successful like
+    # Android's), so nothing on the phone tells the two apart: the record, or
+    # the user, must. The current slot is taken as Android's only when the
+    # user says this is the first install, and only if it has booted
+    # successfully (a failed Antumbra slot has not).
     SERIAL="$(getvar serialno | tr -cd 'A-Za-z0-9')"
     RECORD="${XDG_DATA_HOME:-${HOME}/.local/share}/antumbra/android-slot-${SERIAL:-unknown}"
     RECORDED=''
@@ -163,10 +166,12 @@ if [ -z "${DRY}" ]; then
         ANDROID_SLOT="${RECORDED}"
     elif [ -n "${UPDATE}" ]; then
         ANDROID_SLOT="$(other "${CURRENT}")"
-    else
+    elif [ -n "${FIRST}" ]; then
         SUCCESSFUL="$(getvar "slot-successful:${CURRENT}")"
-        [ "${SUCCESSFUL}" = "yes" ] || die "slot ${CURRENT} is current but has not booted successfully (slot-successful=${SUCCESSFUL:-unknown}), so it is not Android's running slot: probably Antumbra's from an earlier attempt. Run again with --android-slot <the current-slot you noted before the first install>, or --update"
+        [ "${SUCCESSFUL}" = "yes" ] || die "slot ${CURRENT} is current but has not booted successfully (slot-successful=${SUCCESSFUL:-unknown}), so it is not Android's running slot: probably Antumbra's from an earlier attempt. Run again with --android-slot <the current-slot you noted before the first install>"
         ANDROID_SLOT="${CURRENT}"
+    else
+        die "this computer has no record of Android's slot on this phone: give --android-slot <the current-slot you noted before the first install>, or --first-install if the phone runs Android and Antumbra has never been installed"
     fi
     SLOT="$(other "${ANDROID_SLOT}")"
     mkdir -p "$(dirname "${RECORD}")"

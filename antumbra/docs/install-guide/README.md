@@ -6,7 +6,7 @@ step-by-step install guide for Windows, macOS and Linux users. It follows
 Chromium; `CHROMIUM` may name the browser binary):
 
 ```sh
-node render.js guide.html ../antumbra-install-guide.pdf
+node render.cjs guide.html ../antumbra-install-guide.pdf
 ```
 
 The fonts are subsets of the image's own: Roboto (`fonts-roboto-unhinted`,
