@@ -17,6 +17,9 @@ accent-color='purple'
 font-name='Roboto 11'
 document-font-name='Roboto 11'
 show-battery-percentage=true
+# The status bar shows the time only, as on Android; the date stays in the
+# expanded quick settings.
+clock-show-date=false
 # Material Symbols status icons over Adwaita (/usr/share/icons/Antumbra).
 icon-theme='Antumbra'
 
