@@ -21,6 +21,7 @@ jobs:
   lint:
     name: Lint and unit tests
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install tools
@@ -47,6 +48,7 @@ jobs:
   boot-image:
     name: Pinned sources and boot image contract
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install tools

@@ -1,0 +1,266 @@
+name: Antumbra VM
+
+# The daily VM run: builds the qemu-virt debug image of Antumbra natively on
+# GitHub's arm64 runner and boots it in QEMU through the smoke-test harness
+# (antumbra/docs/vm-testing.md), for every push to the Antumbra branch that
+# can change the image or the harness (not for documents, the tools, the
+# unit tests or the report and perf scripts). The
+# runner has no KVM: QEMU emulates the whole machine (TCG), so every time
+# measured here is many times slower than the phone's. Compare them between
+# runs, never with the phone.
+#
+# The job uploads a small artifact, antumbra-vm-<run number> (14 days):
+#   metrics.json   the run, the phases' wall times, image sizes and package
+#                  count, the checks, boot milestones, Tor's bootstrap
+#                  (antumbra/tests/vm/ci/metrics.py describes every field)
+#   summary.md     the job summary
+#   phases.tsv     antumbra/tests/vm/ci/phase.sh's record
+#   build/         build-flags, packages.txt, the kernel's release and configuration
+#   vm/            the harness's PASS/FAIL output (smoke.log) and report
+#                  (smoke/report.json), the screenshots (smoke/*.png), the
+#                  serial and debug-console logs, the kernel command line,
+#                  the packet capture or its summary (antumbra/tests/vm/ci/run-smoke.sh)
+#
+# Android apps: a push whose head commit's message contains "[vm android]"
+# builds the image with them and runs the harness's --android mode instead
+# of --through-welcome. workflow_dispatch (Android, extra harness options
+# such as --tour) runs only once this file is on the default branch.
+# A newer push to the branch cancels a run that is still going.
+
+on:
+  push:
+    branches:
+      - 'claude/tails-mobile-privacy-os-c71ate'
+    paths:
+      - 'antumbra/**'
+      # Nothing here changes the image or the harness:
+      - '!antumbra/docs/**'
+      - '!antumbra/**/*.md'
+      - '!antumbra/tools/**'
+      - '!antumbra/tests/unit/**'
+      - '!antumbra/tests/vm/report/**'
+      - '!antumbra/tests/vm/perf/**'
+      - '!antumbra/tests/vm/history/**'
+      - '.github/workflows/antumbra-vm.yml'
+  workflow_dispatch:
+    inputs:
+      android:
+        description: 'Build with Android apps and run the --android mode of the smoke test'
+        type: boolean
+        default: false
+      harness_args:
+        description: 'Extra smoke-test options (e.g. --tour, --camera)'
+        type: string
+        default: ''
+      timeout_scale:
+        description: 'Harness timeout scale (empty: 2, or 4 with Android)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: antumbra-vm-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ANTUMBRA_DEVICE: qemu-virt
+  # The debug build: the root shell on the VM's console the harness drives.
+  ANTUMBRA_DEBUG: '1'
+  ANTUMBRA_MINIMAL: ''
+  ANTUMBRA_VERITY: '1'
+  ANTUMBRA_FIRMWARE_DIR: ''
+  ANTUMBRA_LIBCAMERA_LOCAL: ''
+  ANTUMBRA_KERNEL_TOOLCHAIN: llvm
+  ANTUMBRA_ANDROID: >-
+    ${{ ((github.event_name == 'workflow_dispatch' && inputs.android)
+    || (github.event_name == 'push' && contains(github.event.head_commit.message, '[vm android]'))) && '1' || '' }}
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  vm:
+    name: qemu-virt debug image, booted in QEMU (native arm64, no KVM)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash   # bash -eo pipefail
+        working-directory: antumbra
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Run settings
+        id: settings
+        env:
+          INPUT_HARNESS_ARGS: ${{ inputs.harness_args }}
+          INPUT_TIMEOUT_SCALE: ${{ inputs.timeout_scale }}
+        run: |
+          out="${RUNNER_TEMP}/antumbra-vm"
+          mkdir -p "${out}"
+          if [ -n "${ANTUMBRA_ANDROID}" ]; then mode=--android; scale=4; else mode=--through-welcome; scale=2; fi
+          scale="${INPUT_TIMEOUT_SCALE:-${scale}}"
+          [[ "${scale}" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::timeout scale '${scale}' is not a number"; exit 1; }
+          [[ "${INPUT_HARNESS_ARGS}" =~ ^[A-Za-z0-9\ =._-]*$ ]] || { echo "::error::harness options: letters, digits, spaces and =._- only"; exit 1; }
+          {
+            echo "JOB_START=$(date +%s)"
+            echo "ANTUMBRA_CI_OUT=${out}"
+            # One timestamp for the whole build: the commit's (lib/common.sh does the same).
+            echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)"
+            echo "VM_MODE=${mode}"
+            echo "VM_TIMEOUT_SCALE=${scale}"
+            echo "VM_EXTRA_ARGS=${INPUT_HARNESS_ARGS}"
+          } >> "${GITHUB_ENV}"
+          # The kernel depends on these lines of sources.lock only (the tree, its
+          # tag and the port's configuration); a Tor Browser or Waydroid update
+          # must not cost a 30-minute kernel build.
+          echo "kernel_lock=$(grep -E '^(KERNEL_GIT_|PORT_KERNEL_CONFIG)' device/oneplus-hotdog/sources.lock | sha256sum | cut -c1-16)" \
+            >> "${GITHUB_OUTPUT}"
+          echo "Android apps: ${ANTUMBRA_ANDROID:-no}; smoke test ${mode} ${INPUT_HARNESS_ARGS}, timeout scale ${scale}"
+          uname -a; nproc; free -h; df -h /
+          if [ -e /dev/kvm ]; then ls -l /dev/kvm; else echo "no /dev/kvm: QEMU emulates (TCG)"; fi
+
+      - name: Install tools
+        # Before the cache restores: actions/cache needs zstd for the archives it saved.
+        run: |
+          tests/vm/ci/phase.sh tools sudo apt-get update -qq
+          # systemd-repart is part of Ubuntu 24.04's systemd package (apt selects it);
+          # qemu-system-arm has qemu-system-aarch64, ipxe-qemu the virtio NIC's ROM.
+          tests/vm/ci/phase.sh tools sudo apt-get install -y -qq mmdebstrap debian-archive-keyring squashfs-tools \
+            e2fsprogs systemd-repart cryptsetup-bin zstd python3 git curl ca-certificates gpg gpgv unzip openssl \
+            xz-utils qemu-system-arm qemu-utils ipxe-qemu
+          qemu-system-aarch64 --version | head -n1; mmdebstrap --version; mksquashfs -version | head -n1
+
+      - name: Restore the kernel
+        # Keyed on everything kernel.sh builds from: the hardening fragment, the
+        # port's patch list and hashes, Antumbra's patches, the qemu-virt fragment
+        # and profile, the pinned tree and configuration, kernel.sh itself
+        # (raise v1 to force a rebuild, after a toolchain change for one).
+        id: kcache
+        uses: actions/cache/restore@v5
+        with:
+          path: antumbra/build/out/qemu-virt/kernel
+          key: >-
+            antumbra-vm-kernel-v1-${{ runner.arch }}-${{ steps.settings.outputs.kernel_lock }}-${{ hashFiles(
+            'antumbra/device/oneplus-hotdog/kernel/**', 'antumbra/device/qemu-virt/kernel/**',
+            'antumbra/device/qemu-virt/device.conf', 'antumbra/build/kernel.sh') }}
+
+      - name: Restore pinned downloads
+        # Hash-pinned inputs only: fetch-sources.sh checks every file's SHA-256
+        # (and signature) again, cached or not.
+        id: dlcache
+        uses: actions/cache/restore@v5
+        with:
+          path: |
+            antumbra/build/cache/tor-browser/tor-browser-linux-aarch64-*.tar.xz
+            antumbra/build/cache/tor-browser/tor-browser-linux-aarch64-*.tar.xz.asc
+            antumbra/build/cache/waydroid/arm64_only/system.zip
+            antumbra/build/cache/waydroid/arm64_only/vendor.zip
+          key: antumbra-vm-downloads-android-${{ env.ANTUMBRA_ANDROID || '0' }}-${{ hashFiles('antumbra/device/oneplus-hotdog/sources.lock') }}
+
+      - name: Install the kernel toolchain
+        if: steps.kcache.outputs.cache-hit != 'true'
+        run: |
+          tests/vm/ci/phase.sh tools sudo apt-get install -y -qq make bc bison flex libssl-dev libelf-dev kmod cpio \
+            patch tar clang lld llvm
+          clang --version | head -n1; ld.lld --version
+
+      - name: Debian archive keyring with the trixie keys
+        # As in antumbra-release.yml: Ubuntu 24.04's debian-archive-keyring has
+        # the keys up to bookworm; trixie's own keyring package, pinned by the
+        # SHA-256 in trixie's Packages index, has all of them. Only the keyring
+        # file rootfs.sh uses is replaced.
+        run: |
+          deb="${RUNNER_TEMP}/debian-archive-keyring_2025.1_all.deb"
+          curl -fsSL --retry 3 -o "${deb}" \
+              https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb \
+            || curl -fsSL --retry 3 -o "${deb}" \
+              https://snapshot.debian.org/archive/debian/20260711T022200Z/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb
+          echo "9ea7778e443144ca490668737a8ab22dd3e748bb99e805e22ec055abeb3c7fac  ${deb}" | sha256sum -c -
+          dpkg-deb -x "${deb}" "${RUNNER_TEMP}/keyring"
+          sudo install -m 0644 "${RUNNER_TEMP}/keyring/usr/share/keyrings/debian-archive-keyring.gpg" \
+            /usr/share/keyrings/debian-archive-keyring.gpg
+
+      - name: Fetch and verify the pinned inputs
+        env:
+          KERNEL_CACHED: ${{ steps.kcache.outputs.cache-hit }}
+        run: |
+          args=()
+          [ "${KERNEL_CACHED}" != true ] || args+=(--skip-kernel)
+          tests/vm/ci/phase.sh fetch build/fetch-sources.sh "${args[@]}"
+
+      - name: Save pinned downloads
+        if: steps.dlcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            antumbra/build/cache/tor-browser/tor-browser-linux-aarch64-*.tar.xz
+            antumbra/build/cache/tor-browser/tor-browser-linux-aarch64-*.tar.xz.asc
+            antumbra/build/cache/waydroid/arm64_only/system.zip
+            antumbra/build/cache/waydroid/arm64_only/vendor.zip
+          key: ${{ steps.dlcache.outputs.cache-primary-key }}
+
+      - name: Kernel (cache miss only, about 30 minutes)
+        if: steps.kcache.outputs.cache-hit != 'true'
+        run: |
+          tests/vm/ci/phase.sh kernel build/kernel.sh
+          ls -la build/out/qemu-virt/kernel
+
+      - name: Save the kernel
+        if: steps.kcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: antumbra/build/out/qemu-virt/kernel
+          key: ${{ steps.kcache.outputs.cache-primary-key }}
+
+      # The image steps run as root (chroot, loop devices; veritysetup leaves
+      # the .verity and .roothash files readable by root only).
+      - name: Root filesystem (mmdebstrap, native arm64)
+        run: tests/vm/ci/phase.sh rootfs sudo -E build/rootfs.sh
+
+      - name: Squashfs and dm-verity
+        run: tests/vm/ci/phase.sh squashfs sudo -E build/squashfs.sh
+
+      - name: VM disk image
+        run: |
+          tests/vm/ci/phase.sh image sudo -E build/image.sh
+          cat build/out/qemu-virt/rootfs/build-flags; ls -la build/out/qemu-virt build/out/qemu-virt/rootfs
+
+      - name: Boot in QEMU and run the smoke test (full emulation)
+        run: |
+          read -ra extra <<< "${VM_EXTRA_ARGS}"
+          # Stop the harness 10 minutes before the job's limit, so that the
+          # outputs are still collected and uploaded.
+          tests/vm/ci/phase.sh vm-test sudo -E tests/vm/ci/run-smoke.sh --out "${ANTUMBRA_CI_OUT}" \
+            --timeout-scale "${VM_TIMEOUT_SCALE}" --deadline "$((JOB_START + 170 * 60))" -- "${VM_MODE}" "${extra[@]}"
+
+      - name: Metrics and job summary
+        if: ${{ !cancelled() && env.ANTUMBRA_CI_OUT != '' }}
+        env:
+          KERNEL_CACHE_HIT: ${{ steps.kcache.outputs.cache-hit }}
+        run: |
+          python3 tests/vm/ci/metrics.py --out "${ANTUMBRA_CI_OUT}" --summary "${ANTUMBRA_CI_OUT}/summary.md"
+          cat "${ANTUMBRA_CI_OUT}/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+      - uses: actions/upload-artifact@v6
+        id: upload
+        if: ${{ !cancelled() && env.ANTUMBRA_CI_OUT != '' }}
+        with:
+          name: antumbra-vm-${{ github.run_number }}
+          path: ${{ runner.temp }}/antumbra-vm/
+          if-no-files-found: warn
+          retention-days: 14
+          # A re-run of the job replaces its attempt's artifact.
+          overwrite: true
+
+      - name: Artifact link in the summary
+        if: ${{ !cancelled() && steps.upload.outputs.artifact-url != '' }}
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        run: echo "Artifact [antumbra-vm-${GITHUB_RUN_NUMBER}](${ARTIFACT_URL})." >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Disk use
+        if: always()
+        run: df -h /

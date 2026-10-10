@@ -10,15 +10,15 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1" >&2; exit 
 need shellcheck; need python3; need nft; need tor
 
 step "shell scripts (shellcheck)"
-mapfile -t SHELLS < <(grep -rlE '^#!/(usr/)?bin/(ba)?sh' build config/hooks config/rootfs config/rootfs-android tests --exclude-dir=cache --exclude-dir=out --exclude-dir=work --exclude-dir=__pycache__ 2>/dev/null | sort)
+mapfile -t SHELLS < <(grep -rlE '^#!/(usr/)?bin/(ba)?sh' build config/hooks config/rootfs config/rootfs-android tests tools --exclude-dir=cache --exclude-dir=out --exclude-dir=work --exclude-dir=__pycache__ 2>/dev/null | sort)
 # SC3037/SC3043/SC2094: vendored Tails scripts use echo -n and local (fine under dash)
 shellcheck -x -e SC1091,SC3037,SC3043,SC2094 "${SHELLS[@]}" || fail=1
 echo "${#SHELLS[@]} scripts checked"
 
 step "python (byte-compile)"
-mapfile -t PYS < <(grep -rlE '^#!/usr/bin/python3' config/rootfs config/rootfs-android tests 2>/dev/null; find config/rootfs config/rootfs-android tests -name '*.py' 2>/dev/null)
+mapfile -t PYS < <(grep -rlE '^#!/usr/bin/(env )?python3' config/rootfs config/rootfs-android tests tools 2>/dev/null; find config/rootfs config/rootfs-android tests tools -name '*.py' 2>/dev/null)
 python3 -m py_compile "${PYS[@]}" || fail=1
-find config tests -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+find config tests tools -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 echo "${#PYS[@]} python files compiled"
 
 step "pop-up motor sleep flags (userspace model)"
@@ -84,7 +84,7 @@ echo "cmdline base length: ${CMDLEN}"
 step "YAML (yamllint)"
 if command -v yamllint >/dev/null 2>&1; then
     yamllint -d '{extends: default, rules: {line-length: {max: 160}, truthy: disable, document-start: disable}}' \
-        ../.github/workflows/antumbra.yml ../.github/workflows/antumbra-release.yml || fail=1
+        ../.github/workflows/antumbra.yml ../.github/workflows/antumbra-release.yml ../.github/workflows/antumbra-vm.yml || fail=1
 else
     echo "yamllint not installed; skipped"
 fi

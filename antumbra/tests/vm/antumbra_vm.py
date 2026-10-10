@@ -546,6 +546,7 @@ def welcome_phase(vm, rep, T, sh, out, tour, android=False, android_net=False):
             break
         time.sleep(5)
     rep.check("welcome: settings applied and the Phosh session started", session, o.replace("\n", " "))
+    phoc_session_check(rep, sh)
     # Network: the driver loads only now, behind the spoofed address. Not
     # counted: the namespaces' and containers' veths and the Android bridge,
     # which exist without any driver.
@@ -595,6 +596,92 @@ def indexer_check(rep, sh):
     rep.check("session: no file indexer (localsearch-3 and its companion user units masked, D-Bus activation refused, not running)",
               rc is not None and o.strip().split("\n") == ["masked"] * len(INDEXER_UNITS) + ["refused", "inactive", "0"],
               o.replace("\n", " "))
+
+
+# The compositor settings (config/rootfs/etc/phosh/phoc.ini): phosh-session
+# starts the session's phoc with this file, and the greeter's session
+# chooses the same one. Up to 0.1.0-alpha.2 the session read Debian's
+# default instead, without xwayland=false, so its phoc tried to start the
+# Xwayland the image does not have. phoc does not log which file it read.
+PHOC_INI = "/etc/phosh/phoc.ini"
+XWAYLAND_FAILED = ("Failed to initialize Xwayland", "Cannot find Xwayland binary")
+# For each phoc of the session's user (the greeter's runs as antumbra-greeter):
+# its command line (NUL-separated, so base64) and the number of journal lines
+# it logged (phosh-session runs it under systemd-cat -t phoc); then how many
+# lines of this boot's journal, from any process, report a failed Xwayland.
+PHOC_SESSION = ("for p in $(pgrep -u amnesia -x phoc); do echo \"pid $p $(base64 -w0 /proc/$p/cmdline)\"; "
+                "echo \"log $(journalctl -b -o cat --no-pager _PID=$p | wc -l)\"; done; "
+                "echo \"xwayland $(journalctl -b -o cat --no-pager | grep -cE '" + "|".join(XWAYLAND_FAILED) + "')\"; echo end")
+
+
+def phoc_config(argv):
+    """The settings file a phoc command line names (-C FILE, --config FILE or
+    --config=FILE; the last one wins, as in GOption), or None."""
+    path = None
+    i = 1
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            break
+        if a in ("-C", "--config", "-E", "--exec") and i + 1 < len(argv):
+            if a in ("-C", "--config"):
+                path = argv[i + 1]
+            i += 2
+            continue
+        if a.startswith("--config="):
+            path = a.split("=", 1)[1]
+        i += 1
+    return path
+
+
+def judge_phoc_session(rc, o):
+    """(ok, detail) from PHOC_SESSION's output: the session runs a phoc, every
+    phoc of its user was started with -C PHOC_INI and has its log in the
+    journal (so that a missing Xwayland line is not merely a missing log),
+    and no line of this boot's journal reports a failed Xwayland."""
+    if rc is None:
+        return False, "no answer from the console"
+    procs, xwayland, end = [], None, False
+    for line in o.strip().split("\n"):
+        f = line.split()
+        if len(f) in (2, 3) and f[0] == "pid" and f[1].isdigit():
+            try:
+                argv = base64.b64decode(f[2] if len(f) == 3 else "", validate=True).decode("utf-8", "replace").split("\0")
+            except ValueError:
+                argv = [""]
+            if argv[-1] == "":
+                argv.pop()  # every argument ends in a NUL, the last one too
+            procs.append({"pid": f[1], "argv": argv, "log": None})
+        elif len(f) == 2 and f[0] == "log" and f[1].isdigit() and procs:
+            procs[-1]["log"] = int(f[1])
+        elif len(f) == 2 and f[0] == "xwayland" and f[1].isdigit():
+            xwayland = int(f[1])
+        elif f == ["end"]:
+            end = True
+    problems = []
+    if not end or xwayland is None:
+        problems.append("output incomplete: " + o.replace("\n", " | ")[-200:])
+    if not procs:
+        problems.append("no phoc runs as amnesia")
+    for p in procs:
+        config = phoc_config(p["argv"])
+        if config != PHOC_INI:
+            problems.append(f"phoc {p['pid']} reads {config or 'no -C file'} ({' '.join(p['argv'])[:200] or 'no command line'})")
+        if not p["log"]:
+            problems.append(f"phoc {p['pid']} has no lines in the journal")
+    if xwayland:
+        problems.append(f"{xwayland} journal line(s) of a failed Xwayland start")
+    if problems:
+        return False, "; ".join(problems)
+    return True, "; ".join(f"phoc {p['pid']}: -C {PHOC_INI}, {p['log']} journal lines" for p in procs) + "; no failed Xwayland start"
+
+
+def phoc_session_check(rep, sh):
+    """The session's phoc reads Antumbra's compositor settings, the greeter's
+    file, and so does not try to start Xwayland."""
+    rc, o = sh(PHOC_SESSION)
+    ok, detail = judge_phoc_session(rc, o)
+    rep.check(f"session: phoc started with -C {PHOC_INI} (the greeter's settings), no Xwayland start attempted", ok, detail)
 
 
 # The confined applications' namespace veths, the containers' host-side veths
