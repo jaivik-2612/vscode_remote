@@ -1,0 +1,131 @@
+<div class="sim" id="sim">
+  <div class="stage" id="stage">
+    <div class="frame" id="frame">
+      <div class="popcam" id="popcam" aria-hidden="true"></div>
+      <div class="frame-body" aria-hidden="true"></div>
+      <div class="screen" id="screen" role="region" aria-label="Simulated Antumbra phone screen">
+        <button class="sim-chip" id="simChip" type="button" aria-label="Open the simulator panel" aria-controls="panel" aria-expanded="false"><span>Sim<span class="long">ulator</span></span><b class="nb" aria-hidden="true"></b></button>
+      </div>
+      <button class="bezel-btn" id="hwPower" type="button" title="Power button" aria-label="Phone power button: press to turn the screen off and lock, hold 5 seconds to power off"></button>
+    </div>
+  </div>
+  <!-- iPhone: the strip under the phone screen (the home indicator's safe area) also reaches the pill -->
+  <div class="pill-ext" id="pillExt" aria-hidden="true"></div>
+
+  <aside class="panel" id="panel" aria-label="About this simulator">
+    <div class="panel-head">
+      <h2>Antumbra Simulator</h2>
+      <span class="badge-sim">Simulation</span>
+      <button class="panel-close" id="panelClose" type="button" aria-label="Close the simulator panel"><svg class="ic" aria-hidden="true"><use href="#i-app-close-symbolic"/></svg></button>
+    </div>
+    <section class="pnotes" id="pnotes" aria-labelledby="pnotesH">
+      <div class="pnotes-head"><span class="eyebrow" id="pnotesH">Notes</span><button class="pnotes-clear" id="pnotesClear" type="button" hidden>Clear</button></div>
+      <div class="pnotes-scroll"><p class="pnotes-empty" id="pnotesEmpty">What happens behind the screen is explained here as you go. Notes never cover the phone's controls: on the phone they appear only on the bare home screen or in the Welcome screen's title strip. One warning comes as a sheet you close instead: the first time you choose Create, that the simulated Persistent Storage is not encrypted.</p><ol class="pnotes-list" id="pnotesList"></ol></div>
+      <div class="vh" id="pnotesLive" role="status" aria-live="polite"></div>
+    </section>
+    <div class="panel-body" id="panelBody">
+      <div class="eyebrow">About</div>
+      <p>An interactive model of <strong>Antumbra</strong>, the Tails-based privacy OS for the OnePlus 7T Pro (Debian 13, Phosh, mainline Linux). Its screens, labels, defaults, messages and rules come from the project's repository and from screenshots of the real image running in a virtual machine (QEMU).</p>
+      <p><strong>It is not the operating system.</strong> Nothing here runs Antumbra's code, and Tor, Android and the camera are acted out. The page makes no network request at all: even its fonts are embedded. Antumbra is an arm64 image of about 1.3 GB. An iPhone cannot run another operating system: iOS allows apps and web pages no virtual machine (no hypervisor, no JIT). Even a server, emulating the phone's processor, needs minutes to reach the Welcome screen.</p>
+      <p>The project itself is <strong>alpha and has not yet booted on a physical phone</strong>.</p>
+
+      <div class="eyebrow">Live state</div>
+      <dl class="stat" id="liveState"></dl>
+      <p class="mono" style="margin-top:10px">The real OS shows no Tor indicator or notification. To see the phase there: switch on Administration at the Welcome screen, then run <strong>sudo antumbra-tor-connect status</strong> in Console.</p>
+
+      <div class="eyebrow">Controls</div>
+      <div id="controls">
+        <div class="ctl-row"><span>Phone power button<small>Press: screen off and lock. Hold 5 s: orderly power-off.</small></span>
+          <button class="pbtn" type="button" id="ctlPress">Press</button><button class="pbtn" type="button" id="ctlHold">Hold 5 s</button></div>
+        <div class="ctl-row" role="switch" tabindex="0" id="ctlAndroidImg" aria-checked="true"><span>Image built with Android apps<small>The build option <code>ANTUMBRA_ANDROID=1</code>. Takes effect at the next boot.</small></span><span class="sw" aria-hidden="true"></span></div>
+        <div class="ctl-row" role="switch" tabindex="0" id="ctlSelfcheck" aria-checked="false"><span>Failed privacy self-check<small>At the next boot the firewall's Tor-enforcement rules are not loaded: the Welcome screen shows its red banner, the network stays blocked and Android cannot start.</small></span><span class="sw" aria-hidden="true"></span></div>
+        <div class="ctl-row"><span><label for="ctlTor">Tor bootstrap outcome</label><small>No Tor bootstrap past 14 % has happened in Antumbra yet.</small></span>
+          <select class="sel" id="ctlTor"><option value="done">Reaches 100 %</option><option value="stuck">Stuck at 14 % (as in the VM)</option></select></div>
+        <div class="ctl-row" role="switch" tabindex="0" id="ctlIdle" aria-checked="true"><span>Idle lock after 120 s<small>The real idle-delay; the screen blanks and locks.</small></span><span class="sw" aria-hidden="true"></span></div>
+        <div class="ctl-row" role="switch" tabindex="0" id="ctlNotes" aria-checked="true"><span>Simulator notes<small>Explanations of what happens behind the screen, in the Notes list above. Responses to your own taps are always noted.</small></span><span class="sw" aria-hidden="true"></span></div>
+        <div class="btnrow"><button class="pbtn warn" type="button" id="ctlErase">Erase simulated Persistent Storage</button><button class="pbtn" type="button" id="ctlReset">Start over</button></div>
+        <p class="mono" id="ctlMsg" aria-live="polite"></p>
+      </div>
+
+      <div class="eyebrow">What to try</div>
+      <ol>
+        <li>At the Welcome screen choose <strong>Create (erases the data partition)</strong>, type a passphrase of 12 characters or more twice, switch on <strong>Android apps (experimental)</strong>, then press Start.</li>
+        <li>Choose <strong>Through bridges</strong> and type a <code>snowflake</code> line to see the real refusal, then an <code>obfs4 192.0.2.1:443 …</code> line.</li>
+        <li>In the session: pull down the top bar (or tap it) for quick settings and join a Wi-Fi network; Tor then connects (acted out past 14 %).</li>
+        <li>Swipe up from the bottom (or tap the pill) for the apps. Open <strong>Camera</strong>: allow it and watch the pop-up camera rise.</li>
+        <li>Open the <strong>Android</strong> folder once Android has started; open F-Droid.</li>
+        <li>Write a note in <strong>Text Editor</strong> and save it in <strong>Persistent</strong>, or one in Documents.</li>
+        <li>Restart from the power menu (top-right button in quick settings). Unlock with a wrong passphrase, then the right one: only the note in Persistent is still there.</li>
+        <li>In <strong>Console</strong>, try <code>ip a</code>, <code>whoami</code>, <code>sudo antumbra-tor-connect status</code>, <code>cat /run/antumbra/selfcheck.status</code>, <code>torify curl example.org</code>, <code>help</code>.</li>
+      </ol>
+
+      <div class="eyebrow">Known issues (from the project's docs)</div>
+      <ul>
+        <li>The pop-up camera has no drop protection: do not walk with it raised or push it down. It shows only that the front camera is in use; rear cameras have no indicator.</li>
+        <li>The camera prompt does not protect the cameras: any program in the session, Tor Browser included, can use them without any prompt (directly, through PipeWire, or by approving itself in the portal), whatever you answer.</li>
+        <li>Android is a weaker sandbox (privileged container, no SELinux), TCP only through Tor: no UDP, VPN, IPv6 or .onion; no camera; security patches frozen at 2026-09-27.</li>
+        <li>No Tor Connection assistant: bridges are typed again at every boot. Snowflake and IPv6 bridges are refused. No bridge has connected through Antumbra yet.</li>
+        <li>Tor Browser for arm64 is an alpha release with no AppArmor profile; there is no Unsafe Browser.</li>
+        <li>A screen lock without a passphrase does not protect anything. The Welcome screen does not read back the settings stored in Persistent Storage.</li>
+      </ul>
+
+      <div class="eyebrow">Timings</div>
+      <p>Everything slow is shortened here. No timing has been measured on a phone yet: phone values are the project's expectations or settings. VM values were measured in a virtual machine that emulates the phone's processor in software, roughly ten times slower than the phone.</p>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Event</th><th>Here</th><th>Real</th></tr></thead>
+        <tbody>
+          <tr><td>Power on to Welcome screen</td><td>~4 s</td><td>Phone, expected: "the first boot can take a minute". VM: drawn at 302 s.</td></tr>
+          <tr><td>Start to session, no Persistent Storage</td><td>1.5 s</td><td>VM: 10 s. Phone: unknown.</td></tr>
+          <tr><td>Create Persistent Storage (key derivation: argon2id, 1 GiB, 4 iterations)</td><td>~5 s</td><td>VM: ~84 s from applier start to settings applied. Phone: unknown.</td></tr>
+          <tr><td>Unlock / wrong passphrase reported</td><td>2.5 s</td><td>VM: ~17 s / ~16 s. Phone: unknown.</td></tr>
+          <tr><td>MAC address spoofed</td><td>~1 s</td><td>VM: under 1 s, 14 s after Start.</td></tr>
+          <tr><td>Tor bootstrap</td><td>~13 s</td><td>Unknown: in the VM Tor stayed at 14 % (no route to Tor from the build host).</td></tr>
+          <tr><td>Pop-up camera course (rise or lower)</td><td>668 ms</td><td>Nominal ~668 ms, hard cap ~718 ms; stock OxygenOS ~620 ms. Never measured on hardware.</td></tr>
+          <tr><td>First camera preview frame</td><td>~0.3 s after the course</td><td>VM: ~196 s. Phone: unknown.</td></tr>
+          <tr><td>Preparing Android (antumbra-waydroid)</td><td>6 s</td><td>VM: ~63 s.</td></tr>
+          <tr><td>Android boot</td><td>16 s</td><td>VM: ~15.5 min. Phone: unmeasured; the launcher expects "a minute or two".</td></tr>
+          <tr><td>F-Droid installed</td><td>5 s after boot</td><td>VM: ~6.8 min after boot. Phone, expected: "seconds".</td></tr>
+          <tr><td>Idle blank and lock</td><td>120 s</td><td>Set to 120 s (GNOME's <code>idle-delay</code>), lock at blank.</td></tr>
+          <tr><td>Power key long press</td><td>5 s</td><td>Expected: about 5 s.</td></tr>
+          <tr><td>Locked too long</td><td>not simulated</td><td>Power-off after 18 h.</td></tr>
+          <tr><td>Power-off sequence</td><td>~4 s</td><td>VM: ~54 s.</td></tr>
+          <tr><td>End-session countdown</td><td>60 s</td><td>Set by gnome-session; not in the repository.</td></tr>
+        </tbody>
+      </table></div>
+
+      <div class="eyebrow">Real and simulated</div>
+      <p><strong>Taken from the real system:</strong></p>
+      <ul>
+        <li>Every Welcome screen label, option, default and error message, and which fields are enabled when (GTK's "sensitivity"). The bridge check is a direct copy of the OS's own checking code (<code>bridge_lines</code>, <code>normalise_bridges</code>).</li>
+        <li>The order in which Start applies the settings, and its failure texts; the Persistent Storage features; the unlock flow.</li>
+        <li>Tor's own phase names; the VM's log lines up to 14 % (the lines past 14 %, and every bridge line, never appeared in a VM log); the three connection modes.</li>
+        <li>The theme: palette, the image's own Roboto font, radii, the gesture bar at the bottom (108×4 px), the three wallpapers, the Material Symbols and Adwaita icons, the app grid and dock.</li>
+        <li>Quick-settings tiles and their states, the lock screen's texts, the end-session dialog, the camera prompt, the Android launcher's notifications, F-Droid's permission prompt.</li>
+      </ul>
+      <p><strong>Acted out or approximated:</strong></p>
+      <ul>
+        <li>Timings (see above), Tor's progress past 14 %, Wi-Fi networks (invented names, any password of 8 characters works), the battery level.</li>
+        <li>The camera shows the VM's colour bars, or one of your own pictures (it stays on the page: nothing is uploaded or stored); there is no live video.</li>
+        <li>Android, F-Droid and Tor Browser are drawn in HTML; Tor Browser shows only a local page of the simulator. Most other apps open to a placeholder.</li>
+        <li>Clock: your device's local time (the real OS runs in UTC until htpdate sets it).</li>
+        <li>Text fields use your device's keyboard; the phone uses squeekboard.</li>
+        <li>The dashed "Simulator" cards are not part of Antumbra. The real OS shows no Tor or F-Droid notification and no drop warning for the camera.</li>
+        <li><strong>The simulated Persistent Storage is NOT encrypted.</strong> Its files are kept in plain text in this browser's storage (localStorage) until you use "Erase simulated Persistent Storage". Do not type a passphrase you really use, and do not save real notes. Its passphrase is kept only as a slow salted hash (PBKDF2), and a picture made from your own photo is never stored. Everything else is forgotten at a simulated restart.</li>
+      </ul>
+
+      <div class="eyebrow">Journal (simulated)</div>
+      <div class="journal" id="journal" role="log" aria-live="off" tabindex="0" aria-label="Simulated system journal"></div>
+
+      <div class="eyebrow">Credits and licences</div>
+      <ul class="credits">
+        <li>Wallpapers and the gesture pill: Antumbra, GPL-3.0-or-later.</li>
+        <li>Status icons (battery, Wi-Fi, Bluetooth, dark mode, night light): Material Symbols, Apache-2.0, as installed by Antumbra.</li>
+        <li>Adwaita symbolic icons: CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0. Phosh's built-in icons: GPL-3+.</li>
+        <li>App icons as installed in the image: Files (GPL-3+), Camera/Snapshot (GPL-3+), Console (CC-BY-SA-4.0), Calculator (GPL-2+), Clocks (CC-BY-SA-4.0), Electrum (Expat), Image Viewer (GPL-3+), Metadata Cleaner (CC-BY-SA-4.0), Mobile Settings (GPL-3+), OnionShare (GPL-3.0+), Papers (CC-BY-SA-4.0), Secrets (GPL-3), Text Editor (GPL-3+), Android launcher from Waydroid (GPL-3+, resized), Phosh's fallback icon (GPL-3+).</li>
+        <li>Tor Browser's icon is Tor Project branding (licence not stated next to it in the image); F-Droid's icon comes from its APK (licence not stated). Tor is a trademark of The Tor Project, Inc.; Tails is a trademark of the Tails project; Antumbra is endorsed by neither.</li>
+        <li>Fonts embedded in the page, Latin subsets of the image's own files: Roboto (fonts-roboto-unhinted, Apache-2.0) and Noto Sans Mono (fonts-noto-mono, OFL-1.1).</li>
+      </ul>
+    </div>
+  </aside>
+</div>
+<input type="file" id="camFile" accept="image/*" class="vh" tabindex="-1" aria-hidden="true">
