@@ -156,8 +156,8 @@ pre.one { white-space: pre; font-size: 8pt; }
     <div><b>1</b>What you need</div>
     <div><b>2</b>Check your phone's model</div>
     <div><b>3</b>Set up your computer</div>
-    <div><b>4</b>Back up, F.22 in both slots</div>
-    <div><b>5</b>Unlock the bootloader</div>
+    <div><b>4</b>Back up, unlock the bootloader</div>
+    <div><b>5</b>OxygenOS F.22 in both slots</div>
     <div><b>6</b>Download and check Antumbra</div>
     <div><b>7</b>Prepare the install</div>
     <div><b>8</b>Install Antumbra</div>
@@ -175,8 +175,8 @@ pre.one { white-space: pre; font-size: 8pt; }
 
 <div class="flow">
   <div><b>STEPS 2&ndash;3</b>Check the model, install fastboot on the computer</div>
-  <div><b>STEP 4</b>Back up, put OxygenOS F.22 in both slots</div>
-  <div><b>STEP 5</b>Unlock the bootloader (erases the phone)</div>
+  <div><b>STEP 4</b>Back up, unlock the bootloader (erases the phone)</div>
+  <div><b>STEP 5</b>Put OxygenOS F.22 in both slots</div>
   <div><b>STEPS 6&ndash;7</b>Download, check, find the free slot</div>
   <div><b>STEPS 8&ndash;9</b>Write Antumbra, start it</div>
 </div>
@@ -185,7 +185,7 @@ pre.one { white-space: pre; font-size: 8pt; }
   <tr><th style="width:28%">Item</th><th>Details</th></tr>
   <tr><td><strong>The phone</strong></td><td>A OnePlus 7T Pro, ideally model <strong>HD1913</strong> (section 2), charged to well over half. Not the OnePlus 7T, 7 Pro or the T-Mobile 7T Pro 5G McLaren.</td></tr>
   <tr><td><strong>A USB cable</strong></td><td>A USB-C cable that carries data, not only charge (the one that came with the phone is best). If your computer has a USB-A port, a USB-A to USB-C cable in a USB 2.0 port is the most reliable.</td></tr>
-  <tr><td><strong>A computer</strong></td><td>Windows 10 or 11, macOS, or Linux, with about 5 GB of free space and an internet connection. You will type a few commands into a terminal window; this guide gives every one of them.</td></tr>
+  <tr><td><strong>A computer</strong></td><td>Windows 10 or 11, macOS, or Linux, with about 8 GB of free space (the OxygenOS package is several GB; it can stay on a USB stick instead) and an internet connection. You will type a few commands into a terminal window; this guide gives every one of them.</td></tr>
   <tr><td><strong>A GitHub account</strong></td><td>The Antumbra files are on the <em>draft</em> release of your GitHub repository, which only you can see while you are signed in (section 6).</td></tr>
   <tr><td><strong>Time</strong></td><td>About two hours. Do not start shortly before you need the phone.</td></tr>
 </table>
@@ -233,7 +233,7 @@ pre.one { white-space: pre; font-size: 8pt; }
     <h4>Windows 10 or 11</h4>
     <ol>
       <li>Download <em>SDK Platform-Tools for Windows</em>. Right-click the zip, choose <em>Extract All</em>, and type <span class="mono">C:\</span> as the destination (not <span class="mono">C:\platform-tools</span>): the zip already contains a folder named <span class="mono">platform-tools</span>, so this creates <span class="mono">C:\platform-tools\fastboot.exe</span>.</li>
-      <li>Download Google's <strong>USB driver</strong> (<a href="https://developer.android.com/studio/run/win-usb">developer.android.com/studio/run/win-usb</a>, the zip file) and extract it the same way, to <span class="mono">C:\</span>; this creates <span class="mono">C:\usb_driver</span>. You will need it in section 5. (The driver is for ordinary 64-bit Intel or AMD PCs; on a Windows PC with an ARM processor it may not install.)</li>
+      <li>Download Google's <strong>USB driver</strong> (<a href="https://developer.android.com/studio/run/win-usb">developer.android.com/studio/run/win-usb</a>, the zip file) and extract it the same way, to <span class="mono">C:\</span>; this creates <span class="mono">C:\usb_driver</span>. You will need it in section 4. (The driver is for ordinary 64-bit Intel or AMD PCs; on a Windows PC with an ARM processor it may not install.)</li>
       <li>Open the <span class="mono">C:\platform-tools</span> folder (you should see <span class="mono">fastboot.exe</span> in it; if you see another <span class="mono">platform-tools</span> folder instead, open that one), right-click an empty area and choose <em>Open in Terminal</em> (Windows 11) or hold <span class="kbd">Shift</span> and right-click, then <em>Open PowerShell window here</em> (Windows 10).</li>
       <li>Type <code>.\fastboot.exe --version</code> and press <span class="kbd">Enter</span>. A version number means it works.</li>
     </ol>
@@ -256,7 +256,7 @@ pre.one { white-space: pre; font-size: 8pt; }
       <li>If later <code>fastboot devices</code> prints <em>no permissions</em>, install the <span class="mono">android-udev-rules</span> package, or run fastboot with <code>sudo</code>.</li>
     </ol>
     <p class="small">Where this guide writes <code>fastboot</code>, type <code>./fastboot</code> (and <code>./adb</code>). <strong>With your distribution's packages</strong> instead (on Debian or Ubuntu both <span class="mono">adb</span> and <span class="mono">fastboot</span>; elsewhere <span class="mono">android-tools</span>; version 28.0.2 or newer), make a folder for the Antumbra files (<code>mkdir ~/antumbra</code>), work in it (<code>cd ~/antumbra</code>), and type the commands without <code>./</code>.</p>
-    <p class="small">If you have the Antumbra repository, its guided script performs sections 7 and 8 with extra checks. Always give it Android's slot, the letter on your note from section 7: <code>build/flash.sh --release FOLDER --android-slot LETTER</code>.</p>
+    <p class="small">If you have the Antumbra repository, its guided script performs sections 7 and 8 with extra checks. On the first install, run <code style="white-space:nowrap">build/flash.sh --release FOLDER --first-install</code> rather than giving it a letter you remember. It takes the current slot as Android's, refuses one that has never started successfully, and prints the letter: write it down as in section 7. On every later install, give it the letter on your note: <code style="white-space:nowrap">--android-slot LETTER</code>.</p>
   </div>
 </div>
 <div class="box note">
@@ -267,34 +267,17 @@ pre.one { white-space: pre; font-size: 8pt; }
 
 <!-- ============================== 4 ============================== -->
 <section>
-<h2><span class="num">4</span>Back up, then put OxygenOS 12 F.22 in both slots</h2>
-<p>Antumbra runs on the start-up software and firmware of its own slot, and the Linux port it is built on was tested with OxygenOS 12 build <strong>F.22</strong>, the last one for this phone. A system update only writes the slot Android is <em>not</em> using and then switches to it, so after one update the other slot still holds the previous version. Installing F.22 twice puts it in both.</p>
-<ol class="steps">
-  <li><strong>Back up everything you want to keep</strong>: photos, messages, two-factor codes, contacts. Section 5 erases the phone completely.</li>
-  <li><strong>Turn on Developer options and USB debugging.</strong> On OxygenOS 12: <em>Settings &rarr; About device &rarr; Version</em>, tap <em>Build number</em> seven times (enter your PIN if asked); on older versions: <em>Settings &rarr; About phone</em>, tap <em>Build number</em> seven times. Then open <em>Developer options</em> (search Settings for it) and switch on <em>OEM unlocking</em> and <em>USB debugging</em>.</li>
-  <li><strong>Connect the phone</strong> and type <code>adb devices</code>. On the phone, allow USB debugging for this computer (tick <em>Always allow</em>). The command lists the phone with the word <span class="mono">device</span>. (Windows: if it lists nothing, look in <em>Device Manager</em> for a device with a yellow triangle and install Google's driver for it as in section 5, choosing <em>Android ADB Interface</em>.)</li>
-  <li><strong>Update to F.22.</strong> On OxygenOS 12: <em>Settings &rarr; About device</em>, tap the version card (<em>Up to date</em> or <em>Update available</em>). On OxygenOS 10 or 11: <em>Settings &rarr; System &rarr; System updates</em>. If neither is there, search Settings for "update". Install every update offered. The version then reads something like <span class="mono">HD1913_11_F.22</span>.</li>
-  <li><strong>Look at the current slot:</strong> type <code>adb shell getprop ro.boot.slot_suffix</code>. It prints <span class="mono">_a</span> or <span class="mono">_b</span>. Remember it only to compare in step 7; this is not the note you keep (that comes in section 7).</li>
-  <li><strong>Install F.22 a second time</strong>, from the full update package: download it with the free <em>Oxygen Updater</em> app (it fetches OnePlus's own files), then use <em>Local install</em>, which on OxygenOS 12 is in the menu (top right) of <em>Settings &rarr; About device &rarr; Up to date</em> once Developer options are on. Let it finish and restart.</li>
-  <li><strong>Check that it worked:</strong> <code>adb shell getprop ro.boot.slot_suffix</code> now prints the <em>other</em> letter. Both slots then hold F.22.</li>
-  <li><strong>Restart the phone once more</strong> and wait a few minutes with the screen on: OxygenOS 12 finishes an update in the background after the first restart, and the phone refuses to install Antumbra until it has (section 7 checks this).</li>
-</ol>
-<div class="box warn">
-  <span class="t">If the second install is refused</span>
-  <p>Nobody has confirmed that OxygenOS accepts installing the version it already runs. If it refuses, or the letter in step 7 did not change, you can continue: Antumbra will then run on the start-up software and firmware of the previous OxygenOS version, a combination nobody has tested. If Antumbra does not start, going back to Android (section 11) works either way.</p>
-</div>
-</section>
-
-<!-- ============================== 5 ============================== -->
-<section>
-<h2><span class="num">5</span>Unlock the bootloader</h2>
+<h2><span class="num">4</span>Back up, then unlock the bootloader</h2>
+<p><strong>Unlock before you install any OxygenOS update.</strong> OnePlus 7-series phones on OxygenOS 12 have been reported to refuse the unlock (see the box at the end of this section), so a phone still on OxygenOS 10 or 11 stays on it until it is unlocked; section 5 then brings it to F.22. If your phone already runs F.22, the order does not matter for it: the unlock comes first all the same, and its second F.22 install (section 5) may also be done before the unlock.</p>
 <div class="box stop">
   <span class="t">This erases the phone</span>
-  <p>Unlocking deletes everything on the phone. After it, the phone shows a warning that the bootloader is unlocked every time it starts; that is normal and stays. OnePlus says an unlocked phone no longer receives official updates (there are none left for this phone). Never lock the bootloader again while Antumbra is installed.</p>
+  <p>Unlocking deletes everything on the phone. After it, the phone shows a warning that the bootloader is unlocked every time it starts; that is normal and stays. OnePlus says an unlocked phone no longer receives official updates; section 5 therefore uses the full update package if none is offered. Never lock the bootloader again while Antumbra is installed.</p>
 </div>
 <ol class="steps">
-  <li><strong>Check</strong> that <em>OEM unlocking</em> and <em>USB debugging</em> are still on in <em>Developer options</em> (section 4), and connect the phone.</li>
-  <li><strong>Start the bootloader:</strong> type <code>adb reboot bootloader</code>. (Without a computer: switch the phone off, then hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> until the bootloader screen appears.)</li>
+  <li><strong>Back up everything you want to keep</strong>: photos, messages, two-factor codes, contacts. Step 6 erases the phone completely.</li>
+  <li><strong>Turn on Developer options and OEM unlocking.</strong> On OxygenOS 12: <em>Settings &rarr; About device &rarr; Version</em>, tap <em>Build number</em> seven times (enter your PIN if asked); on older versions: <em>Settings &rarr; About phone</em>, tap <em>Build number</em> seven times. Then open <em>Developer options</em> (search Settings for it), switch on <em>OEM unlocking</em>, and switch off <em>Automatic system updates</em> if it is there, so that no update is installed before the unlock.</li>
+  <li><strong>Keep a copy of the F.22 full package off the phone.</strong> Download it with the free <em>Oxygen Updater</em> app (it fetches OnePlus's own files), but <strong>do not install it now</strong>. Copy the file (a <span class="mono">.zip</span>) to a USB stick with the Files app, or to your computer into the same folder as the other files (connect the phone and choose <em>File transfer</em> in its USB notification): the unlock erases it from the phone, and section 5 needs it.</li>
+  <li><strong>Start the bootloader:</strong> switch the phone off, then hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> until the bootloader screen appears. Connect the phone.</li>
   <li><strong>Check the connection:</strong> type <code>fastboot devices</code>. It should print one line with a serial number and the word <span class="mono">fastboot</span>.
     <div class="box warn" style="margin-top:0.5em">
       <span class="t">Windows: nothing printed?</span>
@@ -302,8 +285,32 @@ pre.one { white-space: pre; font-size: 8pt; }
     </div>
   </li>
   <li><strong>Unlock:</strong> type <code>fastboot oem unlock</code>. The phone asks whether to unlock. Use the <span class="kbd">Volume</span> keys to choose the unlock option and press <span class="kbd">Power</span> to confirm.</li>
-  <li>The phone erases itself and restarts into Android's first-time setup. Go through it quickly (no accounts are needed). The bootloader is now unlocked: you can check with <code>fastboot getvar unlocked</code> in the bootloader, which should say <span class="mono">unlocked: yes</span>.</li>
+  <li>The phone erases itself and restarts into Android's first-time setup, where section 5 continues. The bootloader is now unlocked: you can check with <code>fastboot getvar unlocked</code> in the bootloader, which should say <span class="mono">unlocked: yes</span>.</li>
 </ol>
+<div class="box warn">
+  <span class="t">If the unlock is refused &ldquo;for technical reason&rdquo;</span>
+  <p>If step 6 answers <span class="mono">FAILED (remote: 'Device cannot be unlocked for technical reason.')</span>, the phone stays locked. This has been reported for the OnePlus 7 Pro (GM1913) on OxygenOS 12; whether the 7T Pro does the same is unknown. <strong>Stop here and keep the phone as it is</strong>: type <code>fastboot reboot</code> to start Android, and install no update and no other OxygenOS version. The reported way round is a detour: roll back to OxygenOS 11 with OnePlus's full rollback package (which erases the phone), unlock, then put F.22 in both slots. A later release of this guide describes the detour step by step.</p>
+</div>
+</section>
+
+<!-- ============================== 5 ============================== -->
+<section>
+<h2><span class="num">5</span>Put OxygenOS 12 F.22 in both slots</h2>
+<p>Antumbra runs on the start-up software and firmware of its own slot, and the Linux port it is built on was tested with OxygenOS 12 build <strong>F.22</strong>, the last one for this phone. A system update only writes the slot Android is <em>not</em> using and then switches to it, so each install moves Android to the other slot, and after one update the other slot still holds the previous version. Installing F.22 twice puts it in both.</p>
+<ol class="steps">
+  <li><strong>Set up Android</strong> quickly (no accounts are needed) and connect to Wi-Fi.</li>
+  <li><strong>Turn on Developer options and USB debugging again</strong>: the unlock reset them. Tap <em>Build number</em> seven times as in section 4, step 2, then switch on <em>USB debugging</em> in <em>Developer options</em>.</li>
+  <li><strong>Connect the phone</strong> and type <code>adb devices</code>. On the phone, allow USB debugging for this computer (tick <em>Always allow</em>). The command lists the phone with the word <span class="mono">device</span>. (Windows: if it lists nothing, look in <em>Device Manager</em> for a device with a yellow triangle and install Google's driver for it as in section 4, choosing <em>Android ADB Interface</em>.)</li>
+  <li><strong>Update over the air, if an update is offered.</strong> On OxygenOS 12: <em>Settings &rarr; About device</em>, tap the version card (<em>Up to date</em> or <em>Update available</em>). On OxygenOS 10 or 11: <em>Settings &rarr; System &rarr; System updates</em>. If neither is there, search Settings for "update". Install every update offered. The version then reads something like <span class="mono">HD1913_11_F.22</span>. Whether an unlocked phone is offered updates is not confirmed; if none is, go on to step 5.</li>
+  <li><strong>Look at the current slot:</strong> type <code>adb shell getprop ro.boot.slot_suffix</code>. It prints <span class="mono">_a</span> or <span class="mono">_b</span>. Remember it only to compare in step 7; this is not the note you keep (that comes in section 7).</li>
+  <li><strong>Install F.22 from the full package</strong> you saved in section 4. Copy it back into the top folder of the phone's storage, where <em>Local install</em> is reported to look for it: from a USB stick with the Files app, or from the computer with <code style="white-space:nowrap">adb push FILE /sdcard/</code> (FILE is the package's name). Wait a few minutes after the last restart (the phone first finishes the previous update), then use <em>Local install</em>, which on OxygenOS 12 is in the menu (top right) of <em>Settings &rarr; About device &rarr; Up to date</em> once Developer options are on (on OxygenOS 10 or 11 it is reported to be <em>Local upgrade</em>, under the icon at the top right of <em>System updates</em>). Let it finish and restart.</li>
+  <li><strong>Check that it worked:</strong> <code>adb shell getprop ro.boot.slot_suffix</code> now prints the <em>other</em> letter. If the phone did not already run F.22 before step 6, do steps 5 to 7 once more. Both slots then hold F.22.</li>
+  <li><strong>Restart the phone once more</strong> and wait a few minutes with the screen on: OxygenOS 12 finishes an update in the background after the first restart (it "merges" it), and the phone refuses to install Antumbra until it has (section 7 checks this). Only then read Android's slot in section 7: each install moved Android to the other slot.</li>
+</ol>
+<div class="box warn">
+  <span class="t">If the second install is refused</span>
+  <p>Nobody has confirmed that OxygenOS accepts installing the version it already runs. If it refuses, or the letter in step 7 did not change, you can continue: Antumbra will then run on the start-up software and firmware of the previous OxygenOS version, a combination nobody has tested. If Antumbra does not start, going back to Android (section 11) works either way.</p>
+</div>
 </section>
 
 <!-- ============================== 6 ============================== -->
@@ -355,7 +362,7 @@ pre.one { white-space: pre; font-size: 8pt; }
 <ol class="steps">
   <li><strong>Start the bootloader:</strong> switch the phone off, then hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> until the bootloader screen appears. Connect it and type <code>fastboot devices</code> (one line).</li>
   <li><strong>Check the unlock:</strong> <code>fastboot getvar unlocked</code> must answer <span class="mono">unlocked: yes</span>.</li>
-  <li><strong>First install only &ndash; find Android's slot.</strong> (On a retry or an update, skip this step and use the letter already on your note.) Type <code>fastboot getvar current-slot</code>. It answers <span class="mono">current-slot: a</span> or <span class="mono">current-slot: b</span>. <strong>Write the letter down and keep the note</strong>: it is Android's slot, and the only slot note you keep. Antumbra goes into the <em>other</em> slot, called X in this guide, now and for every later install:
+  <li><strong>First install only &ndash; find Android's slot.</strong> (On a retry or an update, skip this step and use the letter already on your note.) Do this only after the last F.22 install of section 5 has finished merging (section 5, step 8): each install moves Android to the other slot, so a letter read earlier, or remembered, can be wrong. Type <code>fastboot getvar current-slot</code>. It answers <span class="mono">current-slot: a</span> or <span class="mono">current-slot: b</span>. <strong>Write the letter down and keep the note</strong>: it is Android's slot, and the only slot note you keep. Antumbra goes into the <em>other</em> slot, called X in this guide, now and for every later install:
     <table style="width:auto">
       <tr><th>Android's slot</th><th>Antumbra's slot X</th></tr>
       <tr><td class="mono">a</td><td><strong>b</strong></td></tr>
@@ -364,7 +371,7 @@ pre.one { white-space: pre; font-size: 8pt; }
     <span class="small">After the install, <code>current-slot</code> shows Antumbra's slot, so it can no longer tell you which one is Android's. That is why you need the note.</span>
   </li>
   <li><strong>Start fastbootd</strong> (the recovery's fastboot mode): type <code>fastboot reboot fastboot</code>. The phone restarts into a screen titled <em>fastbootd</em> or similar. Then type <code>fastboot getvar is-userspace</code>: it must answer <span class="mono">is-userspace: yes</span>.
-    <p class="small" style="margin-top:0.4em"><strong>Windows:</strong> if the command waits forever (<em>waiting for any device</em>), Windows needs the driver for this mode too. Repeat the Device Manager steps of section 5 for the new device, again choosing <em>Android Bootloader Interface</em>.</p>
+    <p class="small" style="margin-top:0.4em"><strong>Windows:</strong> if the command waits forever (<em>waiting for any device</em>), Windows needs the driver for this mode too. Repeat the Device Manager steps of section 4 for the new device, again choosing <em>Android Bootloader Interface</em>.</p>
   </li>
   <li><strong>Check that no OxygenOS update is pending:</strong> type <code>fastboot getvar snapshot-update-status</code>. If it answers <span class="mono">snapshotted</span> or <span class="mono">merging</span>, <strong>stop</strong>: type <code>fastboot reboot</code>, let Android start, wait ten minutes, restart Android once more, and begin this section again. Any other answer (<span class="mono">none</span>, or an error saying the variable is unknown) is fine.</li>
   <li><strong>Back to the bootloader:</strong> type <code>fastboot reboot bootloader</code>.</li>
@@ -464,7 +471,7 @@ fastboot reboot</pre>
 <p>Two key combinations solve most problems. <strong>Switch the phone off:</strong> hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> for about ten seconds. <strong>Start the bootloader:</strong> from off, hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span>.</p>
 <table>
   <tr><th style="width:36%">What you see</th><th>What to do</th></tr>
-  <tr><td><code>fastboot devices</code> prints nothing, or a command waits forever</td><td>Try another cable and another USB port (a USB 2.0 port works best). On Windows install the driver (sections 5 and 7). On Linux try <code>sudo</code>. Make sure the phone shows the bootloader or fastbootd screen.</td></tr>
+  <tr><td><code>fastboot devices</code> prints nothing, or a command waits forever</td><td>Try another cable and another USB port (a USB 2.0 port works best). On Windows install the driver (sections 4 and 7). On Linux try <code>sudo</code>. Make sure the phone shows the bootloader or fastbootd screen.</td></tr>
   <tr><td><span class="mono">FAILED</span> when writing a start-up file</td><td>Check that you typed the slot letter and file name exactly, and that <code>fastboot getvar unlocked</code> says <span class="mono">yes</span>. Nothing harmful happened to Android's slot; you can run the command again.</td></tr>
   <tr><td>The large file stops with an error</td><td>Make sure you are in fastbootd (<code>fastboot getvar is-userspace</code> says <span class="mono">yes</span>) and that no update is pending (section 7, step 5). Then run the <code>-S 128M flash userdata</code> command again.</td></tr>
   <tr><td>After installing, the phone returns to the bootloader, shows a red error screen, or stays dark for more than ten minutes</td><td>Switch it off, start the bootloader, and either try again with <code>fastboot set_active X</code> and <code>fastboot reboot</code> (this resets the phone's count of failed starts), install again into the same X (sections 7 and 8, using the letter on your note, not <code>current-slot</code>), or go back to Android (section 11). Do not wait for the phone to switch back to Android by itself: on this model it may not.</td></tr>
@@ -496,7 +503,7 @@ fastboot reboot</pre>
 <p>If the phone no longer reaches the bootloader at all, or neither slot starts, the <strong>OnePlus MSM Download Tool</strong> rewrites the entire phone with OxygenOS from its emergency download mode (EDL). It is OnePlus's own service tool; OnePlus has never published it officially, and copies circulate in the community (for this phone mainly through the XDA Developers forum thread "OP7TPRO Unbrick tool"). Be careful where you download it from.</p>
 <ul>
   <li>It runs on <strong>Windows only</strong> and needs the Qualcomm USB driver; the phone must show up as <span class="mono">Qualcomm HS-USB QDLoader 9008</span> (not <span class="mono">QHSUSB_BULK</span>, which means the driver is missing).</li>
-  <li>You need the package for your exact model and region (HD1913 is the "EU" variant). The packages contain OxygenOS 10 or 11; update to F.22 afterwards.</li>
+  <li>You need the package for your exact model and region (HD1913 is the "EU" variant). The packages contain OxygenOS 10 or 11; to install Antumbra afterwards, unlock first (section 4), then put F.22 in both slots (section 5).</li>
   <li>To enter EDL: switch the phone off, hold <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> and connect the cable.</li>
   <li>It erases everything and is reported to lock the bootloader again. Never use its "SMT" mode: it can erase the phone's IMEI.</li>
 </ul>

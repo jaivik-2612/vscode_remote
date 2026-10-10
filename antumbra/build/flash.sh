@@ -131,7 +131,8 @@ cat <<WARNING
  * The bootloader must already be unlocked; the unlocked-bootloader warning
    at every boot is expected and cannot be removed.
  * Antumbra runs on the bootloader and firmware of its own slot: install
-   OxygenOS 12 F.22 into both slots first (INSTALL.md, "Before you start").
+   OxygenOS 12 F.22 into both slots after the unlock and before this script
+   (INSTALL.md, "Before you start").
  * Only the HD1913 (EU) variant has been validated by the mainline port, and
    Antumbra itself has not yet been booted on a phone.
 ================================================================================

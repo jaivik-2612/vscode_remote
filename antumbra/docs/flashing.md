@@ -20,35 +20,57 @@ written for non-experts, is `antumbra-install-guide.pdf` in the release
   ran LineageOS, and `fastboot getvar product` says `msmnile` on the
   OnePlus 7 Pro and 7T as well. `flash.sh` also checks every partition
   size.
-- **OxygenOS 12, build F.22, in both slots**: Antumbra runs on the
-  bootloader, TrustZone and modem firmware of its own slot, and the port
-  validated F.22's (the vbmeta asset is F.22's). An A/B update writes only
-  the slot Android is not running from, so after updating to F.22 the
-  other slot, Antumbra's, still holds the previous build. Therefore:
-  update to F.22 (OxygenOS 12: Settings, About device, the version card;
-  OxygenOS 10 and 11: Settings, System, System updates), restart, then install
-  the F.22 full package once more with a local install (the full package
-  as the Oxygen Updater app downloads it; on OxygenOS 12 the *Local
-  install* entry is in the menu of Settings, About device, Up to date,
-  once Developer options are on). Check with `adb shell getprop
-  ro.boot.slot_suffix` before and after: the second install moves
-  Android to the other slot and leaves F.22 in both. Whether OxygenOS
-  accepts installing the build it already runs is unverified; if it
-  refuses, Antumbra runs on the previous build's chain, which nobody has
-  tested. After the last install, restart Android once more and wait:
-  OxygenOS 12 updates with Virtual A/B, and fastbootd refuses `userdata`
-  while an update is still being merged.
-- **Android's slot, written down**: `fastboot getvar current-slot` before
-  the first install names Android's slot. Antumbra's slot `X` is always
-  the other letter, on the first install, on a retry after a failed boot
-  and on every update. After the first install `current-slot` names
-  Antumbra's slot, so it can no longer tell you which one is Android's.
-- **Bootloader unlocked**: Developer options (tap *Build number* seven
-  times), turn on *OEM unlocking* and *USB debugging*, then from the
-  bootloader `fastboot oem unlock` and confirm on the phone with the
+- **Bootloader unlocked, before any OxygenOS update**: Developer options
+  (tap *Build number* seven times), turn on *OEM unlocking*, then from
+  the bootloader `fastboot oem unlock` and confirm on the phone with the
   volume and power keys. This erases the phone. A warning that the
   bootloader is unlocked then shows at every boot; it is expected and
   permanent. Do not lock the bootloader again while Antumbra is installed.
+  Unlock first and update afterwards: OnePlus 7-series phones on OxygenOS
+  12 reportedly refuse the unlock with `FAILED (remote: 'Device cannot be
+  unlocked for technical reason.')`. The reports are for the OnePlus 7 Pro
+  (GM1913); whether the 7T Pro does the same is unknown. A phone still on
+  OxygenOS 10 or 11 therefore stays on it until it is unlocked; for one
+  already on F.22 the order does not matter (its second F.22 install may
+  also come before the unlock). If the unlock is refused, keep the
+  phone as it is (install no update and no other OxygenOS version). The
+  reported way round is a detour: roll back to OxygenOS 11 with OnePlus's
+  full rollback package (a local install, which erases the phone), unlock,
+  then put F.22 in both slots as below. A later release of this document
+  describes it step by step.
+- **OxygenOS 12, build F.22, in both slots, installed after the unlock**:
+  Antumbra runs on the bootloader, TrustZone and modem firmware of its
+  own slot, and the port validated F.22's (the vbmeta asset is F.22's).
+  An A/B update writes only the slot Android is not running from and
+  moves Android to it, so after updating to F.22 the other slot,
+  Antumbra's, still holds the previous build. Therefore, before
+  unlocking, save the F.22 full package (as the Oxygen Updater app
+  downloads it) off the phone: the unlock erases it. After the unlock,
+  set Android up again (no accounts are needed), turn on Developer
+  options and *USB debugging*, and update over the air if an update is
+  offered (OxygenOS 12: Settings, About device, the version card;
+  OxygenOS 10 and 11: Settings, System, System updates; whether an
+  unlocked phone is offered updates is unverified). Then install the F.22
+  full package with a local install (on OxygenOS 12 the *Local install*
+  entry is in the menu of Settings, About device, Up to date, once
+  Developer options are on): once if the phone already runs F.22,
+  otherwise twice. Check with `adb shell getprop ro.boot.slot_suffix`
+  before and after each install: each one moves Android to the other
+  slot, and the last leaves F.22 in both. Whether OxygenOS accepts
+  installing the build it already runs is unverified; if it refuses,
+  Antumbra runs on the previous build's chain, which nobody has tested.
+  After the last install, restart Android once more and wait: OxygenOS
+  12 updates with Virtual A/B, and fastbootd refuses `userdata` while an
+  update is still being merged.
+- **Android's slot, written down**: `fastboot getvar current-slot` before
+  the first install names Android's slot. Read it only after the last
+  F.22 install has finished merging: each install moves Android to the
+  other slot, so a letter noted earlier can be wrong. Antumbra's slot `X`
+  is always the other letter, on the first install, on a retry after a
+  failed boot and on every update. After the first install
+  `current-slot` names Antumbra's slot, so it can no longer tell you
+  which one is Android's. With `flash.sh`, give the first install
+  `--first-install` rather than a remembered letter (below).
 - **A recovery that offers fastbootd** must be in the active slot (stock
   OxygenOS recovery, which Android needs anyway, or LineageOS recovery).
   `fastboot reboot fastboot` must land in fastbootd. Flashing `userdata`
@@ -105,17 +127,21 @@ build/verify-release.sh antumbra-<v>-oneplus-hotdog [minisign-public-key]
 release: clone it and check out the release's tag (`antumbra-v<v>`).
 
 ```sh
-build/flash.sh --release antumbra-<v>-oneplus-hotdog --android-slot <Android's slot>
+build/flash.sh --release antumbra-<v>-oneplus-hotdog --first-install
 ```
 
 It checks the device identity, the unlocked state and every partition
-size, and needs to know Android's slot: `--android-slot` with the letter
-you noted, or the record it keeps per phone (by serial number, in
-`~/.local/share/antumbra/`) after a run on this computer, or
-`--first-install`, which takes the current slot when the phone runs
-Android (refused unless that slot has booted successfully). Without any
-of them it stops rather than guess: once Antumbra is installed, nothing
-the phone reports tells its slot from Android's. `--update` says the
+size, and needs to know Android's slot: `--first-install`, which takes
+the current slot when the phone runs Android (refused unless that slot
+has booted successfully), or `--android-slot` with the letter you noted,
+or the record it keeps per phone (by serial number, in
+`~/.local/share/antumbra/`) after a run on this computer. On the first
+install use `--first-install`, after the last F.22 install has finished
+merging, rather than a letter remembered from earlier: each OxygenOS
+install moved Android to the other slot. Later runs use the record or
+`--android-slot`. Without any of them it stops rather than guess: once
+Antumbra is installed, nothing the phone reports tells its slot from
+Android's. `--update` says the
 phone runs Antumbra now. Antumbra goes into the other slot, never
 Android's; the script shows both slots' boot state and asks you to type
 the target slot's letter. Before writing anything it
