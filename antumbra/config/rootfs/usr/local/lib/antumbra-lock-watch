@@ -1,0 +1,40 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Start the auto-shutdown timer when the user's session locks and stop it
+when it unlocks (logind's Lock/Unlock signals and the LockedHint property
+Phosh sets)."""
+import subprocess
+
+import gi
+
+gi.require_version("Gio", "2.0")
+from gi.repository import Gio, GLib  # noqa: E402
+
+TIMER = "antumbra-auto-shutdown.timer"
+
+
+def set_timer(active):
+    subprocess.run(["systemctl", "start" if active else "stop", TIMER], check=False)
+
+
+def on_signal(_conn, _sender, _path, iface, member, params):
+    if iface == "org.freedesktop.login1.Session":
+        set_timer(member == "Lock")
+    elif iface == "org.freedesktop.DBus.Properties" and member == "PropertiesChanged":
+        changed_iface, changed, _ = params.unpack()
+        if changed_iface == "org.freedesktop.login1.Session" and "LockedHint" in changed:
+            set_timer(bool(changed["LockedHint"]))
+
+
+def main():
+    bus = Gio.bus_get_sync(Gio.BusType.SYSTEM)
+    for member in ("Lock", "Unlock"):
+        bus.signal_subscribe("org.freedesktop.login1", "org.freedesktop.login1.Session", member,
+                             None, None, Gio.DBusSignalFlags.NONE, on_signal)
+    bus.signal_subscribe("org.freedesktop.login1", "org.freedesktop.DBus.Properties", "PropertiesChanged",
+                         None, None, Gio.DBusSignalFlags.NONE, on_signal)
+    GLib.MainLoop().run()
+
+
+if __name__ == "__main__":
+    main()

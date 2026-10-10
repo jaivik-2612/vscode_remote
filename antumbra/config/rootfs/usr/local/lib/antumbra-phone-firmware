@@ -1,0 +1,570 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Give the kernel this phone's own firmware, read from its own partitions.
+
+Antumbra's images contain no proprietary firmware (docs/legal.md). The
+OnePlus 7T Pro already carries every signed image the mainline drivers need,
+in the partitions OxygenOS mounts for the same purpose:
+
+  modem_<slot>      FAT    image/: adsp and modem (split .mdt + .bNN),
+                           wlanmdsp.mbn, the WLAN board files bdwlan.*
+  bluetooth_<slot>  FAT    image/: crbtfw*.tlv, crnv*.bin
+  vendor_<slot>     EROFS (ext4 after some custom ROMs), a logical
+                    partition inside super: firmware/a640_zap.*,
+                    a640_gmu.bin, a630_sqe.fw
+
+The early run (antumbra-phone-firmware.service, before udev's coldplug loads
+the remoteproc drivers) mounts the two FAT partitions read-only for the whole
+session (remoteproc reloads its image after a crash; tqftpserv serves the
+modem on every start), copies the three GPU files out of vendor, builds
+ath10k's board-2.bin from the bdwlan files and its firmware-5.bin
+descriptor, links all of it under LIB in the names the kernel asks for, and
+points firmware_class.path at LIB. Nothing is ever written to the phone's
+partitions. If a partition was missing, --late (after udev) tries again and
+starts the audio DSP if it stayed offline. docs/architecture.md, "Device
+firmware from the phone".
+
+usage: antumbra-phone-firmware [--late | --status] [--any-device] [--wait SECONDS] [--slot a|b]
+       (--any-device and --slot are for tests: the VM, or a slot other than the booted one)
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import sys
+import time
+
+BASE = "/run/antumbra/phone-firmware"
+LIB = os.path.join(BASE, "lib")
+MNT = os.path.join(BASE, "mnt")
+STATUS = os.path.join(BASE, "status.json")
+INCOMPLETE = os.path.join(BASE, "incomplete")
+FW_PATH_PARAM = "/sys/module/firmware_class/parameters/path"
+# The firmware-name prefix in the hotdog device tree (adsp, modem, zap shader).
+PREFIX = "qcom/sm8150/oneplus/hotdog"
+ATH10K = "ath10k/WCN3990/hw1.0"
+DM_NAME = "antumbra-phone-vendor"
+COMPATIBLE = b"oneplus,hotdog"
+FAT_OPTIONS = "ro,nodev,nosuid,noexec,shortname=lower,uid=0,gid=0,fmask=0337,dmask=0227"
+SECTOR = 512
+
+
+def log(msg):
+    print(f"antumbra-phone-firmware: {msg}", flush=True)
+
+
+# --- Android's logical partitions (liblp's metadata_format.h, version 10.0-10.2)
+
+LP_GEOMETRY_MAGIC = 0x616C4467
+LP_HEADER_MAGIC = 0x414C5030
+LP_RESERVED = 4096
+LP_GEOMETRY_SIZE = 4096
+LP_TARGET_LINEAR = 0
+LP_ATTR_DISABLED = 1 << 3
+
+
+class LpError(Exception):
+    pass
+
+
+def _lp_geometry(read):
+    for offset in (LP_RESERVED, LP_RESERVED + LP_GEOMETRY_SIZE):
+        raw = read(offset, 52)
+        if len(raw) < 52:
+            continue
+        magic, size = struct.unpack_from("<II", raw)
+        if magic != LP_GEOMETRY_MAGIC or size != 52:
+            continue
+        if hashlib.sha256(raw[:8] + bytes(32) + raw[40:52]).digest() != raw[8:40]:
+            continue
+        max_size, slots, block = struct.unpack_from("<III", raw, 40)
+        if max_size % SECTOR or not 0 < slots <= 8 or not max_size or block % SECTOR:
+            continue
+        return max_size, slots
+    raise LpError("no valid metadata geometry")
+
+
+def _lp_metadata(raw):
+    if len(raw) < 128:
+        raise LpError("short metadata header")
+    magic, major, minor, hsize = struct.unpack_from("<IHHI", raw)
+    if magic != LP_HEADER_MAGIC or major != 10 or minor > 2:
+        raise LpError("unsupported metadata header")
+    if hsize != (256 if minor >= 2 else 128) or hsize > len(raw):
+        raise LpError("bad metadata header size")
+    if hashlib.sha256(raw[:12] + bytes(32) + raw[44:hsize]).digest() != raw[12:44]:
+        raise LpError("metadata header checksum mismatch")
+    (tables_size,) = struct.unpack_from("<I", raw, 44)
+    tables = raw[hsize:hsize + tables_size]
+    if len(tables) != tables_size or hashlib.sha256(tables).digest() != raw[48:80]:
+        raise LpError("metadata tables checksum mismatch")
+
+    def table(index, entry_min):
+        offset, count, size = struct.unpack_from("<III", raw, 80 + 12 * index)
+        if size < entry_min or offset + count * size > tables_size:
+            raise LpError("metadata table out of bounds")
+        return [tables[offset + i * size: offset + (i + 1) * size] for i in range(count)]
+
+    extents = [struct.unpack_from("<QIQI", e) for e in table(1, 24)]
+    devices = [e[24:60].rstrip(b"\0").decode("ascii", "replace") for e in table(3, 64)]
+    partitions = {}
+    for entry in table(0, 52):
+        name = entry[:36].rstrip(b"\0").decode("ascii", "replace")
+        attributes, first, count = struct.unpack_from("<III", entry, 36)
+        if first + count > len(extents):
+            raise LpError(f"extents of {name} out of bounds")
+        if not attributes & LP_ATTR_DISABLED:
+            partitions[name] = extents[first:first + count]
+    return partitions, devices
+
+
+def lp_partitions(read, slot_number):
+    """Partitions of one metadata slot: {name: [(sectors, type, start, source)]}
+    and the block device names. read(offset, length) reads super."""
+    max_size, slots = _lp_geometry(read)
+    slot_number = min(slot_number, slots - 1)
+    first = LP_RESERVED + 2 * LP_GEOMETRY_SIZE
+    errors = []
+    for offset in (first + slot_number * max_size, first + (slots + slot_number) * max_size):
+        try:
+            return _lp_metadata(read(offset, max_size))
+        except LpError as e:
+            errors.append(str(e))
+    raise LpError("; ".join(errors))
+
+
+def dm_linear_table(extents, super_dev, super_sectors):
+    """The device-mapper table that maps a logical partition, or None when
+    it is not a plain linear mapping inside the first (only) super device."""
+    lines, start = [], 0
+    for sectors, kind, target, source in extents:
+        if kind != LP_TARGET_LINEAR or source != 0 or not sectors or target + sectors > super_sectors:
+            return None
+        lines.append(f"{start} {sectors} linear {super_dev} {target}")
+        start += sectors
+    return "\n".join(lines) if lines else None
+
+
+# --- ath10k's files for the WCN3990 (drivers/net/wireless/ath/ath10k/hw.h)
+
+def _ie(ident, body, pad):
+    return struct.pack("<II", ident, len(body)) + body + pad * (-len(body) % 4)
+
+
+def board2(files):
+    """board-2.bin from the modem partition's bdwlan.* files, as
+    ath10k-bdencoder lays it out: one BOARD element per file, named
+    "bus=snoc,qmi-board-id=<hex>" (bdwlan.bin is board 0xff, bdwlan.bXX
+    0xXX, bdwlan.NNN 0xNNN), in name order. files: {name: bytes}."""
+    blob = b"QCA-ATH10K-BOARD\0" + b"\x6d" * 3
+    count = 0
+    for name in sorted(files):
+        ext = name.split(".", 1)[1] if name.startswith("bdwlan.") else ""
+        try:
+            board = 0xFF if ext == "bin" else int(ext[1:] if ext.startswith("b") else ext, 16)
+        except ValueError:
+            continue
+        label = f"bus=snoc,qmi-board-id={board:x}".encode()
+        blob += _ie(0, _ie(0, label, b"\x6d") + _ie(1, files[name], b"\x6d"), b"\x6d")
+        count += 1
+    return blob if count else None
+
+
+def firmware5():
+    """firmware-5.bin: no code, only the description ath10k needs of the
+    WCN3990's firmware (features WOWLAN, MGMT_TX_BY_REF, NON_BMI and
+    SINGLE_CHAN_INFO_PER_CHANNEL; WMI op version 4 = TLV; HTT op version 3 =
+    TLV), as the port's working configuration has it."""
+    features = 0
+    for bit in (6, 18, 19, 20):
+        features |= 1 << bit
+    return (b"QCA-ATH10K\0" + b"\x77"
+            + _ie(1, struct.pack("<I", 0x6622BC6A), b"\x77")
+            + _ie(2, features.to_bytes(3, "little"), b"\x77")
+            + _ie(5, struct.pack("<I", 4), b"\x77")
+            + _ie(6, struct.pack("<I", 3), b"\x77"))
+
+
+# --- the link farm --------------------------------------------------------------
+
+def _link(target, link):
+    os.makedirs(os.path.dirname(link), mode=0o700, exist_ok=True)
+    if os.path.lexists(link):
+        os.unlink(link)
+    os.symlink(target, link)
+
+
+def _write(path, data):
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.chmod(tmp, 0o400)
+    os.replace(tmp, path)
+
+
+def link_modem(image, lib):
+    """Link every entry of the modem partition's image/ directory under the
+    device tree's prefix (tqftpserv looks there for what the modem asks, as
+    <firmware_class.path>/<prefix>/<file>), plus <name>.mbn for each split
+    <name>.mdt: the kernel's MDT loader takes the .mbn name the device tree
+    gives, sees a split image and loads <name>.bNN beside it."""
+    names = os.listdir(image)
+    lower = {n.lower(): n for n in names}
+    for name in names:
+        _link(os.path.join(image, name), os.path.join(lib, PREFIX, name.lower()))
+    for name in names:
+        base, ext = os.path.splitext(name.lower())
+        if ext == ".mdt" and base + ".mbn" not in lower:
+            _link(os.path.join(image, name), os.path.join(lib, PREFIX, base + ".mbn"))
+    found = {n for n in ("adsp", "modem", "wlanmdsp") if os.path.lexists(os.path.join(lib, PREFIX, n + ".mbn"))}
+    bd = {}
+    for name in names:
+        if name.lower().startswith("bdwlan."):
+            with open(os.path.join(image, name), "rb") as f:
+                bd[name.lower()] = f.read()
+    blob = board2(bd)
+    if blob:
+        _write(os.path.join(lib, ATH10K, "board-2.bin"), blob)
+        found.add("board-2")
+    _write(os.path.join(lib, ATH10K, "firmware-5.bin"), firmware5())
+    return found
+
+
+def link_bluetooth(image, lib):
+    found = set()
+    for name in os.listdir(image):
+        low = name.lower()
+        if (low.startswith("crbtfw") and low.endswith(".tlv")) or (low.startswith("crnv") and low.endswith(".bin")):
+            _link(os.path.join(image, name), os.path.join(lib, "qca", low))
+            found.add(low)
+    return found
+
+
+def copy_gpu(firmware, lib):
+    """Copy the GPU's files out of vendor/firmware (vendor is unmounted again
+    afterwards): the zap shader as one file when vendor has the squashed
+    .elf, else its .mdt with the .bNN segments beside it."""
+    entries = {n.lower(): os.path.join(firmware, n) for n in os.listdir(firmware)}
+    found = set()
+    dest = os.path.join(lib, PREFIX)
+    if "a640_zap.elf" in entries:
+        shutil.copyfile(entries["a640_zap.elf"], os.path.join(dest, "a640_zap.mbn"))
+        found.add("a640_zap")
+    elif "a640_zap.mdt" in entries:
+        for low, path in entries.items():
+            if low.startswith("a640_zap.b") and low[10:].isdigit():
+                shutil.copyfile(path, os.path.join(dest, low))
+        shutil.copyfile(entries["a640_zap.mdt"], os.path.join(dest, "a640_zap.mbn"))
+        found.add("a640_zap")
+    for name in ("a640_gmu.bin", "a630_sqe.fw"):
+        if name in entries:
+            shutil.copyfile(entries[name], os.path.join(lib, "qcom", name))
+            found.add(name.split(".")[0])
+    for root, _dirs, files in os.walk(lib):
+        for f in files:
+            p = os.path.join(root, f)
+            if not os.path.islink(p):
+                os.chmod(p, 0o400)
+    return found
+
+
+# --- the phone ----------------------------------------------------------------------
+
+def run(*cmd, **kw):
+    return subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **kw)
+
+
+def is_hotdog():
+    try:
+        with open("/proc/device-tree/compatible", "rb") as f:
+            return COMPATIBLE in f.read().split(b"\0")
+    except OSError:
+        return False
+
+
+def booted_slot():
+    """The slot the bootloader started: androidboot.slot_suffix (or
+    androidboot.slot) on the command line, else the active slot qbootctl
+    reads from the boot partitions' GPT attributes, else None."""
+    try:
+        with open("/proc/cmdline") as f:
+            for word in f.read().split():
+                key, _, value = word.partition("=")
+                if key == "androidboot.slot_suffix" and value in ("_a", "_b"):
+                    return value
+                if key == "androidboot.slot" and value in ("a", "b"):
+                    return "_" + value
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(["qbootctl", "-a"], capture_output=True, text=True, timeout=10).stdout
+        m = re.search(r"Active slot:\s*_?([ab])\b", out)
+        if m:
+            return "_" + m.group(1)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def slot_order(booted=None):
+    """The booted slot first, then the other: a slot's bootloader, TrustZone
+    and modem firmware come from the same update. Unknown: B first, where
+    flash.sh puts Antumbra when Android runs from A."""
+    current = booted or "_b"
+    return [current, "_a" if current == "_b" else "_b"]
+
+
+def partitions():
+    """{GPT partition name: /dev node}, from sysfs (udev may not run yet)."""
+    found = {}
+    for dev in sorted(os.listdir("/sys/class/block")):
+        try:
+            with open(f"/sys/class/block/{dev}/uevent") as f:
+                info = dict(l.rstrip("\n").split("=", 1) for l in f if "=" in l)
+        except OSError:
+            continue
+        name = info.get("PARTNAME")
+        if name and name not in found and os.path.exists("/dev/" + info.get("DEVNAME", dev)):
+            found[name] = "/dev/" + info.get("DEVNAME", dev)
+    return found
+
+
+def wait_partitions(wanted, seconds):
+    deadline = time.monotonic() + seconds
+    while True:
+        found = partitions()
+        if all(any(n + s in found for s in ("_a", "_b")) for n in wanted if n != "super") \
+                and ("super" not in wanted or "super" in found) or time.monotonic() >= deadline:
+            return found
+        time.sleep(0.25)
+
+
+def mounted(path):
+    with open("/proc/self/mounts") as f:
+        return any(line.split()[1] == path for line in f)
+
+
+def mount_fat(dev, where, required):
+    """Mount a FAT firmware partition read-only and keep it if image/ holds
+    one of the required files."""
+    os.makedirs(where, mode=0o700, exist_ok=True)
+    run("blockdev", "--setro", dev)
+    run("mount", "-t", "vfat", "-o", FAT_OPTIONS, dev, where)
+    image = os.path.join(where, "image")
+    try:
+        names = {n.lower() for n in os.listdir(image)}
+    except OSError:
+        names = set()
+    if names & required:
+        return image
+    run("umount", where)
+    return None
+
+
+def collect_fat(kind, parts, slots, required, link):
+    where = os.path.join(MNT, kind)
+    if mounted(where):  # a second run in the same boot starts afresh
+        run("umount", where)
+    for s in slots:
+        dev = parts.get(kind + s)
+        if not dev:
+            continue
+        try:
+            image = mount_fat(dev, where, required)
+        except (subprocess.CalledProcessError, OSError) as e:
+            log(f"{kind}{s}: cannot mount: {getattr(e, 'stderr', '') or e}")
+            continue
+        if image:
+            got = link(image, LIB)
+            log(f"{kind}{s}: {', '.join(sorted(got))}")
+            return {"slot": s[1:], "partition": kind + s, "files": sorted(got)}
+        log(f"{kind}{s}: no firmware in image/")
+    return None
+
+
+def _read_dev(dev):
+    def read(offset, length):
+        with open(dev, "rb") as f:
+            f.seek(offset)
+            return f.read(length)
+    return read
+
+
+def collect_vendor(parts, slots):
+    """Map vendor_<slot> out of super (read-only device-mapper), mount it
+    read-only, copy the GPU's files, and undo both."""
+    sup = parts.get("super")
+    if not sup:
+        return None
+    sectors = int(open(f"/sys/class/block/{os.path.basename(sup)}/size").read())
+    read = _read_dev(sup)
+    where = os.path.join(MNT, "vendor")
+    os.makedirs(where, mode=0o700, exist_ok=True)
+    tried = set()
+    for slot_number in (0 if slots[0] == "_a" else 1, 1 if slots[0] == "_a" else 0):
+        try:
+            table_parts, _devices = lp_partitions(read, slot_number)
+        except (LpError, OSError) as e:
+            log(f"super: metadata slot {slot_number}: {e}")
+            continue
+        for s in slots:
+            name = "vendor" + s
+            table = dm_linear_table(table_parts.get(name, []), sup, sectors)
+            if not table or (name, table) in tried:
+                continue
+            tried.add((name, table))
+            got = _copy_vendor(name, table, where)
+            if got:
+                log(f"{name} (metadata slot {slot_number}): {', '.join(sorted(got))}")
+                return {"slot": s[1:], "partition": name, "metadata_slot": slot_number, "files": sorted(got)}
+    return None
+
+
+def ensure_erofs():
+    """Load the EROFS module by name (modprobe.d keeps mount from loading it
+    through its alias), unless the kernel already knows the file system."""
+    with open("/proc/filesystems") as f:
+        if any(line.split()[-1:] == ["erofs"] for line in f):
+            return
+    run("modprobe", "erofs")
+
+
+def _copy_vendor(name, table, where):
+    dm = "/dev/mapper/" + DM_NAME
+    if mounted(where):
+        subprocess.run(["umount", where], capture_output=True)
+    remove_mapping()  # a stale one from an earlier run
+    try:
+        run("dmsetup", "create", DM_NAME, "--readonly", "--noudevsync", input=table + "\n")
+        run("dmsetup", "mknodes", DM_NAME)
+        head = _read_dev(dm)(1024, 64)
+        if head[:4] == struct.pack("<I", 0xE0F5E1E2):
+            ensure_erofs()
+            fstype, options = "erofs", "ro,nodev,nosuid,noexec"
+        elif head[56:58] == struct.pack("<H", 0xEF53):
+            fstype, options = "ext4", "ro,noload,nodev,nosuid,noexec"
+        else:
+            log(f"{name}: neither EROFS nor ext4")
+            return None
+        run("mount", "-t", fstype, "-o", options, dm, where)
+        try:
+            firmware = os.path.join(where, "firmware")
+            return copy_gpu(firmware, LIB) if os.path.isdir(firmware) else None
+        finally:
+            run("umount", where)
+    except (subprocess.CalledProcessError, OSError) as e:
+        log(f"{name}: {getattr(e, 'stderr', '') or e}")
+        return None
+    finally:
+        remove_mapping()
+
+
+def remove_mapping():
+    """Remove the vendor mapping and its /dev/mapper node (without udev
+    running, mknodes is what removes a stale node)."""
+    subprocess.run(["dmsetup", "remove", "--retry", "--noudevsync", DM_NAME], capture_output=True)
+    subprocess.run(["dmsetup", "mknodes", DM_NAME], capture_output=True)
+
+
+def start_offline_adsp():
+    """The audio DSP boots when its driver probes; started here when its
+    firmware arrived after that (remoteproc does not retry)."""
+    if not os.path.lexists(os.path.join(LIB, PREFIX, "adsp.mbn")):
+        return
+    for rp in os.listdir("/sys/class/remoteproc"):
+        d = os.path.join("/sys/class/remoteproc", rp)
+        try:
+            if open(d + "/name").read().strip() == "adsp" and open(d + "/state").read().strip() == "offline":
+                with open(d + "/state", "w") as f:
+                    f.write("start")
+                log(f"started {rp} (adsp)")
+        except OSError as e:
+            log(f"{rp}: {e}")
+
+
+def load_status():
+    try:
+        with open(STATUS) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_status(status):
+    status["complete"] = all(status.get(k) for k in ("modem", "bluetooth", "vendor"))
+    tmp = STATUS + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(status, f, indent=1, sort_keys=True)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, STATUS)
+    if status["complete"]:
+        if os.path.exists(INCOMPLETE):
+            os.unlink(INCOMPLETE)
+    else:
+        open(INCOMPLETE, "w").close()
+
+
+def main(argv):
+    late = "--late" in argv
+    if "--status" in argv:
+        print(json.dumps(load_status(), indent=1, sort_keys=True))
+        return 0
+    wait = 30.0 if late else 10.0
+    if "--wait" in argv:
+        wait = float(argv[argv.index("--wait") + 1])
+    if "--any-device" not in argv and not is_hotdog():
+        log("not a OnePlus 7T Pro: nothing to do")
+        return 0
+    os.makedirs(BASE, mode=0o755, exist_ok=True)
+    os.makedirs(LIB, mode=0o700, exist_ok=True)
+    os.makedirs(os.path.join(LIB, PREFIX), mode=0o700, exist_ok=True)
+    os.makedirs(os.path.join(LIB, "qcom"), mode=0o700, exist_ok=True)
+    os.makedirs(MNT, mode=0o700, exist_ok=True)
+    status = load_status() if late else {}
+    booted = booted_slot()
+    if "--slot" in argv:
+        value = argv[argv.index("--slot") + 1]
+        if value not in ("a", "b"):
+            log("--slot: a or b")
+            return 2
+        booted = "_" + value
+    slots = slot_order(booted)
+    status["booted_slot"] = booted[1:] if booted else None
+    status["slots"] = [s[1:] for s in slots]
+    wanted = [k for k in ("modem", "bluetooth") if not status.get(k)]
+    if not status.get("vendor"):
+        wanted.append("super")
+    try:
+        parts = wait_partitions(wanted, wait)
+        collectors = (
+            ("modem", lambda: collect_fat("modem", parts, slots, {"modem.mdt", "modem.mbn", "adsp.mdt", "adsp.mbn"}, link_modem)),
+            ("bluetooth", lambda: collect_fat("bluetooth", parts, slots, {"crbtfw21.tlv", "crnv21.bin"}, link_bluetooth)),
+            ("vendor", lambda: collect_vendor(parts, slots)),
+        )
+        for kind, collect in collectors:
+            if status.get(kind):
+                continue
+            try:
+                status[kind] = collect()
+            except Exception as e:  # noqa: BLE001 - one part failing must not stop the others
+                log(f"{kind}: {e}")
+                status[kind] = None
+    finally:
+        # Searched first, file by file; Debian's /lib/firmware stays behind it.
+        with open(FW_PATH_PARAM, "w") as f:
+            f.write(LIB)
+        save_status(status)
+    missing = [k for k in ("modem", "bluetooth", "vendor") if not status.get(k)]
+    if missing:
+        log("not found: " + ", ".join(missing) + " (Wi-Fi needs modem; graphics acceleration needs vendor)")
+    if late:
+        start_offline_adsp()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

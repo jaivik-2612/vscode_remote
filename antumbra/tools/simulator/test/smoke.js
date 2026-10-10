@@ -1,0 +1,21 @@
+const path = require('path');
+const { launch, newPage, IPHONE, DESKTOP, SHOTS } = require('./harness');
+(async () => {
+  const b = await launch();
+  const errors = [];
+  const { page } = await newPage(b, IPHONE, { errors });
+  await page.screenshot({ path: path.join(SHOTS, 's00-intro.png') });
+  await page.tap('#introGo');
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: path.join(SHOTS, 's01-orange.png') });
+  await page.waitForSelector('.w-root', { timeout: 10000 });
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: path.join(SHOTS, 's02-welcome.png') });
+  const ov = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth }));
+  console.log('overflow', ov);
+  const { page: d } = await newPage(b, DESKTOP, { errors });
+  await d.waitForTimeout(500);
+  await d.screenshot({ path: path.join(SHOTS, 's03-desktop-intro.png') });
+  console.log(errors.join('\n') || 'no errors');
+  await b.close();
+})();

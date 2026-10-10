@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run by the host's systemd-shutdown (the initramfs copy runs the
+# pre-shutdown hook instead): drop caches once more.
+echo 3 > /proc/sys/vm/drop_caches

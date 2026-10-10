@@ -1,0 +1,7 @@
+# Sourced by the greeter session and the user session.
+# A virtual machine (the qemu-virt test profile, docs/vm-testing.md) has no
+# 3D-capable GPU, and GTK 4's GL renderer then never draws a window; use its
+# software renderer there. Real hardware keeps GTK's default.
+if systemd-detect-virt --vm --quiet 2>/dev/null; then
+    export GSK_RENDERER=cairo
+fi

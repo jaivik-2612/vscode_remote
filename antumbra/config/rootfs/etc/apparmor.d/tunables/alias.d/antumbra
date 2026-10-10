@@ -1,0 +1,5 @@
+# Ported from Tails' tunables/alias.d/tails for Debian trixie's live-boot
+# paths: files of the read-only squashfs and of the RAM overlay may be seen
+# under these paths, and profiles must match them as if they were under /.
+alias / -> /run/live/overlay/rw/,
+alias / -> /run/live/rootfs/filesystem.squashfs/,

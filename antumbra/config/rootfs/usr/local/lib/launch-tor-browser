@@ -1,0 +1,36 @@
+#!/bin/sh
+# Adapted from Tails' launch-tor-browser and tails-shell-library/tor-browser.sh
+# (without the Flatpak sandbox, which is not yet ported). Runs as the user
+# inside the tbb network namespace: 127.0.0.1:9050 and :951 there are the
+# host's SocksPort and control-port filter.
+export PATH='/usr/local/bin:/usr/bin:/bin'
+set -eu
+TBB_INSTALL=/usr/local/lib/tor-browser
+TBB_PROFILE_SKEL=/etc/tor-browser/profile
+PROFILE="${HOME}/.tor-browser/profile.default"
+
+if [ ! -d "${PROFILE}" ]; then
+    mkdir -p "$(dirname "${PROFILE}")"
+    cp -a "${TBB_PROFILE_SKEL}" "${PROFILE}"
+    cp /usr/share/antumbra/tor-browser-user.js "${PROFILE}/user.js"
+fi
+TMPDIR="${PROFILE}/tmp"; [ -d "${TMPDIR}" ] || mkdir -m 0700 "${TMPDIR}"; export TMPDIR
+
+export LD_LIBRARY_PATH="${TBB_INSTALL}"
+export TOR_SKIP_LAUNCH=1
+export TOR_CONTROL_PORT=951
+export TOR_SOCKS_PORT=9050
+export TOR_CONTROL_COOKIE_AUTH_FILE="${HOME}/.tor/control_auth_cookie"
+export TOR_SKIP_CONTROLPORTTEST=1
+export MOZ_ENABLE_WAYLAND=1
+export GSETTINGS_BACKEND=memory
+# Tor Browser's own fontconfig (fonts/fonts.conf) lists only the fonts it
+# bundles (<dir prefix="cwd">fonts</dir>, hence the cd below), so fonts
+# installed in the system, such as Roboto, do not change its font set. A
+# missing directory here would make fontconfig fall back to /etc/fonts.
+export FONTCONFIG_PATH="${TBB_INSTALL}/fonts"
+export FONTCONFIG_FILE="fonts.conf"
+export __GL_SHADER_DISK_CACHE=0
+unset SESSION_MANAGER
+cd "${TBB_INSTALL}"
+exec "${TBB_INSTALL}/firefox.real" --class "Tor Browser" --name "Tor Browser" --profile "${PROFILE}" "$@"

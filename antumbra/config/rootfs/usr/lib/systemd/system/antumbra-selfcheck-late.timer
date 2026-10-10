@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the late privacy self-check after the system settled
+
+[Timer]
+OnBootSec=4min
+OnUnitActiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

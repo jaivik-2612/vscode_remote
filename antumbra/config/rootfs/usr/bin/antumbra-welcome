@@ -1,0 +1,338 @@
+#!/usr/bin/python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Antumbra Welcome screen: the Tails Welcome Screen in phone form.
+
+Runs as the greeter user under a bare phoc compositor before any user
+process exists. Writes the chosen settings (Tails' file format), waits for
+the root-side applier, then asks greetd to start the user's Phosh session.
+
+  antumbra-welcome [--demo]        # --demo: run anywhere, write to a temp dir, no greetd
+  antumbra-welcome --self-test     # build the UI, write default settings to a temp dir, exit
+"""
+import os
+import sys
+import tempfile
+import threading
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
+
+from antumbra import settings as S  # noqa: E402
+
+DEMO = "--demo" in sys.argv or "--self-test" in sys.argv
+SELF_TEST = "--self-test" in sys.argv
+STATUS_FILE = "/run/antumbra/selfcheck.status"
+DATA_STATE_FILE = "/run/antumbra/persistence-state"   # written by antumbra-persistence status at boot
+TOR_BROWSER_WARNING = ("Tor Browser for arm64 Linux exists only in Tor Project's alpha channel. "
+                       "Tor Project advises people at risk not to rely on alpha releases.")
+# Android apps exist only in images built with ANTUMBRA_ANDROID=1 (shown in
+# --demo and --self-test too, so that the switch can be tried anywhere).
+ANDROID_AVAILABLE = os.path.isdir("/usr/share/antumbra/android") or DEMO
+ANDROID_WARNING = "A weaker sandbox than the rest of Antumbra: use only apps you trust."
+
+
+def selfcheck_failures():
+    try:
+        with open(STATUS_FILE, encoding="utf-8") as f:
+            return [l.strip() for l in f if " FAIL" in l]
+    except OSError:
+        return []
+
+
+def persistence_state():
+    """'none' (no volume), 'luks' (encrypted volume present), 'unknown'."""
+    try:
+        with open(DATA_STATE_FILE, encoding="utf-8") as f:
+            return f.read().strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+class WelcomeWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Welcome to Antumbra")
+        self.set_default_size(480, 1000)
+        self.model = S.WelcomeSettings()
+        self.android_row = self.android_keep_row = None
+
+        view = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        header.set_show_end_title_buttons(False)
+        header.set_show_start_title_buttons(False)
+        view.add_top_bar(header)
+        self.set_content(view)
+
+        self.banner = Adw.Banner()
+        failures = selfcheck_failures()
+        if failures:
+            self.banner.set_title("Privacy self-check failed: " + "; ".join(failures)[:200])
+            self.banner.set_revealed(True)
+        view.add_top_bar(self.banner)
+
+        page = Adw.PreferencesPage()
+        view.set_content(page)
+
+        # --- Persistent Storage ------------------------------------------------
+        g = Adw.PreferencesGroup(title="Persistent Storage",
+                                 description="Encrypted storage that survives shutdown. Everything else is forgotten.")
+        page.add(g)
+        state = persistence_state()
+        self.pers_combo = Adw.ComboRow(title="Persistent Storage")
+        choices = Gtk.StringList()
+        self.pers_choices = []
+        choices.append("Do not use (amnesic session)"); self.pers_choices.append("none")
+        if state == "luks":
+            choices.append("Unlock"); self.pers_choices.append("unlock")
+        else:
+            choices.append("Create (erases the data partition)"); self.pers_choices.append("create")
+        self.pers_combo.set_model(choices)
+        self.pers_combo.connect("notify::selected", self.on_persistence_changed)
+        g.add(self.pers_combo)
+        self.pers_pass = Adw.PasswordEntryRow(title="Persistent Storage passphrase")
+        self.pers_pass.set_sensitive(False)
+        g.add(self.pers_pass)
+        self.pers_pass2 = Adw.PasswordEntryRow(title="Repeat passphrase")
+        self.pers_pass2.set_sensitive(False)
+        self.pers_pass2.set_visible(state != "luks")
+        g.add(self.pers_pass2)
+
+        # --- Network ---------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Network and Tor")
+        page.add(g)
+        self.mac_row = Adw.SwitchRow(title="MAC address anonymization",
+                                     subtitle="Random Wi-Fi hardware address for this session")
+        self.mac_row.set_active(True)
+        g.add(self.mac_row)
+        self.net_combo = Adw.ComboRow(title="Connect to Tor")
+        self.net_combo.set_model(Gtk.StringList.new([
+            "Automatically", "Through bridges (enter below)", "Offline mode (no network at all)"]))
+        self.net_combo.connect("notify::selected", self.on_network_changed)
+        g.add(self.net_combo)
+        # One line: bridges pasted on several lines keep their line breaks,
+        # which collect() turns into ';' (S.normalise_bridges). The title
+        # fits the phone's 480-pixel width; a longer one is cut short.
+        self.bridges_row = Adw.EntryRow(title="Bridges: obfs4, webtunnel or meek_lite, separated by ;")
+        self.bridges_row.set_sensitive(False)
+        g.add(self.bridges_row)
+
+        # --- Security -----------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Security",
+                                 description="A passphrase locks the screen. Without one, anyone who picks up the phone can use the session.")
+        page.add(g)
+        self.pass_row = Adw.PasswordEntryRow(title="Screen-lock passphrase (recommended)")
+        g.add(self.pass_row)
+        self.pass2_row = Adw.PasswordEntryRow(title="Repeat passphrase")
+        g.add(self.pass2_row)
+        self.admin_row = Adw.SwitchRow(title="Administration (sudo) with that passphrase",
+                                       subtitle="Off by default, as in Tails")
+        g.add(self.admin_row)
+
+        # --- Android apps (images built with ANTUMBRA_ANDROID=1) ----------------------
+        if ANDROID_AVAILABLE:
+            g = Adw.PreferencesGroup(title="Android apps",
+                                     description="Android 13 (LineageOS) in a container, with F-Droid and no Google apps. "
+                                                 "Its traffic goes only through Tor. Off by default.")
+            page.add(g)
+            # Alt+A toggles it from a keyboard (the VM test uses that too).
+            self.android_row = Adw.SwitchRow(title="_Android apps (experimental)", use_underline=True,
+                                             subtitle=ANDROID_WARNING)
+            self.android_row.connect("notify::active", self.on_persistence_changed)
+            g.add(self.android_row)
+            self.android_keep_row = Adw.SwitchRow(title="Keep Android apps and data",
+                                                  subtitle="In Persistent Storage, with Android's own usage history")
+            self.android_keep_row.set_sensitive(False)
+            g.add(self.android_keep_row)
+
+        # --- Notes ------------------------------------------------------------------------
+        g = Adw.PreferencesGroup(title="Before you start")
+        page.add(g)
+        for text in (TOR_BROWSER_WARNING,
+                     "The bootloader is unlocked: an attacker with the phone in hand can replace the system. The orange warning at boot is expected.",
+                     "The cellular radio stays off. Only Wi-Fi is used, through Tor."):
+            row = Adw.ActionRow(title=text)
+            row.set_title_lines(0)
+            g.add(row)
+
+        self.error_label = Gtk.Label(wrap=True, css_classes=["error"])
+        g = Adw.PreferencesGroup()
+        g.add(self.error_label)
+        page.add(g)
+
+        self.start_button = Gtk.Button(label="Start Antumbra", css_classes=["suggested-action", "pill"],
+                                       halign=Gtk.Align.CENTER, margin_bottom=24, margin_top=12)
+        self.start_button.connect("clicked", self.on_start)
+        view.add_bottom_bar(self.start_button)
+        if not DEMO and os.path.exists(S.APPLIED_MARKER):
+            # Settings were applied earlier this boot (the user logged out):
+            # only a new session can be started, settings cannot change.
+            page.set_sensitive(False)
+            self.start_button.set_label("Start a new session")
+
+    def on_persistence_changed(self, *_):
+        choice = self.pers_choices[self.pers_combo.get_selected()]
+        self.pers_pass.set_sensitive(choice != "none")
+        self.pers_pass2.set_sensitive(choice == "create")
+        # Android's data can be kept only with Android on and Persistent Storage in use.
+        if self.android_keep_row is not None:
+            self.android_keep_row.set_sensitive(choice != "none" and self.android_row.get_active())
+
+    def on_network_changed(self, *_):
+        self.bridges_row.set_sensitive(self.net_combo.get_selected() == 1)
+
+    def collect(self):
+        m = self.model
+        m.persistence = self.pers_choices[self.pers_combo.get_selected()]
+        m.persistence_passphrase = self.pers_pass.get_text()
+        if m.persistence == "create":
+            if len(m.persistence_passphrase) < 12:
+                raise ValueError("The Persistent Storage passphrase needs at least 12 characters.")
+            if m.persistence_passphrase != self.pers_pass2.get_text():
+                raise ValueError("The Persistent Storage passphrases differ.")
+        if m.persistence == "unlock" and not m.persistence_passphrase:
+            raise ValueError("Enter the Persistent Storage passphrase, or choose not to use it.")
+        m.mac_spoof = self.mac_row.get_active()
+        m.network = ["direct", "bridges", "offline"][self.net_combo.get_selected()]
+        m.bridges = S.normalise_bridges(self.bridges_row.get_text())
+        # bridge_lines() refuses, saying why, a bridge Tor cannot use here
+        # (snowflake), as antumbra-tor-connect would after the session starts.
+        if m.network == "bridges" and not S.bridge_lines(m.bridges.split(";")):
+            raise ValueError("Enter at least one bridge line, or connect automatically.")
+        m.user_password = self.pass_row.get_text()
+        if m.user_password != self.pass2_row.get_text():
+            raise ValueError("The screen-lock passphrases differ.")
+        if m.user_password and len(m.user_password) < 6:
+            raise ValueError("The screen-lock passphrase needs at least 6 characters.")
+        m.admin = self.admin_row.get_active()
+        if m.admin and not m.user_password:
+            raise ValueError("Administration needs a passphrase.")
+        if self.android_row is not None:
+            m.android = self.android_row.get_active()
+            m.android_persistent = m.android and self.android_keep_row.get_active() and m.persistence != "none"
+
+    def on_start(self, _button):
+        self.error_label.set_text("")
+        try:
+            self.collect()
+        except ValueError as e:
+            self.error_label.set_text(str(e))
+            return
+        self.start_button.set_sensitive(False)
+        self.start_button.set_label("Applying settings…")
+        threading.Thread(target=self.apply_and_start, daemon=True).start()
+
+    def apply_and_start(self):
+        try:
+            if DEMO:
+                root = tempfile.mkdtemp(prefix="antumbra-welcome-demo-")
+                self.model.write(root)
+                GLib.idle_add(self.finish_demo, root)
+                return
+            if not os.path.exists(S.APPLIED_MARKER):
+                # After a failure (a wrong passphrase) the user starts again;
+                # the earlier report stays until the applier runs again, so
+                # only a report other than the one there now is this
+                # attempt's. Start stays insensitive until the applier is
+                # done, and nothing is written again while it has not
+                # finished an attempt (after a time-out).
+                S.wait_for_applier(S.submit(self.model))
+            from antumbra.greetd import Greetd
+            env = ["XDG_SESSION_TYPE=wayland", "XDG_CURRENT_DESKTOP=Phosh:GNOME",
+                   "XDG_SESSION_DESKTOP=phosh", "GDMSESSION=phosh"]
+            Greetd().start_user_session("amnesia", ["/usr/libexec/antumbra-session"], env)
+            GLib.idle_add(self.get_application().quit)
+        except Exception as e:  # noqa: BLE001
+            GLib.idle_add(self.show_error, str(e))
+
+    def finish_demo(self, root):
+        self.error_label.set_text(f"Demo: settings written to {root}")
+        self.start_button.set_label("Done (demo)")
+
+    def show_error(self, text):
+        self.error_label.set_text(text)
+        self.start_button.set_sensitive(True)
+        self.start_button.set_label("Start Antumbra")
+
+
+class WelcomeApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id="org.antumbra.Welcome")
+
+    def do_startup(self):
+        # Chain up first: Adw.Application.do_startup initialises libadwaita
+        # and its style manager, which the theme below builds on.
+        Adw.Application.do_startup(self)
+        # Antumbra's look (docs/architecture.md, "Interface theme"). Always
+        # dark, whatever the colour scheme setting, so the stylesheet's dark
+        # surfaces never meet light text. The stylesheet sits next to this
+        # script's prefix: /usr/share/antumbra/theme in the image,
+        # config/rootfs/usr/share/antumbra/theme in a checkout (--demo).
+        Adw.StyleManager.get_default().set_color_scheme(Adw.ColorScheme.FORCE_DARK)
+        css = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           os.pardir, "share", "antumbra", "theme", "welcome.css")
+        if os.path.exists(css):
+            provider = Gtk.CssProvider()
+            provider.load_from_path(os.path.normpath(css))
+            Gtk.StyleContext.add_provider_for_display(
+                Gdk.Display.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def do_activate(self):
+        win = WelcomeWindow(self)
+        win.present()
+        # Fullscreen only once the window exists on the compositor's side: a
+        # fullscreen request sent before the surface's first commit makes
+        # phoc (wlroots 0.18) drop the initial configure, and the window
+        # then never draws.
+        GLib.idle_add(lambda: win.fullscreen() and False)
+        if SELF_TEST:
+            GLib.timeout_add(500, self.self_test, win)
+
+    def self_test(self, win):
+        try:
+            win.pass_row.set_text("selftest-passphrase")
+            win.pass2_row.set_text("selftest-passphrase")
+            if win.android_row is not None:
+                win.android_row.set_active(True)
+            # Bridges: a snowflake line is refused at Start; lines pasted
+            # with their line breaks are stored on one line, ';' between them.
+            win.net_combo.set_selected(1)
+            win.bridges_row.set_text("snowflake 192.0.2.3:80 2B280B23E1107BB62ABFC40DDCC8824814F80A72")
+            refused = None
+            try:
+                win.collect()
+            except ValueError as e:
+                refused = str(e)
+            if refused != S.SNOWFLAKE_REFUSED:
+                raise RuntimeError(f"a snowflake bridge was not refused ({refused!r})")
+            win.net_combo.set_selected(0)
+            win.bridges_row.set_text("obfs4 192.0.2.1:443 A cert=x iat-mode=0\r\n\nwebtunnel 192.0.2.2:443 B url=https://example.org/b\n")
+            win.collect()
+            root = tempfile.mkdtemp(prefix="antumbra-welcome-selftest-")
+            win.model.write(root)
+            bridges = S.read_setting(os.path.join(root, "persistent", "tails.bridges"), "ANTUMBRA_BRIDGES")
+            if bridges != "obfs4 192.0.2.1:443 A cert=x iat-mode=0;webtunnel 192.0.2.2:443 B url=https://example.org/b":
+                raise RuntimeError(f"bridges not written on one line ({bridges!r})")
+            if win.android_row is not None:
+                android = S.read_setting(os.path.join(root, "persistent", "antumbra.android"), "ANTUMBRA_ANDROID_ENABLED")
+                if android != "true":
+                    raise RuntimeError(f"Android apps switch not written ({android})")
+            print("self-test: settings written to", root)
+            for d in ("persistent", "transient"):
+                for name in sorted(os.listdir(os.path.join(root, d))):
+                    print(f"  {d}/{name}")
+            self.selftest_ok = True
+        except Exception as e:  # noqa: BLE001
+            print("self-test FAILED:", repr(e))
+            self.selftest_ok = False
+        self.quit()
+        return False
+
+
+if __name__ == "__main__":
+    app = WelcomeApp()
+    status = app.run([a for a in sys.argv if a not in ("--demo", "--self-test")])
+    if SELF_TEST and not getattr(app, "selftest_ok", False):
+        sys.exit(1)
+    sys.exit(status)

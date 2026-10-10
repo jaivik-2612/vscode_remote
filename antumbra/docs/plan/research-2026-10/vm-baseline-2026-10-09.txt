@@ -1,0 +1,285 @@
+# VM performance baseline, 9 Oct 2026 (tests/vm/perf/vmperf.py RUN_DIR 8192)
+# Image: the qemu-virt debug image of 6 Oct 2026, built with Android apps
+# (ANTUMBRA_ANDROID=1), version 0.1.0-alpha.1. Machine: QEMU virt, cortex-a72,
+# 3 vCPUs, 8192 MiB, full emulation (TCG) on an x86-64 cloud host without KVM.
+# Clock times are the host's; durations in blame are emulated time, roughly 10 to
+# 30 times what the phone is expected to take. Tor had no route out (14 %).
+# Context only: the daily VM run's first result is the baseline for later changes.
+# Unchanged below this header.
+
+
+===== debug console ready (19:53:09) =====
+254 s after QEMU start (TCG, 3 vCPU, 8192 MiB)
+
+===== welcome screen (19:54:19) =====
+Start button (357, 1338) at 325 s
+
+===== WELCOME: systemd-analyze (19:55:22) =====
+Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=0).
+Please try again later.
+Hint: Use 'systemctl list-jobs' to see active jobs
+Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=0).
+Please try again later.
+Hint: Use 'systemctl list-jobs' to see active jobs
+
+===== WELCOME: blame (top 30) (19:56:12) =====
+1min 418ms antumbra-create-netns.service
+   56.783s apparmor.service
+   36.824s initramfs-shutdown.service
+   31.996s tor@default.service
+   24.130s udisks2.service
+   22.608s dev-loop0p1.device
+   21.521s dev-mapper-0431855ae7a89d9795ba3f1adcf5bfb50b3753203ff19712df628641647d029f\x2dverity.device
+   16.417s nftables.service
+   14.948s antumbra-selfcheck.service
+   14.480s systemd-udev-trigger.service
+   13.072s antumbra-selfcheck-late.service
+   10.962s user@0.service
+    9.841s user@993.service
+    8.972s usbguard-dbus.service
+    8.662s e2scrub_reap.service
+    8.041s usbguard.service
+    7.936s antumbra-set-wireless-devices-state.service
+    7.105s polkit.service
+    7.037s tor.service
+    6.268s dbus.service
+    6.095s systemd-logind.service
+    5.950s systemd-journald.service
+    4.391s systemd-sysctl.service
+    4.147s systemd-binfmt.service
+    3.954s antumbra-persistence-probe.service
+    3.832s systemd-tmpfiles-setup-dev-early.service
+    3.775s wpa_supplicant.service
+    3.730s dev-hugepages.mount
+    3.701s dev-mqueue.mount
+    3.657s run-initramfs.mount
+
+===== WELCOME: memory (19:56:14) =====
+               total        used        free      shared  buff/cache   available
+Mem:            7939         703        6431          88        1067        7236
+Swap:           3969           0        3969
+MemTotal:        8130052 kB
+MemAvailable:    7409928 kB
+Cached:          1062840 kB
+SwapTotal:       4064764 kB
+SwapFree:        4064764 kB
+AnonPages:        214860 kB
+Shmem:             90376 kB
+Slab:             164012 kB
+SUnreclaim:       138116 kB
+KernelStack:        2992 kB
+PageTables:         4884 kB
+AnonHugePages:     75776 kB
+NAME       ALGORITHM DISKSIZE DATA COMPR TOTAL STREAMS MOUNTPOINT
+/dev/zram0 zstd          3.9G   4K   63B   20K         [SWAP]
+Filesystem     1M-blocks  Used Available Use% Mounted on
+tmpfs               3970    23      3948   1% /run/live/overlay
+some avg10=0.00 avg60=0.00 avg300=0.00 total=989
+full avg10=0.00 avg60=0.00 avg300=0.00 total=124
+[always] madvise never
+vm.swappiness = 60
+vm.page-cluster = 3
+
+===== WELCOME: PSS by process (MiB: PSS RSS pid uid comm) (19:56:17) =====
+> > > > > > > > > > > > > > > > > > total PSS MiB 394 over 37 processes
+  116.1   129.9   1205    993 phoc
+   54.0    74.3   1280    993 antumbra-welcom
+   41.6    47.3    749    101 tor
+   23.9    34.2   1079      0 onion-grater
+   20.0    30.1    890    101 tor_wait_until_
+   18.5    28.3   1279    993 squeekboard
+   15.5    27.9    721      0 antumbra-lock-w
+   14.1    28.4   1211    993 wireplumber
+   10.1    21.3   1204    993 pipewire
+    9.5    22.2    623      0 memlockd
+    6.4    13.4    650      0 udisksd
+    5.4    13.9      1      0 systemd
+    4.8     9.4   1402      0 python3
+    4.8     7.4    723      0 usbguard-daemon
+    4.7    11.2    653      0 usbguard-dbus
+    4.1    12.3   1132    993 systemd
+    4.0    12.3   1169      0 systemd
+    3.7     9.6    362      0 systemd-udevd
+    3.3     6.5    729      0 wpa_supplicant
+    3.3     8.0   1094      0 greetd
+    3.3     5.2   1231      0 bash
+    2.9     8.6    300      0 systemd-journal
+    2.2     7.7   1216    993 pipewire-pulse
+    2.1     8.3    630      0 systemd-logind
+    2.0     7.6   1286    993 gvfsd
+    1.8     3.8   1143    993 (sd-pam)
+    1.8     3.7   1172      0 (sd-pam)
+    1.7     7.5    754    990 polkitd
+    1.2     4.4    620    997 dbus-daemon
+    1.2     6.7   1186      0 power-profiles-
+
+===== WELCOME: idle wakeups over 60 s (19:57:21) =====
+> > > > > > > > > > > > > > > > > > > > > > > > > > > > > > interrupts/s 178.4, context switches/s (user+kernel threads) 43.9 over 61 s
+   25.77/s    890 tor_wait_until_
+    3.58/s      1 systemd
+    3.42/s     28 kworker/2:0-events
+    3.10/s    749 tor
+    2.02/s   1079 onion-grater
+    2.00/s     38 kcompactd0
+    1.35/s     15 rcu_preempt
+    0.85/s     12 kworker/u12:0-events_power_efficient
+    0.48/s     48 kworker/u12:1-events_power_efficient
+    0.26/s    754 polkitd
+    0.25/s    650 udisksd
+    0.20/s    723 usbguard-daemon
+    0.18/s   1403 python3
+    0.13/s     40 khugepaged
+    0.10/s    729 wpa_supplicant
+    0.07/s     21 migration/1
+    0.05/s     26 migration/2
+    0.05/s     14 ksoftirqd/0
+    0.03/s     27 ksoftirqd/2
+    0.03/s     22 ksoftirqd/1
+
+===== WELCOME: running units (19:57:26) =====
+antumbra-lock-watch.service dbus.service greetd.service memlockd.service onion-grater.service polkit.service power-profiles-daemon.service serial-getty@hvc0.service systemd-journald.service systemd-logind.service systemd-udevd.service tor@default.service udisks2.service usbguard-dbus.service usbguard.service user@0.service user@993.service wpa_supplicant.service 
+user root:
+dbus.service 
+user antumbra-greeter:
+dbus.service filter-chain.service gvfs-daemon.service pipewire-pulse.service pipewire.service wireplumber.service xdg-permission-store.service 
+
+===== session (19:58:48) =====
+phosh running 83 s after tapping Start
+
+===== SESSION (3 min after phosh started): systemd-analyze (20:01:50) =====
+Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=0).
+Please try again later.
+Hint: Use 'systemctl list-jobs' to see active jobs
+Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=0).
+Please try again later.
+Hint: Use 'systemctl list-jobs' to see active jobs
+
+===== SESSION (3 min after phosh started): blame (top 30) (20:02:42) =====
+1min 418ms antumbra-create-netns.service
+   56.783s apparmor.service
+   41.399s antumbra-apply-welcome-settings.service
+   36.824s initramfs-shutdown.service
+   31.996s tor@default.service
+   24.130s udisks2.service
+   22.608s dev-loop0p1.device
+   21.521s dev-mapper-0431855ae7a89d9795ba3f1adcf5bfb50b3753203ff19712df628641647d029f\x2dverity.device
+   16.417s nftables.service
+   14.948s antumbra-selfcheck.service
+   14.480s systemd-udev-trigger.service
+   13.622s user@1000.service
+   13.072s antumbra-selfcheck-late.service
+   10.962s user@0.service
+   10.195s NetworkManager.service
+    8.972s usbguard-dbus.service
+    8.662s e2scrub_reap.service
+    8.041s usbguard.service
+    7.936s antumbra-set-wireless-devices-state.service
+    7.105s polkit.service
+    7.037s tor.service
+    6.268s dbus.service
+    6.095s systemd-logind.service
+    5.950s systemd-journald.service
+    4.668s systemd-hostnamed.service
+    4.391s systemd-sysctl.service
+    4.147s systemd-binfmt.service
+    4.074s upower.service
+    3.954s antumbra-persistence-probe.service
+    3.832s systemd-tmpfiles-setup-dev-early.service
+
+===== SESSION (3 min after phosh started): memory (20:02:44) =====
+               total        used        free      shared  buff/cache   available
+Mem:            7939         970        6070         110        1186        6968
+Swap:           3969           0        3969
+MemTotal:        8130052 kB
+MemAvailable:    7136132 kB
+Cached:          1178824 kB
+SwapTotal:       4064764 kB
+SwapFree:        4064764 kB
+AnonPages:        436056 kB
+Shmem:            112892 kB
+Slab:             182824 kB
+SUnreclaim:       151124 kB
+KernelStack:        5280 kB
+PageTables:         9696 kB
+AnonHugePages:    229376 kB
+NAME       ALGORITHM DISKSIZE DATA COMPR TOTAL STREAMS MOUNTPOINT
+/dev/zram0 zstd          3.9G   4K   63B   20K         [SWAP]
+Filesystem     1M-blocks  Used Available Use% Mounted on
+tmpfs               3970    26      3945   1% /run/live/overlay
+some avg10=0.00 avg60=0.00 avg300=0.00 total=1048
+full avg10=0.00 avg60=0.00 avg300=0.00 total=184
+[always] madvise never
+vm.swappiness = 60
+vm.page-cluster = 3
+
+===== SESSION (3 min after phosh started): PSS by process (MiB: PSS RSS pid uid comm) (20:02:47) =====
+> > > > > > > > > > > > > > > > > > total PSS MiB 640 over 69 processes
+  187.0   221.3   1931   1000 phosh
+  147.2   172.0   1689   1000 phoc
+   42.2    48.4    749    101 tor
+   24.0    34.2   1079      0 onion-grater
+   20.2    30.1    890    101 tor_wait_until_
+   16.0    27.9    721      0 antumbra-lock-w
+   13.4    28.4   1654   1000 wireplumber
+   13.2    28.4   2059   1000 squeekboard
+    9.8    21.4   1653   1000 pipewire
+    8.8    22.2    623      0 memlockd
+    8.4    19.2   1679      0 NetworkManager
+    7.8    24.6   2044   1000 gsd-media-keys
+    7.2    21.9   2056   1000 gsd-wacom
+    6.8    22.9   2045   1000 gsd-power
+    6.8    21.8   2039   1000 gsd-color
+    6.1    20.7   2043   1000 gsd-keyboard
+    6.1    13.8    650      0 udisksd
+    6.0    10.1    723      0 usbguard-daemon
+    5.7    14.3      1      0 systemd
+    5.0    12.9    653      0 usbguard-dbus
+    5.0     9.4   2467      0 python3
+    4.2    12.5   1566   1000 systemd
+    3.9    12.3   1169      0 systemd
+    3.7     9.6    300      0 systemd-journal
+    3.6     9.7    362      0 systemd-udevd
+    3.3    15.1   1897   1000 gnome-session-b
+    3.3     6.5    729      0 wpa_supplicant
+    3.2     5.3   1231      0 bash
+    3.2     8.0   1510      0 greetd
+    3.0     9.4   1853   1000 gnome-keyring-d
+
+===== SESSION (3 min after phosh started): idle wakeups over 60 s (20:03:52) =====
+> > > > > > > > > > > > > > > > > > > > > > > > > > > > > > interrupts/s 374.3, context switches/s (user+kernel threads) 80.4 over 62 s
+   26.48/s    890 tor_wait_until_
+   23.32/s     15 rcu_preempt
+    4.29/s   1565 kworker/1:0-events
+    3.96/s      1 systemd
+    3.56/s     28 kworker/2:0-events
+    3.39/s    749 tor
+    3.02/s     10 kworker/0:1-events
+    2.03/s   1079 onion-grater
+    2.01/s     38 kcompactd0
+    2.00/s   1881 sh
+    1.02/s   2029 gvfs-afc-volume
+    0.62/s    300 systemd-journal
+    0.52/s    620 dbus-daemon
+    0.49/s    630 systemd-logind
+    0.44/s     48 kworker/u12:1-events_power_efficient
+    0.39/s   2471 python3
+    0.31/s   1689 phoc
+    0.29/s   1679 NetworkManager
+    0.28/s    650 udisksd
+    0.24/s    754 polkitd
+
+===== SESSION (3 min after phosh started): running units (20:03:57) =====
+antumbra-lock-watch.service dbus.service greetd.service memlockd.service NetworkManager.service onion-grater.service polkit.service power-profiles-daemon.service serial-getty@hvc0.service systemd-journald.service systemd-logind.service systemd-udevd.service tor@default.service udisks2.service upower.service usbguard-dbus.service usbguard.service user@0.service user@1000.service wpa_supplicant.service 
+user root:
+dbus.service 
+user amnesia:
+dbus.service dconf.service filter-chain.service gcr-ssh-agent.service gnome-keyring-daemon.service gnome-session-manager@phosh.service gnome-session-monitor.service gvfs-afc-volume-monitor.service gvfs-daemon.service gvfs-goa-volume-monitor.service gvfs-gphoto2-volume-monitor.service gvfs-mtp-volume-monitor.service gvfs-udisks2-volume-monitor.service mobi.phosh.Shell.service org.gnome.SettingsDaemon.A11ySettings.service org.gnome.SettingsDaemon.Color.service org.gnome.SettingsDaemon.Datetime.service org.gnome.SettingsDaemon.Housekeeping.service org.gnome.SettingsDaemon.Keyboard.service org.gnome.SettingsDaemon.MediaKeys.service org.gnome.SettingsDaemon.Power.service org.gnome.SettingsDaemon.PrintNotifications.service org.gnome.SettingsDaemon.Rfkill.service org.gnome.SettingsDaemon.ScreensaverProxy.service org.gnome.SettingsDaemon.Sharing.service org.gnome.SettingsDaemon.Smartcard.service org.gnome.SettingsDaemon.Sound.service org.gnome.SettingsDaemon.UsbProtection.service org.gnome.SettingsDaemon.Wacom.service org.gnome.SettingsDaemon.Wwan.service pipewire-pulse.service pipewire.service wireplumber.service xdg-permission-store.service 
+
+===== journal: Tor bootstrap lines (20:03:58) =====
+[  162.663924] amnesia Tor[749]: Bootstrapped 0% (starting): Starting
+[  534.544458] amnesia Tor[749]: Bootstrapped 5% (conn): Connecting to a relay
+[  534.610736] amnesia Tor[749]: Bootstrapped 10% (conn_done): Connected to a relay
+[  535.083607] amnesia Tor[749]: Bootstrapped 14% (handshake): Handshaking with a relay
+
+===== done (20:03:58) =====
+total 904 s

@@ -1,0 +1,63 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Antumbra theme for GTK 4 and libadwaita apps (and the Welcome screen,
+ * through welcome.css). docs/architecture.md, "Interface theme".
+ *
+ * Loaded through ~/.config/gtk-4.0/gtk.css (a one-line @import that
+ * antumbra-session writes when the file is absent, and hook 50 installs for
+ * the Welcome screen's user), at USER priority, above libadwaita's
+ * stylesheet and its accent colour.
+ *
+ * GTK 4.18 has no prefers-color-scheme media query (that arrives in 4.20),
+ * so nothing here can differ between dark and light, and the Dark Mode tile
+ * switches apps to light. The file therefore sets only the accent: the
+ * Material 3 primary tone 80 with its "on primary" tone 20, which reads as a
+ * filled button in the dark scheme and as a tonal one in the light scheme.
+ * libadwaita derives its accent text colour from --accent-bg-color for each
+ * scheme (darker in light, lighter in dark). Window and card surfaces stay
+ * libadwaita's.
+ *
+ * Palette: Material 3 "tonal spot" dark scheme from the seed #4d2c9e,
+ * generated offline with material-color-utilities 0.3.0 (Apache-2.0); the
+ * same values as shell.css (tests/unit/test_theme.py keeps them in step).
+ * The --antumbra-* properties are used by welcome.css; other apps ignore
+ * them. The VM test finds the Welcome screen's Start button by this accent
+ * (tests/vm/antumbra_vm.py, WELCOME_ACCENT).
+ */
+
+:root {
+  --antumbra-primary: #cebdfe;
+  --antumbra-on-primary: #35275d;
+  --antumbra-primary-container: #4c3e76;
+  --antumbra-on-primary-container: #e8ddff;
+  --antumbra-secondary-container: #494458;
+  --antumbra-on-secondary-container: #e8def8;
+  --antumbra-surface: #141218;
+  --antumbra-surface-container-low: #1c1b20;
+  --antumbra-surface-container: #211f24;
+  --antumbra-surface-container-high: #2b292f;
+  --antumbra-surface-container-highest: #36343a;
+  --antumbra-on-surface: #e6e1e9;
+  --antumbra-on-surface-variant: #cac4cf;
+  --antumbra-outline-variant: #48454e;
+
+  --accent-bg-color: var(--antumbra-primary);
+  --accent-fg-color: var(--antumbra-on-primary);
+}
+
+/* libadwaita's switch handle is near-white, which disappears on the light
+ * accent; Material 3 draws the handle of an enabled switch in the "on
+ * primary" colour. The shorthand also covers libadwaita's hover state. */
+switch:checked > slider {
+  background: var(--accent-fg-color);
+}
+
+/* GTK's own theme, which plain GTK 4 programs without libadwaita use, draws
+ * the checked track in literal blue and ignores the accent variables; give
+ * the track the accent here so the knob above never sits on blue. Same
+ * values as libadwaita 1.7's own rule. */
+switch:checked {
+  color: var(--accent-fg-color);
+  background-color: var(--accent-bg-color);
+  border-color: transparent;
+}

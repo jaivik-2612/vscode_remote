@@ -1,0 +1,24 @@
+#!/bin/sh
+# greetd default_session: a bare phoc compositor with the on-screen keyboard
+# and the Welcome screen, running as the greeter user. This is how phrog's
+# greeter session works too.
+set -eu
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+export XDG_SESSION_DESKTOP=antumbra-greeter
+export GSETTINGS_BACKEND=memory
+# libadwaita takes the colour scheme and accent from the Settings portal
+# unless this is set; with it, it reads GSettings, which the memory backend
+# answers with the schema defaults (90_antumbra.gschema.override). The
+# Welcome screen's look then does not depend on a portal process.
+export ADW_DISABLE_PORTAL=1
+# shellcheck source=antumbra-session-env
+. /usr/libexec/antumbra-session-env
+# The compositor settings: phosh-session's rule for the user's session
+# (/etc/phosh/phoc.ini, which Antumbra ships, else Debian's default), so
+# that the Welcome screen and the session read the same file.
+PHOC_INI=/usr/share/phosh/phoc.ini
+[ -f /etc/phosh/phoc.ini ] && PHOC_INI=/etc/phosh/phoc.ini
+# No -S (shell mode): that makes phoc wait, showing only a spinner, for a
+# Phosh shell to attach, and the greeter session runs no Phosh.
+exec /usr/bin/phoc -C "${PHOC_INI}" -E /usr/libexec/antumbra-greeter-inner

@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refuse connections to hidden Wi-Fi networks: they make the phone broadcast
+# the network name in probe requests wherever it goes. Runs before the
+# connection is brought up; a hidden profile is torn down and removed.
+set -eu
+[ "${CONNECTION_UUID:-}" ] || exit 0
+hidden="$(nmcli -g 802-11-wireless.hidden connection show uuid "${CONNECTION_UUID}" 2>/dev/null || true)"
+if [ "${hidden}" = "yes" ]; then
+    logger -t antumbra-network "refusing hidden Wi-Fi profile ${CONNECTION_ID:-?}; removing it"
+    nmcli connection down uuid "${CONNECTION_UUID}" >/dev/null 2>&1 || true
+    nmcli connection delete uuid "${CONNECTION_UUID}" >/dev/null 2>&1 || true
+    mkdir -p /run/antumbra && printf 'hidden-ssid-refused %s\n' "${CONNECTION_ID:-?}" >> /run/antumbra/network-events
+    exit 1
+fi

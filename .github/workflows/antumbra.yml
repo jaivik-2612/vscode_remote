@@ -1,0 +1,110 @@
+name: Antumbra
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'antumbra/**'
+      - '.github/workflows/antumbra.yml'
+  pull_request:
+    paths:
+      - 'antumbra/**'
+      - '.github/workflows/antumbra.yml'
+  workflow_dispatch:
+    inputs:
+      full_build:
+        description: 'Build the kernel and the full root filesystem (slow)'
+        required: false
+        default: 'false'
+
+jobs:
+  lint:
+    name: Lint and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck nftables tor python3-pytest yamllint \
+            python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 xvfb openssl
+      - name: Lint
+        working-directory: antumbra
+        run: tests/lint.sh
+      - name: Unit tests
+        working-directory: antumbra
+        run: python3 -m pytest -q tests/unit
+      - name: Welcome settings applier (as root, in a mount namespace)
+        working-directory: antumbra
+        run: sudo python3 -m pytest -q -p no:cacheprovider tests/unit/test_applier.py
+      - name: Welcome screen UI self-test (headless)
+        working-directory: antumbra
+        run: tests/ui-selftest.sh
+      - name: Package names exist in Debian trixie arm64
+        working-directory: antumbra
+        run: tests/check-packages.sh
+
+  boot-image:
+    name: Pinned sources and boot image contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq python3 gpgv gpg curl git zstd
+      - name: Fetch and verify pinned inputs (no kernel tree, no Tor Browser download)
+        working-directory: antumbra
+        run: build/fetch-sources.sh --skip-kernel --skip-tor-browser
+      - name: Boot image dry run with placeholder kernel and ramdisk
+        working-directory: antumbra
+        run: |
+          mkdir -p build/out/kernel build/out/rootfs
+          # A placeholder with the arm64 header magic at offset 0x38
+          python3 -c "import sys; d=bytearray(0x40); d[0x38:0x3c]=b'ARM\x64'; sys.stdout.buffer.write(bytes(d)+b'\0'*4096)" > build/out/kernel/Image
+          printf 'placeholder' > build/out/kernel/sm8150-oneplus-hotdog.dtb
+          printf 'placeholder' > build/out/rootfs/initrd.img
+          # The stamps bootimg.sh checks, as kernel.sh, rootfs.sh and squashfs.sh
+          # (with ANTUMBRA_VERITY=0) write them; a kernel release ends in the
+          # profile's KERNEL_LOCALVERSION.
+          KREL=0.0.0-antumbra
+          echo "${KREL}" > build/out/kernel/kernel.release
+          printf '%s\n' ANTUMBRA_DEVICE=oneplus-hotdog "KERNEL_RELEASE=${KREL}" > build/out/kernel/profile
+          printf '%s\n' ANTUMBRA_DEVICE=oneplus-hotdog ANTUMBRA_DEBUG= ANTUMBRA_MINIMAL= ANTUMBRA_ANDROID= \
+            ANTUMBRA_LIBCAMERA_LOCAL= DEVICE_FIRMWARE= "KERNEL_RELEASE=${KREL}" ANTUMBRA_VERITY=0 > build/out/rootfs/build-flags
+          ANTUMBRA_VERITY=0 build/bootimg.sh
+
+  rootfs-minimal:
+    name: Minimal arm64 root filesystem (native runner)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq mmdebstrap debian-archive-keyring squashfs-tools \
+            e2fsprogs android-sdk-libsparse-utils systemd-repart zstd python3 \
+            clang lld llvm make bc bison flex libssl-dev libelf-dev kmod cpio git curl gpg gpgv cryptsetup-bin
+      - name: Fetch pinned inputs
+        working-directory: antumbra
+        run: build/fetch-sources.sh --skip-tor-browser
+      - name: Kernel
+        working-directory: antumbra
+        run: build/kernel.sh
+      - name: Minimal root filesystem, squashfs, images
+        working-directory: antumbra
+        # All as root: veritysetup leaves the .verity and .roothash files
+        # readable by root only, and image.sh and bootimg.sh read them.
+        run: |
+          export ANTUMBRA_MINIMAL=1 SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          sudo -E build/rootfs.sh
+          sudo -E build/squashfs.sh
+          sudo -E build/image.sh
+          sudo -E build/bootimg.sh
+      - name: Summary
+        working-directory: antumbra
+        run: ls -la build/out build/out/rootfs
