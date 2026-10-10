@@ -250,7 +250,7 @@ def build(args):
         "{{URL}}": E(url), "{{FIRST}}": ('<p class="note">Baseline: the first run of the daily test, on the '
                                          'unchanged system. Later runs are compared with the run before them.</p>'
                                          if first else ""),
-        "{{PREV}}": E(str(prev_run)) if prev_run else "none",
+        "{{PREV}}": f"Compared with run {E(str(prev_run))}." if prev_run else "No earlier run to compare with.",
         "{{QUESTION}}": q_html, "{{SCREENS}}": "\n".join(cards) or "<p>No screenshots in this run.</p>",
         "{{NUMBERS}}": "\n".join(rows), "{{FAILED}}": failed_html, "{{CHECKS}}": checks_html,
         "{{DATA}}": json.dumps(data).replace("</", "<\\/"),
@@ -285,6 +285,7 @@ TEMPLATE = r"""<title>Antumbra Daily</title>
   --ok: #9fdcb0; --ok-bg: #173323; --bad: #f6b0a5; --bad-bg: #431a14; color-scheme: dark;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); font-size: 1rem; line-height: 1.5; }
 .wrap { max-width: 44rem; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; display: grid; gap: 18px; }
 h1 { font-size: 1.6rem; line-height: 1.2; margin: 0; font-weight: 650; }
@@ -338,7 +339,7 @@ a { color: var(--accent); }
     <p><span class="result {{STATE}}">{{RESULT}}</span></p>
     <p>Change tested: <strong>{{SUBJECT}}</strong> <span class="small">({{SHA}})</span></p>
     {{FIRST}}
-    <p class="small">The system built from this change and started in a virtual machine on GitHub (no phone hardware, full emulation: times are only comparable between runs). Compared with run {{PREV}}. <a href="{{URL}}">The run on GitHub</a>.</p>
+    <p class="small">The system built from this change and started in a virtual machine on GitHub (no phone hardware, full emulation: times are only comparable between runs). {{PREV}} <a href="{{URL}}">The run on GitHub</a>.</p>
   </header>
 
   {{QUESTION}}
