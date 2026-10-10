@@ -11,9 +11,24 @@ touch, the Welcome screen under bare phoc, Wi-Fi with the modem in
 low-power mode, the self-check, Tor bootstrap, shutdown behaviour; then
 the pop-up motor, the cameras and Android apps.
 
+## Releases not to flash
+
+Releases up to 0.1.0-alpha.2 start the Phosh session without Antumbra's
+compositor settings. They ship them as `/etc/antumbra/phoc.ini`, which
+only the Welcome screen reads; Debian's `phosh-session` reads
+`/etc/phosh/phoc.ini`, so the session takes Debian's defaults: on the
+phone most likely the panel's preferred 90 Hz mode, which has DSI
+transport errors on the port, at a scale phoc picks itself, and an
+attempt to start Xwayland, which is not installed (seen in the VM). Do
+not flash them. The next release ships the settings as
+`/etc/phosh/phoc.ini`, which both read (`architecture.md`, section 10).
+
 ## Hardware
 
-- 90 Hz display mode is disabled (DSI transport errors on the port).
+- 90 Hz display mode is disabled (DSI transport errors on the port):
+  Antumbra's `/etc/phosh/phoc.ini` sets 60 Hz for the Welcome screen and
+  the session. Up to 0.1.0-alpha.2 only the Welcome screen got 60 Hz, from
+  `/etc/antumbra/phoc.ini` ("Releases not to flash").
 - Earpiece, headset and most microphone routes do not work on the port;
   the internal speakers and handset microphone do.
 - Charging from USB hosts may be limited to the USB default (around

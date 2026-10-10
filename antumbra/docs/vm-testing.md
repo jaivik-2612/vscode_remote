@@ -137,7 +137,13 @@ asserts, in order:
    colour) and presses it with the
    defaults (amnesic session, MAC address anonymization, Tor connected
    automatically), then checks that the settings were applied and Phosh
-   started, that the network driver loaded only now and the interface got
+   started; that the session's phoc (the one running as `amnesia`, not
+   the greeter's) was started with `-C /etc/phosh/phoc.ini`, the file the
+   greeter's phoc reads too (phoc does not log which file it read, so the
+   harness reads its `/proc/<pid>/cmdline`), with its log in the journal,
+   and that no line of the boot's journal reports a failed Xwayland start
+   (the file turns Xwayland off; it is not installed); that the network
+   driver loaded only now and the interface got
    an address, that the interface's MAC address is not the one QEMU gave
    the hardware, and, polling every socket in the system once a second for
    90 seconds, that every connection to the network belongs to Tor (DHCP
@@ -547,6 +553,7 @@ Storage found these in the system (S) and in the harness (H):
 | S: F-Droid's installer gave up | it waited 2 minutes after `waydroid app install`; under emulation the installation takes longer | waits up to 15 minutes |
 | S: `/dev/fb0` and the render node stayed open to every user after Android stopped | udev's change events restore no mode for framebuffers and did not restore the render node's | modes recorded before the boot's first container start and put back at stop |
 | S: the file indexer restarted every 3 seconds for the whole session | its first start outlasted systemd's timeout under load, leaving a database every later start refused | the indexer is off (hook 52) |
+| S: the session's phoc logged "Cannot find Xwayland binary" and "Failed to initialize Xwayland" | only the greeter read Antumbra's settings (`/etc/antumbra/phoc.ini`); `phosh-session` reads `/etc/phosh/phoc.ini`, else Debian's default, so the session ran without `xwayland=false` and, on the phone, without the 60 Hz mode and scale 3 | one file, `/etc/phosh/phoc.ini`, for both; `tests/lint.sh`, a unit test and the smoke test check it |
 | H: Snapshot's preview was not ready after 30 seconds | the first frame takes about three minutes under emulation | the check waits for the picture |
 | H: one slow command made every later check time out | the console's shell kept running it | a timed-out command is interrupted; console timeouts follow `--timeout-scale` |
 | H: the full-UI check passed on a picture of the wallpaper | it counted colours | most of the screen must change |

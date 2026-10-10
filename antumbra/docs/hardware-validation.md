@@ -45,8 +45,21 @@ whether `androidboot.slot_suffix` is on `/proc/cmdline`.
 
 ## Display, input, session
 
-6. The panel comes up at 1440x3120, 60 Hz; the greeter's phoc runs with
-   scale 3 (`/etc/antumbra/phoc.ini`).
+6. The panel comes up at 1440x3120, 60 Hz, scale 3 (`/etc/phosh/phoc.ini`)
+   on the Welcome screen and again in the Phosh session: both compositors
+   must read that file (in releases up to 0.1.0-alpha.2 the session did
+   not, `known-issues.md`). In the session, as root:
+   `tr '\0' ' ' < /proc/$(pgrep -u amnesia -x phoc)/cmdline` names
+   `-C /etc/phosh/phoc.ini`;
+   `journalctl -b _COMM=phoc | grep Modesetting` shows (phoc logs
+   straight to the journal under its own name; only the session's phoc
+   runs with `-v` and logs this line)
+   `connector DSI-1: Modesetting with 1440x3120 @ 60` (about 60 Hz, not
+   90; the session's phoc logs verbosely, the greeter's does not);
+   `dmesg` shows no DSI FIFO or transport errors; `wlr-randr`, where
+   installed (the image does not ship it yet), lists DSI-1 at 1440x3120,
+   60 Hz, scale 3. Text in the session is the size it is on the Welcome
+   screen (another scale makes it visibly larger or smaller).
 7. Touch works in the Welcome screen; squeekboard appears for text fields.
 8. "Start Antumbra" leads to the Phosh session as `amnesia` (check
    `loginctl` for the session and `journalctl -t antumbra-welcome`). The

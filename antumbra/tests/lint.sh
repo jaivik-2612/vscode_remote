@@ -90,9 +90,26 @@ else
 fi
 
 step "compositor configuration"
+# One settings file for both compositors: phosh-session starts the user's
+# phoc with /etc/phosh/phoc.ini when it exists (else Debian's
+# /usr/share/phosh/phoc.ini), and the greeter's session must choose by the
+# same rule. Up to 0.1.0-alpha.2 only the greeter read Antumbra's settings
+# (/etc/antumbra/phoc.ini). tests/unit/test_phoc_config.py runs the rule.
+PHOC_INI=config/rootfs/etc/phosh/phoc.ini
+GREETER=config/rootfs/usr/libexec/antumbra-greeter-session
+[ -f "${PHOC_INI}" ] || { echo "${PHOC_INI} is missing"; fail=1; }
+others="$(find config/rootfs config/rootfs-android -name phoc.ini ! -path "${PHOC_INI}")"
+[ -z "${others}" ] || { echo "phoc.ini shipped twice (the greeter and the session must read one file): ${others}"; fail=1; }
+if grep -qxF '[ -f /etc/phosh/phoc.ini ] && PHOC_INI=/etc/phosh/phoc.ini' "${GREETER}" \
+        && grep -qE '^exec /usr/bin/phoc -C "\$\{PHOC_INI\}" ' "${GREETER}"; then
+    echo "phoc.ini: the greeter's phoc reads /etc/phosh/phoc.ini, as the session's does"
+else
+    echo "${GREETER} does not start phoc with /etc/phosh/phoc.ini, the file phosh-session gives the session's"; fail=1
+fi
+stale="$(grep -rlF /etc/antumbra/phoc.ini config build/vm.sh || true)"
+[ -z "${stale}" ] || { echo "/etc/antumbra/phoc.ini is no longer shipped but still named in: ${stale}"; fail=1; }
 # phoc aborts at startup on a malformed mode (the refresh rate needs "Hz").
-[ -f config/rootfs/etc/antumbra/phoc.ini ] || { echo "config/rootfs/etc/antumbra/phoc.ini is missing"; fail=1; }
-bad_modes="$(grep -nE '^[[:space:]]*mode[[:space:]]*=' config/rootfs/etc/antumbra/phoc.ini \
+bad_modes="$(grep -nE '^[[:space:]]*mode[[:space:]]*=' "${PHOC_INI}" \
     | grep -vE '=[[:space:]]*[0-9]+x[0-9]+(@[0-9]+(\.[0-9]+)?Hz)?[[:space:]]*$' || true)"
 if [ -n "${bad_modes}" ]; then echo "phoc.ini: malformed mode line(s): ${bad_modes}"; fail=1; else echo "phoc.ini: mode lines valid"; fi
 

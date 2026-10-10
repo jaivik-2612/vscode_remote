@@ -688,9 +688,9 @@ answers once.
 
 1. `greetd` (`/etc/greetd/config.toml`) starts
    `/usr/libexec/antumbra-greeter-session` as the `antumbra-greeter` user:
-   a bare phoc compositor (`/etc/antumbra/phoc.ini`: scale 3, 60 Hz)
-   running squeekboard and `antumbra-welcome`, exactly as the phrog
-   greeter's session works.
+   a bare phoc compositor (`/etc/phosh/phoc.ini`: scale 3, 60 Hz,
+   Xwayland off) running squeekboard and `antumbra-welcome`, exactly as
+   the phrog greeter's session works.
 2. `antumbra-welcome` (GTK4/libadwaita) asks the Tails Welcome Screen
    questions in phone form: Persistent Storage (unlock, or create if the
    partition is still empty), MAC address anonymisation (on by default),
@@ -760,7 +760,14 @@ answers once.
    create a session for `amnesia` (greetd's PAM stack for IPC sessions,
    `/etc/pam.d/greetd`, lets that user in without a password, since the
    passphrase is only for the lock screen) and starts `/usr/libexec/antumbra-session`, which exports the
-   session variables and runs `phosh-session`. If the user logs out,
+   session variables and runs `phosh-session`. That starts the session's
+   phoc with `/etc/phosh/phoc.ini` when the file exists, else with
+   Debian's `/usr/share/phosh/phoc.ini`; the greeter's session chooses by
+   the same rule, so the Welcome screen and the session read one file
+   (`tests/lint.sh` and `tests/unit/test_phoc_config.py` check it, and the
+   VM's smoke test reads the session's phoc command line). Releases up
+   to 0.1.0-alpha.2 shipped the settings as `/etc/antumbra/phoc.ini`,
+   which only the greeter read (`known-issues.md`). If the user logs out,
    greetd shows the Welcome screen again; settings cannot change in the
    same boot, only a new session can start.
 
@@ -1326,7 +1333,9 @@ antumbra/
    fully stopped, and whether the port's power-domain fixes hold with
    Antumbra's service set and the SLPI disabled.
 7. **Audio routing** with Debian's generic UCM profiles.
-8. **90 Hz.** Stays off until the port's DSI issue is fixed upstream.
+8. **90 Hz.** Stays off until the port's DSI issue is fixed upstream:
+   `/etc/phosh/phoc.ini` sets 60 Hz for the Welcome screen and the
+   session alike (`hardware-validation.md` item 6).
 9. **Cameras.** Whether PipeWire can be the only user of CAMSS, with
    WirePlumber's libcamera monitor on (the port turns it off), and
    whether the pop-up motor behaves as patch `0102` intends across

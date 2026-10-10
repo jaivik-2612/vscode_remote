@@ -14,8 +14,11 @@ export GSETTINGS_BACKEND=memory
 export ADW_DISABLE_PORTAL=1
 # shellcheck source=antumbra-session-env
 . /usr/libexec/antumbra-session-env
+# The compositor settings: phosh-session's rule for the user's session
+# (/etc/phosh/phoc.ini, which Antumbra ships, else Debian's default), so
+# that the Welcome screen and the session read the same file.
 PHOC_INI=/usr/share/phosh/phoc.ini
-[ -f /etc/antumbra/phoc.ini ] && PHOC_INI=/etc/antumbra/phoc.ini
+[ -f /etc/phosh/phoc.ini ] && PHOC_INI=/etc/phosh/phoc.ini
 # No -S (shell mode): that makes phoc wait, showing only a spinner, for a
 # Phosh shell to attach, and the greeter session runs no Phosh.
 exec /usr/bin/phoc -C "${PHOC_INI}" -E /usr/libexec/antumbra-greeter-inner

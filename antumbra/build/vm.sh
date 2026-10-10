@@ -135,7 +135,7 @@ ARGS=(
     -drive "if=none,id=userdata,file=${RUN}/overlay.qcow2,format=qcow2,cache=writeback,discard=unmap"
     -device "virtio-blk-pci,drive=userdata,logical_block_size=4096,physical_block_size=4096${DISK_SERIAL:+,serial=${DISK_SERIAL}}"
     -device virtio-rng-pci
-    # A phone-shaped display: 720x1440 at scale 2 (etc/antumbra/phoc.ini, output Virtual-1).
+    # A phone-shaped display: 720x1440 at scale 2 (etc/phosh/phoc.ini, output Virtual-1).
     -device "virtio-gpu-pci,xres=720,yres=1440" -device virtio-keyboard-pci -device virtio-tablet-pci
     # hvc0: the debug console (a getty only in debug builds with antumbra.debug=1).
     -device virtio-serial-pci
