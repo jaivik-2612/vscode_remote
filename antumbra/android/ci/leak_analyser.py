@@ -1153,6 +1153,14 @@ def analyse(args):
             else:
                 notes.append("no clock marker found in %s: its clock is taken to be the host's, with a wider margin"
                              % d["name"])
+        if d["kind"] == "guest" and c["source"] == "marker" and args.arm_event:
+            # The marker's own reading always agrees with the marker: only a
+            # reading taken after the arm event shows the clock stayed put.
+            arm_t = event_time(events, args.arm_event)
+            if arm_t is None or not [t for t, _, _ in samples if t >= arm_t]:
+                capture_problems.append("the device's clock was not read after %s (no usable device_clock "
+                                        "reading): whether it stayed where the clock marker put it is unknown, "
+                                        "so the times in %s cannot be trusted" % (args.arm_event, d["name"]))
         if d["kind"] == "guest" and c["source"] == "marker" and samples:
             moved = max(max(low - c["offset_high"], c["offset_low"] - high, 0.0) for _, low, high in samples)
             d["device_clock_moved"] = round(moved, 3)

@@ -161,7 +161,7 @@ that the captures must show traffic from the phone.
    `welcome/ci/welcome-adb.sh`: `check-policies --keep-adb` (the
    device-owner restrictions of a default session) and `check-addon` (the
    status screen shows the firewall live).
-8. Wait (10 minutes at most) for `module.tor.bootstrap` = 100 in the
+8. Wait (15 minutes at most) for `module.tor.bootstrap` = 100 in the
    filter's `/status` (through `adb forward`), or "Bootstrapped 100%" in
    `tor.log`. Screenshot of the status screen.
 9. Tracker test: `doubleclick.net` (HaGeZi) and `stats.lineageos.org`

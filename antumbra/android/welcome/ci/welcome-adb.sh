@@ -329,7 +329,7 @@ focus() { sh_ dumpsys window | grep -m 1 -o 'mCurrentFocus=.*' || true; }
 # is in front, and scroll down until the row shows. Welcome reads the
 # property every 2 s; the row says "Checking…" until the first read.
 cmd_check_addon() {
-    local seconds=${1:-60} end xml text='' w h armed
+    local seconds=${1:-60} end xml text='' w h armed reopened=''
     case $seconds in '' | *[!0-9]*) die "usage: check-addon [SECONDS]" ;; esac
     end=$((SECONDS + seconds))
     armed=$(sh_ getprop antumbra.fw.armed)
@@ -339,7 +339,8 @@ cmd_check_addon() {
         xml=$(dump_ui || true)
         # "Power off now" is pinned at the bottom of the status screen only.
         if [ -z "$(find_node poweroff_button <<<"$xml")" ]; then
-            say "the status screen is not in front ($(focus)); opening it"
+            [ -n "$reopened" ] || reopened=$(focus)
+            say "the status screen is not in front ($reopened); opening it"
             a shell am start -n "$PKG/.StatusActivity" >/dev/null
             sleep 2
             continue
@@ -351,10 +352,15 @@ cmd_check_addon() {
                 say "Welcome sees the firewall: $text"
                 # Back to the top (Tor's progress) for later screenshots.
                 for _ in 1 2 3; do a shell input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 300; done
+                # The status screen must stay in front after Start (run 4:
+                # Android closed it ten seconds later). Reopening it to read
+                # the row is not a pass.
+                [ -z "$reopened" ] ||
+                    die "Welcome sees the firewall, but the status screen was not in front after Start ($reopened)"
                 return 0
                 ;;
             *Live*) die "the firewall row does not show antumbra.fw.armed=${armed:-(not set)}: $text" ;;
-            *"Not running"*) die "Welcome does not see antumbra.fw.armed: $text" ;;
+            *"Not running"*) die "Welcome does not see antumbra.fw.armed=${armed:-(not set)}: $text" ;;
         esac
         # Not on screen, cut off, or not read yet: scroll down and look again.
         a shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 3 / 10)) 300

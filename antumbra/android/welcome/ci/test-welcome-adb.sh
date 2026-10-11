@@ -170,17 +170,31 @@ status_screens() {
 }
 
 # 4a. CI run 4: the launcher in front, the row below the fold. check-addon
-#     opens the status screen, scrolls, and waits out "Checking…".
+#     opens the status screen, scrolls, waits out "Checking…" and reads the
+#     row, but fails: the status screen must stay in front after Start.
 status_screens "Live (rules 0123abcd4567)"
 echo launcher >"$work/screen"
 : >"$work/log"
 if "$script" check-addon 10 2>"$work/err"; then
+    bad "check-addon passed with the launcher in front"
+else
     grep -q 'not in front (mCurrentFocus=.*Launcher' "$work/err" &&
         grep -qx 'shell am start -n org.antumbra.welcome/.StatusActivity' "$work/log" &&
-        grep -q '^shell input swipe ' "$work/log" && grep -q 'sees the firewall: Firewall | Live' "$work/err" &&
-        pass "check-addon opens the status screen and scrolls to the row" || bad "check-addon 4a: $(cat "$work/err")"
+        grep -q '^shell input swipe ' "$work/log" &&
+        tail -n 1 "$work/err" | grep -q 'sees the firewall, but the status screen was not in front after Start' &&
+        pass "check-addon reads the row but fails when the status screen was not in front" || bad "check-addon 4a: $(cat "$work/err")"
+fi
+
+# 4a'. The status screen in front, the row below the fold: scroll, pass.
+status_screens "Live (rules 0123abcd4567)"
+echo status-top >"$work/screen"
+: >"$work/log"
+if "$script" check-addon 10 2>"$work/err"; then
+    grep -q '^shell input swipe ' "$work/log" && grep -q 'sees the firewall: Firewall | Live' "$work/err" &&
+        ! grep -q 'am start' "$work/log" &&
+        pass "check-addon scrolls to the row on the status screen" || bad "check-addon 4a': $(cat "$work/err")"
 else
-    bad "check-addon with the launcher in front: $(cat "$work/err")"
+    bad "check-addon with the status screen in front: $(cat "$work/err")"
 fi
 
 # 4b. The row says the firewall is not running, or shows other rules: fail.

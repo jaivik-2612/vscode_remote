@@ -762,6 +762,8 @@ LINKS = """# capture_start 1000.0
 16: wlan0    inet 10.0.2.16/24 brd 10.0.2.255 scope global wlan0\\       valid_lft forever preferred_lft forever
 """
 GUEST_STOP = ("guest_capture_stop", 1099.0, "captured=10 received=10 dropped=0")
+# A reading of the device's clock after the arm event, where the marker put it.
+CLOCK_OK = ("device_clock", 1050.0, "device=1049.8 host_after=1050.1")
 
 
 def guest_frames():
@@ -787,7 +789,7 @@ def guest_frames():
 class GuestCaptureTest(TempDir):
     """The capture inside the guest: every interface, its own clock."""
 
-    def run_guest(self, gframes, events=(GUEST_STOP,), linktype=276, links=LINKS, extra=(), **kw):
+    def run_guest(self, gframes, events=(GUEST_STOP, CLOCK_OK), linktype=276, links=LINKS, extra=(), **kw):
         write_pcap(self.path("g.pcap"), gframes, linktype=linktype)
         args = ["--pcap-iface", "eth0", "--guest-pcap", self.path("g.pcap"),
                 "--expect-guest", self.write("ip.txt", "eth0 10.0.2.15/24\nwlan0 10.0.2.16/24\n")]
@@ -859,6 +861,18 @@ class GuestCaptureTest(TempDir):
                                                                    "device=1049.8 host_after=1050.1")))
         self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
         self.assertAlmostEqual(a["captures"][1]["device_clock_moved"], 0.0)
+
+    def test_device_clock_must_be_read_after_arm(self):
+        # No reading after the arm event, or only unusable ones (an adb error
+        # or timeout leaves "device=" empty or not a number): blind.
+        for events in ((GUEST_STOP,),
+                       (GUEST_STOP, ("device_clock", 1050.0, "device= host_after=1050.1")),
+                       (GUEST_STOP, ("device_clock", 1050.0, "device=error: closed host_after=1050.1")),
+                       (GUEST_STOP, ("device_clock", 1010.0, "device=1009.8 host_after=1010.1"))):
+            rc, a = self.run_guest(guest_frames(), events=events)
+            self.assertEqual((a["verdict"], rc), ("blind", 3), events)
+            self.assertTrue(any("was not read after install_start" in r for r in a["verdict_reasons"]),
+                            (events, a["verdict_reasons"]))
 
     def test_sll_v1_named_by_hardware_address(self):
         frames = []

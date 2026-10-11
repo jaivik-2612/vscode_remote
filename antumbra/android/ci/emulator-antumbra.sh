@@ -82,7 +82,7 @@
 #                          then stages the scripts from the checkout)
 #   ANTUMBRA_WELCOME_APK   app-debug.apk (required)
 #   ANTUMBRA_SERIAL, ANTUMBRA_CAPTURE, ANTUMBRA_CI_IMAGE
-#   ANTUMBRA_CI_BOOTSTRAP_TIMEOUT  seconds to wait for tor (default 600)
+#   ANTUMBRA_CI_BOOTSTRAP_TIMEOUT  seconds to wait for tor (default 900)
 #   ANTUMBRA_CI_TRACKERS   names that must be blocked
 #                          (default "doubleclick.net stats.lineageos.org")
 #   ANTUMBRA_CI_CONTROL    a name that must resolve through Tor
@@ -101,7 +101,11 @@ scenario_init antumbra
 ZIP=${ANTUMBRA_MODULE_ZIP:-}
 TREE=${ANTUMBRA_MODULE_TREE:-}
 APK=${ANTUMBRA_WELCOME_APK:?set ANTUMBRA_WELCOME_APK to the Welcome APK}
-BOOTSTRAP_TIMEOUT=${ANTUMBRA_CI_BOOTSTRAP_TIMEOUT:-600}
+# 900 s: tor takes the consensus from one source and starts no second
+# download while that one still sends, however slowly; in run 4 a slow
+# fallback directory held it at 30% for nine minutes, then moria1 sent the
+# whole consensus in about a second.
+BOOTSTRAP_TIMEOUT=${ANTUMBRA_CI_BOOTSTRAP_TIMEOUT:-900}
 TRACKERS=${ANTUMBRA_CI_TRACKERS:-doubleclick.net stats.lineageos.org}
 CONTROL=${ANTUMBRA_CI_CONTROL:-check.torproject.org}
 BUILD_MODULE=${ANTUMBRA_CI_BUILD_MODULE:-$ANDROID_DIR/module/build-module.sh}
