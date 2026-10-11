@@ -234,7 +234,8 @@ install_module() {
 	# only on the emulator; never on a phone.
 	ash 'setprop debug.antumbra.log_queries 1' >/dev/null
 	event install_start
-	if ! sh "$BUILD_MODULE" "${args[@]}" >"$LOGS/$SCEN-build-module.log" 2>&1; then
+	# build-module.sh adds post_fs_data_start, the arm cutoff (analyse.sh).
+	if ! ANTUMBRA_EVENTS=$SDIR/events.tsv sh "$BUILD_MODULE" "${args[@]}" >"$LOGS/$SCEN-build-module.log" 2>&1; then
 		tail -n 30 "$LOGS/$SCEN-build-module.log" >&2
 		abort module_install "build-module.sh --emulator failed (logs/$SCEN-build-module.log)"
 	fi

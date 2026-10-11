@@ -65,8 +65,12 @@ if [ ! -s "$A/consensus" ] && [ -s "$A/consensus.gz" ]; then
 fi
 if [ -s "$CAP/antumbra.pcap" ] || [ -s "$OUT/capture/antumbra-guest.pcap" ]; then
 	mkdir -p "$A"
+	# The arm cutoff: post_fs_data_start (build-module.sh, just before the
+	# step that arms the firewall), else the earlier install_start.
+	arm_event=install_start
+	grep -q "^post_fs_data_start$(printf '\t')" "$A/events.tsv" 2>/dev/null && arm_event=post_fs_data_start
 	args=(analyse --scenario antumbra --out "$A/analysis.json"
-		--arm-event install_start --require-tor-traffic
+		--arm-event "$arm_event" --require-tor-traffic
 		--armed-window armed_probe_start:armed_probe_end --require-armed-window
 		--expected-destinations "$HERE/expected-destinations.txt"
 		--destinations-mode "${ANTUMBRA_CI_DESTINATIONS:-learning}"

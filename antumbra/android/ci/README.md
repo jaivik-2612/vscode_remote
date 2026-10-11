@@ -305,9 +305,14 @@ phone sent bounds that capture's offset to the host (several markers:
 their bounds intersect; bounds that do not meet make the verdict
 `blind`); the analyser counts only what the phone sent, since slirp's echo
 reply may come after the second stamp. The cutoff is the host time of
-`install_start`, which is taken before `build-module.sh` starts and so
-before `antumbra-fw arm` runs, moved to each capture's clock with the
-lower bound of its offset, minus 1 s (3 s without a marker). Every packet
+`post_fs_data_start`, which `build-module.sh --emulator` records just
+before the step that runs `post-fs-data.sh` (whose first act is
+`antumbra-fw arm`), or of the earlier `install_start` when that event is
+missing, moved to each capture's clock with the lower bound of its offset,
+minus 1 s (3 s without a marker). Run 5 used `install_start`, taken
+before the module's files were pushed: an IPv6 router solicitation sent
+on `dummy0` half a second after it, while the files were still being
+pushed, was judged after arm. Every packet
 from the cutoff on counts. The cutoff can only be early, never late.
 `--judge-from-start` judges every packet instead (a capture on the phone,
 which has neither marker nor arm event).
@@ -321,11 +326,11 @@ the guest capture's times cannot be trusted: `blind`.
 
 The module's own log line `post-fs-data: firewall armed` (`--module-log`)
 is placed on the time line by the device's clock, and must not lie before
-`install_start` (else the device's clock moved: `blind` when the guest
+the arm event (else the device's clock moved: `blind` when the guest
 capture depends on it, a note otherwise). It is not the cutoff: it is
 written after `antumbra-fw arm` and after the runtime directory is set
 up, to the second, by the device's clock, so it bounds the arm only from
-above. `install_start` bounds it from below by construction, and with a
+above. The arm event bounds it from below by construction, and with a
 bracket of a second or two the cutoff lies only a few seconds before the
 real arm (run 4, replayed with such a bracket: 4.6 s or more before the
 module's line).

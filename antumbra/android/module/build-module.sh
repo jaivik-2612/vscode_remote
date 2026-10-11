@@ -376,6 +376,12 @@ emu shell sh /data/local/tmp/antumbra/lib/emu-install.sh /data/local/tmp/antumbr
 	die "installation failed"
 emu shell rm -rf /data/local/tmp/antumbra
 MD=/data/adb/modules/antumbra
+# For the CI's leak test: the host time just before the step that arms the
+# firewall, a lower bound of the arm that is seconds, not the whole push and
+# install, before it (ci/README.md, "The clock and the arm cutoff").
+if [ -n "${ANTUMBRA_EVENTS:-}" ]; then
+	printf 'post_fs_data_start\t%s\t\n' "$(date +%s.%N)" >>"$ANTUMBRA_EVENTS"
+fi
 if [ "$RESTART" = 1 ]; then
 	say "emulator: stop framework, post-fs-data.sh, start framework"
 	emu shell "stop; sh $MD/post-fs-data.sh; start"
