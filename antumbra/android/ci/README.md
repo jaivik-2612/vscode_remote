@@ -412,6 +412,49 @@ artifact is uploaded and fails the job afterwards with `summary.py --check`.
   Linux by `module-e2e`), a network change, IPv6 router advertisements,
   DHCP renewal over a long session, and the keep-alive offload check.
 
+## The daily page
+
+`daily.py` turns one emulator run's artifact (unpacked `antumbra-android-<n>`),
+compared with the run before it, into the "Antumbra Daily" page: the verdict
+(pass, fail, or "could not judge" for `blind`), the leak test in plain words
+(packets after arm, how many went to Tor, what the rest were, LEAK flows, the
+armed window, and what plain Android sent in the baseline), each screenshot
+with "Looks right"/"Looks off" buttons (before and after when more than 2% of
+it changed, the status bar left out), the numbers with their change since the
+previous run, and the checks, warnings and failures first. It reads
+`verdict.json`, `leak-report.json`, `<scenario>/checks.tsv` and `events.tsv`,
+`antumbra/filter-status.json`, `bootstrap-progress.tsv`, `build/*.md` and
+`screenshots/`; without `verdict.json` it judges with `summary.py`. A missing
+value shows as a dash. Standard library only, plus ImageMagick (`convert`,
+`compare`, `identify`) for the embedded JPEGs; without it the page has no
+images.
+
+```sh
+python3 -I antumbra/android/ci/daily.py --run RUN_DIR [--prev PREV_DIR] \
+    --run-number N --sha SHA --subject "commit subject" --run-url URL \
+    [--question QUESTION.json] [--date 2026-10-11] \
+    --out antumbra-daily.html --metrics-out metrics.json
+```
+
+The output is the page's content for an artifact (no `<html>` or `<body>`),
+titled "Antumbra Daily". The artifact holds no run number, commit or link, so
+they are passed in; the run number defaults to the DNS filter's version
+(`ci.<n>`), which also names the previous run (`--prev-run-number`
+overrides it). The page's buttons write the same database documents as the
+Debian track's page (`feedback/<run>_<screen>`, `controls/state`,
+`undo/<sha>`, `answers/<id>`, `photos/<asset>`), and its history table reads
+`metrics/<run>`, the document `--metrics-out` writes (its fields are listed
+in the script's docstring). Pause and Stop keep any other field of
+`controls/state` (such as a `reason`), and the page says in words that
+changes are paused, and why. `--sha` must be a commit id; without it the
+page offers no Undo. When the leak analysis ended in an error, or has no
+time after the firewall went on, the page and the metrics show no packet
+or leak counts (a dash, `null`) instead of zeros; the armed window counts
+only when it was measured (`ok` or `fail`). Tor's time is rounded once, to
+whole seconds, for the page and the metrics alike. A screen counts as
+changed when more than 2% of its pixels differ at full size, the status
+bar left out. Tests: `tests/test_daily.py`.
+
 ## Running the pieces by hand
 
 ```sh
@@ -448,8 +491,10 @@ bash antumbra/android/ci/emulator-antumbra.sh
 | `expected-destinations.txt` | the names and destinations expected through Tor |
 | `citool.py` | uiautomator search, DNS over TCP, JSON lookups, the artifact size limit |
 | `summary.py` | the job summary, `verdict.json` and the final verdict |
+| `daily.py` | the "Antumbra Daily" page and its `metrics/<run>` document, from an artifact |
 | `sdk-install.sh` | the pinned NDK, platform 36 and build tools 36.0.0 |
 | `tests/test_ci.py` | unit tests with generated captures |
+| `tests/test_daily.py` | unit tests of `daily.py` with synthetic artifacts |
 
 ## Contracts with the other parts
 
