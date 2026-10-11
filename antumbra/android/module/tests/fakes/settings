@@ -1,0 +1,28 @@
+#!/system/bin/sh
+# Test stand-in for Android's settings command. It fails like the real one
+# while the framework is down (no /antumbra-test/framework-up). Values are
+# NAME=VALUE lines in /antumbra-test/settings; changes are logged to
+# /antumbra-test/settings.log.
+T=/antumbra-test
+if [ ! -f $T/framework-up ]; then
+	echo "cmd: Can't find service: settings" >&2
+	exit 20
+fi
+[ "${2-}" = global ] || { echo "settings: only 'global' is faked" >&2; exit 1; }
+case $1 in
+get)
+	v=$(grep -F "$3=" $T/settings | sed -n "s/^$3=//p" | tail -n 1)
+	printf '%s\n' "${v:-null}"
+	;;
+put)
+	echo "put $3 $4" >>$T/settings.log
+	{ grep -v -F "$3=" $T/settings; printf '%s=%s\n' "$3" "$4"; } >$T/settings.new
+	mv -f $T/settings.new $T/settings
+	;;
+delete)
+	echo "delete $3" >>$T/settings.log
+	grep -v -F "$3=" $T/settings >$T/settings.new
+	mv -f $T/settings.new $T/settings
+	;;
+*) exit 1 ;;
+esac

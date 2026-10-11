@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+     Wording follows the Tails Welcome Screen and the archived Debian
+     Antumbra (config/rootfs/usr/bin/antumbra-welcome) where they apply. -->
+<resources>
+    <string name="app_name">Antumbra</string>
+    <string name="tile_label">Emergency off</string>
+    <string name="tile_subtitle_poweroff">Powers off at once</string>
+    <string name="tile_subtitle_restart">Restarts at once</string>
+
+    <!-- Welcome screen -->
+    <string name="welcome_title">Welcome to Antumbra</string>
+    <string name="welcome_intro">These choices last until you restart the phone. Until you start, the network stays closed.</string>
+    <string name="warning_not_owner">Welcome is not the device owner, so it cannot apply Antumbra\'s protections. Set it up with adb first (see the README).</string>
+    <string name="warning_no_addon">The Antumbra add-on is not running. Nothing else protects the network, so Wi-Fi will stay off for this session.</string>
+
+    <string name="section_tor">Tor</string>
+    <string name="tor_direct">Connect to Tor directly</string>
+    <string name="tor_direct_detail">The usual choice. The network can see that you use Tor, but not what you do.</string>
+    <string name="tor_bridges">Connect through bridges</string>
+    <string name="tor_bridges_detail">Hides from the network that you use Tor. Use it where Tor is blocked or watched.</string>
+    <string name="tor_offline">Stay offline</string>
+    <string name="tor_offline_detail">No network for this session. Wi-Fi stays off.</string>
+    <string name="bridges_builtin">Built-in bridges (obfs4)</string>
+    <string name="bridges_builtin_detail">The same bridges as in Tor Browser. They are blocked in some countries.</string>
+    <string name="bridges_custom">Bridges I enter</string>
+    <string name="bridges_custom_detail">From bridges.torproject.org, or from someone you trust.</string>
+    <string name="bridges_field_label">Bridge lines, one per line</string>
+    <string name="bridges_field_help">obfs4, webtunnel, meek_lite or plain bridges. Snowflake does not work here.</string>
+
+    <string name="section_network">Network</string>
+    <string name="mac_title">New Wi-Fi hardware address</string>
+    <string name="mac_on">A random MAC address for this session, so networks cannot recognise the phone.</string>
+    <string name="mac_off">Networks can recognise this phone from earlier sessions.</string>
+
+    <string name="section_storage">Persistent Storage</string>
+    <string name="persistent_title">Persistent Storage</string>
+    <string name="persistent_detail">Not set up yet</string>
+
+    <string name="section_additional">Additional settings</string>
+    <string name="admin_title">Administration</string>
+    <string name="admin_detail">Allows installing apps from outside the Antumbra store, USB debugging, and Bluetooth and Location settings for this session. Off by default, as in Tails.</string>
+    <string name="unsafe_title">Unsafe Browser</string>
+    <string name="unsafe_detail">For signing in to hotel or café Wi-Fi. It does not use Tor and is not anonymous.</string>
+
+    <string name="start">Start Antumbra</string>
+    <string name="starting">Starting…</string>
+
+    <!-- Bridge errors -->
+    <string name="bridges_none">Enter at least one bridge line, or choose the built-in bridges.</string>
+    <string name="bridges_too_many">Too many bridges: the limit is %1$d.</string>
+    <string name="bridges_snowflake">Line %1$d: Snowflake bridges do not work in Antumbra. Snowflake needs UDP, and the firewall lets Tor make only TCP connections. Use obfs4 or webtunnel bridges.</string>
+    <string name="bridges_unknown">Line %1$d: unsupported bridge type “%2$s”. Antumbra takes obfs4, webtunnel, meek_lite and plain bridges.</string>
+    <string name="bridges_characters">Line %1$d: this line has a character that cannot be part of a bridge line.</string>
+    <string name="bridges_too_long">Line %1$d is too long for a bridge line.</string>
+    <string name="bridges_ipv6">Line %1$d: IPv6 bridges do not work in Antumbra, because IPv6 is off. Use a bridge with an IPv4 address.</string>
+    <string name="bridges_address">Line %1$d: “%2$s” is not an IPv4 address and port, such as 192.0.2.1:443.</string>
+    <string name="bridges_fingerprint">Line %1$d: the fingerprint must be 40 hexadecimal characters.</string>
+    <string name="bridges_missing_arg">Line %1$d: a %2$s bridge needs its %3$s part.</string>
+    <string name="bridges_builtin_missing">The built-in bridges are missing from this build of Welcome.</string>
+
+    <!-- Status screen -->
+    <string name="status_title">Antumbra is running</string>
+    <string name="status_not_started">The session has not started yet.</string>
+    <string name="status_open_welcome">Open the Welcome screen</string>
+    <string name="status_lost">Welcome was restarted and no longer knows this session\'s choices. The add-on keeps the choices made at Start until you restart the phone.</string>
+    <string name="status_mode_direct">Connecting to Tor directly.</string>
+    <plurals name="status_mode_bridges">
+        <item quantity="one">Connecting to Tor through %1$d bridge.</item>
+        <item quantity="other">Connecting to Tor through %1$d bridges.</item>
+    </plurals>
+    <string name="status_mode_offline">Offline. Tor stays disconnected and Wi-Fi stays off until you restart.</string>
+
+    <string name="card_tor">Tor</string>
+    <string name="tor_connected">Connected to the Tor network</string>
+    <string name="tor_progress">Connecting: %1$d%%</string>
+    <string name="tor_waiting">Waiting for Tor to start…</string>
+    <string name="tor_offline_state">Tor is not connecting: offline session.</string>
+    <string name="tor_no_module_status">The add-on has not reported Tor\'s progress yet.</string>
+    <string name="addon_not_answering">The Antumbra add-on is not answering, so Tor\'s progress is unknown.</string>
+
+    <string name="card_filter">Tracker filter</string>
+    <string name="filter_queries">Lookups</string>
+    <string name="filter_blocked">Blocked</string>
+    <string name="filter_list_size">Domains on the list</string>
+    <string name="filter_list_version">List version</string>
+    <string name="filter_no_list">No block list is loaded.</string>
+    <string name="filter_unreachable">The tracker filter is not answering.</string>
+
+    <string name="card_session">This session</string>
+    <string name="row_tor">Tor</string>
+    <string name="row_mac">Wi-Fi address</string>
+    <string name="row_admin">Administration</string>
+    <string name="row_unsafe">Unsafe Browser</string>
+    <string name="row_firewall">Firewall</string>
+    <string name="value_direct">Direct</string>
+    <string name="value_bridges">Bridges</string>
+    <string name="value_offline">Offline</string>
+    <string name="value_new">New</string>
+    <string name="value_keep">Not changed</string>
+    <string name="value_on">On</string>
+    <string name="value_off">Off</string>
+    <string name="value_firewall_live">Live (rules %1$s)</string>
+    <string name="value_firewall_unknown">Not visible to apps</string>
+
+    <string name="policy_failures">Some protections could not be applied: %1$s</string>
+
+    <string name="wifi_settings">Wi-Fi settings</string>
+    <string name="add_tile">Add Emergency off to Quick Settings</string>
+    <string name="tile_added">Emergency off is in Quick Settings.</string>
+    <string name="tile_not_added">Emergency off was not added.</string>
+    <string name="power_off_now">Power off now</string>
+    <string name="power_off_detail_poweroff">Powers the phone off at once and ends this session.</string>
+    <string name="power_off_detail_restart">Restarts the phone at once and ends this session. Memory can keep traces for a short while after a restart; when you have time, power off from the power menu instead.</string>
+    <string name="power_off_failed">The phone could not be restarted: %1$s</string>
+    <string name="power_off_unavailable">Emergency off needs Welcome to be the device owner.</string>
+
+    <!-- Session notification -->
+    <string name="channel_session">Antumbra session</string>
+    <string name="notification_title">Antumbra session</string>
+    <string name="notification_text">Tap for Tor\'s progress and the tracker filter.</string>
+</resources>

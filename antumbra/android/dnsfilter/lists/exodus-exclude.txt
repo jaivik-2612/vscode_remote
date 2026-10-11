@@ -1,0 +1,21 @@
+# Exodus Privacy network signatures that are left out of the block list
+# because they name a whole service the person may use on purpose (signing
+# in, maps, a social network), not just its tracking. Only the exact entry
+# is left out; other sources may still block it or its subdomains, and the
+# guard list in sources.conf stops the build if one of them does.
+#
+# Checked against the Exodus list on 2026-10-11.
+
+# Facebook SDK: "\.facebook\.com" would block all of facebook.com.
+facebook.com
+# Several Google SDKs: "\.google\.com" would block all of google.com.
+google.com
+# Firebase: the console and documentation site, not the analytics endpoint
+# (firebaselogging-pa.googleapis.com stays blocked).
+firebase.com
+# Microsoft Authentication Library: Microsoft sign-in itself.
+login.microsoftonline.com
+management.azure.com
+# Baidu and Tencent map SDKs: the map services themselves.
+map.baidu.com
+map.qq.com

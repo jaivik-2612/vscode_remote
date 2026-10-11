@@ -1,0 +1,4 @@
+#!/system/bin/sh
+# Test stand-in for Android's cmd: logs to /antumbra-test/cmd.log.
+[ -f /antumbra-test/framework-up ] || { echo "cmd: Can't find service: $1" >&2; exit 20; }
+echo "$*" >>/antumbra-test/cmd.log

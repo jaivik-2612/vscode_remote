@@ -1,0 +1,33 @@
+#!/system/bin/sh
+# Test stand-in for Android's content command, answering only
+#   content query --user 0 --uri content://org.antumbra.welcome.state/session --projection A:B:...
+# like Welcome's StateProvider: one row with the asked columns in the
+# asked order. Values are NAME=VALUE lines in /antumbra-test/welcome;
+# bridges come from /antumbra-test/welcome.bridges (one per line).
+T=/antumbra-test
+[ -f $T/framework-up ] || { echo "Error while accessing provider" >&2; exit 1; }
+[ -f $T/welcome ] || { echo "Error while accessing provider:org.antumbra.welcome.state" >&2; exit 1; }
+proj=
+while [ $# -gt 0 ]; do
+	case $1 in
+	--projection) proj=$2; shift 2 ;;
+	--uri) [ "$2" = content://org.antumbra.welcome.state/session ] || exit 1; shift 2 ;;
+	*) shift ;;
+	esac
+done
+out='Row: 0 '
+sep=
+old=$IFS
+IFS=:
+for col in $proj; do
+	IFS=$old
+	if [ "$col" = bridges ]; then
+		v=$(cat $T/welcome.bridges 2>/dev/null)
+	else
+		v=$(grep -F "$col=" $T/welcome | sed -n "s/^$col=//p" | tail -n 1)
+	fi
+	out="$out$sep$col=$v"
+	sep=', '
+done
+IFS=$old
+printf '%s\n' "$out"

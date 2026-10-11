@@ -1,0 +1,104 @@
+## Antumbra torrc for the system tor on Android.
+##
+## render-torrc.sh replaces @ANTUMBRA_DIR@ with the runtime directory
+## (/data/adb/antumbra on the phone). The module starts tor as uid/gid 2950
+## with 'tor -f <this file>'. tor is built with --disable-system-torrc, so it
+## reads no other configuration file.
+##
+## Directories tor expects the module to create before it starts tor
+## (tor checks owner and mode itself and refuses to start otherwise):
+##   @ANTUMBRA_DIR@/state/tor  owner 2950:2950, mode 0700, on a tmpfs
+##                             mounted fresh at every boot, so guard
+##                             choices and time stamps never reach flash.
+##   @ANTUMBRA_DIR@/run        owner 2950, group 2950 or 0, mode 0751 or
+##                             0750 (0751 lets uid 2951 open status.json).
+##   @ANTUMBRA_DIR@/log        writable by uid 2950.
+## Every directory above them (/data/adb, @ANTUMBRA_DIR@) must be
+## searchable (x) by uid 2950.
+
+## --- Where tor keeps its state ------------------------------------------
+DataDirectory @ANTUMBRA_DIR@/state/tor
+## Write state and cache files as rarely as possible.
+AvoidDiskWrites 1
+## Stay in the foreground; the module supervises the process.
+RunAsDaemon 0
+## No 'User' line: the module starts tor directly as uid 2950 with every
+## capability dropped. tor never runs as root, even briefly.
+
+## --- What tor offers to the rest of the phone -----------------------------
+## No SOCKS port. Apps reach Tor only through the firewall's redirect to
+## TransPort, so every name lookup goes through the DNS filter. A SOCKS port
+## would let an app send host names to Tor directly, past the filter.
+SocksPort 0
+## Transparent proxy: the firewall redirects all TCP from every uid except
+## 2950 here. Connections to different destination addresses use separate
+## circuits. IsolateClientAddr is tor's default and is stated for clarity;
+## after the redirect every app has the same client address, so it does not
+## separate apps from each other (per-app circuits are later work).
+TransPort 127.0.0.1:9040 IsolateClientAddr IsolateDestAddr
+## Name lookups: only the DNS filter (uid 2951) may reach this port. It
+## listens on 127.0.0.1:5353 and forwards what it does not block here.
+DNSPort 127.0.0.1:9053
+## Answer lookups of .onion and .exit names with addresses from
+## VirtualAddrNetworkIPv4, which TransPort maps back to the name.
+AutomapHostsOnResolve 1
+AutomapHostsSuffixes .onion,.exit
+VirtualAddrNetworkIPv4 10.192.0.0/10
+## Refuse connections to private and local addresses (the router, the LAN)
+## and drop lookup answers that point at them. These are tor's defaults;
+## they are stated because the LAN must stay unreachable through Tor too.
+ClientRejectInternalAddresses 1
+ClientDNSRejectInternalAddresses 1
+
+## --- Control interface ------------------------------------------------------
+## No TCP control port: any app can open a loopback TCP port, and the
+## control port can point tor at an attacker's bridge. The control socket is
+## a Unix socket with mode 0660, owned by uid/gid 2950: only root (the
+## module) and tor's own uid can use it. RelaxDirModeCheck lets the run
+## directory be 0751, so the DNS filter can read status.json there.
+ControlPort 0
+ControlSocket unix:@ANTUMBRA_DIR@/run/tor-control.sock GroupWritable RelaxDirModeCheck
+CookieAuthentication 1
+CookieAuthFile @ANTUMBRA_DIR@/run/tor-control.authcookie
+CookieAuthFileGroupReadable 0
+
+## --- Network ------------------------------------------------------------------
+## Start with the network off. After the Welcome screen the module sets
+## DisableNetwork 0 (and any bridges) over the control socket, unless the
+## person chose to stay offline.
+DisableNetwork 1
+## IPv4 only. IPv6 is switched off on the phone and dropped by the firewall.
+ClientUseIPv4 1
+ClientUseIPv6 0
+ClientPreferIPv6ORPort 0
+
+## --- Logging ------------------------------------------------------------------
+## Notices only, to a file the module can show. SafeLogging (tor's default)
+## keeps addresses out of the log. Nothing goes to logcat, which other
+## system components and adb can read.
+Log notice file @ANTUMBRA_DIR@/log/tor.log
+SafeLogging 1
+## Same as Tails: do not warn about the POP3 and IMAP ports, so people are
+## not trained to ignore warnings about mail clients that use STARTTLS.
+WarnPlaintextPorts 23,109
+
+## --- What Tails' torrc does that this file keeps or drops --------------------
+## Kept:
+##   TransPort on 127.0.0.1:9040 with IsolateDestAddr; AutomapHostsOnResolve
+##   with the .exit and .onion suffixes; DNSPort (moved to 9053, because the
+##   DNS filter takes Tails' 5353); cookie authentication; AvoidDiskWrites 1;
+##   WarnPlaintextPorts 23,109; DisableNetwork 1 until the person has made
+##   their choice at the Welcome screen.
+## Changed:
+##   Tails' TransPort also has IsolateDestPort; Antumbra isolates by
+##   destination address only, to keep the number of circuits on a phone
+##   down. Logs go to a file instead of the systemd journal. Debian's
+##   'User debian-tor' becomes a dedicated Android uid (2950) chosen by the
+##   module; Debian's group-readable cookie becomes owner-only.
+## Dropped:
+##   All four SocksPorts (9050, 9062, 9063 and the browser's 10.200.1.1:9050):
+##   Tor Browser for Android runs its own tor, and a SOCKS port would bypass
+##   the DNS filter. ControlPort 127.0.0.1:9052: replaced by the control
+##   socket. Sandbox 1: tor's seccomp sandbox needs libseccomp and is written
+##   for glibc's system calls; this build has no sandbox (on the phone, tor is
+##   instead confined by its uid, dropped capabilities and the firewall).

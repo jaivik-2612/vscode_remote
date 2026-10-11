@@ -1,0 +1,80 @@
+# Antumbra: pinned inputs for build-tor.sh.
+#
+# One record per line: KIND NAME VALUE... Blank lines and lines starting
+# with '#' are ignored. build-tor.sh refuses to unpack any tarball whose
+# SHA-256 differs from the value here. When gpg is installed it also checks
+# the publisher's OpenPGP signature and accepts it only from a primary key
+# listed under 'signer'.
+#
+# To update a source: download the new tarball and its signature from the
+# URLs below, check the signature by hand against the listed fingerprints,
+# then change the version, file name, SHA-256 and URLs together, and run
+# build-tor.sh once with '--signatures require'.
+#
+# Checked on 2026-10-11:
+#   tor 0.4.9.14 (2026-10-07) is the newest stable release on
+#   dist.torproject.org and torproject.org/download/tor.
+#   OpenSSL 3.5 is the current LTS series (supported until 2030-04-08);
+#   3.5.9 (2026-09-29) is its newest release.
+#   libevent 2.1.12-stable is the newest stable libevent.
+#   zlib 1.3.2 is the newest zlib release.
+
+# Toolchain and target. The NDK revision is checked against the
+# source.properties of the NDK in use. The API level is the minimum Android
+# version the binary runs on (34 = Android 14).
+ndk     28.2.13676358
+api     34
+
+# SOURCE_DATE_EPOCH for every build step: the time stamp of the tor
+# tarball's top directory (2026-10-07 14:40:00 UTC).
+epoch   1791384000
+
+# --- tor ----------------------------------------------------------------
+# source NAME VERSION SHA256 FILE
+source  tor       0.4.9.14  182449ac1c8ff43278da27b69b02040e11d03d0327db6d9126e4190ec6235e4a  tor-0.4.9.14.tar.gz
+url     tor       https://dist.torproject.org/tor-0.4.9.14.tar.gz
+url     tor       https://archive.torproject.org/tor-package-archive/tor-0.4.9.14.tar.gz
+# tor signs a .sha256sum file rather than the tarball itself.
+sigtype tor       sha256sum
+sumurl  tor       https://dist.torproject.org/tor-0.4.9.14.tar.gz.sha256sum
+sigurl  tor       https://dist.torproject.org/tor-0.4.9.14.tar.gz.sha256sum.asc
+# Release signing keys listed on support.torproject.org (little-t-tor).
+signer  tor       1C1BC007A9F607AA8152C040BEA7B180B1491921  Alexander Faeroy
+signer  tor       B74417EDDF22AC9F9E90F49142E86A2A11F48D36  David Goulet
+signer  tor       2133BC600AB133E1D826D173FE43009C4607B1FB  Nick Mathewson
+# The Tor Project's Web Key Directory has the current copies of these keys
+# (keyserver copies can lag behind key renewals).
+keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/bakehip1o7n7gcmff79qd1n5p7n9ag9i?l=ahf
+keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/ht64pofxwitaf8p99qzbw4bf7y815uhe?l=dgoulet
+keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/qmie598udw8k51esbny48og3uea6b3jr?l=nickm
+
+# --- OpenSSL --------------------------------------------------------------
+source  openssl   3.5.9     603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a  openssl-3.5.9.tar.gz
+url     openssl   https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz
+sigtype openssl   detached
+sigurl  openssl   https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz.asc
+# OpenSSL signing certificate named on openssl-library.org/source/; the
+# signature is made by one of its subkeys.
+signer  openssl   B146647E45A7B33947AB226B2A2C87D161692D40  OpenSSL signing certificate
+keyurl  openssl   https://openssl-library.org/source/pubkeys.asc
+
+# --- libevent -------------------------------------------------------------
+source  libevent  2.1.12-stable  92e6de1be9ec176428fd2367677e61ceffc2ee1cb119035037a27d346b0403bb  libevent-2.1.12-stable.tar.gz
+url     libevent  https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz
+sigtype libevent  detached
+sigurl  libevent  https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz.asc
+signer  libevent  9E3AC83A27974B84D1B3401DB86086848EF8686D  Azat Khuzhin
+keyurl  libevent  https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x9E3AC83A27974B84D1B3401DB86086848EF8686D
+
+# --- zlib -----------------------------------------------------------------
+source  zlib      1.3.2     bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16  zlib-1.3.2.tar.gz
+# zlib.net keeps only the current release at the top level; fossils/ keeps
+# every release.
+url     zlib      https://zlib.net/zlib-1.3.2.tar.gz
+url     zlib      https://zlib.net/fossils/zlib-1.3.2.tar.gz
+url     zlib      https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz
+sigtype zlib      detached
+sigurl  zlib      https://zlib.net/zlib-1.3.2.tar.gz.asc
+sigurl  zlib      https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz.asc
+signer  zlib      5ED46A6721D365587791E2AA783FCD8E58BCAFBA  Mark Adler
+keyurl  zlib      https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x5ED46A6721D365587791E2AA783FCD8E58BCAFBA

@@ -1,0 +1,481 @@
+name: Antumbra Android
+
+# Builds and tests the Android-based Antumbra (antumbra/android/): the
+# firewall in a Linux sandbox, the DNS filter and its block list, tor for
+# arm64-v8a and x86_64, the Welcome app and the Magisk module, then runs the
+# leak test on Google's Android 16 emulator image (API 36, 'default': no
+# Google services) on a KVM runner:
+#
+#   BASELINE  plain Android, left alone for 3 minutes: what it contacts.
+#   ANTUMBRA  a fresh boot; the module installed and started as
+#             build-module.sh --emulator does it; Welcome as device owner;
+#             "Start Antumbra"; tor; a tracker lookup.
+#
+# The emulator records every packet of the phone ('-tcpdump'), and
+# antumbra/android/ci/leak_analyser.py classifies each: Tor relay, Tor
+# directory, configured bridge, link-level (ARP, DHCP), or LEAK. The run
+# passes only with zero LEAK after the moment the firewall was armed, a
+# capture that saw every connection tor reported, the tracker names blocked,
+# and every scenario check passed (antumbra/android/ci/README.md).
+#
+# Artifact antumbra-android-<run number> (14 days, kept under 40 MB):
+# summary.md, leak-report.md and .json, screenshots/, capture/, logs/ and
+# the build jobs' notes. The module zip and the Welcome APK are separate
+# artifacts (5 days). workflow_dispatch works once this file is on the
+# default branch. A newer push to the branch cancels a run still going.
+
+on:
+  push:
+    branches: [claude/tails-mobile-privacy-os-c71ate]
+    paths:
+      - 'antumbra/android/**'
+      - '.github/workflows/antumbra-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: antumbra-android-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  firewall:
+    name: firewall (sandbox test)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install the shells antumbra-fw must run under
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends mksh busybox dash iptables iproute2 util-linux
+
+      - name: Sandbox test, as root
+        run: |
+          mkdir -p "$RUNNER_TEMP/build-report"
+          set -o pipefail
+          sudo env AFW_TEST_REQUIRE_SHELLS="bash dash busybox mksh" AFW_TEST_REQUIRE_IPV6=1 \
+            bash antumbra/android/firewall/tests/sandbox-test.sh 2>&1 | tee "$RUNNER_TEMP/firewall-sandbox.log"
+
+      - name: Notes for the summary
+        if: ${{ !cancelled() }}
+        run: |
+          log="$RUNNER_TEMP/firewall-sandbox.log"
+          mkdir -p "$RUNNER_TEMP/build-report"
+          {
+            echo "### firewall"
+            echo
+            echo "Sandbox test: $(grep -c '^PASS' "$log" || true) passed, $(grep -c '^FAIL' "$log" || true) failed, $(grep -c '^SKIP' "$log" || true) skipped."
+            grep '^FAIL' "$log" | head -n 20 | sed 's/^/- /' || true
+          } | tee "$RUNNER_TEMP/build-report/firewall.md" >> "$GITHUB_STEP_SUMMARY"
+          cp "$log" "$RUNNER_TEMP/build-report/firewall-sandbox.log"
+
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: antumbra-android-build-firewall-${{ github.run_number }}
+          path: ${{ runner.temp }}/build-report
+          retention-days: 5
+          overwrite: true
+
+  dnsfilter:
+    name: dnsfilter (tests, binaries, block list)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: antumbra/android/dnsfilter/go.mod
+          cache-dependency-path: antumbra/android/dnsfilter/go.sum
+
+      - name: go vet, go test, and both static binaries
+        run: |
+          bash antumbra/android/dnsfilter/build.sh --out "$RUNNER_TEMP/out/dnsfilter" --test --check \
+            --version "ci.${{ github.run_number }}"
+
+      - name: Fetch and compile the block list
+        run: |
+          bash antumbra/android/dnsfilter/fetch-lists.sh --out "$RUNNER_TEMP/lists" \
+            --listc "$RUNNER_TEMP/out/dnsfilter/host/listc"
+          "$RUNNER_TEMP/out/dnsfilter/x86_64/antumbra-dnsfilter" -check-list "$RUNNER_TEMP/lists/dnsfilter.list"
+          mkdir -p "$RUNNER_TEMP/out/lists"
+          cp "$RUNNER_TEMP/lists/dnsfilter.list" "$RUNNER_TEMP/lists/SHA256SUMS" "$RUNNER_TEMP/out/lists/"
+          [ ! -f "$RUNNER_TEMP/lists/doh-ipv4.txt" ] || cp "$RUNNER_TEMP/lists/doh-ipv4.txt" "$RUNNER_TEMP/out/lists/"
+          rm -rf "$RUNNER_TEMP/out/dnsfilter/host"
+
+      - name: Notes for the summary
+        run: |
+          mkdir -p "$RUNNER_TEMP/build-report"
+          list="$RUNNER_TEMP/out/lists/dnsfilter.list"
+          {
+            echo "### dnsfilter"
+            echo
+            lv=$(sed -n 's/^# version: //p' "$list" | head -n 1)
+            ln=$(sed -n 's/^# entries: //p' "$list" | head -n 1)
+            echo "- Block list: version $lv, $ln entries, $(stat -c %s "$list") bytes."
+            for abi in arm64-v8a x86_64; do
+              f="$RUNNER_TEMP/out/dnsfilter/$abi/antumbra-dnsfilter"
+              echo "- $abi: $(stat -c %s "$f") bytes, sha256 \`$(sha256sum "$f" | cut -c1-16)…\`"
+            done
+            echo "- DoH addresses for the firewall: $(grep -vc '^#' "$RUNNER_TEMP/out/lists/doh-ipv4.txt" 2>/dev/null || echo none)."
+          } | tee "$RUNNER_TEMP/build-report/dnsfilter.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-dnsfilter-${{ github.run_number }}
+          path: ${{ runner.temp }}/out
+          retention-days: 5
+          overwrite: true
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-build-dnsfilter-${{ github.run_number }}
+          path: ${{ runner.temp }}/build-report
+          retention-days: 5
+          overwrite: true
+
+  tor:
+    name: tor (arm64-v8a, x86_64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Cache key (tor/cache-key.txt)
+        id: key
+        run: echo "key=$(bash antumbra/android/tor/build-tor.sh --print-cache-key --abi all)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache/restore@v5
+        id: cache
+        with:
+          path: ${{ runner.temp }}/tor-out
+          key: ${{ steps.key.outputs.key }}
+
+      - name: The pinned NDK
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash antumbra/android/ci/sdk-install.sh ndk
+
+      - name: Build tor (sources checked by SHA-256 and OpenPGP signature)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          bash antumbra/android/tor/build-tor.sh --out "$RUNNER_TEMP/tor-out" --abi all --jobs 4 \
+            --work "$RUNNER_TEMP/tor-work" --signatures require --host-check yes
+
+      - name: tor's host check as root (namespaces, uid 2950, control socket)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          v=$(awk '$1 == "source" && $2 == "tor" { print $3 }' antumbra/android/tor/sources.lock)
+          sudo bash antumbra/android/tor/hostcheck-tor.sh --require-runtime --expect-version "$v" \
+            "$RUNNER_TEMP/tor-work/x86_64/tor-hostcheck"
+
+      - uses: actions/cache/save@v5
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ runner.temp }}/tor-out
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Check both binaries
+        env:
+          CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          CACHE_KEY: ${{ steps.key.outputs.key }}
+        run: |
+          v=$(awk '$1 == "source" && $2 == "tor" { print $3 }' antumbra/android/tor/sources.lock)
+          for abi in arm64-v8a x86_64; do
+            bash antumbra/android/tor/check-tor-binary.sh --abi "$abi" --expect-version "$v" "$RUNNER_TEMP/tor-out/$abi/tor"
+          done
+          mkdir -p "$RUNNER_TEMP/build-report"
+          {
+            echo "### tor"
+            echo
+            how='built in this run'
+            [ "$CACHE_HIT" != true ] || how='from the cache'
+            echo "- tor $v, $how; cache key \`$CACHE_KEY\`."
+            for abi in arm64-v8a x86_64; do
+              f="$RUNNER_TEMP/tor-out/$abi/tor"
+              echo "- $abi: $(stat -c %s "$f") bytes, sha256 \`$(sha256sum "$f" | cut -c1-16)…\`"
+            done
+          } | tee "$RUNNER_TEMP/build-report/tor.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-tor-${{ github.run_number }}
+          path: ${{ runner.temp }}/tor-out
+          retention-days: 5
+          overwrite: true
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-build-tor-${{ github.run_number }}
+          path: ${{ runner.temp }}/build-report
+          retention-days: 5
+          overwrite: true
+
+  welcome:
+    name: welcome (debug APK)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: SDK platform and build tools
+        run: bash antumbra/android/ci/sdk-install.sh platform build-tools
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper/dists/antumbra
+          key: >-
+            antumbra-welcome-gradle-${{ hashFiles('antumbra/android/welcome/gradle/**',
+            'antumbra/android/welcome/**/*.kts', 'antumbra/android/welcome/gradle.properties') }}
+
+      - name: assembleDebug
+        working-directory: antumbra/android/welcome
+        run: ./gradlew --no-daemon assembleDebug
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-welcome-${{ github.run_number }}
+          path: antumbra/android/welcome/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 5
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Unit tests
+        working-directory: antumbra/android/welcome
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+      - name: Notes for the summary
+        run: |
+          apk=antumbra/android/welcome/app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p "$RUNNER_TEMP/build-report"
+          {
+            echo "### welcome"
+            echo
+            echo "- app-debug.apk: $(stat -c %s "$apk") bytes, sha256 \`$(sha256sum "$apk" | cut -c1-16)…\`; unit tests passed."
+          } | tee "$RUNNER_TEMP/build-report/welcome.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-build-welcome-${{ github.run_number }}
+          path: ${{ runner.temp }}/build-report
+          retention-days: 5
+          overwrite: true
+
+  module:
+    name: module (Magisk zip)
+    needs: [firewall, dnsfilter, tor, welcome]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: SDK packages (NDK for antumbra-run, build tools for the overlay)
+        run: bash antumbra/android/ci/sdk-install.sh ndk platform build-tools
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-tor-${{ github.run_number }}
+          path: ${{ runner.temp }}/tor
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-dnsfilter-${{ github.run_number }}
+          path: ${{ runner.temp }}/dns
+
+      - name: Module unit tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends mksh busybox dash
+          sh antumbra/android/module/tests/unit.sh
+
+      - name: Build the module zip
+        run: |
+          # Artifacts lose the executable bit.
+          chmod +x "$RUNNER_TEMP"/tor/*/tor "$RUNNER_TEMP"/dns/dnsfilter/*/antumbra-dnsfilter
+          mkdir -p "$RUNNER_TEMP/module"
+          version=$(sed -n 's/^version=//p' antumbra/android/module/module.prop)
+          sh antumbra/android/module/build-module.sh \
+            --tor "$RUNNER_TEMP/tor" --dnsfilter "$RUNNER_TEMP/dns/dnsfilter" \
+            --blocklist "$RUNNER_TEMP/dns/lists/dnsfilter.list" \
+            --out "$RUNNER_TEMP/module/antumbra-module-$version.zip"
+          zip="$RUNNER_TEMP/module/antumbra-module-$version.zip"
+          mkdir -p "$RUNNER_TEMP/build-report"
+          {
+            echo "### module"
+            echo
+            echo "- antumbra-module-$version.zip: $(stat -c %s "$zip") bytes, sha256 \`$(sha256sum "$zip" | cut -d ' ' -f 1)\`."
+            echo
+            echo '```'
+            unzip -l "$zip" | sed -n '4,$p' | head -n 60
+            echo '```'
+          } | tee "$RUNNER_TEMP/build-report/module.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-module-${{ github.run_number }}
+          path: ${{ runner.temp }}/module
+          retention-days: 5
+          overwrite: true
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: antumbra-android-build-module-${{ github.run_number }}
+          path: ${{ runner.temp }}/build-report
+          retention-days: 5
+          overwrite: true
+
+  emulator:
+    name: emulator (Android 16 leak test)
+    needs: [firewall, dnsfilter, tor, welcome, module]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ANTUMBRA_SERIAL: emulator-5554
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test the CI tools (pcap reader, leak analyser)
+        run: python3 -B -m unittest discover -s antumbra/android/ci/tests -v
+
+      - name: Directories
+        run: |
+          {
+            echo "ANTUMBRA_CI_OUT=$RUNNER_TEMP/report"
+            echo "ANTUMBRA_CAPTURE_DIR=$RUNNER_TEMP/capture"
+            echo "ANTUMBRA_MODULE_TREE=$RUNNER_TEMP/module-tree"
+            echo "ANTUMBRA_WELCOME_APK=$RUNNER_TEMP/welcome/app-debug.apk"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/report/build" "$RUNNER_TEMP/capture" "$RUNNER_TEMP/module-tree"
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-module-${{ github.run_number }}
+          path: ${{ runner.temp }}/module
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-welcome-${{ github.run_number }}
+          path: ${{ runner.temp }}/welcome
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: antumbra-android-build-*-${{ github.run_number }}
+          path: ${{ runner.temp }}/report/build
+          merge-multiple: true
+
+      - name: Unpack the module zip (the emulator gets exactly its files)
+        run: |
+          zip=$(ls "$RUNNER_TEMP"/module/antumbra-module-*.zip)
+          unzip -q "$zip" -d "$ANTUMBRA_MODULE_TREE"
+          ls -l "$ANTUMBRA_MODULE_TREE/bin/x86_64"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # -feature -WiFiPacketStream keeps the emulator's Wi-Fi on its own
+      # virtual network instead of netsim (emulator 36.5 and later), so that
+      # -tcpdump records Wi-Fi as well as mobile data.
+      - name: 'BASELINE: plain Android 16, left alone for 3 minutes'
+        timeout-minutes: 30
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
+        env:
+          ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/baseline.pcap
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          cores: 3
+          ram-size: 4096M
+          disk-size: 6000M
+          force-avd-creation: true
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -camera-back none -camera-front none -feature -WiFiPacketStream
+            -tcpdump ${{ runner.temp }}/capture/baseline.pcap
+          script: bash antumbra/android/ci/emulator-baseline.sh
+
+      - name: Stop what the first emulator left running
+        if: ${{ !cancelled() }}
+        run: |
+          adb kill-server || true
+          pkill -f netsimd || true
+          pkill -f qemu-system || true
+          sleep 3
+
+      - name: 'ANTUMBRA: module, Welcome, Start, tor, tracker test'
+        if: ${{ !cancelled() }}
+        timeout-minutes: 50
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
+        env:
+          ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/antumbra.pcap
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          cores: 3
+          ram-size: 4096M
+          disk-size: 6000M
+          force-avd-creation: true
+          disable-animations: true
+          emulator-boot-timeout: 900
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -camera-back none -camera-front none -feature -WiFiPacketStream
+            -tcpdump ${{ runner.temp }}/capture/antumbra.pcap
+          script: bash antumbra/android/ci/emulator-antumbra.sh
+
+      - name: Leak analysis
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: bash antumbra/android/ci/analyse.sh
+
+      - name: Job summary
+        if: ${{ !cancelled() }}
+        run: python3 -B -I antumbra/android/ci/summary.py "$ANTUMBRA_CI_OUT" --run "${{ github.run_number }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the artifact under 40 MB
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -B -I antumbra/android/ci/citool.py pack "$ANTUMBRA_CI_OUT" --limit-mb 39 \
+            --optional 'capture/antumbra.pcap' --optional 'capture/baseline.pcap' \
+            --optional 'antumbra/consensus.gz' --optional 'capture/*.slim.pcap'
+
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: antumbra-android-${{ github.run_number }}
+          path: ${{ runner.temp }}/report
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: error
+
+      - name: Verdict
+        if: ${{ !cancelled() }}
+        run: python3 -B -I antumbra/android/ci/summary.py "$ANTUMBRA_CI_OUT" --verdict
