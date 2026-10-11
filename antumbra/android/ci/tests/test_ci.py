@@ -834,6 +834,23 @@ class GuestCaptureTest(TempDir):
         self.assertEqual((a["verdict"], rc), ("fail", 1))
         self.assertEqual([(f["kind"], sorted(f["seen"])) for f in a["leaks"]], [("multicast", ["guest:wlan0"])])
 
+    def test_empty_frame_is_link_level(self):
+        # Run 6: an IPv4 frame of zero bytes on wlan0, from a packet socket,
+        # complete in the capture. It carries no data: listed, not a LEAK.
+        empty = (1040.0, sll2(16, b"", WLAN_MAC))
+        rc, a = self.run_guest(guest_frames() + [empty])
+        self.assertEqual((a["verdict"], rc), ("pass", 0), a["verdict_reasons"])
+        self.assertEqual(a["phases"]["post-arm"]["link-empty"], 1)
+        # A frame the capture cut off is not known to be empty.
+        rec = pcapread.Record(1040.0, 276, sll2(16, b"", WLAN_MAC), 20 + 60)
+        self.assertEqual(pcapread.decode(rec).note, "truncated frame")
+        rec = pcapread.Record(1040.0, 276, sll2(16, b"", WLAN_MAC), 20)
+        self.assertEqual(pcapread.decode(rec).note, pcapread.EMPTY_FRAME)
+        # One byte after the header is not empty: still a LEAK.
+        rc, a = self.run_guest(guest_frames() + [(1040.0, sll2(16, b"\x45", WLAN_MAC))])
+        self.assertEqual((a["verdict"], rc), ("fail", 1))
+        self.assertEqual([f["kind"] for f in a["leaks"]], ["undecoded"])
+
     def test_address_on_the_wrong_interface_is_blind(self):
         # wlan0's address seen only on eth0: wlan0 itself was not seen.
         frames = [(t, f) for t, f in guest_frames() if f[4:8] != struct.pack(">I", 16)]

@@ -22,6 +22,10 @@ flows, and classifies each flow as one of:
   link-arp       ARP: link-level address resolution, never routed
   link-80211     802.11 association and power-save frames (in a capture
                  of the Wi-Fi radio, such as netsim's)
+  link-empty     an empty frame: a link-layer header with nothing after
+                 it, complete in the capture, sent from a packet socket
+                 outside the firewall; it carries no data (run 6 saw one
+                 on wlan0 while the firewall was armed)
   ci-marker      the clock marker this CI sends before the module is
                  installed (see "Clocks" below); never after arm
   LEAK           anything else, with a kind: dns, tcp, udp, lan, icmp,
@@ -200,12 +204,13 @@ LOCAL_NETS = [ipaddress.ip_network(n) for n in (
     "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10",
     "fc00::/7", "fe80::/10", "fec0::/10")]
 
-ALLOWED = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211", "ci-marker")
+ALLOWED = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211", "link-empty",
+           "ci-marker")
 # What may pass while the firewall is only armed: link-level frames, and
 # DHCP, which Android sends from a packet socket outside the firewall.
-ALLOWED_ARMED = ("lan-dhcp", "link-arp", "link-80211")
+ALLOWED_ARMED = ("lan-dhcp", "link-arp", "link-80211", "link-empty")
 LEAK = "LEAK"
-CLASS_ORDER = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211",
+CLASS_ORDER = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211", "link-empty",
                "ci-marker", LEAK)
 
 EXIT = {"pass": 0, "info": 0, "fail": 1, "error": 2, "blind": 3}
@@ -1350,6 +1355,8 @@ def analyse(args):
             # Something the guest sent that has no IP header here.
             if note.startswith(("802.11 management", "802.11 null")):
                 cls = ("link-80211", None, "802.11 association or power-save frame", p.src_mac)
+            elif note == pcapread.EMPTY_FRAME:
+                cls = ("link-empty", None, "an empty frame: a link-layer header and nothing after it", p.src_mac)
             else:
                 cls = (LEAK, "undecoded", "a frame from the phone that this analyser cannot read (%s)"
                        % note, p.src_mac)
@@ -1765,7 +1772,7 @@ def scenario_md(s):
     if aw.get("status") not in (None, "not-asked"):
         if aw.get("start_t") is not None:
             lines.append("- Armed window (`%s` to `%s`): t+%.1f to t+%.1f s, %s s; %d packet(s) from the phone, "
-                         "%d of them ARP or DHCP; %d LEAK(s): **%s**." % (
+                         "%d of them link-level (ARP, DHCP, empty frames); %d LEAK(s): **%s**." % (
                              aw.get("start_event"), aw.get("end_event"), aw["start_t"], aw["end_t"],
                              aw.get("seconds"), aw.get("packets", 0), aw.get("allowed", 0), aw.get("leaks", 0),
                              aw.get("status")))
@@ -1813,7 +1820,8 @@ def scenario_md(s):
                     r["first"], r["class"], _dest(r), _md_escape(r["label"] or ""), r["packets"],
                     _md_escape(seen_text(r["seen"]))))
             lines.append("")
-        other = [r for r in _dest_rows(flows, "post-arm") if r["class"] in ("lan-dhcp", "link-arp", "link-80211")]
+        other = [r for r in _dest_rows(flows, "post-arm")
+                 if r["class"] in ("lan-dhcp", "link-arp", "link-80211", "link-empty")]
         if other:
             lines.append("Link-level traffic after arm (allowed): " + ", ".join(
                 "%s `%s` (%d)" % (r["class"], _dest(r), r["packets"]) for r in other[:20]) + ".")

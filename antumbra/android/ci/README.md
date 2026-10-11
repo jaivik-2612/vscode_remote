@@ -235,6 +235,7 @@ standard library only) and classifies every packet the phone sent:
 | `bridge` | TCP to a bridge the session configured | yes |
 | `lan-dhcp` | a DHCP client message (UDP 68 to 67) to the broadcast address or a local server. Android sends it from a packet socket, outside the firewall, by design (the design allows DHCP for NetworkStack) | yes, unless it asks for a lease from before arm |
 | `link-arp`, `link-80211` | ARP, and 802.11 association frames in a Wi-Fi capture | yes |
+| `link-empty` | an empty frame: a link-layer header and nothing after it, complete in the capture, sent from a packet socket outside the firewall; it carries no data (run 6: one IPv4 frame of zero bytes on wlan0 while the firewall was armed). A frame the capture cut off is not empty; one byte after the header is a LEAK | yes |
 | `ci-marker` | this CI's clock marker, before the module is installed | before arm only |
 | `LEAK` | anything else: `dns`, `tcp`, `udp`, `lan`, `icmp`, `ipv6`, `multicast`, `dhcp`, `dhcp-lease`, `dhcp-hostname`, `armed`, `fragment`, `unattributed`, `undecoded`, `other` | no |
 

@@ -17,9 +17,9 @@ name: Antumbra Android
 # emulated radio) and tcpdump inside the guest records every interface,
 # Wi-Fi included, after the firewall; antumbra/android/ci/leak_analyser.py
 # classifies each packet: Tor relay, Tor directory, configured bridge,
-# link-level (ARP, DHCP), or LEAK; every frame that is not the emulator's
+# link-level (ARP, DHCP, empty frames), or LEAK; every frame that is not the emulator's
 # own counts as the phone's. The run passes only with zero LEAK after the
-# moment the firewall was armed, nothing but ARP and DHCP while it was only
+# moment the firewall was armed, nothing but link-level frames (ARP, DHCP, empty frames) while it was only
 # armed, captures that saw every connection tor reported and every address
 # the phone had on its own interface, the tracker names blocked, and
 # every scenario check passed (antumbra/android/ci/README.md). The names and

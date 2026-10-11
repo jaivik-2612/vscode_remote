@@ -282,6 +282,10 @@ def decode(rec):
         _decode_link(p, rec.linktype, rec.data)
     except (IndexError, struct.error, ValueError):
         p.note = "malformed"
+    # Empty only if nothing was cut off: a frame the capture truncated is
+    # not known to be empty.
+    if p.note == EMPTY_FRAME and len(rec.data) != rec.orig_len:
+        p.note = "truncated frame"
     return p
 
 
@@ -386,7 +390,15 @@ def _decode_ethertype(p, etype, b):
             p.proto = "arp"
 
 
+# A link-layer header with nothing after it (run 6: an IPv4 frame of zero
+# bytes on wlan0, from a packet socket, while the firewall was armed).
+EMPTY_FRAME = "empty frame"
+
+
 def _decode_ipv4(p, b):
+    if len(b) == 0:
+        p.note = EMPTY_FRAME
+        return
     if len(b) < 20 or b[0] >> 4 != 4:
         p.note = "bad IPv4 header"
         return
@@ -406,6 +418,9 @@ def _decode_ipv4(p, b):
 
 
 def _decode_ipv6(p, b):
+    if len(b) == 0:
+        p.note = EMPTY_FRAME
+        return
     if len(b) < 40 or b[0] >> 4 != 6:
         p.note = "bad IPv6 header"
         return

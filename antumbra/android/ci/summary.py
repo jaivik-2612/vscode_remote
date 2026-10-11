@@ -206,7 +206,7 @@ def summary(root, run):
         aw = a.get("armed_window") or {}
         if aw.get("status") not in (None, "not-asked"):
             L.append("- Armed state with the network up: **%s** (%s s, %d packet(s) from the phone, %d of them "
-                     "ARP or DHCP, %d LEAK)." % (aw.get("status"), aw.get("seconds", "?"), aw.get("packets", 0),
+                     "link-level (ARP, DHCP, empty frames), %d LEAK)." % (aw.get("status"), aw.get("seconds", "?"), aw.get("packets", 0),
                                                 aw.get("allowed", 0), aw.get("leaks", 0)))
         d = a.get("destinations")
         if d:
