@@ -2,7 +2,7 @@
 
 The tracker-blocking DNS filter of the Antumbra module (layer L2 of the
 design). The firewall redirects every DNS query on the phone, from every
-app and from the system, to `127.0.0.1:5353`. The filter answers blocked
+app and from the system, to `127.0.0.1:5335`. The filter answers blocked
 names and local names itself and forwards everything else to tor's DNSPort
 on `127.0.0.1:9053`. If tor does not answer, the query fails: there is no
 other server, so the filter fails closed.
@@ -105,7 +105,7 @@ What the check cannot do on its own: a socket that binds the port, receives
 the query and closes again between the two reads is not seen. It has
 learnt the name (the query then times out), and it could have answered.
 Only the firewall can stop its answer: `antumbra-fw` must drop packets
-from source port 9053 (and from the filter's own 5353 and 5380, and tor's
+from source port 9053 (and from the filter's own 5335 and 5380, and tor's
 9040) that do not belong to the port's rightful uid. That rule belongs to
 the firewall part; until it is there, this check narrows the window but
 does not close it.
@@ -128,7 +128,7 @@ off; do not do that on the phone.
   permitted, effective or ambient capability (`-insecure-allow-privileged`
   is for tests only). Sets `PR_SET_NO_NEW_PRIVS`.
 - Listens only on IPv4 loopback addresses, and binds its UDP socket
-  without `SO_REUSEADDR`, so no other socket can share `127.0.0.1:5353`
+  without `SO_REUSEADDR`, so no other socket can share `127.0.0.1:5335`
   (tested).
 - Rate limit per client address and port (default 20 queries/s, bursts of
   40; over it, UDP queries are dropped and TCP connections closed); at most
@@ -162,7 +162,7 @@ there is one, else the copy shipped in the module.
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `-listen` | `127.0.0.1:5353` | UDP and TCP address (IPv4 loopback only) |
+| `-listen` | `127.0.0.1:5335` | UDP and TCP address (IPv4 loopback only) |
 | `-status-listen` | `127.0.0.1:5380` | status page (loopback only; `""` turns it off) |
 | `-status-refresh` | `1m` | take the status page's counters and upstream state afresh at most this often; `0` shows them live |
 | `-upstream` | `127.0.0.1:9053` | tor's DNSPort (IPv4 loopback only) |
@@ -428,13 +428,13 @@ there and says so.
 - It cannot stop apps that resolve names some other way: DNS-over-HTTPS to
   servers on neither list, hard-coded addresses, or a tor of their own
   (Tor Browser is deliberately not filtered).
-- Port 5353 is also the mDNS port. Android's mDNS sockets bind it with
-  `SO_REUSEADDR` on each interface; whichever binds first keeps it. The
-  filter starts early in `service.sh` and retries for `-bind-wait`; if
-  Android's mDNS holds the port, the filter cannot start and DNS stops
-  (closed, not open).
-- If the filter is not running, nothing answers on 5353 and DNS fails.
-  Any app could then bind 127.0.0.1:5353 (or 5380) itself, receive every
+- The filter listened on 5353 until the first emulator run showed
+  Android's mDNS service (uid 1020) already holding `0.0.0.0:5353` when the
+  module starts, so the filter could not bind and DNS stopped (closed, not
+  open). 5335 is a port no Android component is known to use; the module's
+  port check still treats any other holder as a squatter.
+- If the filter is not running, nothing answers on 5335 and DNS fails.
+  Any app could then bind 127.0.0.1:5335 (or 5380) itself, receive every
   app's lookups and answer them; the same holds for tor's 9040 and 9053
   while tor's network is off. Only the firewall (dropping replies from
   those ports that do not come from the right uid) and the module

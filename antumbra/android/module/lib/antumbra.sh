@@ -32,7 +32,7 @@ FW_PROP=antumbra.fw.armed
 # DNSPort (UDP), the DNS filter (UDP and TCP) and its status page (TCP).
 TRANS_PORT=9040
 TOR_DNS_PORT=9053
-FILTER_PORT=5353
+FILTER_PORT=5335
 STATUS_PORT=5380
 
 # --- Paths of this module (not part of the contract) ------------------------
@@ -245,8 +245,8 @@ pid_alive() {
 # --- Who holds the service ports -------------------------------------------------
 #
 # The firewall sends every app's TCP to 127.0.0.1:9040 and every DNS query
-# to 127.0.0.1:5353, and lets apps reach 5380. Only tor (2950) may listen on
-# 9040 and 9053, and only the filter (2951) on 5353 and 5380. But tor holds
+# to 127.0.0.1:5335, and lets apps reach 5380. Only tor (2950) may listen on
+# 9040 and 9053, and only the filter (2951) on 5335 and 5380. But tor holds
 # no TransPort or DNSPort while its network is off (before Start, in an
 # offline session, while it restarts), and the filter's ports are free while
 # it restarts: then any app can bind them. The firewall drops the answers
@@ -259,7 +259,7 @@ pid_alive() {
 #
 # Sockets that can receive what is sent to 127.0.0.1 count: bound to
 # 127.0.0.1, 0.0.0.0, :: or ::ffff:127.0.0.1. TCP in LISTEN (state 0A):
-# 9040, 9053, 5353, 5380. UDP in any state: 9053, 5353. /proc/net prints
+# 9040, 9053, 5335, 5380. UDP in any state: 9053, 5335. /proc/net prints
 # addresses and ports in hex, IPv4 addresses in host (little-endian) order.
 PROC_NET=${PROC_NET:-/proc/net}
 
@@ -272,7 +272,7 @@ ports_bad() {
 	fi
 	for _pb_f in tcp tcp6 udp udp6; do
 		[ -r "$PROC_NET/$_pb_f" ] || continue
-		grep -E ':(2350|235D|14E9|1504) ' "$PROC_NET/$_pb_f" 2>/dev/null |
+		grep -E ':(2350|235D|14D7|1504) ' "$PROC_NET/$_pb_f" 2>/dev/null |
 			while read -r _ _pb_loc _ _pb_st _ _ _ _pb_uid _; do
 				case ${_pb_loc%:*} in
 				0100007F | 00000000 | 00000000000000000000000000000000 | 0000000000000000FFFF00000100007F) ;;
@@ -281,10 +281,10 @@ ports_bad() {
 				case ${_pb_f%6}:${_pb_loc##*:} in
 				tcp:2350) _pb_p=$TRANS_PORT/tcp _pb_want=$TOR_UID ;;
 				tcp:235D) _pb_p=$TOR_DNS_PORT/tcp _pb_want=$TOR_UID ;;
-				tcp:14E9) _pb_p=$FILTER_PORT/tcp _pb_want=$DNS_UID ;;
+				tcp:14D7) _pb_p=$FILTER_PORT/tcp _pb_want=$DNS_UID ;;
 				tcp:1504) _pb_p=$STATUS_PORT/tcp _pb_want=$DNS_UID ;;
 				udp:235D) _pb_p=$TOR_DNS_PORT/udp _pb_want=$TOR_UID ;;
-				udp:14E9) _pb_p=$FILTER_PORT/udp _pb_want=$DNS_UID ;;
+				udp:14D7) _pb_p=$FILTER_PORT/udp _pb_want=$DNS_UID ;;
 				*) continue ;;
 				esac
 				# TCP: listeners only. Accepted connections are the

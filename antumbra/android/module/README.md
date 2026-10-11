@@ -135,7 +135,8 @@ the person may set by hand for tor.
    post-fs-data, or `open` if arming failed there (then step 3 tries
    again, and switches the radios off if that fails too).
 1. **The DNS filter** as uid/gid 2951, first, so that it holds
-   `127.0.0.1:5353` before Android's mDNS can bind that port.
+   `127.0.0.1:5335` before an app can bind that port. (It was 5353 until
+   the emulator showed Android's mDNS holding `0.0.0.0:5353` at boot.)
 2. **tor** as uid/gid 2950 with `etc/torrc` (rendered from
    `tor/torrc.in`), `DisableNetwork 1`.
 3. **`antumbra-fw apply`**, then `antumbra-fw status`, then the port check
@@ -291,7 +292,7 @@ set.
 - **SELinux**: both run in Magisk's `magisk` domain, which Magisk
   describes as effectively permissive. See the gaps below.
 - **The service ports.** Only tor may hold `127.0.0.1:9040` (TCP) and
-  `:9053` (UDP, and TCP), only the filter `:5353` (UDP and TCP) and
+  `:9053` (UDP, and TCP), only the filter `:5335` (UDP and TCP) and
   `:5380` (TCP). See "Who holds the service ports" below.
 - **Welcome's provider** is trusted only while Welcome is the device
   owner (below).
@@ -327,7 +328,7 @@ needed.
 ### Who holds the service ports
 
 The firewall redirects every app's TCP to `127.0.0.1:9040` and every DNS
-query to `127.0.0.1:5353`. tor holds no TransPort or DNSPort while its
+query to `127.0.0.1:5335`. tor holds no TransPort or DNSPort while its
 network is off (before Start, in an offline session, while it restarts),
 and the filter's ports are free while it restarts: then any app could bind
 them. The firewall drops the answers of a socket that is not the owner's
@@ -338,8 +339,8 @@ and a squatter on 9040 or 9053 makes tor's `DisableNetwork=0` fail (553).
 So `listeners_ok()` reads `/proc/net/{tcp,tcp6,udp,udp6}`: sockets bound
 to `127.0.0.1`, `0.0.0.0`, `::` or `::ffff:127.0.0.1` (the ones that receive
 what is sent to 127.0.0.1); TCP listeners on 9040 and 9053 must be uid
-2950's and on 5353 and 5380 uid 2951's; UDP sockets in any state on 9053
-must be 2950's and on 5353 2951's. No listener at all is fine. If
+2950's and on 5335 and 5380 uid 2951's; UDP sockets in any state on 9053
+must be 2950's and on 5335 2951's. No listener at all is fine. If
 `/proc/net/tcp` cannot be read, that counts as a failure. It runs before
 the full rule set is published (in `fw_publish`, before `apply` and after
 `status`), at every turn of the loop, and before tor's network is
@@ -348,7 +349,7 @@ firewall goes back to armed (no redirect at all, so the squatter is sent
 nothing and nothing leaves), tor's network stays off, and `module.problem`
 names the port and the uid; once the port is free, the full rule set is
 loaded again at once. What remains: between a squatter's bind and the next
-turn (at most about 5 s) it can receive UDP queries to 5353 (names, no
+turn (at most about 5 s) it can receive UDP queries to 5335 (names, no
 answers) and TCP SYNs.
 
 The complete fix, tor holding 9040 and 9053 from boot (`DisableNetwork 0`
@@ -537,7 +538,7 @@ framework is up, all of them after; and per scenario:
 |---|---|---|
 | `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
 | `direct` | mksh, LineageOS hotdog properties | mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
-| `offline` | mksh | network stays off; mobile data left alone (emulator); an app binds `127.0.0.1:5353` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script, which puts the Settings back and deletes itself, and deletes the early arm script |
+| `offline` | mksh | network stays off; mobile data left alone (emulator); an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script, which puts the Settings back and deletes itself, and deletes the early arm script |
 | `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; iptables broken → firewall `open`, property removed, airplane mode on and Wi-Fi off; repaired → live |
 | `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
 
@@ -628,9 +629,9 @@ phone the rest.
   module only disabled (`disable` flag), the early arm script keeps the
   network closed.
 - The port check runs at every turn of the loop (2 to 5 s); in between, a
-  squatter on 5353 can receive DNS queries (it cannot answer them, and
+  squatter on 5335 can receive DNS queries (it cannot answer them, and
   nothing leaves) and one on 9040 SYNs. On the phone, Android's mDNS
-  (system_server, uid 1000) on 5353 before the filter would count as a
+  (system_server, uid 1000) on 5335 before the filter would count as a
   squatter too: the firewall then stays armed, with the reason in the
   status (closed, not open).
 - If the firewall cannot even be armed, airplane mode and Wi-Fi go off;
@@ -651,9 +652,9 @@ phone the rest.
   off (events, at most 10 s), the interface has IPv6 on. The firewall
   drops all IPv6 on it meanwhile, router advertisements included, so no
   global address is assigned; a link-local one can exist briefly.
-- The filter must bind `127.0.0.1:5353` before Android's mDNS. It starts
-  first in `service.sh`, but after zygote; if mDNS wins, DNS stays off
-  (closed, not open). Unverified on the phone.
+- The filter must bind `127.0.0.1:5335` before any other uid. It starts
+  first in `service.sh`, but after zygote; if another uid holds the port,
+  DNS stays off and the firewall stays armed (closed, not open).
 - The overlay works only where Magisk (or KernelSU) mounts `system/`: not
   on the CI emulator, whose Google-built resources package is also named
   differently (`com.google.android.connectivity.resources`). Untested on

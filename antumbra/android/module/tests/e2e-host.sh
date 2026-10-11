@@ -43,7 +43,7 @@
 #               127.0.0.1:9040 before Start (firewall back to armed, tor's
 #               network held off until the port is free); mobile data off
 #               for every SIM; no bridges
-#   offline     tor stays off; an app takes the filter's 5353 while the
+#   offline     tor stays off; an app takes the filter's 5335 while the
 #               filter restarts; then uninstall.sh puts the Settings back
 #   pt          obfs4 bridges without lyrebird: refused, network off; then
 #               iptables broken: the firewall reports open, and airplane

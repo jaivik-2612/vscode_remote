@@ -9,8 +9,8 @@
 # after tor, the DNS filter and the firewall.
 #
 # Order (shared contract):
-#   1. the DNS filter as uid 2951 (first, so that it holds 127.0.0.1:5353
-#      before Android's mDNS can take the port);
+#   1. the DNS filter as uid 2951 (first, so that it holds 127.0.0.1:5335
+#      before an app can take the port);
 #   2. tor as uid 2950, with the network off (DisableNetwork 1);
 #   3. 'antumbra-fw apply', checked with 'status' and with who holds the
 #      service ports; only then 'resetprop -n antumbra.fw.armed <hash
@@ -25,7 +25,7 @@
 #      control socket, once the firewall is live and no other uid holds a
 #      service port;
 #   8. then, until shutdown: at every turn, check who holds 9040, 9053,
-#      5353 and 5380 and go back to the armed state while another uid
+#      5335 and 5380 and go back to the armed state while another uid
 #      does; restart tor or the filter if they stop; check the firewall
 #      every 30 seconds and reload it if it is not live; keep status.json
 #      up to date; at shutdown, put the fail-safe Settings back.

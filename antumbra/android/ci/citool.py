@@ -11,7 +11,7 @@
 
   citool.py dns-query --port PORT --name NAME [--server 127.0.0.1] [--type A]
                       [--timeout 10]
-      Sends one DNS query over TCP (the DNS filter listens on TCP 5353 as
+      Sends one DNS query over TCP (the DNS filter listens on TCP 5335 as
       well as UDP; adb forwards only TCP) and prints the answer as JSON:
       rcode, answers, authority records, time taken.
 

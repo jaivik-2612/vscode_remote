@@ -15,7 +15,7 @@
 #                                                    lo: 2001:db8:1::1 (IPv6 "Internet")
 #
 # The phone runs fake services in place of tor (TransPort 9040, DNSPort 9053,
-# a pluggable transport on 40000, all as UID 2950), the DNS filter (5353 and
+# a pluggable transport on 40000, all as UID 2950), the DNS filter (5335 and
 # the status page on 5380, as UID 2951), a TCP "ControlPort" on 9052 that no
 # app may reach, tor's ControlSocket (0660, 2950:2950), an exempt app's own
 # port 9150 (as UID 10101), another app's listener in the ephemeral range
@@ -271,7 +271,7 @@ start_tor() {
 		udp:tor-dnsport:127.0.0.1:9053 tcp:tor-pt:127.0.0.1:40000
 }
 start_dnsfilter() {
-	start_serve "$P" 2951 phone-dns tcp:dnsfilter-tcp:127.0.0.1:5353 udp:dnsfilter:127.0.0.1:5353 tcp:status:127.0.0.1:5380
+	start_serve "$P" 2951 phone-dns tcp:dnsfilter-tcp:127.0.0.1:5335 udp:dnsfilter:127.0.0.1:5335 tcp:status:127.0.0.1:5380
 }
 
 V6_PHONE=
@@ -474,7 +474,7 @@ expect app-dns-udp-to-filter '^ok dnsfilter$' 10100 udp 198.51.100.1 53
 not_logged app-dns-udp-not-reached net-53
 expect app-dns-tcp-to-filter '^ok dnsfilter-tcp orig=198\.51\.100\.1:53$' 10100 tcp 198.51.100.1 53
 expect app-dns-lan-to-filter '^ok dnsfilter$' 10100 udp 192.168.77.1 53
-expect app-dns-filter-direct '^ok dnsfilter$' 10100 udp 127.0.0.1 5353
+expect app-dns-filter-direct '^ok dnsfilter$' 10100 udp 127.0.0.1 5335
 expect app-udp-ntp-refused '^err ' 10100 udp 198.51.100.1 123
 not_logged app-udp-ntp-not-reached net-123
 expect app-udp-quic-refused '^err ' 10100 udp 198.51.100.1 443
@@ -532,7 +532,7 @@ expect tor-lan-dns-refused '^err ' 2950 udp 192.168.77.1 53
 expect tor-multicast-refused '^err ' 2950 udp 224.0.0.251 5353
 expect tor-own-address-refused '^err ECONNREFUSED$' 2950 tcp 192.168.77.2 8080
 expect tor-status-page-refused '^err ECONNREFUSED$' 2950 tcp 127.0.0.1 5380
-expect tor-dns-filter-refused '^err ' 2950 udp 127.0.0.1 5353
+expect tor-dns-filter-refused '^err ' 2950 udp 127.0.0.1 5335
 expect tor-controlport-refused '^err ECONNREFUSED$' 2950 tcp 127.0.0.1 9052
 expect tor-pluggable-transport '^ok tor-pt ' 2950 tcp 127.0.0.1 40000
 expect tor-control-socket '^ok tor-control$' 2950 unix "$AD/run/tor-control.sock"
@@ -564,7 +564,7 @@ echo "-- tor and the DNS filter stopped: an app holding their ports answers no o
 stop_serve phone-tor
 stop_serve phone-dns
 start_serve "$P" 10100 phone-squat tcp:squat-transport:127.0.0.1:9040 tcp:squat-dnsport-tcp:127.0.0.1:9053 \
-	udp:squat-dnsport:127.0.0.1:9053 tcp:squat-filter-tcp:127.0.0.1:5353 udp:squat-filter:127.0.0.1:5353 \
+	udp:squat-dnsport:127.0.0.1:9053 tcp:squat-filter-tcp:127.0.0.1:5335 udp:squat-filter:127.0.0.1:5335 \
 	tcp:squat-status:127.0.0.1:5380
 wait_ready
 tx0=$(tx)
@@ -580,7 +580,7 @@ expect squat-app-dns-no-answer '^err ' 10200 udp 198.51.100.1 53 --timeout 1
 logged squat-app-dns-query-received squat-filter
 expect squat-app-dns-tcp-no-handshake '^err ETIMEDOUT$' 10200 tcp 198.51.100.1 53 --timeout 1
 not_logged squat-app-dns-tcp-not-served squat-filter-tcp
-expect squat-filter-direct-no-answer '^err ' 10200 udp 127.0.0.1 5353 --timeout 1
+expect squat-filter-direct-no-answer '^err ' 10200 udp 127.0.0.1 5335 --timeout 1
 expect squat-status-no-handshake '^err ETIMEDOUT$' 10200 tcp 127.0.0.1 5380 --timeout 1
 not_logged squat-status-not-served squat-status
 expect squat-dnsport-no-answer '^err ' 2951 udp 127.0.0.1 9053 --timeout 1
@@ -670,7 +670,7 @@ cat >"$AD/state/fw-exempt.conf" <<'EOF'
 2950
 1010100 1:2,3:4,5:6,7:8,9:10,11:12,13:14,15:16
 10103 9040
-10104 9150,5353
+10104 9150,5335
 10105 5380
 10106 1000
 10107 32000:33000
@@ -700,7 +700,7 @@ n=$(inp "$IPT4" -w -t filter -S ANTUMBRA_DOH | grep -c -e '--ctorigdst ')
 [ "$n" = 2 ] && pass doh-single-addresses-loaded || fail doh-single-addresses-loaded "$n rules"
 # tor's and the filter's ports, ports below 1024 and ranges into the
 # ephemeral range are never an app's own; a single high port is.
-for line in '10103 9040' '10104 9150,5353' '10105 5380' '10106 1000' '10107 32000:33000' '10108 9000:9100' \
+for line in '10103 9040' '10104 9150,5335' '10105 5380' '10106 1000' '10107 32000:33000' '10108 9000:9100' \
 	'10109 1024:65535'; do
 	grep -q "ignored invalid line: $line\$" "$TMP/err" && pass "exempt-refused-${line// /-}" ||
 		fail "exempt-refused-${line// /-}" "$(cat "$TMP/err")"

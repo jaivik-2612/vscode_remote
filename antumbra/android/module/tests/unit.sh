@@ -241,7 +241,7 @@ expect "ports_bad: nothing listening" "" "$(pb)"
 # (uid 0); the filter's upstream socket; another app on other ports.
 {
 	tcp_line 0100007F:2350 00000000:0000 0A 2950
-	tcp_line 0100007F:14E9 00000000:0000 0A 2951
+	tcp_line 0100007F:14D7 00000000:0000 0A 2951
 	tcp_line 0100007F:1504 00000000:0000 0A 2951
 	tcp_line 0A00020F:9C40 5DB8D822:0050 01 10100
 	tcp_line 0100007F:2350 0100007F:9C41 01 2950
@@ -251,7 +251,7 @@ expect "ports_bad: nothing listening" "" "$(pb)"
 } >>"$P/tcp"
 {
 	udp_line 0100007F:235D 07 2950
-	udp_line 0100007F:14E9 07 2951
+	udp_line 0100007F:14D7 07 2951
 	udp_line 0100007F:C350 01 2951
 } >>"$P/udp"
 expect "ports_bad: tor and the filter on their ports" "" "$(pb)"
@@ -259,10 +259,10 @@ tcp_line 00000000:2350 00000000:0000 0A 10200 >>"$P/tcp"
 expect "ports_bad: an app on 0.0.0.0:9040" "9040/tcp held by uid 10200;" "$(pb)"
 reset_net
 tcp_line 0100007F:2350 00000000:0000 0A 10200 >>"$P/tcp"
-udp_line 0100007F:14E9 07 10200 >>"$P/udp"
+udp_line 0100007F:14D7 07 10200 >>"$P/udp"
 tcp_line 0100007F:1504 00000000:0000 0A 0 >>"$P/tcp"
 expect "ports_bad: TransPort, filter and status page taken" \
-	"5353/udp held by uid 10200;5380/tcp held by uid 0;9040/tcp held by uid 10200;" "$(pb)"
+	"5335/udp held by uid 10200;5380/tcp held by uid 0;9040/tcp held by uid 10200;" "$(pb)"
 reset_net
 tcp_line 00000000000000000000000000000000:2350 00000000000000000000000000000000:0000 0A 10200 >>"$P/tcp6"
 udp_line 0000000000000000FFFF00000100007F:235D 07 10300 >>"$P/udp6"
@@ -271,14 +271,19 @@ expect "ports_bad: an app on [::]:9040 and [::ffff:127.0.0.1]:9053" \
 reset_net
 # Bound to another address: cannot receive what is sent to 127.0.0.1.
 tcp_line 0A00020F:2350 00000000:0000 0A 10200 >>"$P/tcp"
-udp_line 0100A8C0:14E9 07 1000 >>"$P/udp"
+udp_line 0100A8C0:14D7 07 1000 >>"$P/udp"
 # A UDP socket on 9040 or 5380: no service uses UDP there.
 udp_line 0100007F:2350 07 10200 >>"$P/udp"
 expect "ports_bad: other addresses and unused protocols are ignored" "" "$(pb)"
 reset_net
-# A connected UDP socket on 5353 counts.
-udp_line 0100007F:14E9 01 10200 >>"$P/udp"
-expect "ports_bad: a connected UDP socket on 5353" "5353/udp held by uid 10200;" "$(pb)"
+# A connected UDP socket on 5335 counts.
+udp_line 0100007F:14D7 01 10200 >>"$P/udp"
+expect "ports_bad: a connected UDP socket on 5335" "5335/udp held by uid 10200;" "$(pb)"
+reset_net
+# Android's mDNS (uid 1020) on 0.0.0.0:5353, as the emulator showed it at
+# boot: not a service port, so not a squatter.
+udp_line 00000000:14E9 07 1020 >>"$P/udp"
+expect "ports_bad: Android's mDNS on 0.0.0.0:5353 is not a service port" "" "$(pb)"
 rm -f "$P/tcp"
 expect "ports_bad: /proc/net/tcp unreadable fails closed" "$P/tcp is unreadable;" "$(pb)"
 if PROC_NET=$P listeners_ok; then bad "listeners_ok with tcp unreadable"; else ok "listeners_ok false when unreadable"; fi

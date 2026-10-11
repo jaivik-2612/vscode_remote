@@ -221,7 +221,7 @@ Facts other parts depend on (all seen in `hostcheck-tor.sh`):
   redirects there. If another process still holds either port when the
   module sends `DisableNetwork=0`, tor refuses the whole command (`553
   Unable to set option: Failed to bind one of the listener ports.`) and
-  the network stays off. So the module has to check who holds 9040, 5353
+  the network stays off. So the module has to check who holds 9040, 5335
   and 5380 (and the filter who holds 9053) before and after Start, and
   treat any owner other than 2950 or 2951 as a failure.
 - **Once tor holds 9040 and 9053, no other uid can bind them as well**:

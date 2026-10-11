@@ -351,13 +351,13 @@ offline)
 	old=$(dns_pid)
 	kill -9 "$old"
 	sleep 1
-	squat_bg udp 5353 60
+	squat_bg udp 5335 60
 	sq=$!
 	wait_until 5 grep -q '^bound$' $T/squat.out
 	kill -CONT "$svc"
-	check "filter's port taken: an app bound 127.0.0.1:5353" grep -q '^bound$' $T/squat.out
+	check "filter's port taken: an app bound 127.0.0.1:5335" grep -q '^bound$' $T/squat.out
 	check "filter's port taken: the firewall goes back to armed" wait_until 15 eval 'test "$(fw_rc)" = 1'
-	check "filter's port taken: status names the port and the uid" wait_until 10 status_has '5353/udp held by uid 10200'
+	check "filter's port taken: status names the port and the uid" wait_until 10 status_has '5335/udp held by uid 10200'
 	r=$(as_app dns example.org)
 	check "filter's port taken: an app's query is not passed on ($r)" test "$r" != NOERROR
 	check "filter's port taken: the squatter received no query" test -z "$(grep received $T/squat.out)"

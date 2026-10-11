@@ -26,7 +26,7 @@ func TestFlagDefaultsMatchTheContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.listen != "127.0.0.1:5353" || o.statusListen != "127.0.0.1:5380" || o.upstream != "127.0.0.1:9053" ||
+	if o.listen != "127.0.0.1:5335" || o.statusListen != "127.0.0.1:5380" || o.upstream != "127.0.0.1:9053" ||
 		o.upstreamUID != 2950 || o.upstreamNet != "udp" || o.blockedAnswer != "nxdomain" || o.aaaa != "empty" ||
 		o.moduleStatus != "/data/adb/antumbra/run/status.json" || o.debugQueries || o.allowPrivileged ||
 		o.statusRefresh != time.Minute ||

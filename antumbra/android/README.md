@@ -97,7 +97,7 @@ work queue is `docs/queue.md`.
    v                              module service.sh (root) -- control socket --> tor
  antumbra-fw (iptables, root)
    |  TCP  -> REDIRECT 127.0.0.1:9040 --------------------------> tor TransPort
-   |  DNS  -> REDIRECT 127.0.0.1:5353 -> DNS filter (uid 2951) -> tor DNSPort 127.0.0.1:9053
+   |  DNS  -> REDIRECT 127.0.0.1:5335 -> DNS filter (uid 2951) -> tor DNSPort 127.0.0.1:9053
    |  rest -> rejected                                             |
    v                                                               v
  only tor (uid 2950) leaves the phone  <---------------------- the Internet, through Tor

@@ -78,7 +78,7 @@ A bad line never opens anything.
 
 | File | Format | Meaning |
 |---|---|---|
-| `$ANTUMBRA_DIR/state/fw-exempt.conf` | `<uid> [<port>[,<port>\|<lo>:<hi>]...]` | Apps with their own tor (Tor Browser, Briar, OnionShare). The UID must be an app's (app ID 10000-19999 in any Android user), so never root, a system UID, tor or the DNS filter. The ports are the app's own loopback ports (its tor's SOCKS port), at most 15 (a range counts as two). Refused, so the whole line is ignored: a port below 1024, a port or range that includes 9040, 9053, 5353 or 5380, and a range that reaches into 32768-60999 (where tor's pluggable transports and other apps' listeners are). A single port in that range is accepted (Briar's tor uses 59050): only a socket of the app itself can answer on its listed ports, so a pluggable transport or another app listening there cannot. Each session is a new Android user, so the module rewrites this file and re-runs `apply` every session. |
+| `$ANTUMBRA_DIR/state/fw-exempt.conf` | `<uid> [<port>[,<port>\|<lo>:<hi>]...]` | Apps with their own tor (Tor Browser, Briar, OnionShare). The UID must be an app's (app ID 10000-19999 in any Android user), so never root, a system UID, tor or the DNS filter. The ports are the app's own loopback ports (its tor's SOCKS port), at most 15 (a range counts as two). Refused, so the whole line is ignored: a port below 1024, a port or range that includes 9040, 9053, 5335 or 5380, and a range that reaches into 32768-60999 (where tor's pluggable transports and other apps' listeners are). A single port in that range is accepted (Briar's tor uses 59050): only a socket of the app itself can answer on its listed ports, so a pluggable transport or another app listening there cannot. Each session is a new Android user, so the module rewrites this file and re-runs `apply` every session. |
 | `$ANTUMBRA_DIR/state/fw-relays.conf` | `<IPv4> <port>` | Tor relays and configured bridges that the exempt apps may connect to directly. Contract v0: empty (no file). Filling it from tor's consensus every hour is later work (W9). |
 | `$ANTUMBRA_DIR/lists/doh-ipv4.txt` | `<IPv4>[/32]` | DNS-over-HTTPS servers no app may reach, even through Tor (design layer L1), so apps fall back to the system's DNS and its filter. Single addresses only: a line with a wider prefix is ignored as invalid, as the list compiler does. Absent until the list job provides it. |
 
@@ -97,7 +97,7 @@ in the script, as the shared contract fixes them.
 | Tails grants its desktop user | On a phone that would mean | Here |
 |---|---|---|
 | direct TCP and UDP to the LAN | any app can ask the router for the public IP (UPnP `GetExternalIPAddress`, router status pages) and send it out through Tor | every app's TCP to the LAN is passed into tor, which refuses private addresses; other LAN traffic is refused. tor itself may not reach the LAN either. |
-| any loopback TCP port | an app reaches tor's ControlPort, sets a bridge or entry guard it controls, and tor connects there directly, revealing the real IP; it also reaches other apps' local servers (Tor Browser's tor, adbd, Shizuku) | apps may use only 127.0.0.1:9040, 5353 and 5380, and an exempt app its own listed ports; only tor can answer on 9040, only the filter on 5353 and 5380, only the exempt app on its ports, so an app that takes one of them while its owner is not listening serves no one. Any other loopback TCP goes into the TransPort, where tor refuses it. There is no ControlPort: tor uses a ControlSocket (a 0660 file, uid and gid 2950), which netfilter does not reach and file permissions protect. |
+| any loopback TCP port | an app reaches tor's ControlPort, sets a bridge or entry guard it controls, and tor connects there directly, revealing the real IP; it also reaches other apps' local servers (Tor Browser's tor, adbd, Shizuku) | apps may use only 127.0.0.1:9040, 5335 and 5380, and an exempt app its own listed ports; only tor can answer on 9040, only the filter on 5335 and 5380, only the exempt app on its ports, so an app that takes one of them while its owner is not listening serves no one. Any other loopback TCP goes into the TransPort, where tor refuses it. There is no ControlPort: tor uses a ControlSocket (a 0660 file, uid and gid 2950), which netfilter does not reach and file permissions protect. |
 | `ct state established accept` for everyone | listening app sockets answer inbound LAN connections | inbound packets from other interfaces are dropped unless they belong to a connection the firewall let out (tor's, an exempt app's to a relay, the DHCP client's). |
 
 ## Where the rules hook in, and why there
@@ -190,7 +190,7 @@ the destination as it is"; netd has no rules in nat OUTPUT to skip.
 1. **tor (2950) and the DNS filter (2951): not translated.** tor must reach
    the Internet as itself; the DNS filter is held to tor's DNSPort by the
    filter table.
-2. **UDP and TCP to port 53, any address: to 127.0.0.1:5353.** Every DNS
+2. **UDP and TCP to port 53, any address: to 127.0.0.1:5335.** Every DNS
    query, whoever sends it and wherever it was addressed (the router, a
    public resolver, 127.0.0.1:53), reaches the DNS filter. The system
    resolver's sockets (Android's DnsResolver hands them to `AID_DNS`, 1051)
@@ -198,7 +198,7 @@ the destination as it is"; netd has no rules in nat OUTPUT to skip.
    `getaddrinfo` and apps that send their own queries. If the filter is not
    running, the query fails: the filter fails closed and nothing falls back
    to direct DNS, because other UDP is refused.
-3. **TCP to 127.0.0.1:9040, 5353, 5380: not translated.** The three loopback
+3. **TCP to 127.0.0.1:9040, 5335, 5380: not translated.** The three loopback
    services apps may use: tor's TransPort, the DNS filter and its status page.
 4. **Exempt apps: their own listed loopback ports, and Tor relays: not
    translated.** The relay chain `ANTUMBRA_RELAYS` holds one ACCEPT rule per
@@ -217,8 +217,8 @@ only where no translation can have happened.
 
 1. **Only a service's owner may answer on its loopback port** (to
    `ANTUMBRA_SQUAT`, which drops). Packets on loopback from TCP source port
-   9040 or 9053, or UDP 9053, whose socket is not tor's (2950); from TCP 5353
-   or 5380, or UDP 5353, whose socket is not the DNS filter's (2951); answers
+   9040 or 9053, or UDP 9053, whose socket is not tor's (2950); from TCP 5335
+   or 5380, or UDP 5335, whose socket is not the DNS filter's (2951); answers
    (the reply direction) from an exempt app's listed ports whose socket is not
    that app's (tor's own connections aside; only answers, because such a port
    can be in the ephemeral range, where the kernel also picks other apps'
@@ -228,7 +228,7 @@ only where no translation can have happened.
    while they restart, so without this an app that bound 127.0.0.1:9040
    first would receive every other app's and root's redirected TCP, with the
    original destination (`SO_ORIGINAL_DST`), and answer it; the same for DNS
-   on 5353 and the status page on 5380. Now its SYN-ACKs and answers are
+   on 5335 and the status page on 5380. Now its SYN-ACKs and answers are
    dropped: no handshake completes and no answer arrives. A SYN-ACK belongs
    to the listening socket (the kernel attributes it with `skb_to_full_sk`
    since Linux 4.4), so the owner match sees the listener's UID. Packets the
@@ -275,7 +275,7 @@ only where no translation can have happened.
    same; the leak check's suggestion to refuse rather than redirect UIDs below
    10000 was not taken, so system traffic that the module does not switch off
    (L0) goes through Tor rather than being blocked.
-   - DNS to 127.0.0.1:5353 (redirected or sent there directly): allowed.
+   - DNS to 127.0.0.1:5335 (redirected or sent there directly): allowed.
    - New TCP whose original destination port is 853 (DNS over TLS, Android's
      Private DNS): refused with a reset, so Android falls back to plain DNS
      at once, which the filter sees.
@@ -384,7 +384,7 @@ configuration on every run, shell and userland (the test checks this).
   `open`); the second has to be ruled out on the phone (W16), though the
   vendor bits (29-30) are already out of the way.
 - **Packets an app receives on a port it took.** The owner checks stop a
-  squatting app from answering on 9040, 9053, 5353 or 5380, but it still
+  squatting app from answering on 9040, 9053, 5335 or 5380, but it still
   receives the SYNs and UDP queries sent there while it holds the port
   (iptables cannot match the receiving socket), and tor cannot bind the port
   until it is free. A check in the module of which UID holds the ports, and
@@ -431,7 +431,7 @@ probe the contract lists, from every UID, IPv4 and IPv6; only tor and DHCP
 leave; DHCP only to the LAN or broadcast, and inbound DHCP only from the
 LAN; tor reaching its pluggable transport but not another uid's listener in
 the ephemeral range; netd starting afterwards; tampering detected and
-repaired); an app holding 9040, 9053, 5353 and 5380 while the fake tor and
+repaired); an app holding 9040, 9053, 5335 and 5380 while the fake tor and
 filter are stopped (no handshake completes and no answer arrives, for apps,
 root and the filter; nothing leaves; the real services work again after);
 exempt apps (their own port taken by another app, a listed port held by

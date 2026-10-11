@@ -127,7 +127,7 @@ traffic from the phone.
    `tor.log`. Screenshot of the status screen.
 9. Tracker test: `doubleclick.net` (HaGeZi) and `stats.lineageos.org`
    (Antumbra's own list) asked of the filter directly, DNS over TCP to
-   127.0.0.1:5353 through `adb forward`; both must be NXDOMAIN (or the zero
+   127.0.0.1:5335 through `adb forward`; both must be NXDOMAIN (or the zero
    address). `check.torproject.org` should resolve through Tor (a warning
    otherwise: exit lookups fail now and then). The same names through
    Android's resolver with `ping`, as root and as Welcome's uid (`run-as`),
@@ -160,7 +160,7 @@ traffic from the phone.
     16 hex digits (any other state fails); tor (uid 2950) and the filter
     (uid 2951) run with CapEff and CapPrm 0; tor listens only on TCP
     127.0.0.1:9040 and UDP 127.0.0.1:9053, the filter only on
-    127.0.0.1:5353 and TCP 127.0.0.1:5380, no other uid holds any of these
+    127.0.0.1:5335 and TCP 127.0.0.1:5380, no other uid holds any of these
     ports on any address, and nothing listens on a SOCKS or control port
     (9050, 9051, 9052, 9150, 9151); `tor-control.sock` is a socket, 0660,
     owned by 2950:2950; Wi-Fi's store is on a tmpfs in system_server's

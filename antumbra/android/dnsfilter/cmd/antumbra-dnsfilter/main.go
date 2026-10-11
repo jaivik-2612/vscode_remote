@@ -1,5 +1,5 @@
 // Command antumbra-dnsfilter is the tracker-blocking DNS filter of the
-// Antumbra module. It listens on 127.0.0.1:5353 (UDP and TCP), where the
+// Antumbra module. It listens on 127.0.0.1:5335 (UDP and TCP), where the
 // firewall redirects every DNS query on the phone; answers blocked names
 // and local names itself; and forwards everything else to tor's DNSPort
 // on 127.0.0.1:9053. If tor does not answer, the query fails (SERVFAIL):
@@ -41,7 +41,7 @@ var version = "dev"
 
 // Defaults from the shared contract (antumbra/android/docs).
 const (
-	defaultListen       = "127.0.0.1:5353"
+	defaultListen       = "127.0.0.1:5335"
 	defaultStatus       = "127.0.0.1:5380"
 	defaultUpstream     = "127.0.0.1:9053"
 	defaultUpstreamUID  = 2950 // tor

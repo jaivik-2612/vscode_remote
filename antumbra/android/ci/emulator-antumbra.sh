@@ -39,7 +39,7 @@
 #      its status screen are checked with welcome/ci/welcome-adb.sh.
 #   8. Wait for tor to bootstrap (the DNS filter's /status, else tor.log).
 #   9. Tracker test: names on the block list asked of the filter directly
-#      (DNS over TCP to 127.0.0.1:5353 through adb forward) and through
+#      (DNS over TCP to 127.0.0.1:5335 through adb forward) and through
 #      Android's resolver, plus a control name that must resolve.
 #  10. Probes with the full rule set, as root and as an app (Welcome's uid,
 #      through run-as): TCP to the emulator host's ports 80, 5000 and 49152
@@ -57,7 +57,7 @@
 #      (read as tor's uid, never by root, since tor can write there); the
 #      firewall live with the property matching; the capabilities of tor
 #      and the filter; who listens on the service ports (no SOCKS or
-#      control port, no other uid on 9040, 9053, 5353, 5380); the control
+#      control port, no other uid on 9040, 9053, 5335, 5380); the control
 #      socket's mode and owner; Wi-Fi's store and NetworkStack's databases
 #      on a tmpfs as system_server and NetworkStack see them; IPv6 off on
 #      every interface; the device's addresses; the DNS filter's query log
@@ -132,7 +132,7 @@ fetch_status() {
 }
 
 dns_port() {
-	[ -n "$DNS_PORT" ] || DNS_PORT=$(timeout 20 adb -s "$ANTUMBRA_SERIAL" forward tcp:0 tcp:5353 2>/dev/null | tr -d '\r\n')
+	[ -n "$DNS_PORT" ] || DNS_PORT=$(timeout 20 adb -s "$ANTUMBRA_SERIAL" forward tcp:0 tcp:5335 2>/dev/null | tr -d '\r\n')
 	[ -n "$DNS_PORT" ]
 }
 
@@ -438,7 +438,7 @@ tracker_test() {
 		fi
 		rm -f "$tmp"
 	else
-		check tracker_test fail "adb forward to the filter's TCP port 5353 failed"
+		check tracker_test fail "adb forward to the filter's TCP port 5335 failed"
 	fi
 	# The same names through Android's own resolver (netd), as root and as
 	# the Welcome app's uid: the firewall must send these to the filter too.
@@ -644,7 +644,7 @@ collect_evidence() {
 
 	# The contract's sockets: tor (2950) listens only on TCP 127.0.0.1:9040
 	# (TransPort) and UDP 127.0.0.1:9053 (DNSPort), the filter (2951) only
-	# on 127.0.0.1:5353 (UDP and TCP) and TCP 127.0.0.1:5380; no SOCKSPort
+	# on 127.0.0.1:5335 (UDP and TCP) and TCP 127.0.0.1:5380; no SOCKSPort
 	# or ControlPort on any port, for any uid; and no other uid holds one of
 	# the service ports, on any address (a squatter would receive what the
 	# firewall redirects there).
@@ -655,21 +655,21 @@ collect_evidence() {
 	out=$(awk '
 		$1 == "tcp" && ($4 == 9050 || $4 == 9051 || $4 == 9052 || $4 == 9150 || $4 == 9151) { print; next }
 		($4 == 9040 || $4 == 9053) && $2 != 2950 { print "port held by another uid: " $0; next }
-		($4 == 5353 || $4 == 5380) && $2 != 2951 { print "port held by another uid: " $0; next }
+		($4 == 5335 || $4 == 5380) && $2 != 2951 { print "port held by another uid: " $0; next }
 		$2 != 2950 && $2 != 2951 { next }
 		$3 != "127.0.0.1" { print; next }
 		$1 == "tcp" && $2 == 2950 && $4 != 9040 { print; next }
 		$1 == "udp" && $2 == 2950 && $4 != 9053 { print; next }
-		$1 == "tcp" && $2 == 2951 && $4 != 5353 && $4 != 5380 { print; next }
-		$1 == "udp" && $2 == 2951 && $4 != 5353 { print }
+		$1 == "tcp" && $2 == 2951 && $4 != 5335 && $4 != 5380 { print; next }
+		$1 == "udp" && $2 == 2951 && $4 != 5335 { print }
 	' "$SDIR/listeners.txt")
 	if [ -n "$out" ]; then
 		check listeners fail "sockets outside the contract: $(printf '%s' "$out" | tr '\n' ';')"
 	else
 		check listeners ok "tor and the filter listen on their loopback ports only, and only they do; no SOCKS or control port"
 	fi
-	for want in "tcp 2950 127.0.0.1 9040" "udp 2950 127.0.0.1 9053" "tcp 2951 127.0.0.1 5353" \
-		"udp 2951 127.0.0.1 5353" "tcp 2951 127.0.0.1 5380"; do
+	for want in "tcp 2950 127.0.0.1 9040" "udp 2950 127.0.0.1 9053" "tcp 2951 127.0.0.1 5335" \
+		"udp 2951 127.0.0.1 5335" "tcp 2951 127.0.0.1 5380"; do
 		grep -qx "$want" "$SDIR/listeners.txt" || check "listener:${want// /:}" warn "not listening"
 	done
 	st=$(ash "if [ -S $RT/run/tor-control.sock ]; then stat -c '%a %u %g' $RT/run/tor-control.sock; else echo 'not a socket'; fi" 2>&1)

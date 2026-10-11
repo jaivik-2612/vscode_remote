@@ -69,7 +69,7 @@ DNS_UID=2951          # antumbra-dnsfilter
 NETSTACK_UID=1073     # AID_NETWORK_STACK: Android's DHCP client
 TRANS_PORT=9040       # tor TransPort on 127.0.0.1
 TOR_DNS_PORT=9053     # tor DNSPort on 127.0.0.1, for the DNS filter only
-FILTER_PORT=5353      # the DNS filter, UDP and TCP, on 127.0.0.1
+FILTER_PORT=5335      # the DNS filter, UDP and TCP, on 127.0.0.1
 STATUS_PORT=5380      # the DNS filter's read-only status page on 127.0.0.1
 # Tor's pluggable transports (lyrebird, uid 2950 like tor) listen on a random
 # loopback port in the kernel's ephemeral range; tor must be able to connect

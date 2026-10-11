@@ -44,7 +44,7 @@ SocksPort 0
 ## separate apps from each other (per-app circuits are later work).
 TransPort 127.0.0.1:9040 IsolateClientAddr IsolateDestAddr
 ## Name lookups: only the DNS filter (uid 2951) may reach this port. It
-## listens on 127.0.0.1:5353 and forwards what it does not block here.
+## listens on 127.0.0.1:5335 and forwards what it does not block here.
 DNSPort 127.0.0.1:9053
 ## Answer lookups of .onion and .exit names with addresses from
 ## VirtualAddrNetworkIPv4, which TransPort maps back to the name.
@@ -100,8 +100,8 @@ WarnPlaintextPorts 23,109
 ## --- What Tails' torrc does that this file keeps or drops --------------------
 ## Kept:
 ##   TransPort on 127.0.0.1:9040 with IsolateDestAddr; AutomapHostsOnResolve
-##   with the .exit and .onion suffixes; DNSPort (moved to 9053, because the
-##   DNS filter takes Tails' 5353); cookie authentication; AvoidDiskWrites 1;
+##   with the .exit and .onion suffixes; DNSPort (on 9053 rather than Tails'
+##   5353, which is Android's mDNS port); cookie authentication; AvoidDiskWrites 1;
 ##   WarnPlaintextPorts 23,109; DisableNetwork 1 until the person has made
 ##   their choice at the Welcome screen.
 ## Changed:
