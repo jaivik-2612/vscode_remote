@@ -27,21 +27,10 @@ name: Antumbra VM
 # such as --tour) runs only once this file is on the default branch.
 # A newer push to the branch cancels a run that is still going.
 
+# Archived with the Debian-based Antumbra on 11 October 2026: the project now
+# builds on Android (antumbra/android/, antumbra-android.yml). This workflow
+# runs only when started by hand.
 on:
-  push:
-    branches:
-      - 'claude/tails-mobile-privacy-os-c71ate'
-    paths:
-      - 'antumbra/**'
-      # Nothing here changes the image or the harness:
-      - '!antumbra/docs/**'
-      - '!antumbra/**/*.md'
-      - '!antumbra/tools/**'
-      - '!antumbra/tests/unit/**'
-      - '!antumbra/tests/vm/report/**'
-      - '!antumbra/tests/vm/perf/**'
-      - '!antumbra/tests/vm/history/**'
-      - '.github/workflows/antumbra-vm.yml'
   workflow_dispatch:
     inputs:
       android:

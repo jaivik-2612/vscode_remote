@@ -5,10 +5,13 @@ on:
     branches: ['**']
     paths:
       - 'antumbra/**'
+      # The Android-based system has its own workflow (antumbra-android.yml).
+      - '!antumbra/android/**'
       - '.github/workflows/antumbra.yml'
   pull_request:
     paths:
       - 'antumbra/**'
+      - '!antumbra/android/**'
       - '.github/workflows/antumbra.yml'
   workflow_dispatch:
     inputs:

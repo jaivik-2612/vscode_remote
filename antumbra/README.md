@@ -1,5 +1,13 @@
 # Antumbra
 
+> **Archived (11 October 2026).** This is the Debian-based Antumbra. The
+> project now builds on Android: LineageOS 23.2 for the OnePlus 7T Pro with
+> Tails' rules added (Tor for every connection, a fresh session at every
+> start, trackers blocked by the system). See [`android/`](android/). The
+> Debian work stays here for reference; its last state is commit `48eac55`.
+> Its threat model, Tor configuration, firewall design, Welcome-screen
+> choices and test ideas carry over.
+
 An amnesic, Tor-enforcing mobile operating system for the OnePlus 7T Pro,
 built from Debian 13 and the design of Tails.
 

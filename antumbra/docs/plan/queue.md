@@ -1,5 +1,8 @@
 # Work queue
 
+> **Archived (11 October 2026)** with the Debian-based Antumbra. The work queue
+> of the Android-based Antumbra is `antumbra/android/docs/queue.md`.
+
 The plan's tasks for Mon 12 Oct 2026 to mid-February 2027, one row each,
 in the order they are due. The daily routine reads this file to choose the
 day's change and writes the status back; sessions that settle a decision
