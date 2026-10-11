@@ -64,7 +64,7 @@ The emulator job passing is CI1 (v0 batch).
 
 | ID | What | Size | Status | Done when |
 |---|---|---|---|---|
-| REL0 | Freeze the Debian track after decision D1: tag `antumbra-debian-final` on its last commit, stop its daily VM run, Daily page fed by the Android emulator. Its documents are already marked archived | S | blocked: D1 | Tag pushed, `antumbra-vm.yml` no longer scheduled, the page shows the Android run |
+| REL0 | Freeze the Debian track after decision D1: record its last commit (fd98a1c; the work session cannot push tags, so `antumbra-debian-final` is left to the owner, from GitHub's web page, if wanted), stop its daily VM run, Daily page fed by the Android emulator (`ci/daily.py`). Its documents are already marked archived | S | done (83d37fe) | The final commit recorded, `antumbra-vm.yml` no longer scheduled, the page shows the Android run |
 | REL1 | Mirror the official LineageOS build the release is checked against, with its `build-manifest.xml` and the SHA-256 values from the download API; static checks of the zip: iptables and the `-restore` tools present, init and Updater assumptions, netd and Connectivity changes against AOSP `android16-release`; a weekly check of `hotdog`'s builds for LineageOS 24 | M | todo | A CI job checks the mirrored build and reports any LineageOS 24 build for `hotdog` |
 
 ## W3 · 26 Oct to 1 Nov · Leak baselines
@@ -208,9 +208,9 @@ A settled decision is recorded here as `decided: <choice>` with the date.
 
 | ID | When | Question | Recommended | Status |
 |---|---|---|---|---|
-| D1 | W2 | Freeze the Debian track: tag it, stop its daily VM run, switch the Daily page to the Android emulator? | yes | open |
-| D2 | apply now, decide W18 | Build capacity for Stage 2: apply for a free crave.io account now (an application by a person, not by CI), spend nothing before February, then decide between crave.io, on-demand servers (about €15 to €40 a month) and an always-on server (about €100 a month plus set-up) | apply now; decide with phone data | open |
-| D3 | W2 | A SIM card in the Antumbra phone? A SIM is also a way out in the clear whenever the module does not run (mobile data on for a SIM Android has never seen) | no SIM, Wi-Fi only, and none from LineageOS's first boot on; a "phone mode" later, clearly labelled as not anonymous, after MOD6 | open |
+| D1 | W2 | Freeze the Debian track: tag it, stop its daily VM run, switch the Daily page to the Android emulator? | yes | decided: yes (11 Oct 2026); REL0 |
+| D2 | apply now, decide W18 | Build capacity for Stage 2: apply for a free crave.io account now (an application by a person, not by CI), spend nothing before February, then decide between crave.io, on-demand servers (about €15 to €40 a month) and an always-on server (about €100 a month plus set-up) | apply now; decide with phone data | open: the owner applies (12 Oct 2026) |
+| D3 | W2 | A SIM card in the Antumbra phone? A SIM is also a way out in the clear whenever the module does not run (mobile data on for a SIM Android has never seen) | no SIM, Wi-Fi only, and none from LineageOS's first boot on; a "phone mode" later, clearly labelled as not anonymous, after MOD6 | decided: a SIM in the phone (11 Oct 2026); how mobile data, the carrier's view of location and GPS are handled is being designed |
 | D4 | before W6 | Daily jobs: Antumbra's workflows on the default branch (GitHub's schedules run only there), or runs started by a push from the routine? | routine-driven; a pause leaves the block list stale and the phone uses the module's copy | open |
 | D5 | before W7 | Generate the signing keys (app, repository index, block list, module), stored as secrets with a passphrase-encrypted backup outside GitHub. A device-owner app can only be updated with the same key | yes | open |
 | D6 | before W9 | The app repository as release assets under a fixed tag, or a separate public repository (the repository's Pages site serves another project) | release assets; the address fixed from RC1 on | open |
