@@ -73,7 +73,7 @@ The emulator job passing is CI1 (v0 batch).
 |---|---|---|---|---|
 | CI2 | Leak test v1 completed: each relay connection attributed to tor's UID (or an exempt UID) on the device; NFLOG records of redirected flows with their UID in the report; the log of names the system looks up, with unexpected names flagged (names and destinations through Tor are listed in v0, in learning mode; strict once the expected list is learned) | M | doing | The report lists UIDs for every flow and the system's looked-up names |
 | CI3 | A baseline with a pinned Orbot as always-on VPN with "Block connections without VPN", to show what a VPN alone lets out | S | todo | A third report in the artifact |
-| CI4 | A secondary QPR2 run on Google's `google_apis` image for API 36.1 (LineageOS 23.2 is QPR2; the `default` image is QPR0), Google services disabled before the baseline; in the workflow since v0, not blocking | S | doing | The ANTUMBRA scenario passes on QPR2 too |
+| CI4 | A secondary QPR2 run on Google's `google_apis` image for API 36.1 (LineageOS 23.2 is QPR2; the `default` image is QPR0), Google services disabled before the baseline; in the workflow since v0, not blocking. Runs 3 to 5: 'dpm set-device-owner' is refused there ("already some accounts on the device") although 'dumpsys account' lists none, only Google's authenticators | S | doing | The ANTUMBRA scenario passes on QPR2 too |
 
 ## W4 · 2 to 8 Nov · A rooted emulator, the first preview
 
