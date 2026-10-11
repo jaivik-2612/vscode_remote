@@ -35,18 +35,23 @@ work queue is `docs/queue.md`.
   Android's system services and root alike, is passed into Tor or refused.
   Name lookups go through Tor. Other UDP and all IPv6 are refused (DHCP
   renewals by Android's network stack aside). Nothing goes out until the
-  Welcome screen's Start.
+  Welcome screen's Start. This holds while the Antumbra layer runs; see
+  "What it is not" for a phone that starts without it.
 - **A Welcome screen at every start**, as in Tails: connect to Tor directly,
-  through bridges, or stay offline; a new Wi-Fi hardware address; later,
-  Persistent Storage; Administration (off); the Unsafe Browser (off).
+  through bridges, or stay offline; a new Wi-Fi hardware address;
+  Administration (off). Persistent Storage and the Unsafe Browser are shown
+  but come later.
 - **Trackers blocked by the system.** A small DNS filter between the system's
   resolver and Tor's answers "does not exist" for tracker domains. Most apps
   cannot get around it; `docs/design.md` (section 6) lists what it cannot
   block. Tor Browser is deliberately not filtered.
-- **Network state kept in RAM.** Saved Wi-Fi networks and Android's DHCP
-  lease memory never reach flash, so a new session cannot be linked to the
-  last one through them, and a phone that starts without the Antumbra layer
-  has no network to join.
+- **Network state kept in RAM.** Saved Wi-Fi networks (Android's shared
+  store) and Android's DHCP lease memory are kept in RAM, so a new session
+  cannot be linked to the last one through them, and a phone that starts
+  without the Antumbra layer has no saved shared Wi-Fi network to join. Two
+  exceptions: user 0's credential-encrypted Wi-Fi store stays on flash, and
+  the first boot after installing writes that boot's lease memory to flash
+  (deleted at the next) (`docs/threat-model.md`).
 - **Planned, not in v0:** a throwaway Android user for each session, Persistent
   Storage, Tor Browser and other apps with their own Tor, a signed app
   repository, time over Tor, the emergency power-off as a privileged app
@@ -65,8 +70,17 @@ work queue is `docs/queue.md`.
   monthly Android security fixes, but OnePlus stopped firmware updates in
   December 2022, and the kernel (4.14) is past its support. Graphics-chip bugs
   exploited in real attacks are listed for this processor.
+- **Without the Antumbra layer there is no firewall.** Magisk's Safe Mode,
+  or a LineageOS update installed without Magisk's step, starts the phone
+  without it. Such a boot has no saved shared Wi-Fi network, and Welcome
+  keeps Wi-Fi off, but a network joined by hand connects in the clear, and
+  so does a SIM whose mobile data is on: it goes online as the phone
+  starts, with no saved network and before the Welcome screen. The layer
+  stores mobile data as off for every SIM Android knows; a SIM Android has
+  never seen starts with it on (`docs/design.md`, section 7.3).
 - **Calls and SMS are not anonymous**, and the modem is outside the firewall.
-  The default is no SIM card.
+  The default is no SIM card, for this reason and the one above: keep the
+  SIM out from LineageOS's first boot on (`docs/install.md`).
 - **It does not make anyone invisible.** Few people run it, so its users
   stand out, and apps that know who you are still know.
 - **For a serious, well-funded adversary, other setups are safer:** Tails on
@@ -93,9 +107,9 @@ work queue is `docs/queue.md`.
 |---|---|---|---|
 | Base | Official LineageOS 23.2 for `hotdog`, unmodified | — | not in this repository |
 | Root | Magisk, pinned to v31.0; used only by the module | — | not in this repository |
-| Module | The Magisk module `antumbra`: boot scripts that arm the firewall before Android starts, keep network state in RAM, set fail-safe settings, start tor and the filter, and open tor's network after Welcome's Start | root | `module/` |
+| Module | The Magisk module `antumbra`: boot scripts that arm the firewall before Android starts, keep network state in RAM, set fail-safe settings (mobile data off among them), start tor and the filter, check that only they hold their loopback ports, and open tor's network after Welcome's Start | root | `module/` |
 | Firewall | `antumbra-fw`: `arm`, `apply`, `status`, `flush` | root, one-shot | `firewall/` |
-| tor | The system tor, built for Android from pinned sources; TransPort, DNSPort and a control socket, no SOCKS port | uid 2950 | `tor/` |
+| tor | The system tor, built for Android (API 29 and later) from pinned sources with one small Antumbra patch (no `SO_REUSEADDR` on the DNSPort, so no app can share it; `tor/patches/`); TransPort, DNSPort and a control socket, no SOCKS port | uid 2950 | `tor/` |
 | DNS filter | `antumbra-dnsfilter`: the tracker filter in front of tor's DNSPort, and a read-only status page | uid 2951 | `dnsfilter/` |
 | Welcome | The device-owner app: the Welcome screen, the session's policies, the status screen, the emergency tile | an app in user 0 | `welcome/` |
 | Apps | Tor Browser and curated privacy apps from a signed repository | apps | planned (`docs/queue.md`, W9) |
@@ -126,26 +140,30 @@ On the phone:
 |---|---|
 | `/data/adb/modules/antumbra` (`MODDIR`) | the installed module; `bin/` holds `tor`, `antumbra-dnsfilter`, `antumbra-fw` and the helper `antumbra-run`. The zip carries `bin/arm64-v8a` and `bin/x86_64`; `customize.sh` keeps the one for the CPU |
 | `/data/adb/antumbra/{run,state,lists,log}` | the runtime directory, a tmpfs mounted at every boot: tor's control socket and `status.json` (`run`), tor's DataDirectory and the module's state (`state`), updated lists (`lists`), logs (`log`) |
-| property `antumbra.fw.armed` | the first 16 hex digits of the live ruleset's SHA-256, set by the module with `resetprop -n` only after `apply` succeeded and was verified |
+| `/data/adb/post-fs-data.d/antumbra-arm.sh` | the early arm script: `antumbra-fw arm` before any module, also when the module is switched off |
+| property `antumbra.fw.armed` | the first 16 hex digits of the live ruleset's SHA-256, set by the module with `resetprop -n` only after `apply` succeeded and was verified, and only while no other uid holds tor's or the filter's loopback ports |
 
 ## Building
 
 No binaries are kept in the repository. Every build script downloads its
-pinned sources over HTTPS, checks their SHA-256, and also checks OpenPGP
-signatures where the project publishes them. Third-party code stays out of
-the tree. Needs a Linux x86_64 host with the Android SDK (`platforms;android-36`,
-`build-tools;36.0.0`, `ndk;28.2.13676358`), Go, JDK 17 or later (CI uses
-21), `curl`, `make`, `perl` and Python 3. Commands are run from the
-repository root unless they say otherwise.
+pinned sources over HTTPS, checks their SHA-256, and checks OpenPGP
+signatures where the project publishes them; for tor, pass
+`--signatures require`, since its default (`auto`) skips the signature
+check with only a message when `gpg` is missing. Third-party code stays out
+of the tree. Needs a Linux x86_64 host with the Android SDK
+(`platforms;android-36`, `build-tools;36.0.0`, `ndk;28.2.13676358`), Go, JDK
+17 or later (CI uses 21; its `keytool` signs the module's overlay), `curl`,
+`gpg`, `make`, `perl`, `zip` and Python 3. Commands are run from the
+repository root.
 
 | Part | Build | Check |
 |---|---|---|
-| firewall | nothing to build; `firewall/antumbra-fw print` shows the ruleset without root | `sudo bash antumbra/android/firewall/tests/sandbox-test.sh` |
-| tor | `antumbra/android/tor/build-tor.sh --out TOR_OUT --abi all --jobs 2` | `tor/check-tor-binary.sh`, and as root `tor/hostcheck-tor.sh` |
-| DNS filter | `antumbra/android/dnsfilter/build.sh --out DNS_OUT --test --check` | `go vet ./... && go test -race ./...` in `dnsfilter/` |
+| firewall | nothing to build; `antumbra/android/firewall/antumbra-fw print` shows the ruleset without root | `sudo bash antumbra/android/firewall/tests/sandbox-test.sh` |
+| tor | `antumbra/android/tor/build-tor.sh --out TOR_OUT --work TOR_WORK --abi all --jobs 2 --signatures require` | `antumbra/android/tor/check-tor-binary.sh --abi arm64-v8a --expect-version 0.4.9.14 TOR_OUT/arm64-v8a/tor` (and `x86_64`); as root `sudo bash antumbra/android/tor/hostcheck-tor.sh --require-runtime --expect-version 0.4.9.14 TOR_WORK/x86_64/tor-hostcheck` |
+| DNS filter | `antumbra/android/dnsfilter/build.sh --out DNS_OUT --test --check` | `cd antumbra/android/dnsfilter && go vet ./... && go test -race ./...` |
 | block list | `antumbra/android/dnsfilter/fetch-lists.sh --out LISTS --listc DNS_OUT/host/listc` | `DNS_OUT/x86_64/antumbra-dnsfilter -check-list LISTS/dnsfilter.list` |
-| Welcome | `cd antumbra/android/welcome && ./gradlew assembleDebug` | `./gradlew testDebugUnitTest lintDebug` |
-| module | `antumbra/android/module/build-module.sh --tor TOR_OUT --dnsfilter DNS_OUT --blocklist LISTS/dnsfilter.list --out antumbra-module.zip` | `sh antumbra/android/module/tests/unit.sh`; as root `module/tests/e2e-host.sh` |
+| Welcome | `cd antumbra/android/welcome && ./gradlew assembleDebug` | `cd antumbra/android/welcome && ./gradlew testDebugUnitTest lintDebug` |
+| module | `antumbra/android/module/build-module.sh --tor TOR_OUT --dnsfilter DNS_OUT --blocklist LISTS/dnsfilter.list --out antumbra-module.zip` | `sh antumbra/android/module/tests/unit.sh`; as root `sudo sh antumbra/android/module/tests/e2e-host.sh` with tor's `tor-hostcheck`, the filter's x86_64 binary, the list and the shells from `antumbra/android/module/tests/build-test-tools.sh` (arguments in `antumbra/android/module/README.md`, Tests) |
 | CI tools | — | `python3 -B -m unittest discover -s antumbra/android/ci/tests -v` |
 
 Build tor, the DNS filter and the list first: the module zip is made from
@@ -159,34 +177,52 @@ emulator the way Magisk would (`module/README.md`).
 branch that touches `antumbra/android/**` or the workflow. A newer push
 cancels a run still going. In order:
 
-1. **firewall:** the sandbox test, as root, under bash, dash, busybox and
-   mksh, with IPv6: two network namespaces, fake tor and filter services
-   under their real UIDs, and probes as root, the network stack, tor, the
-   filter, apps and an exempt app.
-2. **dnsfilter:** `go vet`, the tests, both static binaries, and the block
-   list compiled from its pinned sources and checked by the filter itself.
+1. **firewall:** shellcheck, then the sandbox test, as root, with legacy
+   iptables as on Android, under bash, dash, busybox and mksh, with IPv6:
+   two network namespaces, fake tor and filter services under their real
+   UIDs, and probes as root, the network stack, tor, the filter, apps and
+   an exempt app.
+2. **dnsfilter:** `go vet`, the tests with the race detector, a minute of
+   fuzzing for each of its two fuzz targets, both static binaries with
+   their self-tests (arm64 under qemu-user), and the block list compiled
+   from its pinned sources and checked by the filter itself.
 3. **tor:** tor for arm64-v8a and x86_64 with the pinned NDK, sources checked
-   by SHA-256 and signature, then the host check as root and the binary
-   checks.
-4. **welcome:** the debug APK and the unit tests.
-5. **module:** the unit tests, then the module zip from the outputs above.
+   by SHA-256 and signature, the host check as root, and the binary checks.
+   The build is cached under a key made of its pins: on a cache hit only the
+   binary checks run, and the host check runs again when tor is rebuilt.
+4. **welcome:** the debug APK, the unit tests, lint, the built-in bridges
+   against their pinned source, shellcheck of its scripts, and its adb
+   driver against a fake adb.
+5. **module:** shellcheck, the unit tests, then the module zip from the
+   outputs above; and **module-e2e**: the boot scripts as root on Linux,
+   with the real firewall, tor, filter and `antumbra-run`, under toybox,
+   mksh and busybox built from pinned sources (`module/README.md`, Tests).
 6. **emulator:** on a runner with KVM, Google's Android 16 image without
    Google services (`system-images;android-36;default;x86_64`), each
    scenario a fresh device, every packet recorded from the first moment of
    boot (`-tcpdump`):
    - **BASELINE:** plain Android left alone for 3 minutes: what it contacts
      by itself.
-   - **ANTUMBRA:** the module installed and started as Magisk would at boot
-     (the emulator is rooted with `adb root`, not Magisk), Welcome as device
-     owner, "Start Antumbra", tor's bootstrap, and a tracker test.
+   - **ANTUMBRA:** the module zip installed and started as Magisk would at
+     boot (the emulator is rooted with `adb root`, not Magisk), Welcome as
+     device owner (its debug build's test hook keeps adb), a default
+     session (Administration off) started with "Start Antumbra", the phone
+     on Wi-Fi only, tor's bootstrap, a tracker test, LAN and loopback probes
+     as root and as an app, and the firewall put back to its armed state
+     with the network up.
 
    The leak analyser classifies every packet the emulated phone sent: Tor
    relay or directory, configured bridge, link-level (ARP, DHCP), or LEAK.
-   The run passes only with zero LEAK after the firewall was armed, Tor
-   traffic in the capture, every connection tor reported present in the
-   capture, the tracker names blocked, and every check passed (among them:
-   the firewall live, tor and the filter running with no capabilities, no
-   IPv6 address but loopback and link-local).
+   The run passes only with zero LEAK after the firewall was armed, nothing
+   but ARP and DHCP while it was only armed, Tor traffic in the capture,
+   every connection tor reported and every address the phone had present in
+   the capture, the tracker names blocked, and every check passed (among
+   them: the firewall live, tor and the filter running with no
+   capabilities, no other uid on their ports, IPv6 off on every interface).
+   The names and destinations reached through Tor are listed and compared
+   with an expected list (noted while that list is being learned). A second
+   run on Android 16 QPR2 (`google_apis` 36.1, the Android version of
+   LineageOS 23.2) does the same without blocking the workflow.
 
 The artifact `antumbra-android-<run>` (14 days) holds the summary, the leak
 report, screenshots of the Welcome and status screens, the slimmed captures
@@ -194,13 +230,15 @@ and the logs. `ci/README.md` describes every step and what the capture
 cannot see.
 
 What CI cannot show: anything about the phone's hardware paths (Wi-Fi
-keepalive offload, the modem, Qualcomm's IPA), LineageOS 23.2 itself (the
-emulator runs Android 16 QPR0, LineageOS 23.2 is QPR2), the 4.14 kernel,
-arm64, Magisk's timing, and which app sent a packet that went to a Tor
-relay. Planned additions are in `docs/queue.md`: a Magisk-rooted emulator,
-a QPR2 (`google_apis` 36.1) run, and the scenarios Tor killed, filter
-killed, network change, reboot, IPv6 router advertisements, DHCP
-reconnection, Magisk Safe Mode and update without the Magisk step.
+keepalive offload, the modem, Qualcomm's IPA), LineageOS 23.2 itself, the
+4.14 kernel, arm64, Magisk's timing, and which app sent a packet that went
+to a Tor relay. The analyser does not yet judge what a DHCP message carries
+(the host name, option 12). Planned additions are in `docs/queue.md`: a
+Magisk-rooted emulator, and the scenarios Tor killed, filter killed,
+network change, reboot, IPv6 router advertisements, DHCP reconnection
+without a requested address or a host name, an app holding tor's port
+before Start, Magisk Safe Mode and update without the Magisk step. The
+phone itself is checked by the capture in `docs/install.md`, section 9.
 
 ## Documents
 
@@ -221,6 +259,6 @@ reconnection, Magisk Safe Mode and update without the Magisk step.
 GPL-3.0-or-later, like the rest of Antumbra (`../LICENSE`). The tor binary
 is built in tor's GPL mode and is GPL-3.0; its corresponding source is the
 pinned tarballs plus `tor/`. The block list's sources keep their own
-licences (HaGeZi: GPL-3.0; the Exodus Privacy tracker data: to be confirmed
-before a list containing it is published). LineageOS, Magisk and Tor Browser
+licences (HaGeZi: GPL-3.0). The Exodus Privacy tracker data (ODbL 1.0,
+contents DbCL 1.0) is off in v0 until its terms are checked (queue DNS3). LineageOS, Magisk and Tor Browser
 are not redistributed by this repository.

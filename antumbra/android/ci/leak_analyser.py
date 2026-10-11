@@ -7,10 +7,13 @@ flows, and classifies each flow as one of:
 
   tor-relay      TCP to the ORPort of a relay in the consensus that the
                  phone's tor downloaded (cached-microdesc-consensus)
-  tor-directory  TCP to a directory authority or a fallback directory
-                 compiled into tor (from the consensus's dir-source lines
-                 and from the tor binary's strings), which tor contacts
-                 before it has a consensus
+  tor-directory  TCP to the ORPort of a directory authority or a fallback
+                 directory compiled into tor (from the consensus's dir-source
+                 lines and from the tor binary's strings), which tor
+                 contacts before it has a consensus. DirPorts are not
+                 allowed: tor clients fetch directory documents over the
+                 ORPort (BEGIN_DIR), so TCP to a DirPort is a LEAK, labelled
+                 with the relay it belongs to
   bridge         TCP to a bridge the session configured
   lan-dhcp       a DHCP client message (UDP 68 to 67) to the broadcast
                  address or a local server: link configuration, which
@@ -22,26 +25,40 @@ flows, and classifies each flow as one of:
   ci-marker      the clock marker this CI sends before the module is
                  installed (see "Clocks" below); never after arm
   LEAK           anything else, with a kind: dns, tcp, udp, lan, icmp,
-                 ipv6, multicast, dhcp, fragment, unattributed, undecoded,
-                 other
+                 ipv6, multicast, dhcp, dhcp-lease, dhcp-hostname, armed,
+                 fragment, unattributed, undecoded, other
 
-Emulator infrastructure that is not the guest's own traffic, and is
-therefore not listed: every frame sent by the emulator's user-mode network
-(QEMU slirp) itself. Its virtual hosts use MAC addresses 52:55:<IPv4> and
-52:56:<IPv6>: 10.0.2.2 (the host's loopback alias, gateway and DHCP
-server), 10.0.2.3 to 10.0.2.6 (DNS forwarders), fec0::2 and fec0::3. The
-guest's own packets TO those hosts are listed: a lookup sent to 10.0.2.3
-is the phone's own DNS leaving outside Tor (on a phone, to the Wi-Fi
-router's resolver) and is a LEAK; TCP to 10.0.2.2 reaches the machine
-running the emulator (on a phone, the local network) and is a LEAK.
+Which frames are the phone's (--network emulator, the default). On the
+emulator's virtual Ethernet there are only two kinds of station: QEMU's
+user-mode network (slirp) and the phone. A frame counts as the emulator's
+own, and is counted but not listed, only when all of this holds: its source
+MAC address is exactly one of slirp's (52:55:0a:00:02:0X for its hosts
+10.0.2.X, 52:56:00:00:00:02 and :03 for fec0::2 and fec0::3), it is not
+addressed to one of those MACs, and it is an ARP frame from a slirp address
+or an IP packet from an address that is not the phone's to the phone: to one
+of its addresses, to a broadcast or multicast group, a DHCP answer (port 67
+to 68), or to another address of slirp's network that is not one of slirp's
+hosts (such a packet cannot leave the emulator). Every other frame is the
+phone's: it is listed and judged, whatever its source address. A frame the
+phone sent from an address that is not one of its own is a LEAK
+("unattributed"). The phone's own packets TO slirp's hosts are judged like
+any others: a lookup sent to 10.0.2.3 is the phone's DNS leaving outside Tor
+(on a phone, to the Wi-Fi router's resolver); TCP to 10.0.2.2 reaches the
+machine running the emulator (on a phone, the local network). Frames of
+other link types (raw IP, Linux cooked, 802.11) and captures made on a real
+network (--network lan, for example tcpdump on the phone or on a hotspot)
+are attributed by address instead: a frame is the phone's when the capture
+marks it outgoing, when it comes from one of the phone's MAC addresses, or
+when its source is one of the phone's addresses; other stations' frames are
+not counted.
 
-Which addresses are the guest's: those given with --guest, or else every
-private, link-local or site-local address seen acting as a client (sending
-a TCP SYN, a query to a low UDP port, an ARP request, an echo request, an
-IPv6 router or neighbour solicitation, a DHCP request) from a MAC address
-that is not slirp's, leaving out slirp's own addresses. A frame from one of
-the guest's MAC addresses with a source address that is not the guest's
-is counted too, as "unattributed" (a forged source).
+The phone's addresses: those given with --guest, or else every private,
+link-local or site-local address seen acting as a client (sending a TCP
+SYN, a query to a low UDP port, an ARP request, an echo request, an IPv6
+router or neighbour solicitation, a DHCP request) from a MAC address that
+is not slirp's, leaving out slirp's own addresses. With --expect-guest,
+every address the device had at the end must be among them, or the
+capture missed an interface ("blind").
 
 Clocks. pcap time stamps come from the emulator, the scenario's events
 (events.tsv) from the CI host. Before the module is installed the
@@ -52,21 +69,52 @@ interval. The arm cutoff is the host time of the arm event (taken just
 before the module's installation starts, so before 'antumbra-fw arm' ran)
 moved into the capture's clock with the lower bound of the offset, minus
 a margin. Every packet at or after the cutoff counts. The cutoff can only
-be early, never late, so a packet near it is counted rather than missed;
-the scenario keeps the phone in airplane mode around the installation so
-that nothing is sent near it.
+be early, never late. --judge-from-start judges every packet instead (a
+capture on the phone, which has no marker and no arm event).
+
+The armed window (--armed-window START:END). Between two events the
+scenario puts the firewall back into its armed state ('antumbra-fw flush')
+with the network up and makes traffic as root and as an app. In that
+window nothing but loopback may pass: every packet the phone sent other
+than ARP and DHCP (which Android sends from packet sockets, outside the
+firewall) is a LEAK ("armed"), Tor traffic included. The window is moved
+inward by the clock's uncertainty, so that it never takes in packets sent
+before the flush or after the rule set was loaded again.
+
+DHCP lease memory. After arm, a DHCP REQUEST that asks for an address the
+phone held before arm (option 50 without a server identifier, INIT-REBOOT;
+or a renewal with that address in ciaddr) is a LEAK ("dhcp-lease"): the new
+session announces the previous one's lease. After arm, a DHCP client
+message that carries a host name (option 12; Android 15 and later send the
+device's name unless a device owner restricts it) is a LEAK
+("dhcp-hostname"): every network the phone joins learns its name.
+
+Names and destinations through Tor. A capture cannot see what goes through
+Tor. With --tor-streams (tor's STREAM events, recorded over its control
+socket) and --filter-log (the DNS filter's -debug-log-queries log), every
+name the phone looked up and every destination it reached through Tor is
+listed, and compared with --expected-destinations. In "learning" mode an
+unexpected one is listed and noted; in "strict" mode it fails the run, and
+missing records make it blind.
 
 Verdicts: "pass" (zero LEAK after arm, the capture saw the guest, and,
-when asked, saw Tor traffic and every connection tor reported), "fail"
-(a LEAK after arm), "blind" (the capture missed the guest's traffic: it
-cannot prove anything), "error" (an input is missing or unreadable), and
-"info" for a scenario without an arm event (the baseline).
+when asked, saw Tor traffic, every connection tor reported, every address
+the device had, a whole armed window, and no unexpected destination in
+strict mode), "fail" (a LEAK after arm, or an unexpected destination in
+strict mode), "blind" (the capture missed traffic or ended early: it cannot
+prove anything), "error" (an input is missing or unreadable), and "info"
+for a scenario without an arm event (the baseline).
 
 Usage:
   leak_analyser.py analyse --scenario NAME --pcap FILE [--pcap FILE...]
-      [--events FILE] [--arm-event NAME] [--arm-margin SECONDS]
+      [--network emulator|lan] [--events FILE]
+      [--arm-event NAME | --judge-from-start] [--arm-margin SECONDS]
+      [--armed-window START:END [--require-armed-window]]
       [--consensus FILE] [--tor-binary FILE] [--bridges FILE]
-      [--guest ADDR...] [--expect-seen FILE] [--require-tor-traffic]
+      [--guest ADDR...] [--expect-seen FILE] [--expect-guest FILE]
+      [--require-tor-traffic] [--max-tail-gap SECONDS]
+      [--tor-streams FILE] [--filter-log FILE]
+      [--expected-destinations FILE] [--destinations-mode learning|strict]
       --out FILE.json
   leak_analyser.py report --in FILE.json [--in FILE.json...] --json OUT --md OUT
   leak_analyser.py tor-conns [--uid 2950] PROC_NET_TCP_FILE...
@@ -89,10 +137,9 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pcapread  # noqa: E402
 
-SCHEMA = 1
+SCHEMA = 2
 TOR_UID = 2950
 
-SLIRP_MAC_PREFIXES = ("52:55:", "52:56:")
 SLIRP_V4 = {
     "10.0.2.1": "emulator gateway",
     "10.0.2.2": "emulator host alias, gateway and DHCP server",
@@ -102,7 +149,16 @@ SLIRP_V4 = {
     "10.0.2.6": "emulator DNS forwarder",
 }
 SLIRP_V6 = {"fec0::2": "emulator host alias", "fec0::3": "emulator DNS forwarder"}
+# slirp's own MAC addresses, exactly: 52:55 and the four bytes of the IPv4
+# address of the virtual host, 52:56 and the last four bytes of the IPv6 one
+# (QEMU slirp: if_encap, arp_input, in6_compute_ethaddr).
+SLIRP_MACS = {"52:55:0a:00:02:%02x" % i: "10.0.2.%d" % i for i in range(1, 7)}
+SLIRP_MACS.update({"52:56:00:00:00:02": "fec0::2", "52:56:00:00:00:03": "fec0::3"})
 SLIRP_DNS = {"10.0.2.3", "10.0.2.4", "10.0.2.5", "10.0.2.6", "fec0::3"}
+# slirp's virtual network. A packet to an address in it that is not one of
+# slirp's hosts never leaves the emulator: slirp forwards only to outside
+# addresses and to its own hosts (10.0.2.2 is the host machine).
+SLIRP_NETS = [ipaddress.ip_network("10.0.2.0/24"), ipaddress.ip_network("fec0::/64")]
 MARKER = b"ANTUMBRA-CLOCK "
 # The phone's own network: RFC 1918, shared (carrier-grade NAT), link-local,
 # unique-local and site-local addresses. Python's is_private is wider (it
@@ -112,6 +168,9 @@ LOCAL_NETS = [ipaddress.ip_network(n) for n in (
     "fc00::/7", "fe80::/10", "fec0::/10")]
 
 ALLOWED = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211", "ci-marker")
+# What may pass while the firewall is only armed: link-level frames, and
+# DHCP, which Android sends from a packet socket outside the firewall.
+ALLOWED_ARMED = ("lan-dhcp", "link-arp", "link-80211")
 LEAK = "LEAK"
 CLASS_ORDER = ("tor-relay", "tor-directory", "bridge", "lan-dhcp", "link-arp", "link-80211",
                "ci-marker", LEAK)
@@ -156,15 +215,18 @@ def slirp_service(addr):
 
 
 def slirp_mac(mac):
-    return bool(mac) and mac.startswith(SLIRP_MAC_PREFIXES)
+    """True only for one of slirp's own MAC addresses, exactly (a random
+    Wi-Fi address may begin with 52:55 too)."""
+    return mac in SLIRP_MACS
 
 
 class TorDirectory:
-    """The addresses tor may legitimately connect to."""
+    """The addresses tor may legitimately connect to: ORPorts and bridges.
+    DirPorts are kept only to name them in a LEAK's label."""
 
     def __init__(self):
         self.orports = {}   # (ip, port) -> (class, label)
-        self.dirports = {}  # (ip, port) -> (class, label)
+        self.dirports = {}  # (ip, port) -> label (never allowed)
         self.bridges = {}   # (ip, port) -> label
         self.info = {"consensus": None, "tor_binary": None, "bridges": 0}
 
@@ -174,12 +236,15 @@ class TorDirectory:
             self.orports[key] = (cls, label)
 
     def lookup(self, ip, port):
-        hit = self.orports.get((ip, port)) or self.dirports.get((ip, port))
+        hit = self.orports.get((ip, port))
         if hit:
             return hit
         if (ip, port) in self.bridges:
             return ("bridge", self.bridges[(ip, port)])
         return None
+
+    def dirport(self, ip, port):
+        return self.dirports.get((ip, port))
 
 
 def load_consensus(tordir, path):
@@ -204,7 +269,7 @@ def load_consensus(tordir, path):
                 continue
             tordir.add_or(ip, orport, "tor-relay", "relay " + nick, overwrite=True)
             if dirport.isdigit() and int(dirport):
-                tordir.dirports[(ip, int(dirport))] = ("tor-directory", "relay %s (DirPort)" % nick)
+                tordir.dirports[(ip, int(dirport))] = "relay %s (DirPort)" % nick
             relays += 1
         elif parts[0] == "a" and len(parts) >= 2 and nick:
             m = re.match(r"^\[([0-9a-fA-F:.]+)\]:(\d+)$", parts[1])
@@ -218,7 +283,7 @@ def load_consensus(tordir, path):
             if orport.isdigit():
                 tordir.add_or(ip, orport, "tor-directory", "authority " + name)
             if dirport.isdigit() and int(dirport):
-                tordir.dirports[(ip, int(dirport))] = ("tor-directory", "authority %s (DirPort)" % name)
+                tordir.dirports[(ip, int(dirport))] = "authority %s (DirPort)" % name
             authorities += 1
     if relays == 0:
         raise ValueError("%s has no relay ('r') lines: not a consensus" % path)
@@ -248,14 +313,14 @@ def load_tor_binary(tordir, path):
         fp = m.group(4).decode()
         tordir.add_or(ip, m.group(3).decode(), "tor-directory", "fallback directory " + fp[:8])
         if m.group(2) and int(m.group(2)):
-            tordir.dirports.setdefault((ip, int(m.group(2))), ("tor-directory", "fallback directory %s (DirPort)" % fp[:8]))
+            tordir.dirports.setdefault((ip, int(m.group(2))), "fallback directory %s (DirPort)" % fp[:8])
         fallbacks += 1
     for m in _AUTHORITY_RE.finditer(data):
         name, ip = m.group(1).decode(), m.group(3).decode()
         if ip_or_none(ip) is None:
             continue
         tordir.add_or(ip, m.group(2).decode(), "tor-directory", "authority " + name)
-        tordir.dirports.setdefault((ip, int(m.group(4))), ("tor-directory", "authority %s (DirPort)" % name))
+        tordir.dirports.setdefault((ip, int(m.group(4))), "authority %s (DirPort)" % name)
         authorities += 1
     tordir.info["tor_binary"] = {"path": path, "sha256": hashlib.sha256(data).hexdigest(),
                                  "fallbacks": fallbacks, "authorities": authorities}
@@ -366,6 +431,186 @@ def load_expect_seen(path):
     return out
 
 
+def load_expect_guest(path):
+    """[(interface, address)] from 'ip addr' output or from lines of
+    "INTERFACE ADDRESS[/PREFIX]" or "ADDRESS": the addresses the device had.
+    Loopback and link-local addresses are left out (they never reach the
+    capture as a source on their own)."""
+    out = []
+    iface = ""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.match(r"^\d+:\s+([^:@\s]+)", line)
+            if m:
+                iface = m.group(1)
+                continue
+            words = line.split()
+            if not words:
+                continue
+            if words[0] in ("inet", "inet6") and len(words) > 1:
+                addr, name = words[1], iface
+            elif len(words) >= 2:
+                name, addr = words[0], words[1]
+            else:
+                name, addr = "", words[0]
+            ip = ip_or_none(addr.split("/")[0])
+            if ip is None or ip.is_loopback or ip.is_link_local:
+                continue
+            out.append((name, str(ip)))
+    return sorted(set(out))
+
+
+_STREAM_RE = re.compile(r"^650[ -]STREAM (\d+) (\S+) (\d+) (\S+)(.*)$")
+_KV_RE = re.compile(r'([A-Z_]+)=("(?:[^"\\]|\\.)*"|\S+)')
+# tor's own streams (directory fetches and uploads, reachability tests).
+TOR_INTERNAL_PURPOSES = ("DIR_FETCH", "DIR_UPLOAD", "DIRPORT_TEST")
+
+
+def _split_target(target):
+    """("host", port) from tor's "host:port" or "[v6]:port"."""
+    m = re.match(r"^\[([^\]]+)\]:(\d+)$", target) or re.match(r"^(.*):(\d+)$", target)
+    if not m:
+        return target, None
+    return m.group(1), int(m.group(2))
+
+
+def load_tor_streams(path):
+    """tor's STREAM events from a control-connection transcript (what
+    ci/lib/tor-streams.sh records). Returns (streams, info): one dict per
+    stream (target, kind "connect" or "resolve", purpose, the statuses it
+    went through, remaps), and whether events were switched on."""
+    streams = {}
+    order = []
+    epoch = 0
+    replies = []
+    enabled = False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    for line in lines:
+        line = line.rstrip("\r")
+        if line.startswith("ANTUMBRA-CI-STREAMS connect"):
+            epoch += 1
+            replies = []
+            continue
+        if re.match(r"^[0-9]{3} ", line) and not line.startswith("650 "):
+            # The first two final replies of a connection answer
+            # AUTHENTICATE and SETEVENTS STREAM.
+            replies.append(line.strip())
+            if len(replies) == 2 and replies == ["250 OK", "250 OK"]:
+                enabled = True
+            continue
+        m = _STREAM_RE.match(line)
+        if not m:
+            continue
+        enabled = True
+        sid, status, _circ, target, rest = m.groups()
+        kv = {k: v.strip('"') for k, v in _KV_RE.findall(rest)}
+        key = (epoch, sid)
+        st = streams.get(key)
+        if st is None:
+            st = streams[key] = {"target": None, "kind": None, "purpose": kv.get("PURPOSE", ""),
+                                 "statuses": [], "remaps": [], "reason": None}
+            order.append(key)
+        if status in ("NEW", "NEWRESOLVE") and st["target"] is None:
+            st["target"] = target
+            st["kind"] = "resolve" if status == "NEWRESOLVE" else "connect"
+        elif status == "REMAP":
+            st["remaps"].append(target)
+        if kv.get("PURPOSE"):
+            st["purpose"] = kv["PURPOSE"]
+        if kv.get("REASON"):
+            st["reason"] = kv["REASON"]
+        if not st["statuses"] or st["statuses"][-1] != status:
+            st["statuses"].append(status)
+    out = [streams[k] for k in order if streams[k]["target"]]
+    return out, {"enabled": enabled, "connections": epoch}
+
+
+_QUERY_RE = re.compile(r'query "((?:[^"\\]|\\.)*)" (\S+) -> (.+?)\s*$')
+
+
+def _go_unquote(s):
+    """The text inside a Go %q string."""
+    simple = {"n": "\n", "t": "\t", "r": "\r", "a": "\a", "b": "\b", "f": "\f", "v": "\v",
+              "\\": "\\", '"': '"', "'": "'"}
+
+    def rep(m):
+        e = m.group(1)
+        if e[0] in "xuU" and len(e) > 1:
+            return chr(int(e[1:], 16))
+        return simple.get(e, e)
+    return re.sub(r"\\(x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8}|.)", rep, s)
+
+
+def normalise_name(name):
+    name = name.strip().lower()
+    if name.endswith(".") and name != ".":
+        name = name[:-1]
+    return name or "."
+
+
+def load_filter_log(path):
+    """[(name, qtype, decision)] from the DNS filter's log written with
+    -debug-log-queries, and whether that mode was on."""
+    out = []
+    debug = False
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if "debug mode: query names will be logged" in line:
+                debug = True
+                continue
+            m = _QUERY_RE.search(line)
+            if m:
+                out.append((normalise_name(_go_unquote(m.group(1))), m.group(2), m.group(3)))
+    return out, {"debug": debug}
+
+
+def load_expected_destinations(path):
+    """{"name": [patterns], "target": [(host pattern, port or None)]} from
+    lines "name PATTERN" and "target HOST:PORT" ('#' starts a comment).
+    A name pattern is a name, or "*.NAME" for NAME and every name under
+    it; a target is an address or name and a port, either of them "*"."""
+    exp = {"name": [], "target": []}
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for n, line in enumerate(f, 1):
+            line = line.split("#", 1)[0].strip()
+            if not line:
+                continue
+            words = line.split()
+            if len(words) != 2 or words[0] not in ("name", "target"):
+                raise ValueError("%s line %d: want 'name PATTERN' or 'target HOST:PORT'" % (path, n))
+            if words[0] == "name":
+                exp["name"].append(normalise_name(words[1]))
+            else:
+                host, port = _split_target(words[1])
+                if port is None and not words[1].endswith(":*"):
+                    raise ValueError("%s line %d: a target needs a port (or ':*')" % (path, n))
+                if words[1].endswith(":*"):
+                    host = words[1][:-2].strip("[]")
+                exp["target"].append((host.lower(), port))
+    return exp
+
+
+def name_expected(name, patterns):
+    for pat in patterns:
+        if pat.startswith("*."):
+            if name == pat[2:] or name.endswith(pat[1:]):
+                return True
+        elif name == pat:
+            return True
+    return False
+
+
+def target_expected(host, port, patterns):
+    host = host.lower()
+    for ph, pp in patterns:
+        if pp is not None and pp != port:
+            continue
+        if ph == "*" or ph == host or (ph.startswith("*.") and name_expected(host, [ph])):
+            return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Analysis
 # ---------------------------------------------------------------------------
@@ -392,7 +637,9 @@ def client_evidence(p):
     return False
 
 
-def find_guest(packets, explicit):
+def find_guest(packets, explicit, emulator=True):
+    """(addresses, MACs) of the guest. With emulator=True every station on
+    the emulator's Ethernet that is not slirp is the guest."""
     guest = set(str(ipaddress.ip_address(a)) for a in explicit)
     if not guest:
         for p in packets:
@@ -402,9 +649,50 @@ def find_guest(packets, explicit):
                 guest.add(p.src)
     macs = set()
     for p in packets:
-        if p.src in guest and p.src_mac and not slirp_mac(p.src_mac):
+        if not p.src_mac or slirp_mac(p.src_mac):
+            continue
+        if (emulator and p.linktype == pcapread.LINKTYPE_ETHERNET) or p.src in guest:
             macs.add(p.src_mac)
     return guest, macs
+
+
+def from_emulator(p, guest):
+    """True for a frame that the emulator's own network (slirp) sent to the
+    guest; see "Which frames are the phone's" above. Anything else on the
+    emulator's Ethernet is the guest's."""
+    if not slirp_mac(p.src_mac) or p.dst_mac in SLIRP_MACS:
+        return False
+    if p.l3 == "arp":
+        return p.src in SLIRP_V4
+    if p.l3 not in ("ipv4", "ipv6") or p.src in guest:
+        return False
+    if p.dst in guest or is_group(p.dst):
+        return True
+    if p.proto == "udp" and p.sport == 67 and p.dport == 68:
+        return True
+    dst = ip_or_none(p.dst)
+    return (dst is not None and not slirp_service(p.dst)
+            and any(dst.version == n.version and dst in n for n in SLIRP_NETS))
+
+
+def attribute(p, guest, guest_macs, emulator):
+    """"out" (the guest sent it), "emulator" (slirp sent it) or "other"."""
+    if emulator and p.linktype == pcapread.LINKTYPE_ETHERNET and p.src_mac is not None:
+        return "emulator" if from_emulator(p, guest) else "out"
+    if p.direction_hint == "in":
+        return "emulator" if emulator and slirp_mac(p.src_mac) else "other"
+    if p.direction_hint == "out":
+        return "out"
+    if p.src_mac is not None and p.src_mac in guest_macs:
+        return "out"
+    if p.l3 is not None and p.src in guest:
+        return "out"
+    if (p.l3 is not None and p.src in ("0.0.0.0", "::") and p.src_mac is not None
+            and not slirp_mac(p.src_mac)):
+        return "out"
+    if emulator and (slirp_mac(p.src_mac) or (p.l3 is not None and slirp_service(p.src))):
+        return "emulator"
+    return "other"
 
 
 def find_clock(packets, events):
@@ -457,6 +745,10 @@ def classify(p, tordir, marker_nonce, phase):
     if p.proto == "tcp":
         if hit:
             return (hit[0], None, "Tor network", hit[1])
+        dirport = tordir.dirport(p.dst, p.dport)
+        if dirport:
+            return (LEAK, "tcp", "TCP to a Tor DirPort: tor clients fetch directory documents over the "
+                    "ORPort, so this is not tor's traffic", dirport)
         if p.dport == 853:
             return (LEAK, "dns", "DNS over TLS outside Tor (Android's Private DNS)", slirp_service(p.dst))
         if is_local(p.dst) or slirp_service(p.dst):
@@ -483,13 +775,129 @@ def iso(ts):
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z"
 
 
+def event_time(events, name, after=None):
+    """Host time of the first event NAME (after AFTER, if given), or None."""
+    for n, t, _ in events:
+        if n == name and (after is None or t >= after):
+            return t
+    return None
+
+
+def destinations(args, notes, errors):
+    """Names and destinations through Tor (see "Names and destinations
+    through Tor" above), or None when neither record was given."""
+    if not args.tor_streams and not args.filter_log:
+        return None
+    mode = args.destinations_mode
+    expected = {"name": [], "target": []}
+    if args.expected_destinations:
+        try:
+            expected = load_expected_destinations(args.expected_destinations)
+        except (OSError, ValueError) as e:
+            errors.append("expected destinations: %s" % e)
+    sources = {"tor_streams": False, "tor_connections": 0, "filter_log": False, "filter_debug": False}
+    streams = []
+    if args.tor_streams:
+        try:
+            streams, info = load_tor_streams(args.tor_streams)
+            sources["tor_streams"] = info["enabled"]
+            sources["tor_connections"] = info["connections"]
+        except OSError as e:
+            notes.append("tor's STREAM events not read (%s)" % e)
+    queries = []
+    if args.filter_log:
+        try:
+            queries, info = load_filter_log(args.filter_log)
+            sources["filter_log"] = True
+            sources["filter_debug"] = info["debug"]
+        except OSError as e:
+            notes.append("the DNS filter's log not read (%s)" % e)
+
+    names = {}
+
+    def name_row(n):
+        return names.setdefault(n, {"name": n, "types": set(), "decisions": {}, "queries": 0,
+                                    "tor_resolves": 0, "reached": False})
+    for n, qtype, decision in queries:
+        r = name_row(n)
+        r["types"].add(qtype)
+        r["decisions"][decision] = r["decisions"].get(decision, 0) + 1
+        r["queries"] += 1
+        if decision.startswith("forwarded"):
+            r["reached"] = True
+    targets = {}
+    for st in streams:
+        if st["purpose"] in TOR_INTERNAL_PURPOSES or st["target"].startswith(("(", "$")):
+            continue
+        host, port = _split_target(st["target"])
+        # .onion names are mapped to addresses; judge the name tor maps back.
+        remapped = [h for h, _ in (_split_target(t) for t in st["remaps"]) if ip_or_none(h) is None]
+        if st["kind"] == "resolve" or ip_or_none(host) is None:
+            r = name_row(normalise_name(host))
+            r["tor_resolves"] += 1
+            r["reached"] = True
+            if st["kind"] == "resolve":
+                continue
+        key = (host.lower(), port)
+        t = targets.setdefault(key, {"target": st["target"], "host": host.lower(), "port": port,
+                                     "streams": 0, "statuses": {}, "purposes": set(),
+                                     "names": set(), "reasons": set()})
+        t["streams"] += 1
+        last = st["statuses"][-1] if st["statuses"] else "?"
+        t["statuses"][last] = t["statuses"].get(last, 0) + 1
+        if st["purpose"]:
+            t["purposes"].add(st["purpose"])
+        if st["reason"]:
+            t["reasons"].add(st["reason"])
+        t["names"].update(normalise_name(h) for h in remapped)
+
+    unexpected = []
+    name_rows = sorted(names.values(), key=lambda r: r["name"])
+    for r in name_rows:
+        r["types"] = sorted(r["types"])
+        r["expected"] = name_expected(r["name"], expected["name"])
+        if r["reached"] and not r["expected"]:
+            how = []
+            if r["tor_resolves"]:
+                how.append("%d look-up(s) through Tor" % r["tor_resolves"])
+            if r["decisions"]:
+                how.append("filter: " + ", ".join("%s %d" % kv for kv in sorted(r["decisions"].items())))
+            unexpected.append("name %s (%s)" % (repr(r["name"])[1:-1], "; ".join(how)))
+    target_rows = sorted(targets.values(), key=lambda t: (t["host"], t["port"] or 0))
+    for t in target_rows:
+        t["purposes"] = sorted(t["purposes"])
+        t["reasons"] = sorted(t["reasons"])
+        t["names"] = sorted(t["names"])
+        t["expected"] = (target_expected(t["host"], t["port"], expected["target"])
+                         or any(name_expected(n, expected["name"]) for n in t["names"]))
+        if not t["expected"]:
+            unexpected.append("target %s (%d stream(s), %s)" % (
+                t["target"], t["streams"], ", ".join("%s %d" % kv for kv in sorted(t["statuses"].items()))))
+    if not sources["tor_streams"]:
+        status = "not-recorded"
+        notes.append("tor's STREAM events were not recorded: destinations reached through Tor are unknown")
+    elif unexpected:
+        status = "unexpected"
+    else:
+        status = "ok"
+    if args.filter_log and not sources["filter_debug"]:
+        notes.append("the DNS filter did not run with -debug-log-queries: the names it blocked are not listed")
+    return {"mode": mode, "status": status, "sources": sources, "names": name_rows,
+            "targets": target_rows, "unexpected": unexpected,
+            "expected_file": args.expected_destinations}
+
+
 def analyse(args):
     notes = []
     errors = []
+    emulator = args.network == "emulator"
     result = {
         "schema": SCHEMA, "scenario": args.scenario, "verdict": None, "verdict_reasons": [],
+        "network": args.network,
         "generated": iso(datetime.datetime.now(datetime.timezone.utc).timestamp()),
     }
+    if args.judge_from_start and args.arm_event:
+        errors.append("--judge-from-start and --arm-event exclude each other")
 
     # The Tor network.
     tordir = TorDirectory()
@@ -512,6 +920,7 @@ def analyse(args):
     # The captures.
     records = []
     captures = []
+    capture_problems = []
     for path in args.pcap:
         try:
             recs, info = pcapread.read_capture(path)
@@ -525,7 +934,8 @@ def analyse(args):
         if unsupported:
             notes.append("%s: link types %s are not decoded" % (path, unsupported))
         if info.truncated:
-            notes.append("%s ends in the middle of a record; read up to the last whole one" % path)
+            capture_problems.append("%s ends in the middle of a frame (the emulator did not close it): "
+                                    "frames at the end may be missing" % os.path.basename(path))
         captures.append(d)
         records.extend(recs)
     records.sort(key=lambda r: r.ts)
@@ -541,6 +951,7 @@ def analyse(args):
             errors.append("events: %s" % e)
 
     first = packets[0].ts if packets else None
+    last = packets[-1].ts if packets else None
     clock = find_clock(packets, events)
     result["clock"] = clock
     if clock["source"] == "none" and args.arm_event:
@@ -548,11 +959,13 @@ def analyse(args):
                      "with a wider margin")
 
     cutoff = None
-    arm_host = None
-    if args.arm_event:
-        times = [t for n, t, _ in events if n == args.arm_event]
-        if times:
-            arm_host = times[0]
+    if args.judge_from_start:
+        cutoff = first if first is not None else 0.0
+        result["arm"] = {"event": "(start of the capture)", "host_time": None, "margin": 0.0,
+                         "cutoff": cutoff, "cutoff_utc": iso(cutoff), "cutoff_t": 0.0}
+    elif args.arm_event:
+        arm_host = event_time(events, args.arm_event)
+        if arm_host is not None:
             margin = args.arm_margin if args.arm_margin is not None else (
                 1.0 if clock["source"] == "marker" else 3.0)
             cutoff = arm_host + clock["offset_low"] - margin
@@ -571,75 +984,143 @@ def analyse(args):
         for n, t, d in events
     ]
 
-    guest, guest_macs = find_guest(packets, args.guest or [])
+    # The armed window, moved inward by the clock's uncertainty.
+    window = None
+    armed = {"status": "not-asked"}
+    if args.armed_window:
+        start_ev, _, end_ev = args.armed_window.partition(":")
+        ws_host = event_time(events, start_ev)
+        we_host = event_time(events, end_ev, after=ws_host) if ws_host is not None else None
+        armed = {"status": "not-run", "start_event": start_ev, "end_event": end_ev,
+                 "packets": 0, "allowed": 0, "leaks": 0}
+        if ws_host is not None and we_host is not None:
+            inward = 0.5 if clock["source"] == "marker" else 3.0
+            ws = ws_host + clock["offset_high"] + inward
+            we = we_host + clock["offset_low"] - inward
+            armed.update({"start": ws, "end": we, "seconds": round(we - ws, 1),
+                          "start_t": (ws - first) if first is not None else None,
+                          "end_t": (we - first) if first is not None else None})
+            if we - ws < 5.0:
+                armed["status"] = "too-short"
+            else:
+                window = (ws, we)
+                armed["status"] = "ok"
+
+    guest, guest_macs = find_guest(packets, args.guest or [], emulator)
     result["guest"] = {"addresses": sorted(guest), "macs": sorted(guest_macs),
                        "source": "given" if args.guest else "detected"}
 
-    totals = {"frames": len(packets), "outbound": 0, "from_emulator": 0, "to_guest": 0,
+    def phase_of(p):
+        if cutoff is None:
+            return "baseline"
+        return "post-arm" if p.ts >= cutoff else "pre-arm"
+
+    # The addresses the guest held before arm (sources, DHCP requests, and
+    # the leases slirp acknowledged), for the DHCP lease-memory check.
+    pre_leases = set()
+    directions = []
+    for p in packets:
+        d = attribute(p, guest, guest_macs, emulator)
+        directions.append(d)
+        if cutoff is None or p.ts >= cutoff or p.l3 != "ipv4":
+            continue
+        if d == "out" and p.src in guest:
+            pre_leases.add(p.src)
+        if p.proto == "udp" and {p.sport, p.dport} == {67, 68}:
+            opt = pcapread.dhcp_options(p.payload) or {}
+            if d == "out" and p.sport == 68:
+                pre_leases.update(a for a in (opt.get("requested_ip"), opt.get("ciaddr")) if a)
+            elif d == "emulator" and opt.get("message_type") == "ACK":
+                pre_leases.add(opt.get("yiaddr"))
+    pre_leases.discard("0.0.0.0")
+    pre_leases.discard(None)
+
+    totals = {"frames": len(packets), "outbound": 0, "from_emulator": 0, "not_the_phone": 0,
               "unattributed": 0, "undecoded": 0}
     flows = {}
     phase_counts = {}
     names = {}
     undecoded_notes = {}
-    for p in packets:
-        if cutoff is None:
-            phase = "baseline"
-        else:
-            phase = "post-arm" if p.ts >= cutoff else "pre-arm"
+    sources_seen = set()
+    for p, direction in zip(packets, directions):
+        phase = phase_of(p)
         if p.l3 is None:
             totals["undecoded"] += 1
             note = p.note or ("EtherType 0x%04x" % p.ethertype if p.ethertype is not None else "not decoded")
             undecoded_notes[note] = undecoded_notes.get(note, 0) + 1
-            if p.src_mac in guest_macs:
-                # Something the guest sent that has no IP header here.
-                if note.startswith(("802.11 management", "802.11 null")):
-                    cls = ("link-80211", None, "802.11 association or power-save frame", p.src_mac)
-                else:
-                    cls = (LEAK, "undecoded", "a frame from the guest's MAC address that this "
-                           "analyser cannot read (%s)" % note, p.src_mac)
-                totals["outbound"] += 1
-                _add_flow(flows, ("link", note, p.src_mac, p.dst_mac), p, cls, phase, None)
-                phase_counts.setdefault(phase, {}).setdefault(cls[0], 0)
-                phase_counts[phase][cls[0]] += 1
+        if direction == "emulator":
+            totals["from_emulator"] += 1
             continue
-        unspecified_src = p.src in ("0.0.0.0", "::") and p.src_mac is not None and not slirp_mac(p.src_mac)
-        out = (p.direction_hint == "out" or p.src in guest or unspecified_src)
-        if p.direction_hint == "in":
-            out = False
-        if not out:
-            if slirp_mac(p.src_mac) or slirp_service(p.src):
-                totals["from_emulator"] += 1
-            elif p.dst in guest:
-                totals["to_guest"] += 1
-            elif p.src_mac in guest_macs and p.l3 in ("ipv4", "ipv6"):
-                # From the guest's own MAC address, but with a source address
-                # that is not the guest's: a forged or unexpected source.
-                totals["unattributed"] += 1
-                if phase != "pre-arm":
-                    key = ("unattributed", p.l3, p.proto, p.src, p.dst)
-                    _add_flow(flows, key, p, (LEAK, "unattributed",
-                                              "sent from the guest's MAC address with a source "
-                                              "address that is not the guest's", None), phase, None)
-                    phase_counts.setdefault(phase, {}).setdefault(LEAK, 0)
-                    phase_counts[phase][LEAK] += 1
-            else:
-                totals["unattributed"] += 1
+        if direction != "out":
+            totals["not_the_phone"] += 1
             continue
         totals["outbound"] += 1
-        cls = classify(p, tordir, clock["nonce"], phase)
-        name = app_name(p)
-        if p.proto in ("tcp", "udp"):
-            key = (p.l3, p.proto, p.src, p.sport, p.dst, p.dport)
-        elif p.proto in ("icmp", "icmpv6"):
-            key = (p.l3, p.proto, p.src, p.icmp_type, p.dst, None)
+        in_window = window is not None and window[0] <= p.ts <= window[1]
+        if p.l3 is None:
+            # Something the guest sent that has no IP header here.
+            if note.startswith(("802.11 management", "802.11 null")):
+                cls = ("link-80211", None, "802.11 association or power-save frame", p.src_mac)
+            else:
+                cls = (LEAK, "undecoded", "a frame from the phone that this analyser cannot read (%s)"
+                       % note, p.src_mac)
+            key = ("link", note, p.src_mac, p.dst_mac)
+            name = None
         else:
-            key = (p.l3, p.proto, p.src, None, p.dst, None)
+            sources_seen.add(p.src)
+            cls = classify(p, tordir, clock["nonce"], phase)
+            src_ip = ip_or_none(p.src)
+            if (p.src not in guest and p.src not in ("0.0.0.0", "::")
+                    and not (src_ip is not None and src_ip.is_link_local)):
+                totals["unattributed"] += 1
+                cls = (LEAK, "unattributed", "sent by the phone (MAC %s) with a source address that is "
+                       "not one of its own: %s" % (p.src_mac or "?", cls[2]), cls[3])
+            name = app_name(p)
+            if p.proto in ("tcp", "udp"):
+                key = (p.l3, p.proto, p.src, p.sport, p.dst, p.dport)
+            elif p.proto in ("icmp", "icmpv6"):
+                key = (p.l3, p.proto, p.src, p.icmp_type, p.dst, None)
+            else:
+                key = (p.l3, p.proto, p.src, None, p.dst, None)
+            if cls[0] == "unattributed" or cls[1] == "unattributed":
+                key = ("unattributed", p.src_mac) + key
+            if (phase == "post-arm" and p.proto == "udp" and p.sport == 68 and p.dport == 67
+                    and pre_leases):
+                opt = pcapread.dhcp_options(p.payload) or {}
+                if opt.get("message_type") == "REQUEST":
+                    asked = opt.get("requested_ip") if not opt.get("server_id") else None
+                    renew = opt.get("ciaddr") if opt.get("ciaddr") != "0.0.0.0" else None
+                    reused = sorted({a for a in (asked, renew) if a and a in pre_leases})
+                    if reused:
+                        cls = (LEAK, "dhcp-lease", "a DHCP request after arm for %s, which the phone "
+                               "held before arm: the lease memory links this session to the previous "
+                               "one" % ", ".join(reused), "requested " + ", ".join(reused))
+                        key = ("dhcp-lease", p.src_mac) + key
+            if (phase == "post-arm" and p.proto == "udp" and p.sport == 68 and p.dport == 67
+                    and cls[0] != LEAK):
+                opt = pcapread.dhcp_options(p.payload) or {}
+                if opt.get("hostname"):
+                    host = opt["hostname"][:64]
+                    cls = (LEAK, "dhcp-hostname", "a DHCP message after arm that names the device "
+                           "(option 12, host name %r): every network the phone joins learns it" % host,
+                           "host name " + host)
+                    key = ("dhcp-hostname", p.src_mac) + key
+        if in_window and cls[0] not in ALLOWED_ARMED:
+            cls = (LEAK, "armed", "sent while the firewall was armed, when nothing but loopback may "
+                   "pass (%s: %s)" % (cls[1] or cls[0], cls[2]), cls[3])
+            key = ("armed",) + key
+            armed["leaks"] += 1
+        if in_window:
+            armed["packets"] += 1
+            if cls[0] in ALLOWED_ARMED:
+                armed["allowed"] += 1
         _add_flow(flows, key, p, cls, phase, name)
         phase_counts.setdefault(phase, {}).setdefault(cls[0], 0)
         phase_counts[phase][cls[0]] += 1
         if name and p.dport == 53:
             nk = (phase, name)
             names[nk] = names.get(nk, 0) + 1
+    if armed["status"] == "ok" and armed["leaks"]:
+        armed["status"] = "fail"
 
     flow_list = sorted(flows.values(), key=lambda f: f["first_ts"])
     for f in flow_list:
@@ -652,6 +1133,8 @@ def analyse(args):
     result["totals"] = totals
     result["undecoded"] = undecoded_notes
     result["phases"] = phase_counts
+    result["armed_window"] = armed
+    result["dhcp_pre_arm_leases"] = sorted(pre_leases)
     result["dns_names"] = [{"phase": ph, "name": n, "queries": c} for (ph, n), c in sorted(names.items())]
     result["flows_total"] = len(flow_list)
     result["flows"] = flow_list[:MAX_FLOWS_JSON]
@@ -659,8 +1142,11 @@ def analyse(args):
         notes.append("only the first %d of %d flows are listed" % (MAX_FLOWS_JSON, len(flow_list)))
     result["leaks"] = leaks
 
-    # Coverage: did the capture see the connections tor said it had?
-    coverage = {"status": "not-checked", "expected": [], "seen": [], "missing": []}
+    # Coverage: did the capture see the connections tor said it had, and
+    # every address the device had?
+    coverage = {"status": "not-checked", "expected": [], "seen": [], "missing": [],
+                "addresses": [], "addresses_missing": []}
+    checked = False
     if args.expect_seen:
         try:
             expected = load_expect_seen(args.expect_seen)
@@ -668,15 +1154,42 @@ def analyse(args):
             expected = None
             errors.append("expect-seen: %s" % e)
         if expected is not None:
+            checked = True
             seen_out = {(f["dst"], f["dport"]) for f in flow_list if f["proto"] == "tcp"}
             coverage["expected"] = ["%s:%d" % e for e in expected]
             coverage["seen"] = ["%s:%d" % e for e in expected if e in seen_out]
             coverage["missing"] = ["%s:%d" % e for e in expected if e not in seen_out]
-            if not expected:
-                coverage["status"] = "nothing-to-check"
-            else:
-                coverage["status"] = "complete" if not coverage["missing"] else "incomplete"
+    if args.expect_guest:
+        try:
+            addrs = load_expect_guest(args.expect_guest)
+        except OSError as e:
+            addrs = None
+            errors.append("expect-guest: %s" % e)
+        if addrs is not None:
+            checked = True
+            coverage["addresses"] = ["%s %s" % a for a in addrs]
+            coverage["addresses_missing"] = ["%s %s" % a for a in addrs if a[1] not in sources_seen]
+    if checked:
+        if coverage["missing"] or coverage["addresses_missing"]:
+            coverage["status"] = "incomplete"
+        elif coverage["expected"] or coverage["addresses"]:
+            coverage["status"] = "complete"
+        else:
+            coverage["status"] = "nothing-to-check"
     result["coverage"] = coverage
+
+    # The end of the capture.
+    stop_host = event_time(events, "capture_stop")
+    if stop_host is not None and last is not None:
+        gap = stop_host + clock["offset_low"] - last
+        result["tail_gap"] = round(gap, 1)
+        if gap > args.max_tail_gap:
+            capture_problems.append("the capture's last frame is %.0f s before the scenario stopped the "
+                                    "capture: frames at the end may be missing" % gap)
+    result["capture_problems"] = capture_problems
+
+    dest = destinations(args, notes, errors)
+    result["destinations"] = dest
 
     tor_after_arm = sum(phase_counts.get("post-arm", {}).get(c, 0)
                         for c in ("tor-relay", "tor-directory", "bridge"))
@@ -684,6 +1197,11 @@ def analyse(args):
 
     # Verdict.
     reasons = []
+
+    def blind(reason):
+        reasons.append(reason)
+        return "blind" if verdict == "pass" else verdict
+
     if errors:
         verdict = "error"
         reasons += errors
@@ -696,28 +1214,45 @@ def analyse(args):
     elif cutoff is None:
         verdict = "info"
         reasons.append("no arm event: everything is listed, nothing is judged (baseline)")
+        notes.extend(capture_problems)
     else:
         verdict = "pass"
         if leaks:
             verdict = "fail"
             reasons.append("%d flow(s) after arm are LEAKs (%d packets)" % (
                 len(leaks), sum(f["phases"].get("post-arm", 0) for f in leaks)))
-        if coverage["status"] == "incomplete":
-            if verdict == "pass":
-                verdict = "blind"
-            reasons.append("the capture misses %d of tor's %d connections (%s): it does not see "
-                           "every path out of the phone" % (len(coverage["missing"]),
-                                                             len(coverage["expected"]),
-                                                             ", ".join(coverage["missing"][:5])))
+        if coverage["missing"]:
+            verdict = blind("the capture misses %d of tor's %d connections (%s): it does not see every "
+                            "path out of the phone" % (len(coverage["missing"]), len(coverage["expected"]),
+                                                       ", ".join(coverage["missing"][:5])))
+        if coverage["addresses_missing"]:
+            verdict = blind("the device had address(es) the capture never saw sending (%s): the capture "
+                            "misses an interface" % ", ".join(coverage["addresses_missing"][:5]))
+        for problem in capture_problems:
+            verdict = blind(problem)
+        if args.require_armed_window and armed["status"] in ("not-asked", "not-run", "too-short"):
+            verdict = blind("the armed window (%s) is %s: the armed state was not tested"
+                            % (args.armed_window or "not given", armed["status"]))
+        elif armed["status"] == "fail":
+            reasons.append("%d packet(s) left while the firewall was armed" % armed["leaks"])
         if args.require_tor_traffic and tor_after_arm == 0:
-            if verdict == "pass":
-                verdict = "blind"
-            reasons.append("no Tor traffic after arm: either tor never connected or the capture "
-                           "misses the path it used")
+            verdict = blind("no Tor traffic after arm: either tor never connected or the capture "
+                            "misses the path it used")
         if tordir.info["consensus"] is None:
             reasons.append("no consensus: Tor relays cannot be told apart from other servers")
             if args.require_tor_traffic:
                 verdict = "error"
+        if dest is not None and dest["mode"] == "strict":
+            if dest["status"] == "unexpected":
+                if verdict in ("pass", "blind"):
+                    verdict = "fail"
+                reasons.append("%d unexpected name(s) or destination(s) through Tor: %s" % (
+                    len(dest["unexpected"]), "; ".join(dest["unexpected"][:5])))
+            elif dest["status"] == "not-recorded":
+                verdict = blind("names and destinations through Tor were not recorded")
+        elif dest is not None and dest["unexpected"]:
+            notes.append("%d name(s) or destination(s) through Tor are not on the expected list "
+                         "(learning mode: listed, not judged)" % len(dest["unexpected"]))
         if verdict == "pass":
             reasons.append("zero LEAK after arm (%d packets after arm, %d of them to the Tor network)"
                            % (sum(phase_counts.get("post-arm", {}).values()), tor_after_arm))
@@ -815,10 +1350,12 @@ def scenario_md(s):
         lines.append("- Capture `%s`: %s, %d frames over %.0f s%s." % (
             os.path.basename(c["path"]), c["format"], c["records"], dur,
             " (cut short at the end)" if c.get("truncated") else ""))
-    lines.append("- Frames: %d; sent by the phone: %d; from the emulator's network: %d; to the phone: %d; "
-                 "not attributed: %d; not decoded: %d." % (
-                     t.get("frames", 0), t.get("outbound", 0), t.get("from_emulator", 0),
-                     t.get("to_guest", 0), t.get("unattributed", 0), t.get("undecoded", 0)))
+    lines.append("- Frames: %d; sent by the phone: %d (from an address not its own: %d); from the "
+                 "emulator's network: %d; other stations: %d; not decoded: %d. Attribution: %s." % (
+                     t.get("frames", 0), t.get("outbound", 0), t.get("unattributed", 0),
+                     t.get("from_emulator", 0), t.get("not_the_phone", 0), t.get("undecoded", 0),
+                     "every frame that is not slirp's is the phone's" if s.get("network") == "emulator"
+                     else "by address (a capture on a real network)"))
     g = s.get("guest", {})
     lines.append("- The phone's addresses (%s): %s." % (g.get("source"), ", ".join(g.get("addresses", [])) or "none"))
     td = s.get("tor_directory", {})
@@ -841,6 +1378,22 @@ def scenario_md(s):
         lines.append("- Arm cutoff: t+%.1f s in the capture (%s; event `%s`, margin %.1f s). "
                      "Every packet from there on counts." % (
                          arm.get("cutoff_t") or 0, arm.get("cutoff_utc"), arm.get("event"), arm.get("margin", 0)))
+    aw = s.get("armed_window") or {}
+    if aw.get("status") not in (None, "not-asked"):
+        if aw.get("start_t") is not None:
+            lines.append("- Armed window (`%s` to `%s`): t+%.1f to t+%.1f s, %s s; %d packet(s) from the phone, "
+                         "%d of them ARP or DHCP; %d LEAK(s): **%s**." % (
+                             aw.get("start_event"), aw.get("end_event"), aw["start_t"], aw["end_t"],
+                             aw.get("seconds"), aw.get("packets", 0), aw.get("allowed", 0), aw.get("leaks", 0),
+                             aw.get("status")))
+        else:
+            lines.append("- Armed window (`%s` to `%s`): **%s**." % (aw.get("start_event"), aw.get("end_event"),
+                                                                    aw.get("status")))
+    if s.get("dhcp_pre_arm_leases"):
+        lines.append("- Addresses the phone held before arm (a DHCP request for one after arm is a LEAK): %s."
+                     % ", ".join(s["dhcp_pre_arm_leases"]))
+    for problem in s.get("capture_problems", []):
+        lines.append("- Capture: " + _md_escape(problem) + ".")
     lines.append("")
 
     phases = s.get("phases", {})
@@ -899,12 +1452,17 @@ def scenario_md(s):
         lines.append("")
 
     cov = s.get("coverage", {})
-    if cov.get("status") != "not-checked":
+    if cov.get("status") not in (None, "not-checked"):
         lines.append("### Coverage")
         lines.append("")
         lines.append("tor reported %d established connection(s); the capture saw %d; missing: %s." % (
             len(cov.get("expected", [])), len(cov.get("seen", [])), ", ".join(cov.get("missing", [])) or "none"))
+        if cov.get("addresses"):
+            lines.append("")
+            lines.append("The device's addresses at the end: %s; never seen sending in the capture: %s." % (
+                ", ".join(cov["addresses"]), ", ".join(cov.get("addresses_missing", [])) or "none"))
         lines.append("")
+    lines.extend(destinations_md(s.get("destinations")))
     evs = s.get("events", [])
     if evs:
         lines.append("### Timeline")
@@ -917,6 +1475,56 @@ def scenario_md(s):
         lines.append("")
     if s.get("notes"):
         lines.append("Notes: " + " ".join(_md_escape(n) + "." for n in s["notes"]))
+        lines.append("")
+    return lines
+
+
+def destinations_md(d):
+    if not d:
+        return []
+    src = d.get("sources", {})
+    lines = ["### Names and destinations through Tor", ""]
+    lines.append("Recorded: tor's STREAM events %s; the DNS filter's query log %s. Expected list: `%s`. "
+                 "Mode: %s (%s)." % (
+                     "yes" if src.get("tor_streams") else "**no**",
+                     "yes" if src.get("filter_debug") else ("**no** (not in debug mode)" if src.get("filter_log")
+                                                            else "**no**"),
+                     os.path.basename(d.get("expected_file") or "none"), d.get("mode"),
+                     "an unexpected one fails the run" if d.get("mode") == "strict"
+                     else "unexpected ones are listed, not judged yet"))
+    lines.append("")
+    if d.get("unexpected"):
+        lines.append("**Not on the expected list (%d):**" % len(d["unexpected"]))
+        lines.append("")
+        for u in d["unexpected"][:100]:
+            lines.append("- " + _md_escape(u))
+        lines.append("")
+    names = d.get("names", [])
+    lines.append("%d name(s) looked up:" % len(names))
+    lines.append("")
+    if names:
+        lines.append("| Name | Types | Filter's answers | Through Tor | Expected |")
+        lines.append("|---|---|---|---|---|")
+        for r in names[:300]:
+            lines.append("| `%s` | %s | %s | %s | %s |" % (
+                _md_escape(repr(r["name"])[1:-1]), ", ".join(r.get("types", [])),
+                _md_escape(", ".join("%s %d" % kv for kv in sorted(r.get("decisions", {}).items()))) or "-",
+                ("yes (%d resolve(s))" % r.get("tor_resolves", 0)) if r.get("tor_resolves") else
+                ("yes" if r.get("reached") else "no"),
+                "yes" if r.get("expected") else "**no**"))
+        lines.append("")
+    targets = d.get("targets", [])
+    lines.append("%d destination(s) asked of tor's TransPort:" % len(targets))
+    lines.append("")
+    if targets:
+        lines.append("| Target | Streams | Outcome | Names | Expected |")
+        lines.append("|---|---|---|---|---|")
+        for t in targets[:300]:
+            lines.append("| `%s` | %d | %s | %s | %s |" % (
+                _md_escape(t["target"]), t["streams"],
+                _md_escape(", ".join("%s %d" % kv for kv in sorted(t["statuses"].items()))
+                           + ("; " + ", ".join(t["reasons"]) if t.get("reasons") else "")),
+                _md_escape(", ".join(t.get("names", []))) or "-", "yes" if t.get("expected") else "**no**"))
         lines.append("")
     return lines
 
@@ -947,12 +1555,24 @@ BLIND_SPOTS = """### What this test cannot see
 - Only what passes the emulator's virtual network is captured. Traffic the
   phone's hardware sends by itself (Wi-Fi keep-alive offload, the modem) has
   no equivalent in the emulator; the January capture on the phone covers it.
+  The module's keep-alive overlay has no effect here either: without
+  Magisk nothing mounts it.
 - A packet capture cannot tell which app sent a packet. A connection to a Tor
   relay counts as Tor traffic even if an app other than tor made it.
-- What travels through Tor is not visible here. Names looked up through Tor
-  are in the DNS filter's counters, not in this report.
+- What travels through Tor is not in the capture. tor's STREAM events and
+  the DNS filter's query log (debug mode, on the emulator only) list the
+  names and destinations reached through Tor; see the section above.
 - The emulator runs Android 16 (API 36, Google's image without Google
-  services) on a 6.x kernel, not LineageOS 23.2 on the phone's 4.14 kernel."""
+  services) on a 6.x kernel, not LineageOS 23.2 on the phone's 4.14 kernel,
+  and is rooted with adb root, not Magisk: the module's scripts are started
+  by hand after boot, so the boot path itself (the firewall armed before
+  netd and zygote exist) is not what runs here. The armed window tests the
+  armed rule set with the network up instead.
+- Not covered yet (work queue): a reboot with the module (Magisk-rooted
+  emulator), Magisk's Safe Mode and a start without the module, tor or the
+  DNS filter killed during a session, a network change, IPv6 router
+  advertisements, DHCP renewal over a long session, and the keep-alive
+  offload check."""
 
 
 def report(args):
@@ -1018,15 +1638,30 @@ def main(argv=None):
     a = sub.add_parser("analyse", help="classify one scenario's capture")
     a.add_argument("--scenario", required=True)
     a.add_argument("--pcap", action="append", required=True)
+    a.add_argument("--network", choices=("emulator", "lan"), default="emulator",
+                   help="emulator: every frame on the Ethernet that is not slirp's is the phone's "
+                        "(default); lan: a capture on a real network, attributed by address")
     a.add_argument("--events")
     a.add_argument("--arm-event")
+    a.add_argument("--judge-from-start", action="store_true",
+                   help="judge every packet (a capture on the phone, with no arm event)")
     a.add_argument("--arm-margin", type=float)
+    a.add_argument("--armed-window", metavar="START:END",
+                   help="two events between which the firewall was only armed")
+    a.add_argument("--require-armed-window", action="store_true")
     a.add_argument("--consensus")
     a.add_argument("--tor-binary")
     a.add_argument("--bridges")
     a.add_argument("--guest", action="append")
     a.add_argument("--expect-seen")
+    a.add_argument("--expect-guest", help="the device's addresses at the end ('ip addr' output)")
     a.add_argument("--require-tor-traffic", action="store_true")
+    a.add_argument("--max-tail-gap", type=float, default=120.0,
+                   help="seconds the last frame may lie before the capture_stop event (default 120)")
+    a.add_argument("--tor-streams", help="tor's STREAM events (ci/lib/tor-streams.sh)")
+    a.add_argument("--filter-log", help="the DNS filter's log, written with -debug-log-queries")
+    a.add_argument("--expected-destinations", help="names and targets expected through Tor")
+    a.add_argument("--destinations-mode", choices=("learning", "strict"), default="learning")
     a.add_argument("--out", required=True)
 
     r = sub.add_parser("report", help="merge scenario results into leak-report.json and .md")

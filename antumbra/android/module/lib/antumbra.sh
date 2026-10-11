@@ -25,7 +25,15 @@ DNS_UID=2951
 # process open an Internet socket only when it is in this group.
 INET_GID=3003
 PROVIDER_URI=content://org.antumbra.welcome.state/session
+# shellcheck disable=SC2034 # used by service.sh
+WELCOME_PKG=org.antumbra.welcome
 FW_PROP=antumbra.fw.armed
+# The loopback service ports and their owners: tor's TransPort (TCP) and
+# DNSPort (UDP), the DNS filter (UDP and TCP) and its status page (TCP).
+TRANS_PORT=9040
+TOR_DNS_PORT=9053
+FILTER_PORT=5353
+STATUS_PORT=5380
 
 # --- Paths of this module (not part of the contract) ------------------------
 
@@ -34,8 +42,11 @@ TORRC=$MODDIR/etc/torrc
 # Root-only state of the module: process IDs, the session record, the
 # firewall's lock and recorded hash. Inside STATE, which is root's.
 PRIV=$STATE/module
-# The firewall keeps its lock and its recorded hash in "$ANTUMBRA_DIR/run".
-# The module gives it a root-only directory instead (see fw()).
+# The firewall keeps its lock and its recorded hash under its ANTUMBRA_DIR
+# (in a root-only state/fw since the v0 fixes; in run/ before). The module
+# gives it this root-only directory as ANTUMBRA_DIR (see fw()), so neither
+# is ever in the tor-owned RUN; 'antumbra-fw status' run by hand (or by CI)
+# must be given the same ANTUMBRA_DIR.
 FWDIR=$PRIV/fw
 # The arm step runs before the runtime tmpfs exists. It gets a directory in
 # /dev, which is in RAM, so that its lock never touches flash.
@@ -79,6 +90,18 @@ read_value() {
 	_rv=
 	[ -r "$1" ] && IFS= read -r _rv <"$1" 2>/dev/null
 	printf '%s' "$_rv"
+}
+
+# uptime_s: print whole seconds since boot. Schedules use this monotonic
+# clock, never the wall clock: network time is off, so the clock is set by
+# hand (or by Welcome) for tor, and a clock set back by D seconds would
+# delay every check and restart by D.
+uptime_s() {
+	_us=
+	read -r _us _ </proc/uptime 2>/dev/null
+	_us=${_us%%.*}
+	case $_us in '' | *[!0-9]*) _us=0 ;; esac
+	printf '%s\n' "$_us"
 }
 
 # is_lineage, is_emulator: what kind of Android this is.
@@ -133,12 +156,32 @@ fw() {
 		"$BIN/antumbra-fw" "$@"
 }
 
+# fw_state: print the firewall's state as 'status' reports it (live, armed,
+# partial, open), or "open" if it says nothing.
+fw_state() {
+	_fs=$(fw status 2>/dev/null | sed -n 's/^state=//p')
+	printf '%s\n' "${_fs:-open}"
+}
+
+# fw_unpublish REASON: remove the property and go back to the armed state.
+fw_unpublish() {
+	prop_clear "$FW_PROP"
+	fw flush >/dev/null 2>>"$LOGDIR/firewall.log"
+	log "firewall: back to armed: $1"
+}
+
 # fw_publish: run 'apply', check the result with 'status', and only then
 # publish the first 16 hex digits of the rule-set hash as antumbra.fw.armed.
 # On any failure the firewall is back in its armed state (no network at
 # all) and the property is removed. Prints the hash prefix; returns 0 only
-# when the full rule set is live.
+# when the full rule set is live. While another uid holds one of the
+# service ports (listeners_ok), the full rule set would send traffic to it,
+# so it is not loaded at all, or taken back at once.
 fw_publish() {
+	if ! listeners_ok; then
+		fw_unpublish "$PORTS_BAD"
+		return 1
+	fi
 	_fp_hash=$(fw apply 2>>"$LOGDIR/firewall.log") || {
 		log "firewall: apply failed; the network stays closed"
 		prop_clear "$FW_PROP"
@@ -163,6 +206,11 @@ fw_publish() {
 		log "firewall: rule set not live after apply (status $_fp_rc); back to armed"
 		fw flush >/dev/null 2>>"$LOGDIR/firewall.log"
 		prop_clear "$FW_PROP"
+		return 1
+	fi
+	# A port taken while 'apply' ran.
+	if ! listeners_ok; then
+		fw_unpublish "$PORTS_BAD"
 		return 1
 	fi
 	_fp_prefix=$(printf '%s' "$_fp_hash" | cut -c1-16)
@@ -194,6 +242,66 @@ pid_alive() {
 	[ "$_pa_uid" = "$2" ]
 }
 
+# --- Who holds the service ports -------------------------------------------------
+#
+# The firewall sends every app's TCP to 127.0.0.1:9040 and every DNS query
+# to 127.0.0.1:5353, and lets apps reach 5380. Only tor (2950) may listen on
+# 9040 and 9053, and only the filter (2951) on 5353 and 5380. But tor holds
+# no TransPort or DNSPort while its network is off (before Start, in an
+# offline session, while it restarts), and the filter's ports are free while
+# it restarts: then any app can bind them. The firewall drops the answers
+# of a socket that is not the owner's (ANTUMBRA_SQUAT), but cannot stop it
+# from receiving: a TCP squatter gets the SYNs, a UDP one every query and
+# its name. So the module checks, before it loads the full rule set, at
+# every turn of its loop and before tor's network goes on, that each of
+# these ports is free or held by its owner. Otherwise it goes back to the
+# armed state (no redirect, nothing leaves) until the port is free again.
+#
+# Sockets that can receive what is sent to 127.0.0.1 count: bound to
+# 127.0.0.1, 0.0.0.0, :: or ::ffff:127.0.0.1. TCP in LISTEN (state 0A):
+# 9040, 9053, 5353, 5380. UDP in any state: 9053, 5353. /proc/net prints
+# addresses and ports in hex, IPv4 addresses in host (little-endian) order.
+PROC_NET=${PROC_NET:-/proc/net}
+
+# ports_bad: print "PORT/PROTO held by uid UID" for every such socket that
+# is not its owner's, one per line. Prints nothing when all is well.
+ports_bad() {
+	if [ ! -r "$PROC_NET/tcp" ]; then
+		echo "$PROC_NET/tcp is unreadable"
+		return 0
+	fi
+	for _pb_f in tcp tcp6 udp udp6; do
+		[ -r "$PROC_NET/$_pb_f" ] || continue
+		grep -E ':(2350|235D|14E9|1504) ' "$PROC_NET/$_pb_f" 2>/dev/null |
+			while read -r _ _pb_loc _ _pb_st _ _ _ _pb_uid _; do
+				case ${_pb_loc%:*} in
+				0100007F | 00000000 | 00000000000000000000000000000000 | 0000000000000000FFFF00000100007F) ;;
+				*) continue ;;
+				esac
+				case ${_pb_f%6}:${_pb_loc##*:} in
+				tcp:2350) _pb_p=$TRANS_PORT/tcp _pb_want=$TOR_UID ;;
+				tcp:235D) _pb_p=$TOR_DNS_PORT/tcp _pb_want=$TOR_UID ;;
+				tcp:14E9) _pb_p=$FILTER_PORT/tcp _pb_want=$DNS_UID ;;
+				tcp:1504) _pb_p=$STATUS_PORT/tcp _pb_want=$DNS_UID ;;
+				udp:235D) _pb_p=$TOR_DNS_PORT/udp _pb_want=$TOR_UID ;;
+				udp:14E9) _pb_p=$FILTER_PORT/udp _pb_want=$DNS_UID ;;
+				*) continue ;;
+				esac
+				# TCP: listeners only. Accepted connections are the
+				# listener's, and a TIME_WAIT entry shows uid 0.
+				case ${_pb_f%6}:$_pb_st in tcp:0A | udp:*) ;; *) continue ;; esac
+				[ "$_pb_uid" = "$_pb_want" ] || echo "$_pb_p held by uid $_pb_uid"
+			done
+	done
+}
+
+# listeners_ok: true if no other uid holds a service port. Sets PORTS_BAD
+# to what is wrong (empty when all is well).
+listeners_ok() {
+	PORTS_BAD=$(ports_bad | sort -u | tr '\n' ';' | sed 's/;$//; s/;/; /g')
+	[ -z "$PORTS_BAD" ]
+}
+
 # start_dnsfilter: start the DNS filter as uid 2951. It takes the first
 # list that loads: an updated list in LISTS, else the one in the module. It
 # refuses to run as root or with capabilities, and fails closed.
@@ -202,12 +310,19 @@ start_dnsfilter() {
 		log "dnsfilter: binary missing; DNS stays off"
 		return 1
 	}
+	set -- -list "$LISTS/dnsfilter.list" -list "$MODDIR/lists/dnsfilter.list"
+	# The CI's switch, honoured on the emulator only, never on a phone: log
+	# every query name, and show the status page's counters live
+	# (ci/README.md, "debug.antumbra.log_queries").
+	if is_emulator && [ "$(getprop debug.antumbra.log_queries 2>/dev/null)" = 1 ]; then
+		set -- "$@" -debug-log-queries -status-refresh 0
+		log "dnsfilter: emulator test mode: query names are logged"
+	fi
 	# The helper itself is put in the background (not a shell function
 	# around it), so that $! is the process ID of the filter: antumbra-run
 	# replaces itself with the program.
 	"$BIN/antumbra-run" -u "$DNS_UID" -g "$DNS_UID" -G "$INET_GID" -s -- \
-		"$BIN/antumbra-dnsfilter" \
-		-list "$LISTS/dnsfilter.list" -list "$MODDIR/lists/dnsfilter.list" \
+		"$BIN/antumbra-dnsfilter" "$@" \
 		</dev/null >>"$LOGDIR/dnsfilter.log" 2>&1 &
 	echo $! >"$PRIV/dnsfilter.pid"
 	log "dnsfilter: started (pid $!)"
@@ -259,17 +374,15 @@ torctl_ok() {
 	[ "$_to_n" -eq $(($2 + 1)) ]
 }
 
-# tor_ready: wait up to 30 s until tor answers on its control socket.
+# tor_ready: true if tor runs and answers on its control socket now. It
+# does not wait: service.sh asks again at its next turn (2 seconds later),
+# so that the firewall and port checks never wait behind tor. One call is
+# bounded by torctl.sh (at most 5 s after the commands are sent, 10 s in
+# all).
 tor_ready() {
-	_tr_i=0
-	while [ "$_tr_i" -lt 30 ]; do
-		_tr_out=$(printf 'GETINFO version\r\n' | torctl)
-		torctl_ok "$_tr_out" 1 && return 0
-		pid_alive "$PRIV/tor.pid" "$TOR_UID" || return 1
-		sleep 1
-		_tr_i=$((_tr_i + 1))
-	done
-	return 1
+	pid_alive "$PRIV/tor.pid" "$TOR_UID" || return 1
+	_tr_out=$(printf 'GETINFO version\r\n' | torctl)
+	torctl_ok "$_tr_out" 1
 }
 
 # tor_bootstrap: print "PROGRESS<TAB>SUMMARY" from tor's bootstrap phase.
@@ -425,6 +538,19 @@ welcome_query() {
 	/system/bin/content query --user 0 --uri "$PROVIDER_URI" --projection "$1" 2>/dev/null
 }
 
+# welcome_is_owner: true if Welcome (org.antumbra.welcome) is the device
+# owner. Any app could declare the provider's authority while Welcome is
+# not installed (before it is installed, or if it were ever removed) and
+# answer started=1 with bridges of its choosing. A device owner cannot be
+# uninstalled, and an authority belongs to one package only, so while
+# Welcome is the device owner the authority is Welcome's. The device owner
+# is set by the person over adb at installation (docs/install.md); no app
+# can make itself one afterwards.
+welcome_is_owner() {
+	/system/bin/cmd device_policy list-owners 2>/dev/null |
+		grep -q '^User  *0: admin=org\.antumbra\.welcome/[^,]*,DeviceOwner'
+}
+
 # row_get ROW COLUMN: the value of COLUMN in a 'content query' row. Only
 # for columns whose values never contain ", " (all but bridges).
 row_get() {
@@ -440,10 +566,13 @@ SETTINGS_CONF=$MODDIR/lib/settings.conf
 settings_put() { /system/bin/settings put global "$1" "$2" >/dev/null 2>&1; }
 
 # settings_apply: set every value in settings.conf; "lineage:" lines only on
-# LineageOS. Prints the keys that could not be set.
+# LineageOS, "phone:" lines everywhere but the emulator. Prints the keys
+# that could not be set.
 settings_apply() {
 	_sa_lineage=0
 	is_lineage && _sa_lineage=1
+	_sa_phone=1
+	is_emulator && _sa_phone=0
 	while IFS= read -r _sa_line || [ -n "$_sa_line" ]; do
 		case $_sa_line in '' | '#'*) continue ;; esac
 		case $_sa_line in
@@ -451,9 +580,44 @@ settings_apply() {
 			[ "$_sa_lineage" = 1 ] || continue
 			_sa_line=${_sa_line#lineage:}
 			;;
+		phone:*)
+			[ "$_sa_phone" = 1 ] || continue
+			_sa_line=${_sa_line#phone:}
+			;;
 		esac
 		settings_put "${_sa_line%%=*}" "${_sa_line#*=}" || printf ' %s' "${_sa_line%%=*}"
 	done <"$SETTINGS_CONF"
+}
+
+# mobile_data_off: mobile data off for every SIM Android knows, now and at
+# the next start. Android stores the choice per subscription
+# (Settings.Global mobile_data<subId> in dual-SIM mode; the hotdog has two
+# slots; mobile_data with one; GlobalSettingsHelper in Android 16)
+# and reads it when the SIM comes up, so it holds on a start without the
+# module too. A SIM Android has never seen has no value yet and starts
+# with mobile data on (ro.com.android.mobiledata, default true): that gap
+# is in README, "Known gaps". 'cmd phone data disable' switches it off now
+# on the default data SIM. Not on the emulator, whose only network in CI
+# is its simulated mobile data.
+mobile_data_off() {
+	is_emulator && return 0
+	_md_ids=$({
+		/system/bin/settings list global 2>/dev/null | sed -n 's/^mobile_data\([0-9][0-9]*\)=.*/\1/p'
+		/system/bin/content query --uri content://telephony/siminfo --projection _id 2>/dev/null |
+			sed -n 's/^Row: [0-9]* _id=\([0-9][0-9]*\)$/\1/p'
+	} | sort -u)
+	for _md_id in $_md_ids; do
+		settings_put "mobile_data$_md_id" 0
+	done
+	/system/bin/cmd phone data disable >/dev/null 2>&1
+	return 0
+}
+
+# radios_off: airplane mode on and Wi-Fi off. Used only when the firewall
+# cannot be put in place and the network may be open.
+radios_off() {
+	/system/bin/cmd connectivity airplane-mode enable >/dev/null 2>&1
+	/system/bin/cmd wifi set-wifi-enabled disabled >/dev/null 2>&1
 }
 
 # framework_ready: true once boot has completed and the settings provider
@@ -542,19 +706,27 @@ json_int() {
 # status_write: write run/status.json from the S_* variables (service.sh
 # keeps them). The filter serves it on 127.0.0.1:5380/status under
 # "module", and Welcome shows firewall.state, firewall.hash, tor.bootstrap,
-# tor.summary and tor.network. It is display only: tor's uid can write the
-# file too, so nothing may trust it for a decision (the firewall's word is
-# the property antumbra.fw.armed, which only root can set).
+# tor.summary, tor.network and tor.error. It is display only: tor's uid can
+# write the file too, so nothing may trust it for a decision (the
+# firewall's word is the property antumbra.fw.armed, which only root can
+# set). Every app can read the status page, so the file holds nothing
+# Welcome does not show: not the session ID, not whether the session uses
+# bridges (tor.error can say so, when bridges were refused).
+# module.problem joins the boot's problems (S_PROBLEM) and the current ones
+# (S_NOW_PROBLEM).
 status_write() {
+	_sw_problem=$S_PROBLEM
+	[ -z "${S_NOW_PROBLEM-}" ] || _sw_problem=${_sw_problem:+$_sw_problem; }$S_NOW_PROBLEM
 	_sw_body=$(
+		printf '"problem":%s},' "$(json_str "$_sw_problem")"
 		printf '"firewall":{"state":%s,"hash":%s},' "$(json_str "$S_FW_STATE")" "$(json_str "$S_FW_HASH")"
-		printf '"tor":{"running":%s,"mode":%s,"network":%s,"bootstrap":%s,"summary":%s,"error":%s},' \
-			"$(json_bool "$S_TOR_RUNNING")" "$(json_str "$S_TOR_MODE")" "$(json_str "$S_TOR_NETWORK")" \
+		printf '"tor":{"running":%s,"network":%s,"bootstrap":%s,"summary":%s,"error":%s},' \
+			"$(json_bool "$S_TOR_RUNNING")" "$(json_str "$S_TOR_NETWORK")" \
 			"$(json_int "$S_TOR_BOOTSTRAP")" "$(json_str "$S_TOR_SUMMARY")" "$(json_str "$S_TOR_ERROR")"
 		printf '"dnsfilter":{"running":%s},' "$(json_bool "$S_DNS_RUNNING")"
-		printf '"welcome":{"started":%s,"session_id":%s}}' "$(json_bool "$S_STARTED")" "$(json_str "$S_SESSION_ID")"
+		printf '"welcome":{"started":%s}}' "$(json_bool "$S_STARTED")"
 	)
-	_sw_now=$(date +%s)
+	_sw_now=$(uptime_s)
 	# Written when something changed, and at least once a minute, so that
 	# "updated" shows whether service.sh is still running.
 	if [ "$_sw_body" = "${S_LAST_BODY-}" ] && [ $((_sw_now - ${S_LAST_WRITE:-0})) -lt 60 ]; then
@@ -562,8 +734,8 @@ status_write() {
 	fi
 	_sw_json=$(
 		printf '{"schema":1,'
-		printf '"module":{"version":%s,"updated":%s,"problem":%s},' \
-			"$(json_str "$S_VERSION")" "$(json_str "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")" "$(json_str "$S_PROBLEM")"
+		printf '"module":{"version":%s,"updated":%s,' \
+			"$(json_str "$S_VERSION")" "$(json_str "$(date -u '+%Y-%m-%dT%H:%M:%SZ')")"
 		printf '%s' "$_sw_body"
 	)
 	# The writer runs as uid 2950: it creates a new file next to the old

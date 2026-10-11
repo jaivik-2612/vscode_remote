@@ -1,3 +1,8 @@
+# Not in use while the Exodus source is off (sources.conf). Before turning
+# it back on, review the source's entries that no HaGeZi list has (203 on
+# 2026-10-11) and add here every one that names a company's site or a
+# working service rather than a tracking endpoint.
+#
 # Exodus Privacy network signatures that are left out of the block list
 # because they name a whole service the person may use on purpose (signing
 # in, maps, a social network), not just its tracking. Only the exact entry

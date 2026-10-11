@@ -150,7 +150,22 @@ func (h *Handler) decide(ctx context.Context, q dnsmessage.Question) (result, st
 		st.Refused.Add(1)
 		return result{rcode: dnsmessage.RCodeRefused}, "refused (type)"
 	}
+	if !PlainName(q.Name.String()) {
+		// A name with a byte outside letters, digits, '-' and '_' (a NUL,
+		// a control byte, a space, UTF-8) matches no list entry, yet tor
+		// reads names as C strings and cuts them at a NUL: "doubleclick" +
+		// "net\x00" would be looked up as doubleclick.net at an exit. Such
+		// a name is never forwarded and never matched; it does not exist.
+		st.BadName.Add(1)
+		return result{rcode: dnsmessage.RCodeNameError, soa: true}, "nxdomain (bad name)"
+	}
 	name := blocklist.Canonical(q.Name.String())
+	if name == "" {
+		// The root: it has no A, AAAA or PTR record, and tor's DNSPort
+		// has nothing to say about it.
+		st.Local.Add(1)
+		return result{rcode: dnsmessage.RCodeSuccess, soa: true}, "empty (root)"
+	}
 	if h.cfg.LocalNames {
 		if r, ok := h.local(q, name); ok {
 			st.Local.Add(1)
@@ -328,7 +343,13 @@ func (h *Handler) fromReply(m []byte) (result, string) {
 			var r dnsmessage.CNAMEResource
 			r, err = p.CNAMEResource()
 			if err == nil {
-				if blocked, _ := list.Match(r.CNAME.String()); blocked {
+				// A target that is not a plain name cannot be matched
+				// reliably, so it counts as blocked.
+				target := r.CNAME.String()
+				if !PlainName(target) {
+					return result{}, "blocked"
+				}
+				if blocked, _ := list.Match(target); blocked {
 					return result{}, "blocked"
 				}
 			}
@@ -428,6 +449,40 @@ func (h *Handler) build(hdr dnsmessage.Header, q *dnsmessage.Question, r result)
 		}
 	}
 	return b.Finish()
+}
+
+// PlainName reports whether a DNS name in presentation form (as
+// dnsmessage.Name.String gives it, with or without the final dot) is made
+// only of labels of 1 to 63 bytes from [A-Za-z0-9_-], separated by dots, at
+// most 253 bytes in all. The root name (an empty name) is plain. Only plain
+// names are matched against the lists and forwarded to tor: any other byte
+// (NUL and the other control bytes above all) could make tor, or the exit's
+// resolver, read a different name than the one the filter matched.
+func PlainName(s string) bool {
+	if len(s) > 0 && s[len(s)-1] == '.' {
+		s = s[:len(s)-1]
+	}
+	if len(s) > 253 {
+		return false
+	}
+	if s == "" {
+		return true
+	}
+	start := 0
+	for i := 0; i <= len(s); i++ {
+		if i == len(s) || s[i] == '.' {
+			if n := i - start; n == 0 || n > 63 {
+				return false
+			}
+			start = i + 1
+			continue
+		}
+		c := s[i]
+		if !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func typeName(t dnsmessage.Type) string {

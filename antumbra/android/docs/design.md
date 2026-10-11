@@ -88,31 +88,35 @@ CI in `.github/workflows/antumbra-android.yml`.
 | Status page | `http://127.0.0.1:5380/status` (GET, read-only JSON): `run/status.json` plus the filter's counters (queries, blocked, list size, list version) |
 | tor control | no SOCKSPort, no ControlPort; `ControlSocket /data/adb/antumbra/run/tor-control.sock` (0660, uid/gid 2950) with `CookieAuthentication`; usable only by root and uid 2950 |
 | Firewall | `antumbra-fw arm` (one instant rule set: all non-loopback output and all forwarding dropped, IPv4 and IPv6; first thing at boot), `apply` (the full rule set), `status` (the ruleset hash and whether it is live), `flush` (back to the armed state, never to open). Chains are named `ANTUMBRA_*` |
-| Firewall published | `resetprop -n antumbra.fw.armed <sha256 prefix>`, by the module, only after `apply` succeeded and was verified |
+| Firewall published | `resetprop -n antumbra.fw.armed <sha256 prefix>`, by the module, only after `apply` succeeded and was verified, and while no other uid holds a service port (9040 and 9053 tor's, 5353 and 5380 the filter's); removed at once otherwise |
 | Welcome | package `org.antumbra.welcome`, a device-admin receiver, device owner |
 | Session state | `content://org.antumbra.welcome.state/session`, one row: `started` (0/1), `tor_mode` (`direct`, `bridges`, `offline`), `bridges` (one bridge line per line), `mac` (`new`, `keep`), `admin` (0/1), `unsafe_browser` (0/1), `persistent` (0/1), `session_id`. Readable only by uid 0 and 2000 (`Binder.getCallingUid()`); the module polls it with `content query` |
 
 **Boot sequence** (section 7 has the detail):
 
-1. `post-fs-data.sh`, blocking, before zygote: `antumbra-fw arm` first; a
-   tmpfs (with the right SELinux context) over the Wi-Fi configuration store,
-   so saved networks never reach flash; the DHCP lease memory (IpMemoryStore)
+1. `post-fs-data.sh`, blocking, before zygote: `antumbra-fw arm` first (and
+   before it, the module's early arm script in `/data/adb/post-fs-data.d`,
+   which also runs when the module is switched off); a tmpfs (with the
+   right SELinux context) over the Wi-Fi configuration store, so saved
+   shared networks never reach flash; the DHCP lease memory (IpMemoryStore)
    cleared.
-2. `service.sh`: tor as uid 2950 with `DisableNetwork 1`, the filter as uid
-   2951, `antumbra-fw apply`, then `antumbra.fw.armed`, `status.json`, the
-   fail-safe Settings once the framework answers; then it waits for Welcome's
-   `started=1`. `offline` keeps `DisableNetwork 1`; otherwise it sets the
-   bridges, if any, and `DisableNetwork 0` over the control socket.
+2. `service.sh`: the filter as uid 2951, tor as uid 2950 with
+   `DisableNetwork 1`, `antumbra-fw apply`, the service-port owner check,
+   then `antumbra.fw.armed`, `status.json`, the fail-safe Settings and
+   mobile data off once the framework answers; then it waits for Welcome's
+   `started=1`, trusted only while Welcome is the device owner. `offline`
+   keeps `DisableNetwork 1`; otherwise it sets the bridges, if any, and
+   `DisableNetwork 0` over the control socket.
 
 ## 4. Tails features on Android
 
 | Tails feature | Antumbra on Android | How strong | What is different |
 |---|---|---|---|
-| Everything goes through Tor; anything else is blocked | A firewall that loads before any app starts. Stage 1: the module's `post-fs-data.sh`, which Magisk runs blocking (up to 40 s) before zygote **[verified, Magisk docs]**. Stage 2: system start-up. Only tor's process may go out; other TCP is passed into Tor's TransPort without the app's knowledge, DNS goes to the filter and through Tor, everything else is refused, for root and system services too. Nothing goes out until Welcome's Start. The rules are written for Android from scratch (section 5). | **Strong, pending the phone capture.** Stage 1 depends on the module running (section 7.3). | Tails makes apps use Tor on purpose; Android apps cannot be set up that way, so they are passed through Tor. The modem, firmware offloads and packet sockets are below the firewall (`threat-model.md`). Apps with their own Tor get a narrow exception (W9). |
+| Everything goes through Tor; anything else is blocked | A firewall that loads before any app starts. Stage 1: the module's `post-fs-data.sh`, which Magisk runs blocking (up to 40 s) before zygote **[verified, Magisk docs]**. Stage 2: system start-up. Only tor's process may go out; other TCP is passed into Tor's TransPort without the app's knowledge, DNS goes to the filter and through Tor, everything else is refused, for root and system services too. Nothing goes out until Welcome's Start. The rules are written for Android from scratch (section 5). | **Strong, pending the phone capture.** Stage 1 depends on the module running (section 7.3), and without it on there being no SIM. | Tails makes apps use Tor on purpose; Android apps cannot be set up that way, so they are passed through Tor. The modem, firmware offloads and packet sockets are below the firewall (`threat-model.md`). Apps with their own Tor get a narrow exception (W9). |
 | Amnesia | **Stage 1:** each session is a new throwaway Android user (W8) whose encryption keys exist only in memory **[verified, AOSP vold]**; network state is kept in RAM (v0: saved Wi-Fi networks and the DHCP lease memory); system records listed in section 9 are moved to RAM in W8. **Stage 2:** the whole working storage gets a new key at every boot and is formatted. | **Stage 1: session data only. Stage 2: good, with open points (section 10).** | The phone writes to flash and destroys keys. A restart is not enough against someone holding the phone: memory survives a warm reset (`threat-model.md`). |
 | Persistent Storage | **Stage 1 (W10):** a separate Android user with a long passphrase; guessing is slowed by the processor's TrustZone (gatekeeper, keymaster), whose firmware dates from 2022; there is no separate secure chip (no StrongBox, no Weaver). Welcome re-adds that user's Wi-Fi networks and bridges after the firewall is live. **Stage 2:** an encrypted area in Tails' format (LUKS2, argon2id). | **Stage 1: good, with a long passphrase. Stage 2: [unknown]** until a safe place for it exists. | All or nothing in Stage 1. The user's existence, creation and last-login times and its device-encrypted storage are readable without the passphrase. Fingerprint unlock is useful only in this user. |
-| Welcome Screen | The Welcome app, a locked home screen in user 0 before the session: Tor directly, with bridges, or offline; new Wi-Fi address (on); Persistent Storage; Administration (off); Unsafe Browser (off). | **Good** | It runs after Android has started, but the network stays closed until Start, as in Tails. The language is set once in Settings. |
-| MAC address anonymisation | A new random Wi-Fi address for every connection (`non_persistent_mac_randomization_force_enabled=1`), unless "keep" is chosen. The DHCP lease memory is kept in RAM so Android does not ask the router for the last session's address (DHCP INIT-REBOOT). Stage 2: GrapheneOS's DHCP-state flush and per-connection randomisation, and a neutral DHCP vendor class. | **Good** (less in Stage 1) | Stage 1 still sends the vendor class `android-dhcp-16` **[verified]**. Hidden networks make the phone probe for their names under every address; they are refused at import (W10). |
+| Welcome Screen | The Welcome app, a locked home screen in user 0 before the session: Tor directly, with bridges, or offline; new Wi-Fi address (on); Persistent Storage (shown, not yet available); Administration (off); Unsafe Browser (off; shown but disabled until W11). | **Good** | It runs after Android has started, but the network stays closed until Start, as in Tails. The language is set once in Settings. |
+| MAC address anonymisation | A new random Wi-Fi address for every connection (`non_persistent_mac_randomization_force_enabled=1`), unless "keep" is chosen. The DHCP lease memory is kept in RAM so Android does not ask the router for the last session's address (DHCP INIT-REBOOT). Stage 2: GrapheneOS's DHCP-state flush and per-connection randomisation, and a neutral DHCP vendor class. | **Good** (less in Stage 1) | Stage 1 still sends the vendor class `android-dhcp-16` **[verified]**. Android 15 and later also send the device name (DHCP option 12) unless a device owner restricts it; Welcome does (`setSendDhcpHostnameRestriction`) **[likely]**, unverified until a capture checks it. Hidden networks make the phone probe for their names under every address; they are refused at import (W10). |
 | Tor Browser | The official Tor Browser for Android, unchanged and signature-checked (W9). It gets uBlock Origin only if Tor Browser 17 bundles it (Tor issue #17569, labelled "17.0 stable" **[verified as open]**). | **Good** | It cannot use the system's Tor (issue #43438 **[verified as open]**), so it runs its own and may connect only to Tor relays and bridges (section 5). Android's Firefox engine has weaker internal sandboxing than the desktop one. |
 | Unsafe Browser (captive portals) | Off by default. When ticked at Welcome: a dedicated WebView app with its own UID, launched by hand, bound to the Wi-Fi network, with a root helper that opens a clearnet and DNS exemption for that UID while it runs and closes it on exit, with Tails' warning (W11). Android's captive-portal detection stays off (`captive_portal_mode=0`) in every session. | **Partial** | A session-wide captive-portal switch was rejected: Android would probe Google on every connection, and any app can trigger a probe (`reportNetworkConnectivity`) at a time it chooses. |
 | Curated apps | KeePassDX (for KeePassXC), Thunderbird, OnionShare (beta), Scrambled Exif (for Metadata Cleaner), Electrum, Briar and the HeliBoard keyboard, from Antumbra's signed repository, over Tor (W9). | **Good** | Android equivalents of Tails' apps, not the same programs. |
@@ -120,7 +124,7 @@ CI in `.github/workflows/antumbra-android.yml`.
 | Memory wiping | Qualcomm's crash-dump mode off at boot (`download_mode=0`, v0) **[likely, Stage 1]**, to be checked with a forced panic on the phone. Freed memory zeroed (`init_on_free=1`) in Stage 1 only if the kernel command line can be changed **[unknown]**; certain in Stage 2. | **Weak to partial** | No memory wipe at shutdown as in Tails. EDL cannot be switched off. |
 | Nothing phones home | Android's own background connections off (section 6, L0). Anything missed cannot leave outside Tor, but it can reach its server through Tor, so tests log the system's name lookups and block every unexpected destination by name; a packet capture alone cannot show it. | **Good** | A modem with a SIM talks to the carrier outside Android, hence no SIM by default. |
 | Signed images and updates | Stage 1: the system is signed by LineageOS; the module, Welcome, the apps and the repository by Antumbra, with SHA-256 sums and build provenance. The module has no `updateJson`: Magisk never fetches it. Module updates go through Welcome after a pinned-key signature check (later). Stage 2: the whole system signed with Antumbra's keys, as a non-debug "user" build. | **Partial** | No verified boot on this phone, ever. |
-| Administration | The Administration option at Welcome allows app installation and Settings for that session. Apps never get root. Debugging stays off in every session (target; v0 differs, section 13). | **Good** once debugging is off | |
+| Administration | The Administration option at Welcome lifts three restrictions from Start until the next shutdown: app installation from outside the preinstalled store, Bluetooth, and the location settings. Settings itself is reachable in every session once Start has ended Welcome's locked task. Apps never get root. Debugging stays off in every session, Administration included (v0, a test build's hook aside, section 13). | **Good**; `ro.debuggable=0` still to come (MOD4) | |
 | Tracker blocking (no Tails equivalent) | Section 6. | **Good for apps** | Tor Browser is deliberately not filtered. |
 
 ## 5. The firewall policy
@@ -142,14 +146,19 @@ Policy, for every UID except tor's (2950):
 | TCP to any destination, including the LAN, link-local and loopback ports other than the allowed ones | REDIRECT to `127.0.0.1:9040`; tor refuses private and loopback destinations |
 | UDP and TCP to port 53, anywhere | REDIRECT to `127.0.0.1:5353` (the filter) |
 | Loopback TCP to 9040, 5353, 5380 | allowed; an exempted app also to its own listed ports |
+| Answers on loopback from 9040 or 9053 by a socket that is not tor's, or from 5353 or 5380 by one that is not the filter's | dropped, so an app that takes a service port while its owner is not listening completes no handshake and sends no answer; the module's owner check does the rest (section 7.2) |
 | TCP to port 853 (DNS over TLS), and to known DNS-over-HTTPS servers | rejected, so apps fall back to the system's lookups |
-| DHCP renewals (UDP 68 to 67) from the network stack (uid 1073) | allowed, so leases do not lapse (Android's first DHCP messages use a packet socket, below netfilter) |
+| DHCP renewals (UDP 68 to 67) from the network stack (uid 1073), to private or link-local addresses and the broadcast address | allowed, so leases do not lapse (Android's first DHCP messages use a packet socket, below netfilter) |
 | Everything else: other UDP (NTP, QUIC, mDNS, SSDP, STUN), ICMP, multicast, all IPv6 except `::1` for system UIDs | rejected |
-| Inbound from other interfaces | dropped, except replies on connections the firewall let out, and DHCP replies |
+| Inbound from other interfaces | dropped, except replies on connections the firewall let out, and DHCP replies from private or link-local addresses |
 | Forwarding | dropped (and tethering forbidden, since its offload bypasses netfilter) |
 
-tor (2950) may reach the Internet, but not the LAN, link-local, multicast or
-loopback services other than its own pluggable-transport ports. The filter
+tor (2950) may reach the Internet, but not the LAN, link-local or
+multicast, and on loopback only TCP to 127.0.0.1 ports in the kernel's
+ephemeral range (32768-60999), where lyrebird, its pluggable-transport
+client, listens on a random port. On those connections only a socket of
+uid 2950 may answer, so another app's listener in that range never
+completes a handshake with tor. The filter
 (2951) may reach only `127.0.0.1:9053`. Established and related traffic
 leaving the phone is accepted only for tor (and for an exempt app's
 connections to listed relays). The filter table decides per UID; a second,
@@ -203,8 +212,12 @@ that netd does not flush.
   tracker domains.
   - It fails closed: if it stops, or tor does not answer, lookups fail.
   - Lists: HaGeZi Multi Pro (195,726 domains; HaGeZi Normal, 159,965, if too
-    many apps break), the Exodus Privacy tracker signatures, and Antumbra's
-    own list of LineageOS, OnePlus and Qualcomm endpoints.
+    many apps break), HaGeZi's list of encrypted-DNS servers, and Antumbra's
+    own list of LineageOS, OnePlus, Qualcomm and Google endpoints. The
+    Exodus Privacy tracker signatures are off in v0: read as domains, many
+    block whole sites or working services, and their licence (ODbL 1.0,
+    contents DbCL 1.0) is not yet checked against HaGeZi's GPL-3.0 (queue
+    DNS3; `dnsfilter/lists/sources.conf`).
   - Updates: CI builds a new list every day and signs it (W6). The phone
     fetches it over Tor, keeps it only in Persistent Storage, and otherwise
     uses the copy in the module.
@@ -244,23 +257,24 @@ not prove that an app does not track.
 | When | What | Network |
 |---|---|---|
 | Bootloader, kernel, init | LineageOS starts; Magisk's init patches its own policy in | none (no interface up) |
-| `post-fs-data` (Magisk, blocking, before zygote and netd) | 1. `antumbra-fw arm`: only loopback moves, IPv4 and IPv6, for every UID. 2. The runtime tmpfs. 3. A tmpfs over `/data/misc/apexdata/com.android.wifi` (and user 0's device-encrypted copy), with its owner, mode and SELinux label; the flash copy deleted. 4. NetworkStack's IpMemoryStore database deleted and its directory on a tmpfs. 5. `accept_ra=0`, `disable_ipv6=1` on every interface; Qualcomm crash dumps off. | closed |
-| `service` (Magisk, not waited for) | 1. The filter (uid 2951), first, so it holds 5353 before Android's mDNS. 2. tor (uid 2950), `DisableNetwork 1`: it opens no TransPort or DNSPort at all. 3. `antumbra-fw apply`, `status`; only if live and the hash matches, `resetprop -n antumbra.fw.armed`. 4. `status.json`. 5. The IPv6 guard: NetworkStack re-enables IPv6 on each interface it brings up, so a loop switches it off again on every link or address change. 6. Fail-safe Settings once the framework answers. | closed: TCP redirected into a tor that is not listening, DNS failing in the filter |
-| Welcome (device owner, home screen, locked task) | Applies the baseline policies; Wi-Fi off and locked until Start; saved networks removed (a boot without the module). Checks the add-on: `antumbra.fw.armed`. At Start: the session's policies, then `started=1`. | closed until Start |
-| Start | The module latches the first `started=1` of the boot. `offline`: tor stays off. `direct`: `SETCONF DisableNetwork=0`. `bridges`: the lines are checked again and sent with `UseBridges=1` in one `SETCONF`. `mac=keep` clears the per-connection MAC setting. | Tor only |
-| During the session | Supervision: the filter and tor are restarted if they stop (a restarted tor gets the session's choice again); `antumbra-fw status` every 30 s, and if it is not live the property is removed and `apply` runs again. | Tor only |
-| Shutdown | Welcome makes itself home again, turns Wi-Fi off and locks it, removes saved networks. tmpfs contents disappear at power-off. | closed |
+| `post-fs-data` (Magisk, blocking, before zygote and netd) | 0. The module's early arm script in `/data/adb/post-fs-data.d` runs `antumbra-fw arm` before any module, also when the module is switched off in the Magisk app (not in Magisk's Safe Mode). 1. `antumbra-fw arm`: only loopback moves, IPv4 and IPv6, for every UID. 2. The runtime tmpfs. 3. A tmpfs over `/data/misc/apexdata/com.android.wifi` (Wi-Fi's shared store), with its owner, mode and SELinux label; the flash copy deleted. User 0's credential-encrypted store is still locked here and is not covered. 4. NetworkStack's IpMemoryStore database deleted and its directory on a tmpfs. 5. `accept_ra=0`, `disable_ipv6=1` on every interface; Qualcomm crash dumps off. | closed |
+| `service` (Magisk, not waited for) | 1. The filter (uid 2951), first, so it holds 5353 before Android's mDNS. 2. tor (uid 2950), `DisableNetwork 1`: it opens no TransPort or DNSPort at all. 3. `antumbra-fw apply`, `status`, and the service-port owner check; only if live, the hash matches and no other uid holds 9040, 9053, 5353 or 5380, `resetprop -n antumbra.fw.armed`. 4. `status.json`. 5. The IPv6 guard: NetworkStack re-enables IPv6 on each interface it brings up, so a loop switches it off again on every link or address change. 6. Fail-safe Settings, and mobile data stored as off for every SIM Android knows, once the framework answers. | closed: TCP redirected into a tor that is not listening, DNS failing in the filter |
+| Welcome (device owner, home screen, locked task) | Applies the baseline policies (USB debugging off, no DHCP host name among them); Wi-Fi off and locked until Start; saved networks removed (a boot without the module). Checks the add-on: `antumbra.fw.armed`, nothing else. At Start: the session's policies, then `started=1`. | closed until Start |
+| Start | The module latches the first `started=1` of the boot, only while Welcome is the device owner, and switches tor's network on only while the firewall is live and no other uid holds a service port. `offline`: tor stays off. `direct`: `SETCONF DisableNetwork=0`. `bridges`: the lines are checked again and sent with `UseBridges=1` in one `SETCONF`. `mac=keep` clears the per-connection MAC setting. | Tor only |
+| During the session | Supervision: the service-port owners at every turn (2 to 5 s); the filter and tor are restarted if they stop (a restarted tor gets the session's choice again); `antumbra-fw status` every 30 s, and if it is not live the property is removed and `apply` runs again. | Tor only |
+| Shutdown | Welcome makes itself home again, applies the baseline policies again (Administration's loosening ends), turns Wi-Fi off and locks it, removes saved networks. The module puts the fail-safe Settings back and stores mobile data as off again (best effort: a crash or power loss skips both). tmpfs contents disappear at power-off. | closed |
 
 ### 7.2 What happens when something fails
 
 | Failure | Result |
 |---|---|
 | tor dies or is killed | TransPort and DNSPort vanish: TCP is redirected to a closed port, DNS fails in the filter. Restarted by supervision with the session's choice. |
-| The filter dies | Nothing answers on 5353; DNS fails (closed, not open). Restarted by supervision. Another app could bind 5353 in that gap; its answers are only answers (`dnsfilter/README.md`). |
-| Android's mDNS takes 5353 first | The filter cannot start: DNS stays off (closed). **[unknown]** on the phone. |
+| The filter dies | Nothing answers on 5353; DNS fails (closed, not open). Restarted by supervision. |
+| An app binds a service port while its owner is not listening (9040 or 9053 before Start, in an offline session or while tor restarts; 5353 or 5380 while the filter restarts) | Without a guard, a squatter on 5353 would receive every app's and the system's lookups and could answer with addresses of its choice, skipping the tracker filter and steering connections (still through Tor) to its own servers; one on 9040 would receive every redirected TCP connection with its original destination and content, and tor could not open its port. The firewall drops answers from these ports by any socket but the owner's, so no handshake completes and no answer arrives. The module checks the owners at every turn (2 to 5 s) and before tor's network goes on; while another uid holds a port it removes the property and puts the firewall back to armed, which redirects nothing, until the port is free (`module/README.md`). Left: until the next check a squatter on 5353 still receives queries (names), and it can keep the network closed. |
+| Android's mDNS takes 5353 first | The filter cannot start, and the port check counts mDNS (uid 1000) as a squatter: DNS stays off and the firewall stays armed (closed). **[unknown]** on the phone. |
 | A firewall rule is deleted or reordered | `status` reports `partial` or `open`; the property is removed at once and `apply` runs again. The mangle egress gate still drops anything the filter table did not mark. |
 | `apply` fails | `antumbra-fw` goes back to the armed set; no property; tor's network is never switched on. |
-| Welcome's process dies after Start | A new process answers `started=0` with a new `session_id`; the module keeps the latched choice. |
+| Welcome's process dies after Start | A new process answers `started=0` with a new `session_id`; the module keeps the latched choice, and Welcome refuses a second Start while the module reports a started session, asking for a restart instead. |
 | The module does not run at all | Section 7.3. |
 
 ### 7.3 When the module does not run
@@ -270,14 +284,18 @@ is entered (one volume-key press at boot, which also leaves a `disable` file
 so later boots stay without modules), after a LineageOS update installed
 without Magisk's "Install to inactive slot" step, after a slot switch, or
 after a major upgrade that replaced the boot image. Android's own safe mode
-is separate; Welcome's `DISALLOW_SAFE_BOOT` blocks only that one. The
+is separate; Welcome's `DISALLOW_SAFE_BOOT` blocks only that one. (A module
+only switched off in the Magisk app still has its early arm script in
+`post-fs-data.d`: that boot is armed and has no network at all.) The
 safeguards therefore do not depend on noticing in time:
 
-1. **No saved network on flash.** While the module runs, the Wi-Fi
-   configuration store is a tmpfs and its flash copy is deleted, so a boot
-   without the module has no network to join. This is the main
-   safeguard: Android joins saved networks during boot, before any app runs
-   and before unlock.
+1. **No saved shared network on flash.** While the module runs, the Wi-Fi
+   configuration store (`/data/misc/apexdata/com.android.wifi`) is a tmpfs
+   and its flash copy is deleted, so a boot without the module has no
+   shared network to join. This is the main Wi-Fi safeguard: Android joins
+   saved networks during boot, before any app runs and before unlock.
+   User 0's credential-encrypted store (networks added without "share",
+   approved suggestions, Passpoint) is not covered (section 12).
 2. **Welcome removes networks and turns Wi-Fi off** at every session end, at
    shutdown and at boot, and re-adds Persistent Storage networks only after
    it has read `antumbra.fw.armed` (W10).
@@ -288,17 +306,41 @@ safeguards therefore do not depend on noticing in time:
    addresses, and on LineageOS `restricted_networking_mode=1` (enforced by
    netd's BPF program, so it holds without the module, but it only blocks
    apps whose "Network access" switch is off).
-4. **Welcome's add-on check:** without `antumbra.fw.armed`, Wi-Fi stays off
-   and locked for the session, whatever the Tor choice.
+4. **Mobile data stored as off.** Android keeps the mobile-data choice per
+   SIM in Settings (`mobile_data<subId>`, and `mobile_data`) and reads it
+   when the SIM comes up, before any app runs. The module sets it to 0 for
+   every SIM Android knows at every boot and again at shutdown.
+5. **Welcome's add-on check:** without `antumbra.fw.armed`, Wi-Fi stays off
+   and locked for the session, whatever the Tor choice. Welcome decides from
+   the property alone, which only root can set; the filter's status page,
+   which any app could serve when the module is absent, never counts. In
+   airplane mode Welcome cannot switch Wi-Fi off if the user switched it on
+   (only Settings may); the removed networks and the Wi-Fi restrictions
+   then leave it nothing to join, and Start refuses a network session.
 
-What remains: a network joined by hand in a boot without the module
-connects in the clear (system traffic such as the Updater could then leave).
-Welcome removes it again at shutdown; if that boot ends in a crash or power
-loss instead, the network stays saved on flash, and the next boot without
-the module can join it for the seconds before Welcome removes it. CI tests a
-reboot without the module, with Wi-Fi on and a saved network present at the
-moment of reboot, captured from power-on: zero packets allowed (W12), plus
-Magisk Safe Mode, a module `disable` file and a slot switch without re-root.
+What remains:
+
+- **A SIM.** These safeguards are about Wi-Fi, except point 4. A SIM with
+  mobile data on connects over the mobile network as the phone starts,
+  with no saved network and before Welcome runs, and system traffic such
+  as the Updater leaves in the clear. Welcome locks Wi-Fi only, and a
+  device owner cannot switch airplane mode. Point 4 covers the SIMs
+  Android knows; it does not cover a SIM Android has never seen (LineageOS
+  switches mobile data on for it), nor one whose mobile data a session
+  switched on and that ended in a crash instead of a shutdown. Hence no
+  SIM by default (decision D3), none at LineageOS's first boot
+  (`install.md`), and radios off at shutdown is still to be decided
+  (section 12, MOD6).
+- **A network joined by hand** in a boot without the module connects in the
+  clear (system traffic such as the Updater could then leave). Welcome
+  removes it again at shutdown; if that boot ends in a crash or power loss
+  instead, the network stays saved on flash, and the next boot without the
+  module can join it for the seconds before Welcome removes it.
+
+CI tests a reboot without the module, with Wi-Fi on and a saved network
+present at the moment of reboot, captured from power-on: zero packets
+allowed (W12), plus Magisk Safe Mode, a module `disable` file, a slot switch
+without re-root, and the emulator's mobile data.
 
 ## 8. Root and privileges in Stage 1
 
@@ -325,10 +367,15 @@ Magisk Safe Mode, a module `disable` file and a slot switch without re-root.
   "Rooted debugging" and a cable, adb gives a root shell. The target is
   `ro.debuggable=0` set by the module with `resetprop` (tested for breakage
   first), `DISALLOW_DEBUGGING_FEATURES` in every session including
-  Administration (Administration means app installation and Settings, not
-  adb), and at boot `adb_enabled`, `adb_wifi_enabled`,
-  `development_settings_enabled` and persistent logging reset and
-  `/data/misc/adb/adb_keys` deleted. Stage 2's "user" build removes this.
+  Administration (Administration means app installation, Bluetooth and the
+  location settings, not adb), and at boot `adb_enabled`,
+  `adb_wifi_enabled`, `development_settings_enabled` and persistent logging
+  reset and `/data/misc/adb/adb_keys` deleted. In v0 Welcome does the first
+  half: `DISALLOW_DEBUGGING_FEATURES` and the adb settings at 0 from the
+  moment it is the device owner, at every boot and in every session; a
+  debuggable or testOnly Welcome honours a test hook that keeps adb for CI
+  (section 13). `ro.debuggable=0`, the adb keys and logging are MOD4. Stage
+  2's "user" build removes this.
 - **Module updates** are never fetched by Magisk (no `updateJson`). An
   update is a zip installed by hand, or later by Welcome after checking a
   signature with a pinned key before `magisk --install-module`.
@@ -345,8 +392,12 @@ Magisk Safe Mode, a module `disable` file and a slot switch without re-root.
 - **Moved to RAM** (tmpfs bind mounts with the right SELinux contexts in
   `post-fs-data`, so a boot without the module also leaves nothing new on
   flash): the Wi-Fi configuration store and NetworkStack's IpMemoryStore
-  (v0); in W8 `/data/system/dropbox`, `graphicsstats`, `netstats`,
-  `procstats`, `/data/tombstones`, `/data/anr`, `/data/vendor/tombstones`,
+  (v0); in W8 `/data/system/dropbox`, `graphicsstats`, netstats (in
+  `/data/system/netstats` before Android 14; since NetworkStatsService
+  moved into the Tethering module, **[likely]**
+  `/data/misc/apexdata/com.android.tethering/netstats`; the path is
+  **[unknown]** until checked against `android16-release` and on the
+  emulator, before AM2), `procstats`, `/data/tombstones`, `/data/anr`, `/data/vendor/tombstones`,
   `/data/vendor/ramdump`, `/data/vendor/wifi/wpa`, `/data/vendor/location`,
   and `/data/misc/bluedroid` (or Bluetooth forbidden). Also deleted at
   shutdown.
@@ -406,8 +457,10 @@ a public repository must never run on pull-request triggers.
 ## 11. Testing and its limits
 
 - **On every change:** the firewall in a Linux network-namespace sandbox; the
-  filter's unit and fuzz-seed tests; tor's host check; Welcome's unit tests;
-  the module's unit tests; then the emulator leak test (`ci/README.md`).
+  filter's unit tests and a minute of fuzzing; tor's host check (when tor is
+  rebuilt); Welcome's unit tests and lint; the module's unit tests and its
+  boot scripts end to end as root on Linux; then the emulator leak test
+  (`ci/README.md`), also on QPR2 without blocking.
 - **The emulator leak test** runs Google's Android 16 image without Google
   services on a KVM runner, records every packet from the first moment of
   boot, and passes only if every connection after the firewall was armed
@@ -416,16 +469,17 @@ a public repository must never run on pull-request triggers.
   `adb root` and the module is started as Magisk would start it, so the
   install steps match the phone's except the rooting step.
 - **Scenarios** (v0 runs the first two): baseline (plain Android), boot to a
-  started session with a tracker test; then Welcome offline, tor killed,
+  started session on Wi-Fi with a tracker test, LAN and loopback probes and
+  the armed state with the network up; then Welcome offline, tor killed,
   filter killed, network change, reboot, update guard (module absent with a
   saved network), Magisk Safe Mode, tracker test, the amnesia marker test (a
   marker text typed in a session must be gone from storage after a restart,
   plus a dump of the paths in section 9), an IPv6 router-advertisement source
   (no global address may appear, in `ip -6 addr` or in an app), a DHCP
-  reconnection with a new MAC (no requested-IP option), LAN and loopback
-  probes from an app UID (router ports 80, 5000, 49152; 127.0.0.1:9052;
-  another app's port), tethering cannot be enabled, and `su` from a session
-  UID denied.
+  reconnection with a new MAC (no requested-IP option, no host name), an
+  app that binds 127.0.0.1:9040 before Start (no connection reaches it, the
+  network stays closed until it lets go), tethering cannot be enabled, and
+  `su` from a session UID denied.
 - **What a capture cannot show:** traffic that reaches its server through Tor
   (hence the log of the system's name lookups, and NFLOG records of
   redirected flows with their UID, which `antumbra-fw` can emit for tests);
@@ -433,12 +487,13 @@ a public repository must never run on pull-request triggers.
 - **The emulator is not the phone:** no Qualcomm parts, no modem, no Wi-Fi
   keepalive offload or IPA; a 6.x GKI kernel, not 4.14; Android 16 QPR0
   (`default`), while LineageOS 23.2 is QPR2, which Google publishes only as
-  `google_apis` 36.1 (a secondary run is planned, with Google services kept
-  out of the leak baseline); `adb root` instead of Magisk, whose own CI boots
+  `google_apis` 36.1 (a secondary run does the same test on it, without
+  blocking the workflow); `adb root` instead of Magisk, whose own CI boots
   rooted Android 36, 36.1 and 37.0 emulators on the same runners
   **[verified, Magisk's workflow and `avd.sh`]**. The phone capture after the
-  install closes that gap, and a root `tcpdump` on the phone's `wlan0` is the
-  weaker fallback.
+  install (`install.md`, section 9: the same analyser, judging every packet
+  of a capture on the computer's hotspot) closes that gap, and a root
+  `tcpdump` on the phone's `wlan0` is the weaker fallback.
 - **Before the install:** the arm64 binaries are checked statically
   (`check-tor-binary.sh`, the filter's `-self-test` under `qemu-aarch64`) and
   can be smoke-tested in Termux on an older Android, built with a lower API
@@ -455,28 +510,33 @@ a public repository must never run on pull-request triggers.
 | Requirement | Where | v0 |
 |---|---|---|
 | Firewall derived for Android from scratch, not from Tails' rules | `firewall/` | done |
-| Fail closed when the module is absent | `module/` (Wi-Fi tmpfs, Settings), `welcome/` (Wi-Fi off, property check) | done in v0; CI scenarios W12 |
-| No saved Wi-Fi network on flash | `module/post-fs-data.sh` | done (user 0's credential-encrypted store not covered) |
+| Fail closed when the module is absent | `module/` (Wi-Fi tmpfs, Settings, mobile data stored off, early arm script for a switched-off module), `welcome/` (Wi-Fi off, property check alone) | done for Wi-Fi and for SIMs Android knew; not for a SIM Android has never seen (no SIM by default, D3); CI scenarios W12 |
+| No saved Wi-Fi network on flash | `module/post-fs-data.sh` | done for the shared store (user 0's credential-encrypted store not covered; the first boot after installing writes that boot's lease memory to flash) |
+| Mobile data off when the module is absent | `module/` (`mobile_data`, `mobile_data<subId>` at boot and shutdown) | done for SIMs Android knew; a new SIM starts with mobile data on |
+| Radios off at shutdown (airplane mode), so a boot without the module starts with no radio | `module/` (a device owner cannot set airplane mode) | todo (MOD6): weighed against every Start then asking for Wi-Fi |
+| Service ports held only by their owners (9040, 9053 tor; 5353, 5380 the filter) | `firewall/` (answers from other sockets dropped), `module/` (owner check, armed while held), `dnsfilter/` (9053 owner check) | done, with a window of up to 5 s per check; tor holding its ports from boot is decision D11 (a contract change) |
+| No DHCP host name (option 12, Android 15 and later) | `welcome/` (`setSendDhcpHostnameRestriction`); the leak analyser fails on it (`dhcp-hostname`) | done **[likely]**; no capture has checked it yet (CI, the phone capture) |
 | ControlSocket, not ControlPort; cookie authentication | `tor/torrc.in` | done |
 | IPv6 off per interface, not only globally | `module/` (sysctls at boot, guard loop), firewall drops IPv6, filter answers no AAAA | done; RA test in CI pending |
 | Hardware keepalive offload off | `module/overlay/` | built; untested (the emulator does not mount it) |
 | DHCP lease memory cleared | `module/post-fs-data.sh` | done at boot; not yet when the MAC changes mid-session |
 | The DNS filter fails closed | `dnsfilter/` | done |
 | post-fs-data does one instant "drop all" first | `antumbra-fw arm` | done |
-| `antumbra.fw.armed` set only after a verified apply | `module/service.sh` | done |
+| `antumbra.fw.armed` set only after a verified apply | `module/service.sh` | done (and only while no other uid holds a service port) |
 | tor and the filter: own UIDs, no capabilities | `module/helper/antumbra-run.c` | done; CI checks CapEff |
 | tor and the filter: own SELinux domain | `module/` | todo |
 | DHCP only for the network stack; other UDP rejected; DNS redirected | `firewall/` | done |
 | DNS over TLS and DoH servers rejected | `firewall/`, `dnsfilter/fetch-lists.sh` | done (the DoH list comes from the list job) |
 | Tethering, Wi-Fi Direct, safe boot forbidden; `tether_offload_disabled=1` | `welcome/`, `module/` | done |
-| Location off, Bluetooth off, UTC, automatic time off | `welcome/` | done (Bluetooth and the location restriction lifted in Administration) |
+| Location off, Bluetooth off, UTC, automatic time off | `welcome/` | done (Bluetooth and the location restriction lifted in Administration, until shutdown) |
+| Location and nearby-device permission grants set to denied for every app | `welcome/` | todo (a grant per installed app and on every new install) |
 | tor's DataDirectory on tmpfs | `module/`, `tor/` | done |
 | Qualcomm crash dumps off | `module/post-fs-data.sh` | done; verify with a forced panic on the phone |
 | No `updateJson`; signed updates through Welcome | `module/module.prop`; `welcome/` | first half done |
 | Magisk pinned; "Device owner only"; `su` from sessions denied | `docs/install.md`; CI | documented; CI check needs a Magisk-rooted emulator |
-| `ro.debuggable=0`; debugging off in every session; adb settings reset at boot | `module/`, `welcome/` | todo (v0 keeps adb in Administration sessions) |
+| `ro.debuggable=0`; debugging off in every session; adb settings reset at boot | `module/`, `welcome/` | debugging off and adb settings at 0 in every session, Administration included: done in Welcome (a test build's hook keeps adb, section 13); `ro.debuggable=0`, `adb_keys` and logging: todo (MOD4) |
 | Magisk app hidden outside updates | `welcome/` | todo |
-| Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the app W11 |
+| Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the switch shown but disabled; the app W11 |
 | Emergency off powers off, not restarts | `welcome/`, `module/` | todo (v0 restarts) |
 | System records moved to RAM (section 9) | `module/` | W8 |
 | Hidden networks refused; passphrase field without learning, `FLAG_SECURE` | `welcome/` | W10 |
@@ -497,11 +557,21 @@ These are decisions the parts took, each explained in its README:
   name lookups. Revisit in W5 with the emulator's NFLOG data.
 - **`restricted_networking_mode` is set on LineageOS only.** On plain Android
   (the emulator) it would block every app, even on loopback.
-- **Administration lifts `DISALLOW_DEBUGGING_FEATURES`** in v0, because CI
-  drives the emulator over adb. The target (section 8) keeps it in every
-  session.
-- **`DISALLOW_CONFIG_WIFI` and `DISALLOW_ADD_WIFI_CONFIG` are not set**: Wi-Fi
-  is set up by hand after Start until Persistent Storage brings networks back.
+- **A test build keeps adb.** Welcome keeps debugging off in every session,
+  Administration included; a debuggable or testOnly Welcome honours the
+  property `debug.antumbra.keep_adb`, which CI sets before provisioning so
+  that it can drive a session over adb. A release build never reads it.
+  Which build the phone gets is decision D9.
+- **tor does not hold its ports before Start.** With `DisableNetwork 1` tor
+  opens no TransPort or DNSPort, so 9040 and 9053 are free before Start, in
+  offline sessions and while tor restarts. The firewall and the module guard
+  them instead (section 7.2); tor holding them from boot, with the firewall
+  keeping uid 2950 off the Internet until Start, changes the contract of
+  tor and the firewall and is decision D11.
+- **`DISALLOW_CONFIG_WIFI` and `DISALLOW_ADD_WIFI_CONFIG` are lifted at a
+  network Start**: Wi-Fi is set up by hand after Start until Persistent
+  Storage brings networks back. They stay set before Start, in offline
+  sessions and when the add-on is missing.
 - **The emergency tile restarts the phone** until Welcome is a privileged app
   with `SHUTDOWN`, or the module carries out a power-off request.
 - **Only plain bridges work**: lyrebird (obfs4, WebTunnel, meek_lite) is not

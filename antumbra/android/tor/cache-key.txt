@@ -13,6 +13,8 @@
 file build-tor.sh
 file sources.lock
 file cache-key.txt
+# The patches named by 'patch' records in sources.lock are added to the key
+# automatically.
 #
 # Also part of the key, read from sources.lock or the command line:
 #   - tor, OpenSSL, libevent and zlib versions and SHA-256 (sources.lock)
@@ -26,4 +28,6 @@ file cache-key.txt
 # Deliberately not part of the key, because they do not change the binaries:
 #   torrc.in, render-torrc.sh  (the module renders the torrc when it packages)
 #   check-tor-binary.sh, hostcheck-tor.sh, README.md  (tests and notes)
+#   keys/  (public keys for the signature checks; the SHA-256 pins decide
+#           which tarballs are built)
 #   --jobs, --work, --downloads, --signatures, --host-check, --keep-work

@@ -388,6 +388,8 @@ func TestLocalNames(t *testing.T) {
 	e := newEnv(t, nil)
 	local := []string{"printer.local.", "local.", "router.lan.", "fritz.home.", "nas.home.arpa.", "x.internal.",
 		"a.localdomain.", "foo.test.", "bar.invalid.", "x.alt.", "my.corp.",
+		"wiki.intranet.", "nas.private.", "fritz.box.", "printer.fritz.box.",
+		"1.0.18.198.in-addr.arpa.", "9.9.19.198.in-addr.arpa.", "170.0.0.192.in-addr.arpa.",
 		"1.1.168.192.in-addr.arpa.", "5.0.0.10.in-addr.arpa.", "1.0.16.172.in-addr.arpa.", "1.0.31.172.in-addr.arpa.",
 		"1.0.0.127.in-addr.arpa.", "1.1.254.169.in-addr.arpa.", "1.0.64.100.in-addr.arpa.", "1.0.127.100.in-addr.arpa.",
 		"1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.e.f.ip6.arpa.",
@@ -398,6 +400,8 @@ func TestLocalNames(t *testing.T) {
 		}
 	}
 	forwarded := []string{"lan.example.com.", "localhost.example.com.", "1.0.15.172.in-addr.arpa.",
+		"example.box.", "fritz.box.example.", "1.0.17.198.in-addr.arpa.", "1.0.20.198.in-addr.arpa.",
+		"1.1.0.192.in-addr.arpa.",
 		"1.0.32.172.in-addr.arpa.", "1.0.128.100.in-addr.arpa.", "8.8.8.8.in-addr.arpa.", "abcdefgh.onion.", "x.exit."}
 	for _, n := range forwarded {
 		if m := e.ask(t, query(6, n, dnsmessage.TypeA), MaxUDPSize); m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 1 {
@@ -604,5 +608,135 @@ func TestListSwap(t *testing.T) {
 	cur.Store(testList(t))
 	if m := e.ask(t, query(1, "tracker.example.", dnsmessage.TypeA), MaxUDPSize); m.RCode != dnsmessage.RCodeNameError {
 		t.Errorf("after loading a list: %v", m.RCode)
+	}
+}
+
+func TestPlainName(t *testing.T) {
+	long := strings.Repeat("a", 63)
+	for name, want := range map[string]bool{
+		"":                           true, // the root
+		".":                          true,
+		"example.org.":               true,
+		"example.org":                true,
+		"WwW.Example.COM.":           true,
+		"_dns._udp.example.org.":     true,
+		"xn--caf-dma.example.":       true,
+		"a-b_c.0.example.":           true,
+		long + ".example.":           true,
+		long + "a.example.":          false, // a 64-byte label
+		"doubleclick.net\x00.":       false,
+		"ads.doubleclick.net\x00x.":  false,
+		"a\x01b.example.":            false,
+		"a\tb.example.":              false,
+		"a\x7fb.example.":            false,
+		"a b.example.":               false,
+		"caf\xc3\xa9.example.":       false,
+		"a*.example.":                false,
+		"0/25.2.0.192.in-addr.arpa.": false,
+		"a..b.":                      false,
+		".a.":                        false,
+		"..":                         false,
+	} {
+		if got := PlainName(name); got != want {
+			t.Errorf("PlainName(%q) = %v, want %v", name, got, want)
+		}
+	}
+	if n := strings.Repeat(long+".", 4)[:254]; PlainName(n) {
+		t.Errorf("a %d-byte name passed", len(n)-1)
+	}
+}
+
+// rawQuery builds a query for the wire labels given, whatever bytes they
+// hold (dnsmessage.NewName would refuse a dot inside a label, nothing else).
+func rawQuery(id uint16, t dnsmessage.Type, labels ...string) []byte {
+	m := make([]byte, 12)
+	binary.BigEndian.PutUint16(m, id)
+	m[2] = 0x01 // RD
+	binary.BigEndian.PutUint16(m[4:], 1)
+	for _, l := range labels {
+		m = append(m, byte(len(l)))
+		m = append(m, l...)
+	}
+	m = append(m, 0)
+	m = binary.BigEndian.AppendUint16(m, uint16(t))
+	return binary.BigEndian.AppendUint16(m, uint16(dnsmessage.ClassINET))
+}
+
+func TestBadNamesNeverReachTor(t *testing.T) {
+	cases := [][]string{
+		{"doubleclick", "net\x00"},         // tor would look up doubleclick.net
+		{"ads", "doubleclick", "net\x00x"}, // and ads.doubleclick.net
+		{"tracker", "example\x00", "evil"}, // a blocked name in front of a NUL
+		{"www", "example", "org\x00"},      // an allowed name: refused all the same
+		{"printer\x00", "local"},           // a local name
+		{"exfil-data-1\x00", "doubleclick", "net"},
+		{"a\x01b", "example"}, {"a\nb", "example"}, {"a\x7f", "example"},
+		{"a b", "example"}, {"caf\xc3\xa9", "example"}, {"*", "example"}, {"\x00"},
+	}
+	for _, mode := range []BlockMode{BlockNXDOMAIN, BlockZero} {
+		e := newEnv(t, func(c *Config) { c.BlockMode = mode })
+		for _, labels := range cases {
+			for _, qt := range []dnsmessage.Type{dnsmessage.TypeA, dnsmessage.TypeAAAA, dnsmessage.TypePTR} {
+				m := e.ask(t, rawQuery(0x5151, qt, labels...), MaxUDPSize)
+				if m.ID != 0x5151 || m.RCode != dnsmessage.RCodeNameError || len(m.Answers) != 0 {
+					t.Errorf("%q %v: %v with %d answers, want NXDOMAIN", labels, qt, m.RCode, len(m.Answers))
+				}
+				if len(m.Authorities) != 1 || m.Authorities[0].Header.Type != dnsmessage.TypeSOA {
+					t.Errorf("%q: no SOA in the authority section", labels)
+				}
+				if len(m.Questions) != 1 || m.Questions[0].Name.String() != strings.Join(labels, ".")+"." {
+					t.Errorf("%q: question not echoed: %+v", labels, m.Questions)
+				}
+			}
+		}
+		if n := e.up.calls.Load(); n != 0 {
+			t.Errorf("mode %v: tor asked %d times", mode, n)
+		}
+		if got, want := e.stats.BadName.Load(), uint64(3*len(cases)); got != want {
+			t.Errorf("bad_name counter %d, want %d", got, want)
+		}
+		if e.stats.Blocked.Load() != 0 || e.stats.Local.Load() != 0 {
+			t.Errorf("counted as blocked %d, local %d", e.stats.Blocked.Load(), e.stats.Local.Load())
+		}
+	}
+
+	// The same names without the odd bytes behave as before.
+	e := newEnv(t, nil)
+	if m := e.ask(t, rawQuery(1, dnsmessage.TypeA, "doubleclick", "net"), MaxUDPSize); m.RCode != dnsmessage.RCodeNameError {
+		t.Errorf("doubleclick.net: %v", m.RCode)
+	}
+	if m := e.ask(t, rawQuery(1, dnsmessage.TypeA, "www", "example", "org"), MaxUDPSize); m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 1 {
+		t.Errorf("www.example.org: %v", m.RCode)
+	}
+	if e.up.calls.Load() != 1 || e.stats.BadName.Load() != 0 {
+		t.Errorf("calls=%d bad_name=%d", e.up.calls.Load(), e.stats.BadName.Load())
+	}
+}
+
+func TestRootStaysHere(t *testing.T) {
+	e := newEnv(t, nil)
+	for _, qt := range []dnsmessage.Type{dnsmessage.TypeA, dnsmessage.TypeAAAA, dnsmessage.TypePTR, dnsmessage.TypeNS} {
+		m := e.ask(t, rawQuery(9, qt), MaxUDPSize)
+		if m.RCode != dnsmessage.RCodeSuccess || len(m.Answers) != 0 || len(m.Questions) != 1 || m.Questions[0].Name.String() != "." {
+			t.Errorf("root %v: %+v", qt, m)
+		}
+	}
+	if e.up.calls.Load() != 0 {
+		t.Errorf("tor asked %d times for the root", e.up.calls.Load())
+	}
+}
+
+func TestCNAMEToBadName(t *testing.T) {
+	e := newEnv(t, nil)
+	e.up.fn = func(id uint16, q dnsmessage.Question) ([]byte, error) {
+		return reply(id, q, dnsmessage.RCodeSuccess, func(b *dnsmessage.Builder) {
+			b.CNAMEResource(rr(q.Name.String(), dnsmessage.TypeCNAME),
+				dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName("doubleclick.net\x00.")})
+			b.AResource(rr("doubleclick.net\x00.", dnsmessage.TypeA), dnsmessage.AResource{A: [4]byte{192, 0, 2, 7}})
+		}), nil
+	}
+	m := e.ask(t, query(3, "www.example.org.", dnsmessage.TypeA), MaxUDPSize)
+	if m.RCode != dnsmessage.RCodeNameError || len(m.Answers) != 0 {
+		t.Errorf("CNAME to a name with a NUL: %v with %d answers, want blocked", m.RCode, len(m.Answers))
 	}
 }

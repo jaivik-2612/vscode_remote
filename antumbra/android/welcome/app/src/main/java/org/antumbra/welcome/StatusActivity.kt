@@ -53,6 +53,7 @@ class StatusActivity : ComponentActivity() {
                                 session = session,
                                 check = check,
                                 policyFailures = WelcomeModel.policyFailures,
+                                wifiNotOn = WelcomeModel.wifiNotOn,
                                 canPowerOff = Emergency.canPowerOff(this@StatusActivity),
                                 message = message,
                                 messageIsError = messageIsError,

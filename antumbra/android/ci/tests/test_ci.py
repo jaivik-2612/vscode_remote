@@ -81,7 +81,7 @@ def client_hello(sni):
     return b"\x16\x03\x01" + struct.pack(">H", len(hs)) + hs
 
 
-def dhcp(msgtype, chaddr, hostname=None, vendor=None, requested=None, ciaddr="0.0.0.0"):
+def dhcp(msgtype, chaddr, hostname=None, vendor=None, requested=None, ciaddr="0.0.0.0", server=None):
     b = struct.pack(">BBBBIHH4s4s4s4s", 1, 1, 6, 0, 0xABCDEF01, 0, 0, ipaddress.IPv4Address(ciaddr).packed,
                     b"\0" * 4, b"\0" * 4, b"\0" * 4)
     b += mac(chaddr) + b"\0" * 10 + b"\0" * 64 + b"\0" * 128 + b"\x63\x82\x53\x63"
@@ -92,6 +92,8 @@ def dhcp(msgtype, chaddr, hostname=None, vendor=None, requested=None, ciaddr="0.
         b += bytes([60, len(vendor)]) + vendor.encode()
     if requested:
         b += bytes([50, 4]) + ipaddress.IPv4Address(requested).packed
+    if server:
+        b += bytes([54, 4]) + ipaddress.IPv4Address(server).packed
     return b + b"\xff"
 
 
@@ -160,11 +162,12 @@ NONCE = "abc123"
 ARM_HOST = 1020.0  # install_start; cutoff = 1020 + 1.0 (offset low) - 1.0 (margin) = 1020.0
 
 
-def events_text(arm=True):
+def events_text(arm=True, extra=(), stop=1100.0):
     lines = ["boot_completed\t995.0\t", "clock_marker_before\t1008.0\t" + NONCE, "clock_marker_after\t1009.0\t" + NONCE]
     if arm:
         lines.append("install_start\t%s\t" % ARM_HOST)
-    lines.append("capture_stop\t1100.0\t")
+    lines.extend("%s\t%s\t" % e for e in extra)
+    lines.append("capture_stop\t%s\t" % stop)
     return "\n".join(lines) + "\n"
 
 
@@ -187,7 +190,10 @@ def base_frames():
         (1031.0, out4("192.0.2.10", tcp(40011, 443), 6)),
         (1032.0, out4("192.0.2.20", tcp(40012, 443), 6)),
         (1033.0, out4("192.0.2.44", tcp(40013, 443), 6)),
-        (1034.0, out4("10.0.2.2", udp(68, 67, dhcp(3, GUEST_MAC, requested=GUEST, ciaddr=GUEST)), 17)),
+        # A new lease after arm (SELECTING: the server's offer, with its identifier).
+        (1034.0, eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0800,
+                     ipv4("0.0.0.0", "255.255.255.255", 17,
+                          udp(68, 67, dhcp(3, GUEST_MAC, requested="10.0.2.16", server="10.0.2.2"))))),
     ]
 
 
@@ -223,10 +229,11 @@ class TempDir(unittest.TestCase):
             f.write(content)
         return p
 
-    def analyse(self, frames, arm=True, extra=(), consensus=True, expect_seen=None, require_tor=True):
+    def analyse(self, frames, arm=True, extra=(), consensus=True, expect_seen=None, require_tor=True,
+                events=(), stop=1100.0):
         write_pcap(self.path("c.pcap"), frames)
         args = ["analyse", "--scenario", "t", "--pcap", self.path("c.pcap"),
-                "--events", self.write("events.tsv", events_text(arm)), "--out", self.path("a.json"),
+                "--events", self.write("events.tsv", events_text(arm, events, stop)), "--out", self.path("a.json"),
                 "--tor-binary", self.write("tor", TOR_BINARY), "--bridges", self.write("bridges.txt", BRIDGES)]
         if arm:
             args += ["--arm-event", "install_start"]
@@ -326,7 +333,11 @@ class InputsTest(TempDir):
         self.assertEqual(td.info["consensus"]["flavour"], "microdesc")
         self.assertEqual(td.lookup("198.51.100.7", 9001)[0], "tor-relay")
         self.assertEqual(td.lookup("2001:db8::7", 9001)[0], "tor-relay")
-        self.assertEqual(td.lookup("198.51.100.8", 80)[0], "tor-directory")  # DirPort
+        # DirPorts are never Tor traffic (clients use the ORPort); they are only named.
+        self.assertIsNone(td.lookup("198.51.100.8", 80))
+        self.assertEqual(td.dirport("198.51.100.8", 80), "relay relayB (DirPort)")
+        self.assertIsNone(td.lookup("128.31.0.39", 9231))
+        self.assertIsNone(td.lookup("192.0.2.10", 80))
         self.assertEqual(td.lookup("192.0.2.20", 443), ("tor-directory", "authority auth1"))
         self.assertEqual(td.lookup("192.0.2.10", 443)[0], "tor-directory")  # fallback
         self.assertEqual(td.lookup("128.31.0.39", 9201), ("tor-directory", "authority moria1"))
@@ -504,6 +515,260 @@ class AnalyserTest(TempDir):
         self.assertIn("What this test cannot see", md)
 
 
+class FailClosedTest(TempDir):
+    """Frames that are not slirp's own are the phone's, whatever they carry."""
+
+    def one(self, frame):
+        rc, a = self.analyse(base_frames() + [(1040.0, frame)])
+        self.assertEqual((a["verdict"], rc), ("fail", 1), a["verdict_reasons"])
+        return a["leaks"]
+
+    def test_second_mac_high_udp_port(self):
+        # A second interface whose only traffic is UDP to a high port.
+        leaks = self.one(out4("203.0.113.9", udp(40100, 3478, b"stun"), 17, src="10.0.2.16", src_mac="02:aa:bb:cc:dd:ee"))
+        self.assertEqual([(f["kind"], f["dst"]) for f in leaks], [("unattributed", "203.0.113.9")])
+
+    def test_guest_mac_with_slirp_source(self):
+        leaks = self.one(out4("203.0.113.9", udp(40101, 5000), 17, src="10.0.2.3"))
+        self.assertEqual([f["kind"] for f in leaks], ["unattributed"])
+
+    def test_random_mac_that_looks_like_slirp(self):
+        leaks = self.one(out4("203.0.113.9", tcp(40102, 443), 6, src_mac="52:55:aa:bb:cc:dd"))
+        self.assertEqual([f["kind"] for f in leaks], ["tcp"])
+
+    def test_forged_slirp_mac(self):
+        # slirp's exact MAC, but not addressed to the phone: the phone forged it.
+        leaks = self.one(eth(SLIRP_GW_MAC, GUEST_MAC, 0x0800, ipv4("198.51.100.200", "203.0.113.9", 6, tcp(40103, 443))))
+        self.assertEqual([f["kind"] for f in leaks], ["unattributed"])
+        leaks = self.one(eth(SLIRP_GW_MAC, SLIRP_GW_MAC, 0x0800, ipv4("10.0.2.3", "10.0.2.2", 6, tcp(40104, 80))))
+        self.assertEqual([f["kind"] for f in leaks], ["unattributed"])
+
+    def test_dirport_is_a_leak(self):
+        leaks = self.one(out4("198.51.100.8", tcp(40105, 80), 6))
+        self.assertEqual([(f["kind"], f["label"]) for f in leaks], [("tcp", "relay relayB (DirPort)")])
+
+    def test_slirp_traffic_is_not_judged(self):
+        # Answers from slirp to the phone, a DHCP offer to a new address, slirp's
+        # router advertisement and ARP: counted as the emulator's, never listed.
+        frames = base_frames() + [
+            (1041.0, eth(SLIRP_GW_MAC, "ff:ff:ff:ff:ff:ff", 0x0800,
+                         ipv4("10.0.2.2", "255.255.255.255", 17, udp(67, 68, dhcp(2, GUEST_MAC))))),
+            (1042.0, eth("52:56:00:00:00:02", "33:33:00:00:00:01", 0x86DD,
+                         ipv6("fe80::2", "ff02::1", 58, b"\x86\x00\x00\x00" + b"\x00" * 12))),
+            (1043.0, eth(SLIRP_GW_MAC, "ff:ff:ff:ff:ff:ff", 0x0806, arp(1, SLIRP_GW_MAC, "10.0.2.2", "00:00:00:00:00:00", GUEST))),
+        ]
+        rc, a = self.analyse(frames)
+        self.assertEqual((a["verdict"], rc), ("pass", 0), a["verdict_reasons"])
+        self.assertEqual(a["totals"]["from_emulator"], 7)
+
+    def test_lan_mode_judges_by_address(self):
+        # A capture on a real network: the router's frames are not the phone's,
+        # the phone's own frames are, whatever their source.
+        router = "00:11:22:33:44:55"
+        frames = [f for f in base_frames() if f[0] >= 1030] + [
+            (1035.0, eth(router, GUEST_MAC, 0x0800, ipv4("192.0.2.200", GUEST, 6, tcp(443, 40200, 0x12)))),
+            (1036.0, eth(router, "ff:ff:ff:ff:ff:ff", 0x0800, ipv4("10.0.2.1", "10.0.2.255", 17, udp(137, 137)))),
+        ]
+        _, a = self.analyse(frames, arm=False, require_tor=False,
+                            extra=["--network", "lan", "--judge-from-start", "--guest", GUEST, "--require-tor-traffic"])
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        self.assertEqual(a["totals"]["not_the_phone"], 3)  # the two above and the relay's SYN-ACK
+        _, a = self.analyse(frames + [(1037.0, out4("10.0.2.1", udp(40201, 9), 17, src="10.0.2.99"))], arm=False,
+                            require_tor=False, extra=["--network", "lan", "--judge-from-start", "--guest", GUEST])
+        self.assertEqual([f["kind"] for f in a["leaks"]], ["unattributed"])
+
+
+class JudgementsTest(TempDir):
+    def test_judge_from_start(self):
+        # No events at all, every packet judged: the DNS before 'arm' counts.
+        _, a = self.analyse(base_frames(), arm=False, extra=["--judge-from-start", "--guest", GUEST])
+        self.assertEqual(a["verdict"], "fail")
+        self.assertIn("connectivitycheck.gstatic.com", {n for f in a["leaks"] for n in f["names"]})
+        self.assertEqual(a["arm"]["event"], "(start of the capture)")
+
+    def test_dhcp_lease_memory(self):
+        reboot = eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0800, ipv4("0.0.0.0", "255.255.255.255", 17,
+                                                                 udp(68, 67, dhcp(3, GUEST_MAC, requested=GUEST))))
+        _, a = self.analyse(base_frames() + [(1040.0, reboot)])
+        self.assertEqual(a["verdict"], "fail")
+        self.assertEqual([(f["kind"], f["label"]) for f in a["leaks"]], [("dhcp-lease", "requested 10.0.2.15")])
+        renew = out4("10.0.2.2", udp(68, 67, dhcp(3, GUEST_MAC, ciaddr=GUEST)), 17)
+        _, a = self.analyse(base_frames() + [(1040.0, renew)])
+        self.assertEqual([f["kind"] for f in a["leaks"]], ["dhcp-lease"])
+        # The same address offered anew by the server (SELECTING) is not the lease memory.
+        select = eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0800, ipv4("0.0.0.0", "255.255.255.255", 17,
+                                                                 udp(68, 67, dhcp(3, GUEST_MAC, requested=GUEST, server="10.0.2.2"))))
+        _, a = self.analyse(base_frames() + [(1040.0, select)])
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        self.assertEqual(a["dhcp_pre_arm_leases"], [GUEST])
+
+    def test_dhcp_hostname(self):
+        # After arm, a DHCP message with a host name (option 12) is a LEAK;
+        # before arm (base_frames' DISCOVER, "android-1") it is listed only.
+        named = eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0800, ipv4("0.0.0.0", "255.255.255.255", 17,
+                                                                udp(68, 67, dhcp(1, GUEST_MAC, "OnePlus-7T-Pro"))))
+        _, a = self.analyse(base_frames() + [(1040.0, named)])
+        self.assertEqual(a["verdict"], "fail")
+        self.assertEqual([(f["kind"], f["label"]) for f in a["leaks"]], [("dhcp-hostname", "host name OnePlus-7T-Pro")])
+        # A phone capture judged from its start: the same.
+        _, a = self.analyse([(1000.0, named)] + base_frames()[9:], arm=False,
+                            extra=["--judge-from-start", "--guest", GUEST])
+        self.assertIn("dhcp-hostname", [f["kind"] for f in a["leaks"]])
+
+    def armed(self, frames, require=True, events=(("armed_probe_start", 1050.0), ("armed_probe_end", 1070.0))):
+        extra = ["--armed-window", "armed_probe_start:armed_probe_end"]
+        if require:
+            extra.append("--require-armed-window")
+        return self.analyse(base_frames() + frames, extra=extra, events=events)
+
+    def test_armed_window(self):
+        # Window: 1050 + 2.0 (offset high) + 0.5 to 1070 + 1.0 (offset low) - 0.5.
+        link = [(1060.0, eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0806, arp(1, GUEST_MAC, GUEST, "00:00:00:00:00:00", "10.0.2.2"))),
+                (1061.0, eth(GUEST_MAC, "ff:ff:ff:ff:ff:ff", 0x0800, ipv4("0.0.0.0", "255.255.255.255", 17,
+                                                                           udp(68, 67, dhcp(1, GUEST_MAC)))))]
+        _, a = self.armed(link + [(1052.0, out4("198.51.100.7", tcp(40010, 9001, 0x10), 6)),
+                                  (1071.0, out4("198.51.100.7", tcp(40010, 9001, 0x10), 6))])
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        aw = a["armed_window"]
+        self.assertEqual((aw["status"], aw["packets"], aw["allowed"], aw["leaks"]), ("ok", 2, 2, 0))
+        self.assertAlmostEqual(aw["start"], 1052.5)
+        self.assertAlmostEqual(aw["end"], 1070.5)
+        # Tor's own traffic is a LEAK while only the arm set is loaded.
+        _, a = self.armed(link + [(1065.0, out4("198.51.100.7", tcp(40010, 9001, 0x10), 6))])
+        self.assertEqual(a["verdict"], "fail")
+        self.assertEqual(a["armed_window"]["status"], "fail")
+        self.assertEqual([(f["kind"], f["label"]) for f in a["leaks"]], [("armed", "relay relayA")])
+
+    def test_armed_window_missing_is_blind(self):
+        rc, a = self.armed([], events=(("armed_probe_start", 1050.0),))
+        self.assertEqual((a["verdict"], rc), ("blind", 3))
+        self.assertEqual(a["armed_window"]["status"], "not-run")
+        _, a = self.armed([], events=(("armed_probe_start", 1050.0), ("armed_probe_end", 1052.0)))
+        self.assertEqual((a["verdict"], a["armed_window"]["status"]), ("blind", "too-short"))
+
+    def test_expect_guest(self):
+        ip_addr = ("1: lo: <LOOPBACK,UP> mtu 65536\n    inet 127.0.0.1/8 scope host lo\n"
+                   "2: eth0: <UP> mtu 1500\n    inet 10.0.2.15/24 brd 10.0.2.255 scope global eth0\n"
+                   "    inet6 fe80::1/64 scope link\n"
+                   "3: wlan0@if5: <UP> mtu 1500\n    inet 10.0.2.16/24 brd 10.0.2.255 scope global wlan0\n")
+        self.assertEqual(la.load_expect_guest(self.write("ip.txt", ip_addr)), [("eth0", "10.0.2.15"), ("wlan0", "10.0.2.16")])
+        _, a = self.analyse(base_frames(), extra=["--expect-guest", self.path("ip.txt")])
+        self.assertEqual(a["verdict"], "blind")
+        self.assertEqual(a["coverage"]["addresses_missing"], ["wlan0 10.0.2.16"])
+        _, a = self.analyse(base_frames(), extra=["--expect-guest", self.write("ip2.txt", "eth0 10.0.2.15/24\n")])
+        self.assertEqual((a["verdict"], a["coverage"]["status"]), ("pass", "complete"))
+
+    def test_end_of_capture(self):
+        _, a = self.analyse(base_frames(), stop=1300.0)
+        self.assertEqual(a["verdict"], "blind")
+        self.assertIn("before the scenario stopped", a["verdict_reasons"][0])
+        write_pcap(self.path("c.pcap"), base_frames())
+        with open(self.path("c.pcap"), "rb") as f:
+            cut = f.read()[:-7]
+        self.write("cut.pcap", cut)
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = la.main(["analyse", "--scenario", "t", "--pcap", self.path("cut.pcap"), "--events",
+                          self.write("ev.tsv", events_text()), "--arm-event", "install_start",
+                          "--consensus", self.write("consensus", CONSENSUS), "--tor-binary", self.write("tor", TOR_BINARY),
+                          "--bridges", self.write("bridges.txt", BRIDGES), "--out", self.path("a.json")])
+        self.assertEqual(rc, 3)
+        with open(self.path("a.json")) as f:
+            self.assertIn("ends in the middle of a frame", json.load(f)["verdict_reasons"][0])
+
+
+STREAMS = """ANTUMBRA-CI-STREAMS connect 120
+250 OK
+250 OK
+650 STREAM 1 NEWRESOLVE 0 check.torproject.org:0 SOURCE_ADDR=127.0.0.1:5000 PURPOSE=DNS_REQUEST
+650 STREAM 1 SUCCEEDED 3 check.torproject.org:0
+650 STREAM 2 NEW 0 116.202.120.181:443 SOURCE_ADDR=127.0.0.1:40000 PURPOSE=USER
+650 STREAM 2 SUCCEEDED 3 116.202.120.181:443
+650 STREAM 3 NEW 0 10.0.2.2:80 SOURCE_ADDR=127.0.0.1:40001 PURPOSE=USER
+650 STREAM 3 FAILED 0 10.0.2.2:80 REASON=MISC
+650 STREAM 4 NEW 0 (Tor_internal):0 PURPOSE=DIR_FETCH
+ANTUMBRA-CI-STREAMS connect 300
+250 OK
+250 OK
+650 STREAM 1 NEWRESOLVE 0 connectivitycheck.gstatic.com:0 PURPOSE=DNS_REQUEST
+650 STREAM 6 NEW 0 10.192.0.5:80 PURPOSE=USER
+650 STREAM 6 REMAP 0 abcdefghijklmnop.onion:80 SOURCE=CACHE
+650 STREAM 6 CLOSED 4 abcdefghijklmnop.onion:80 REASON=DONE
+"""
+
+FILTER_LOG = """antumbra-dnsfilter: 2026/10/11 06:38:00 debug mode: query names will be logged
+antumbra-dnsfilter: 2026/10/11 06:38:19 query "check.torproject.org." A -> forwarded
+antumbra-dnsfilter: 2026/10/11 06:38:19 query "doubleclick.net." A -> blocked
+antumbra-dnsfilter: 2026/10/11 06:38:20 query "Connectivitycheck.gstatic.com." AAAA -> forwarded
+antumbra-dnsfilter: 2026/10/11 06:38:20 query "odd\\x00na\\"me." A -> nxdomain (bad name)
+"""
+
+EXPECTED = """# test list
+name check.torproject.org
+name *.doubleclick.net
+target 10.0.2.2:*
+target 116.202.120.181:443
+"""
+
+
+class DestinationsTest(TempDir):
+    def run_it(self, mode, streams=STREAMS):
+        extra = ["--filter-log", self.write("dnsfilter.log", FILTER_LOG),
+                 "--expected-destinations", self.write("expected.txt", EXPECTED), "--destinations-mode", mode]
+        if streams is not None:
+            extra += ["--tor-streams", self.write("streams.txt", streams)]
+        return self.analyse(base_frames(), extra=extra)
+
+    def test_parsers(self):
+        streams, info = la.load_tor_streams(self.write("s", STREAMS))
+        self.assertEqual(info, {"enabled": True, "connections": 2})
+        self.assertEqual([s["target"] for s in streams], ["check.torproject.org:0", "116.202.120.181:443", "10.0.2.2:80",
+                                                         "(Tor_internal):0", "connectivitycheck.gstatic.com:0",
+                                                         "10.192.0.5:80"])
+        self.assertEqual(streams[5]["remaps"], ["abcdefghijklmnop.onion:80"])
+        q, info = la.load_filter_log(self.write("f", FILTER_LOG))
+        self.assertTrue(info["debug"])
+        self.assertEqual(q[2], ("connectivitycheck.gstatic.com", "AAAA", "forwarded"))
+        self.assertEqual(q[3][0], 'odd\x00na"me')
+        exp = la.load_expected_destinations(self.write("e", EXPECTED))
+        self.assertTrue(la.name_expected("doubleclick.net", exp["name"]))
+        self.assertTrue(la.name_expected("ad.doubleclick.net", exp["name"]))
+        self.assertFalse(la.name_expected("notdoubleclick.net", exp["name"]))
+        self.assertTrue(la.target_expected("10.0.2.2", 5000, exp["target"]))
+        self.assertFalse(la.target_expected("10.0.2.3", 53, exp["target"]))
+        with self.assertRaises(ValueError):
+            la.load_expected_destinations(self.write("bad", "target 1.2.3.4\n"))
+
+    def test_learning(self):
+        _, a = self.run_it("learning")
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        d = a["destinations"]
+        self.assertEqual(d["status"], "unexpected")
+        self.assertEqual(len(d["unexpected"]), 2)
+        self.assertTrue(d["unexpected"][0].startswith("name connectivitycheck.gstatic.com"))
+        self.assertTrue(d["unexpected"][1].startswith("target 10.192.0.5:80"))
+        blocked = [r for r in d["names"] if r["name"] == "doubleclick.net"][0]
+        self.assertEqual((blocked["reached"], blocked["expected"]), (False, True))
+        self.assertTrue(any("learning mode" in n for n in a["notes"]))
+        la.main(["report", "--in", self.path("a.json"), "--json", self.path("r.json"), "--md", self.path("r.md")])
+        md = read(self.path("r.md"))
+        self.assertIn("Names and destinations through Tor", md)
+        self.assertIn("abcdefghijklmnop.onion", md)
+
+    def test_strict(self):
+        rc, a = self.run_it("strict")
+        self.assertEqual((a["verdict"], rc), ("fail", 1))
+        self.assertIn("unexpected", a["verdict_reasons"][-1])
+        rc, a = self.run_it("strict", streams=None)
+        self.assertEqual((a["verdict"], rc), ("blind", 3))
+        self.assertEqual(a["destinations"]["status"], "not-recorded")
+        rc, a = self.run_it("strict", streams="ANTUMBRA-CI-STREAMS connect 1\n515 Authentication failed\n")
+        self.assertEqual(a["destinations"]["status"], "not-recorded")
+        # SETEVENTS refused; a later GETINFO's OK does not count.
+        rc, a = self.run_it("strict", streams="ANTUMBRA-CI-STREAMS connect 1\n250 OK\n552 Unrecognized event\n"
+                                              "250-version=0.4.9.3\n250 OK\n")
+        self.assertEqual(a["destinations"]["status"], "not-recorded")
+
+
 class CitoolTest(TempDir):
     XML = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">
 <node index="0" text="" resource-id="" bounds="[0,0][1080,2400]">
@@ -600,6 +865,20 @@ class SummaryTest(TempDir):
         self.assertIn("did not run to the end", problems[0])
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(summary.main([root, "--verdict"]), 1)
+            # Written before the artifact is uploaded, judged afterwards.
+            self.assertEqual(summary.main([root, "--verdict", "--no-fail"]), 0)
+            self.assertEqual(summary.main([root, "--check"]), 1)
+        self.assertFalse(json.loads(read(os.path.join(root, "verdict.json")))["ok"])
+        self.scenario("baseline", 0, [("system_ready", "ok", "")], "info")
+        self.scenario("antumbra", 0, [("tor_bootstrap", "ok", "100%"), ("wifi_mac_new", "warn", "same")], "pass")
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(summary.main([root, "--verdict", "--no-fail"]), 0)
+            self.assertEqual(summary.main([root, "--check"]), 0)
+        self.assertEqual(json.loads(read(os.path.join(root, "verdict.json")))["warnings"],
+                         ["antumbra: wifi_mac_new: same"])
+        os.remove(os.path.join(root, "verdict.json"))
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(summary.main([root, "--check"]), 1)
 
 
 if __name__ == "__main__":

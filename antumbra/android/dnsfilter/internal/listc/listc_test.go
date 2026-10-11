@@ -2,6 +2,7 @@ package listc
 
 import (
 	"bytes"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -84,21 +85,21 @@ func TestParseETIP(t *testing.T) {
 }
 
 func TestParseIPv4(t *testing.T) {
-	in := "# DoH servers\n1.1.1.1\n8.8.8.8 # comment\n9.9.9.0/24\n9.9.9.9/24\n" +
+	in := "# DoH servers\n1.1.1.1\n8.8.8.8 # comment\n9.9.9.9/32\n9.9.9.0/24\n9.9.9.9/24\n9.9.9.8/31\n" +
 		"10.0.0.1\n127.0.0.1\n192.168.1.1\n169.254.1.1\n100.64.0.1\n224.0.0.1\n0.0.0.0\n" +
-		"2606:4700::1111\n300.1.1.1\n1.0.0.0/4\n"
+		"2606:4700::1111\n300.1.1.1\n1.0.0.0/4\n0.0.0.0/0\n"
 	var got []string
 	c, err := ParseIPv4(strings.NewReader(in), func(p netip.Prefix) { got = append(got, p.String()) })
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"1.1.1.1/32", "8.8.8.8/32", "9.9.9.0/24"}
+	want := []string{"1.1.1.1/32", "8.8.8.8/32", "9.9.9.9/32"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q, want %q", got, want)
 	}
-	// 9.9.9.9/24 (not a prefix boundary), 7 special, IPv6, 300.x, /4.
-	if c.Valid != 3 || c.Invalid != 11 {
-		t.Errorf("counts %+v, want 3 valid and 11 invalid", c)
+	// Three prefixes wider than /32, 7 special, IPv6, 300.x, /4, /0.
+	if c.Valid != 3 || c.Invalid != 14 {
+		t.Errorf("counts %+v, want 3 valid and 14 invalid", c)
 	}
 }
 
@@ -313,6 +314,17 @@ func TestCompileFailures(t *testing.T) {
 			t.Error("accepted an invalid allow entry")
 		}
 	})
+	t.Run("doh too many", func(t *testing.T) {
+		dir, dl := testTree(t)
+		var b strings.Builder
+		for i := 0; i <= MaxIPv4Entries; i++ {
+			fmt.Fprintf(&b, "45.%d.%d.%d\n", i>>16, (i>>8)&255, i&255)
+		}
+		os.WriteFile(filepath.Join(dl, "doh-ips"), []byte(b.String()), 0o644)
+		if _, _, err := CompileIPv4(loadConfig(t, dir), dl, "v"); err == nil || !strings.Contains(err.Error(), "at most") {
+			t.Errorf("err = %v, want a maximum-entries failure", err)
+		}
+	})
 	t.Run("doh too few", func(t *testing.T) {
 		dir, dl := testTree(t)
 		os.WriteFile(filepath.Join(dl, "doh-ips"), []byte("10.0.0.1\n"), 0o644)
@@ -375,5 +387,21 @@ func TestShippedSources(t *testing.T) {
 	}
 	if len(cfg.Guard) == 0 {
 		t.Error("no guard entries")
+	}
+	// The Exodus exclusions stay valid while the source is off (see
+	// sources.conf), so that turning it back on is one edit.
+	if _, _, err := readDomainFile(filepath.Join(dir, "exodus-exclude.txt")); err != nil {
+		t.Error(err)
+	}
+	// The emulator's tracker test asks for these; they must stay blocked
+	// whatever the remote lists do.
+	own, _, err := readDomainFile(filepath.Join(dir, "antumbra-extra.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"doubleclick.net", "stats.lineageos.org"} {
+		if !blocklist.Covers(sortedSet(own), want) {
+			t.Errorf("antumbra-extra.txt does not block %s", want)
+		}
 	}
 }

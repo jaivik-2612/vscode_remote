@@ -41,6 +41,9 @@ object WelcomeModel {
 
     /** Policies that failed at Start, for the status screen. */
     var policyFailures: List<String> = emptyList()
+
+    /** Wi-Fi should be on for this session but is not (airplane mode). */
+    var wifiNotOn: Boolean = false
 }
 
 /** Screen 1. The home screen and a locked task until Start (see Home). */
@@ -78,12 +81,12 @@ class WelcomeActivity : ComponentActivity() {
         // The home screen: Back goes nowhere.
         onBackPressedDispatcher.addCallback(this) { }
 
-        // Check the add-on while the screen is visible.
+        // Check the add-on and the device owner while the screen is visible.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     val present = withContext(Dispatchers.IO) { AddOnCheck.run() }.present
-                    WelcomeModel.ui = WelcomeModel.ui.copy(addOnPresent = present)
+                    WelcomeModel.ui = WelcomeModel.ui.copy(addOnPresent = present, notDeviceOwner = !policies.isDeviceOwner)
                     delay(3000)
                 }
             }
@@ -109,18 +112,22 @@ class WelcomeActivity : ComponentActivity() {
     private fun start() {
         val ui = WelcomeModel.ui
         if (ui.starting || Session.current().started) return
-        val choices = ui.choices
+        // The Unsafe Browser does not exist yet (W11): never report it on.
+        val choices = ui.choices.copy(unsafeBrowser = false)
         val bridges: List<String> = when {
             choices.torMode != TorMode.BRIDGES -> emptyList()
             else -> when (val r = bridgeLines(this, choices)) {
                 is Bridges.Result.Ok -> r.lines
                 is Bridges.Result.Error -> {
-                    WelcomeModel.ui = ui.copy(bridgeError = BridgeMessages.text(this, r.problem, choices.bridgeSource))
+                    WelcomeModel.ui = ui.copy(
+                        bridgeError = BridgeMessages.text(this, r.problem, choices.bridgeSource),
+                        startError = null,
+                    )
                     return
                 }
             }
         }
-        WelcomeModel.ui = ui.copy(starting = true, bridgeError = null)
+        WelcomeModel.ui = ui.copy(starting = true, bridgeError = null, startError = null)
         lifecycleScope.launch {
             try {
                 startSession(choices, bridges)
@@ -132,24 +139,53 @@ class WelcomeActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Start: refused unless Welcome is the device owner; a network session
+     * is also refused when a protective policy failed (only an offline
+     * session can start then), and every Start is refused once the module
+     * holds a session from this boot.
+     */
     private suspend fun startSession(choices: Choices, bridges: List<String>) {
-        val check = withContext(Dispatchers.IO) { AddOnCheck.run() }
         val policies = Policies(this)
-        // Policies first: the module opens the network as soon as the
-        // provider reports started = 1.
-        val failures = if (policies.isDeviceOwner) {
-            withContext(Dispatchers.IO) { policies.applyAtStart(choices, check.present) }
-        } else {
-            listOf("device owner")
+        if (!policies.isDeviceOwner) {
+            refuse(getString(R.string.start_refused_not_owner), notDeviceOwner = true)
+            return
         }
-        WelcomeModel.policyFailures = failures
-        Session.start(choices, bridges)
+        val check = withContext(Dispatchers.IO) { AddOnCheck.run() }
+        if (check.sessionLatched) {
+            refuse(getString(R.string.start_refused_latched))
+            return
+        }
+        // Policies first: the module opens the network as soon as the
+        // provider reports started = 1. The boot lock keeps a late boot
+        // broadcast from locking Wi-Fi again in between.
+        val started = withContext(Dispatchers.IO) {
+            synchronized(BootState.lock) {
+                if (Session.current().started) return@synchronized null
+                val result = policies.applyAtStart(choices, check.present)
+                if (result.refused) return@synchronized result
+                WelcomeModel.policyFailures = result.failed
+                WelcomeModel.wifiNotOn = result.wifiNotOn
+                // The module had its chance to act on a power-off request.
+                Emergency.clearRequest(this@WelcomeActivity)
+                Session.start(choices, bridges)
+                result
+            }
+        } ?: return
+        if (started.refused) {
+            refuse(getString(R.string.start_refused_policies, started.protective.joinToString()))
+            return
+        }
         // From here the bridge lines live in the session only.
         WelcomeModel.ui = WelcomeUi()
-        if (policies.isDeviceOwner) SessionService.start(this)
+        SessionService.start(this)
         Home.release(this)
         openStatus()
         Home.disableWelcome(this)
+    }
+
+    private fun refuse(message: String, notDeviceOwner: Boolean = WelcomeModel.ui.notDeviceOwner) {
+        WelcomeModel.ui = WelcomeModel.ui.copy(starting = false, startError = message, notDeviceOwner = notDeviceOwner)
     }
 
     private fun openStatus() {
@@ -162,9 +198,12 @@ class WelcomeActivity : ComponentActivity() {
 
         /** The bridge lines for the choices; built-in ones come from the APK's assets. */
         fun bridgeLines(context: Context, choices: Choices): Bridges.Result = when (choices.bridgeSource) {
-            BridgeSource.CUSTOM -> Bridges.parse(choices.bridgeText)
+            BridgeSource.CUSTOM -> Bridges.parse(choices.bridgeText, Bridges.TRANSPORTS_AVAILABLE)
             BridgeSource.BUILT_IN -> try {
-                Bridges.parse(context.assets.open(BUILTIN_ASSET).bufferedReader().use { it.readText() })
+                Bridges.parse(
+                    context.assets.open(BUILTIN_ASSET).bufferedReader().use { it.readText() },
+                    Bridges.TRANSPORTS_AVAILABLE,
+                )
             } catch (e: java.io.IOException) {
                 Bridges.Result.Error(Bridges.Problem.None())
             }
@@ -187,5 +226,6 @@ object BridgeMessages {
         is Bridges.Problem.Address -> context.getString(R.string.bridges_address, p.line, p.address.take(60))
         is Bridges.Problem.Fingerprint -> context.getString(R.string.bridges_fingerprint, p.line)
         is Bridges.Problem.MissingArg -> context.getString(R.string.bridges_missing_arg, p.line, p.type, p.arg)
+        is Bridges.Problem.NeedsTransport -> context.getString(R.string.bridges_needs_transport, p.line, p.type)
     }
 }

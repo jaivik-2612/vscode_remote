@@ -11,8 +11,8 @@ serve  --log FILE --ready FILE SPEC...
         tcp:NAME:ADDR:PORT    udp:NAME:ADDR:PORT    (IPv6 ADDR in [brackets])
         unix:NAME:PATH:UID:GID:MODE
 
-tcp HOST PORT TOKEN [--timeout S]
-udp HOST PORT TOKEN [--timeout S] [--sport P]
+tcp HOST PORT TOKEN [--timeout S] [--sport P]
+udp HOST PORT TOKEN [--timeout S] [--sport P] [--bind ADDR] [--broadcast]
 unix PATH TOKEN
 ping HOST TOKEN
     Prints exactly one line: "ok <answer>" or "err <ERRNO name>".
@@ -163,6 +163,9 @@ def probe_tcp(args):
     sock = socket.socket(_family(args.host), socket.SOCK_STREAM)
     sock.settimeout(args.timeout)
     try:
+        if args.sport:
+            any_addr = "0.0.0.0" if _family(args.host) == socket.AF_INET else "::"
+            sock.bind((any_addr, args.sport))
         sock.connect((args.host, args.port))
         sock.sendall((args.token + "\n").encode())
         answer = _read_line(sock)
@@ -177,8 +180,13 @@ def probe_udp(args):
     sock = socket.socket(_family(args.host), socket.SOCK_DGRAM)
     sock.settimeout(args.timeout)
     try:
-        if args.sport:
-            sock.bind(("0.0.0.0" if _family(args.host) == socket.AF_INET else "::", args.sport))
+        if args.broadcast:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        if args.sport or args.bind:
+            # Shares the port with a listener there (both set SO_REUSEADDR).
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            any_addr = "0.0.0.0" if _family(args.host) == socket.AF_INET else "::"
+            sock.bind((args.bind or any_addr, args.sport))
         # A connected socket reports ICMP errors as ECONNREFUSED.
         sock.connect((args.host, args.port))
         sock.send((args.token + "\n").encode())
@@ -232,8 +240,10 @@ def main():
         p.add_argument("port", type=int)
         p.add_argument("token")
         p.add_argument("--timeout", type=float, default=2.0)
+        p.add_argument("--sport", type=int, default=0)
         if kind == "udp":
-            p.add_argument("--sport", type=int, default=0)
+            p.add_argument("--bind", default="", help="source address")
+            p.add_argument("--broadcast", action="store_true")
     p = sub.add_parser("unix")
     p.add_argument("path")
     p.add_argument("token")

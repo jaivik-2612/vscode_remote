@@ -37,6 +37,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.antumbra.welcome.BridgeSource
+import org.antumbra.welcome.Bridges
 import org.antumbra.welcome.Choices
 import org.antumbra.welcome.R
 import org.antumbra.welcome.TorMode
@@ -49,6 +50,8 @@ data class WelcomeUi(
     /** Null while the first check is running. */
     val addOnPresent: Boolean? = null,
     val starting: Boolean = false,
+    /** Why Start was refused (not the device owner, a protection failed, a session already held). */
+    val startError: String? = null,
 )
 
 /**
@@ -151,10 +154,12 @@ fun WelcomeScreen(
                     onCheckedChange = { onChoices(c.copy(admin = it)) },
                 )
                 GroupDivider()
+                // Shown, but off and disabled until the Unsafe Browser app
+                // exists (W11): nothing in v0 would act on it.
                 SwitchRow(
                     stringResource(R.string.unsafe_title), stringResource(R.string.unsafe_detail),
-                    checked = c.unsafeBrowser, tag = "switch_unsafe_browser",
-                    onCheckedChange = { onChoices(c.copy(unsafeBrowser = it)) },
+                    checked = false, tag = "switch_unsafe_browser", enabled = false,
+                    onCheckedChange = {},
                 )
             }
             Spacer(Modifier.height(24.dp))
@@ -169,6 +174,18 @@ fun WelcomeScreen(
                     .imePadding()
                     .padding(horizontal = 16.dp, vertical = 16.dp),
             ) {
+                if (ui.startError != null) {
+                    Text(
+                        ui.startError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 480.dp)
+                            .padding(bottom = 12.dp)
+                            .testTag("start_error"),
+                    )
+                }
                 Button(
                     onClick = onStart,
                     enabled = !ui.starting,
@@ -194,8 +211,12 @@ private fun BridgeChoices(ui: WelcomeUi, onChoices: (Choices) -> Unit) {
     val c = ui.choices
     Column(Modifier.selectableGroup()) {
         RadioRow(
-            stringResource(R.string.bridges_builtin), stringResource(R.string.bridges_builtin_detail),
+            stringResource(R.string.bridges_builtin),
+            stringResource(
+                if (Bridges.TRANSPORTS_AVAILABLE) R.string.bridges_builtin_detail else R.string.bridges_builtin_unavailable,
+            ),
             selected = c.bridgeSource == BridgeSource.BUILT_IN, tag = "bridges_builtin", indent = true,
+            enabled = Bridges.TRANSPORTS_AVAILABLE,
             onSelect = { onChoices(c.copy(bridgeSource = BridgeSource.BUILT_IN)) },
         )
         RadioRow(

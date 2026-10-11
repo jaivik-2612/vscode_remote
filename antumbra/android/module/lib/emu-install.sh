@@ -13,6 +13,9 @@
 # Magisk's installer provides. build-module.sh --emulator runs it, and then
 # runs post-fs-data.sh and service.sh by hand.
 set -u
+# adb's root shell has umask 0: without this, the directories and files
+# made here would be writable by everyone, unlike on the phone.
+umask 022
 
 SRC=${1:?usage: emu-install.sh SOURCE_DIR}
 # As in Magisk: the new version is prepared in modules_update while the
@@ -65,6 +68,7 @@ set_perm_recursive() {
 
 # Magisk creates /data/adb (0700) and /data/adb/modules on its first boot.
 mkdir -p /data/adb/modules /data/adb/modules_update
+chmod 0755 /data/adb/modules /data/adb/modules_update
 chmod 0700 /data/adb
 restorecon /data/adb 2>/dev/null
 mkdir -p "$TMPDIR"

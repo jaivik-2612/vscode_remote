@@ -4,7 +4,15 @@
 # with '#' are ignored. build-tor.sh refuses to unpack any tarball whose
 # SHA-256 differs from the value here. When gpg is installed it also checks
 # the publisher's OpenPGP signature and accepts it only from a primary key
-# listed under 'signer'.
+# listed under 'signer', and only if that key had not expired when it made
+# the signature.
+#
+# Signing keys: 'keyfile' is a copy kept in this folder (public keys only,
+# reduced with gpg's export-minimal to the keys listed under 'signer'), so a
+# build works when no key server can be reached. Each 'keyurl' is fetched
+# on every run as well, so that renewals and revocations are seen; a URL
+# that fails is skipped. Only the fingerprints under 'signer' count, so a
+# wrong or extra key in any of these copies cannot make a signature valid.
 #
 # To update a source: download the new tarball and its signature from the
 # URLs below, check the signature by hand against the listed fingerprints,
@@ -21,9 +29,12 @@
 
 # Toolchain and target. The NDK revision is checked against the
 # source.properties of the NDK in use. The API level is the minimum Android
-# version the binary runs on (34 = Android 14).
+# version the binary runs on: 29 = Android 10. One binary then runs on the
+# phone's stock OxygenOS 10 to 12 (API 29 to 31, for a smoke test in Termux
+# before the bootloader is unlocked), on the CI emulator (API 36) and on
+# LineageOS 23.2 (API 36). check-tor-binary.sh reads this value too.
 ndk     28.2.13676358
-api     34
+api     29
 
 # SOURCE_DATE_EPOCH for every build step: the time stamp of the tor
 # tarball's top directory (2026-10-07 14:40:00 UTC).
@@ -37,16 +48,27 @@ url     tor       https://archive.torproject.org/tor-package-archive/tor-0.4.9.1
 # tor signs a .sha256sum file rather than the tarball itself.
 sigtype tor       sha256sum
 sumurl  tor       https://dist.torproject.org/tor-0.4.9.14.tar.gz.sha256sum
+sumurl  tor       https://archive.torproject.org/tor-package-archive/tor-0.4.9.14.tar.gz.sha256sum
 sigurl  tor       https://dist.torproject.org/tor-0.4.9.14.tar.gz.sha256sum.asc
+sigurl  tor       https://archive.torproject.org/tor-package-archive/tor-0.4.9.14.tar.gz.sha256sum.asc
+# Antumbra's own patches, applied in this order after unpacking (see each
+# file for why). They are part of the binary's corresponding source.
+patch   tor       patches/0001-dnsport-no-reuseaddr.patch
 # Release signing keys listed on support.torproject.org (little-t-tor).
 signer  tor       1C1BC007A9F607AA8152C040BEA7B180B1491921  Alexander Faeroy
 signer  tor       B74417EDDF22AC9F9E90F49142E86A2A11F48D36  David Goulet
 signer  tor       2133BC600AB133E1D826D173FE43009C4607B1FB  Nick Mathewson
-# The Tor Project's Web Key Directory has the current copies of these keys
-# (keyserver copies can lag behind key renewals).
+keyfile tor       keys/tor.asc
+# On 2026-10-11 the Tor Project's Web Key Directory still served the copies
+# of Goulet's and Mathewson's keys that expired in 2026-03 and 2025-10;
+# keys.openpgp.org had their renewals (to 2027-03 and 2029-06). Both are
+# fetched; gpg keeps the newest self-signatures.
 keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/bakehip1o7n7gcmff79qd1n5p7n9ag9i?l=ahf
 keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/ht64pofxwitaf8p99qzbw4bf7y815uhe?l=dgoulet
 keyurl  tor       https://openpgpkey.torproject.org/.well-known/openpgpkey/torproject.org/hu/qmie598udw8k51esbny48og3uea6b3jr?l=nickm
+keyurl  tor       https://keys.openpgp.org/vks/v1/by-fingerprint/1C1BC007A9F607AA8152C040BEA7B180B1491921
+keyurl  tor       https://keys.openpgp.org/vks/v1/by-fingerprint/B74417EDDF22AC9F9E90F49142E86A2A11F48D36
+keyurl  tor       https://keys.openpgp.org/vks/v1/by-fingerprint/2133BC600AB133E1D826D173FE43009C4607B1FB
 
 # --- OpenSSL --------------------------------------------------------------
 source  openssl   3.5.9     603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a  openssl-3.5.9.tar.gz
@@ -56,6 +78,7 @@ sigurl  openssl   https://github.com/openssl/openssl/releases/download/openssl-3
 # OpenSSL signing certificate named on openssl-library.org/source/; the
 # signature is made by one of its subkeys.
 signer  openssl   B146647E45A7B33947AB226B2A2C87D161692D40  OpenSSL signing certificate
+keyfile openssl   keys/openssl.asc
 keyurl  openssl   https://openssl-library.org/source/pubkeys.asc
 
 # --- libevent -------------------------------------------------------------
@@ -64,6 +87,10 @@ url     libevent  https://github.com/libevent/libevent/releases/download/release
 sigtype libevent  detached
 sigurl  libevent  https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz.asc
 signer  libevent  9E3AC83A27974B84D1B3401DB86086848EF8686D  Azat Khuzhin
+keyfile libevent  keys/libevent.asc
+# keys.openpgp.org serves this key without a user ID, which gpg will not
+# import, so the key server is the only download; keys/libevent.asc covers
+# its outages.
 keyurl  libevent  https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x9E3AC83A27974B84D1B3401DB86086848EF8686D
 
 # --- zlib -----------------------------------------------------------------
@@ -77,4 +104,6 @@ sigtype zlib      detached
 sigurl  zlib      https://zlib.net/zlib-1.3.2.tar.gz.asc
 sigurl  zlib      https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz.asc
 signer  zlib      5ED46A6721D365587791E2AA783FCD8E58BCAFBA  Mark Adler
+keyfile zlib      keys/zlib.asc
 keyurl  zlib      https://keyserver.ubuntu.com/pks/lookup?op=get&options=mr&search=0x5ED46A6721D365587791E2AA783FCD8E58BCAFBA
+keyurl  zlib      https://keys.openpgp.org/vks/v1/by-fingerprint/5ED46A6721D365587791E2AA783FCD8E58BCAFBA

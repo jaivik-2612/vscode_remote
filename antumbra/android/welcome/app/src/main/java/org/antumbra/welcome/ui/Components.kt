@@ -96,19 +96,20 @@ fun RadioRow(
     tag: String,
     modifier: Modifier = Modifier,
     indent: Boolean = false,
+    enabled: Boolean = true,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = RowMinHeight)
-            .selectable(selected = selected, onClick = onSelect, role = Role.RadioButton)
+            .selectable(selected = selected, enabled = enabled, onClick = onSelect, role = Role.RadioButton)
             .testTag(tag)
             .padding(start = if (indent) 40.dp else 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
         Spacer(Modifier.width(8.dp))
-        RowTexts(title, detail, enabled = true, modifier = Modifier.weight(1f))
+        RowTexts(title, detail, enabled = enabled, modifier = Modifier.weight(1f))
     }
 }
 

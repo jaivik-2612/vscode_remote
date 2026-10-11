@@ -13,7 +13,8 @@
 #             mksh: they run in Android's mksh without resetprop, as on the
 #             CI emulator
 #   SCENARIO  bridges, direct, offline, pt or badbridges (see e2e-host.sh)
-# Prints one line per check; exits 1 if any check failed.
+# Prints one line per check; exits 1 if any check failed. The module's
+# scripts run with umask 0, as from adb's shell on the CI emulator.
 set -u
 SHELLKIND=$1
 SCEN=$2
@@ -55,25 +56,38 @@ wait_until() {
 	done
 	"$@"
 }
-# Run a script the way Magisk (busybox, standalone) or the emulator (mksh) would.
+# Run a script the way Magisk (busybox, standalone) or the emulator (mksh)
+# would, with umask 0 (the scripts must set their own).
 run_module_script() {
 	if [ "$SHELLKIND" = busybox ]; then
-		env ASH_STANDALONE=1 PATH="$PATH:/magisk-bin" /magisk-bin/busybox sh "$@"
+		(umask 000 && env ASH_STANDALONE=1 PATH="$PATH:/magisk-bin" /magisk-bin/busybox sh "$@")
 	else
-		$RUNSH "$@"
+		(umask 000 && $RUNSH "$@")
 	fi
 }
 start_service() {
 	if [ "$SHELLKIND" = busybox ]; then
-		setsid env ASH_STANDALONE=1 PATH="$PATH:/magisk-bin" /magisk-bin/busybox sh "$MD/service.sh" \
-			</dev/null >/dev/null 2>&1 &
+		(umask 000 && setsid env ASH_STANDALONE=1 PATH="$PATH:/magisk-bin" /magisk-bin/busybox sh "$MD/service.sh" \
+			</dev/null >/dev/null 2>&1 &)
 	else
-		setsid /system/bin/sh "$MD/service.sh" </dev/null >/dev/null 2>&1 &
+		(umask 000 && setsid /system/bin/sh "$MD/service.sh" </dev/null >/dev/null 2>&1 &)
 	fi
 }
 prop() { /system/bin/getprop "$1"; }
 fw() { ANTUMBRA_DIR=$FW_DIR /system/bin/sh "$MD/bin/antumbra-fw" "$@"; }
 as_app() { /usr/bin/setpriv --reuid 10100 --regid 10100 --clear-groups /usr/bin/python3 -I $T/probe.py "$@"; }
+# squat_bg PROTO PORT SECONDS: another app (uid 10200) takes 127.0.0.1:PORT
+# in the background ('probe.py squat', output in $T/squat.out); $! is its
+# process ID.
+squat_bg() {
+	(exec /usr/bin/setpriv --reuid 10200 --regid 10200 --clear-groups \
+		/usr/bin/python3 -I $T/probe.py squat "$@" >$T/squat.out 2>&1) &
+}
+fw_rc() { fw status >/dev/null 2>&1; echo $?; }
+session_has() { grep -q -x -F "$1" "$A/state/module/session" 2>/dev/null; }
+# listening UID PORTHEX: a TCP listener on 127.0.0.1:PORT belongs to UID.
+listening() { grep -q "^ *[0-9]*: 0100007F:$2 00000000:0000 0A [^ ]* [^ ]* [^ ]* *$1 " /proc/net/tcp; }
+last_setting() { grep "^put $1 " $T/settings.log | tail -n 1; }
 tor_pid() { cat "$A/state/module/tor.pid" 2>/dev/null; }
 dns_pid() { cat "$A/state/module/dnsfilter.pid" 2>/dev/null; }
 proc_field() { sed -n "s/^$2:[[:space:]]*//p" "/proc/$1/status" 2>/dev/null | head -n 1 | sed 's/[[:space:]]*$//'; }
@@ -112,8 +126,11 @@ ipv6_check() { [ "$HAVE_IPV6" = 1 ] || return 0; check "$@"; }
 # --- 1. Installation (Android running) ---------------------------------------
 touch $T/framework-up
 /system/bin/setprop sys.boot_completed 1
-/system/bin/sh $T/stage/lib/emu-install.sh $T/stage >$T/install.log 2>&1
+(umask 000 && /system/bin/sh $T/stage/lib/emu-install.sh $T/stage >$T/install.log 2>&1)
 check "install: customize.sh accepted this device" grep -q 'Installed in' $T/install.log
+check "install: /data/adb/modules is 0755 (umask 0 in the installer's shell)" test "$(owner_mode /data/adb/modules)" = "0:0 755"
+check "install: module files 0644, programs 0755" test "$(owner_mode $MD/lib/antumbra.sh)/$(owner_mode $MD/bin/tor)" = "0:0 644/0:0 755"
+check "install: early arm script in post-fs-data.d, 0755" test "$(owner_mode /data/adb/post-fs-data.d/antumbra-arm.sh)" = "0:0 755"
 check "install: tor kept for this CPU" test -x $MD/bin/tor
 check "install: the other CPU's programs removed" test ! -e $MD/bin/x86_64 -a ! -e $MD/bin/arm64-v8a
 check "install: settings recorded for uninstall" grep -q '^ntp_server=time.android.com$' $MD/settings.orig
@@ -122,6 +139,9 @@ check "install: customize.sh removed, as Magisk does" test ! -e $MD/customize.sh
 # --- 2. Reboot: post-fs-data -----------------------------------------------------
 rm -f $T/framework-up
 /system/bin/setprop sys.boot_completed ''
+# Magisk runs /data/adb/post-fs-data.d first.
+run_module_script /data/adb/post-fs-data.d/antumbra-arm.sh
+check "early arm: armed before the module's post-fs-data.sh" test "$(iptables -w -S OUTPUT | sed -n '/^-A/{p;q;}')" = "-A OUTPUT -j ANTUMBRA_ARM_OUT"
 start=$(date +%s)
 run_module_script $MD/post-fs-data.sh
 took=$(($(date +%s) - start))
@@ -142,7 +162,6 @@ check "post-fs-data: /data/adb is 0711" test "$(owner_mode /data/adb)" = "0:0 71
 check "post-fs-data: Wi-Fi store on a tmpfs" is_mountpoint /data/misc/apexdata/com.android.wifi
 check "post-fs-data: Wi-Fi store keeps owner and mode" test "$(owner_mode /data/misc/apexdata/com.android.wifi)" = "0:1000 771"
 check "post-fs-data: no saved network in the RAM store" test ! -e /data/misc/apexdata/com.android.wifi/WifiConfigStore.xml
-check "post-fs-data: user 0's DE Wi-Fi store on a tmpfs" is_mountpoint /data/misc_de/0/apexdata/com.android.wifi
 check "post-fs-data: IpMemoryStore on a tmpfs" is_mountpoint /data/user_de/0/com.android.networkstack/databases
 check "post-fs-data: IpMemoryStore keeps NetworkStack's owner" test "$(owner_mode /data/user_de/0/com.android.networkstack/databases)" = "1073:1073 771"
 check "post-fs-data: no lease memory" test ! -e /data/user_de/0/com.android.networkstack/databases/IpMemoryStoreV2.db
@@ -173,7 +192,13 @@ check "service: the DNS filter has no capabilities" test "$(proc_field "$p" CapE
 check "service: status.json written" wait_until 10 status_has '"firewall":{"state":"live","hash":"'"$(prop antumbra.fw.armed)"'"}'
 check "service: status.json belongs to tor's uid" test "$(owner_mode $A/run/status.json | cut -d' ' -f1)" = 2950:2950
 check "service: status says tor runs, offline, not started" status_has '"network":"disabled"'
-check "service: status says Welcome has not started" status_has '"welcome":{"started":false,"session_id":null}'
+check "service: status says Welcome has not started" status_has '"welcome":{"started":false}}'
+check "service: status holds no session ID and no tor mode" test -z "$(status_json | grep -E 'session_id|"mode"')"
+check "umask: module.log, firewall.log, dnsfilter.log, tor.stderr are 0644" test \
+	"$(owner_mode $A/log/module.log) $(owner_mode $A/log/firewall.log) $(owner_mode $A/log/dnsfilter.log) $(owner_mode $A/log/tor.stderr)" = \
+	"0:0 644 0:0 644 0:0 644 0:0 644"
+check "umask: /dev/antumbra-fw is 0755" test "$(owner_mode /dev/antumbra-fw)" = "0:0 755"
+check "umask: the firewall's own directory is root's alone" test "$(owner_mode $FW_DIR)" = "0:0 700"
 s=$(as_app status 2>&1)
 check "service: an app reads the filter's status page with the module part" test -n "$(printf '%s' "$s" | grep -F '"module"' | grep -F '"state":"live"')"
 blocked=$(sed -n '/^[a-z0-9]/{p;q;}' $MD/lists/dnsfilter.list)
@@ -223,7 +248,10 @@ case $SCEN in
 bridges)
 	welcome bridges keep $SID1 "1.2.3.4:443 $FP" "5.6.7.8:9001"
 	check "start: tor's network on" wait_until 30 status_has '"network":"enabled"'
-	check "start: status shows the session" status_has "\"welcome\":{\"started\":true,\"session_id\":\"$SID1\"}"
+	check "start: status shows that the session started" status_has '"welcome":{"started":true}}'
+	check "start: the session is recorded in root's state" session_has "session_id=$SID1"
+	check "start: the session record is 0600" test "$(owner_mode $A/state/module/session)" = "0:0 600"
+	check "start: tor holds 127.0.0.1:9040" listening 2950 2350
 	r=$(getconf UseBridges Bridge DisableNetwork)
 	check "start: tor has both bridges and the network on" test "$r" = "250-UseBridges=1
 250-Bridge=1.2.3.4:443 $FP
@@ -236,7 +264,8 @@ bridges)
 	# Welcome's process restarts with a new, unstarted session: ignored.
 	printf 'started=0\ntor_mode=offline\nmac=new\nsession_id=%s\n' $SID2 >$T/welcome
 	sleep 6
-	check "restart of Welcome: the first session is kept" status_has "\"session_id\":\"$SID1\""
+	check "restart of Welcome: the first session is kept" session_has "session_id=$SID1"
+	check "restart of Welcome: still one session" test "$(grep -c 'session started' $A/log/module.log)" = 1
 
 	old=$(tor_pid)
 	kill -9 "$old"
@@ -257,10 +286,48 @@ bridges)
 	check "firewall tampered: reloaded within 70 s" wait_until 70 fw status
 	check "firewall tampered: the property is the live hash again" wait_until 10 prop_is_live
 	check "firewall tampered: logged" grep -q 'no longer live' $A/log/module.log
+
+	# Android shuts down: the fail-safe Settings go back, MAC randomization
+	# on again after the "keep" session.
+	/system/bin/setprop sys.shutdown.requested 0userrequested
+	check "shutdown: MAC randomization put back to 1" wait_until 10 eval \
+		'test "$(last_setting non_persistent_mac_randomization_force_enabled)" = "put non_persistent_mac_randomization_force_enabled 1"'
+	check "shutdown: logged" grep -q 'shutdown: fail-safe Settings put back' $A/log/module.log
 	;;
 direct)
+	# On the phone (not the emulator): mobile data off for every SIM
+	# Android knows (1 and 3 from the telephony provider, 2 from an older
+	# setting), now and stored.
+	check "phone: mobile_data 0" grep -q '^put mobile_data 0$' $T/settings.log
+	for k in 1 2 3; do
+		check "phone: mobile_data$k 0" grep -q "^put mobile_data$k 0\$" $T/settings.log
+	done
+	check "phone: mobile data switched off now" grep -q '^phone data disable$' $T/cmd.log
+
+	# An app takes tor's TransPort port while tor's network is off (before
+	# Start): the module goes back to armed, so nothing is redirected to it.
+	squat_bg tcp 9040 60
+	sq=$!
+	check "squat: an app bound 127.0.0.1:9040" wait_until 5 grep -q '^bound$' $T/squat.out
+	check "squat: the firewall goes back to armed" wait_until 15 eval 'test "$(fw_rc)" = 1'
+	check "squat: the property is removed" test -z "$(prop antumbra.fw.armed)"
+	check "squat: status names the port and the uid" wait_until 10 status_has '9040/tcp held by uid 10200'
+	check "squat: status says the firewall failed" status_has '"firewall":{"state":"failed"'
+	r=$(as_app tcp 93.184.216.34 80)
+	check "squat: an app's TCP is not passed on ($r)" test "$r" != connected
+	check "squat: the squatter accepted no connection" test -z "$(grep accepted $T/squat.out)"
 	welcome direct new $SID1
+	check "squat: Start is read" wait_until 30 status_has '"started":true'
+	sleep 4
+	check "squat: tor's network stays off while the port is taken" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
+250 closing connection"
+	kill "$sq"
+	wait "$sq" 2>/dev/null
+	check "squat: the firewall is live again once the port is free" wait_until 15 prop_is_live
+	check "squat: logged" grep -q 'ports: free again' $A/log/module.log
+
 	check "start: tor's network on" wait_until 30 status_has '"network":"enabled"'
+	check "start: tor holds 127.0.0.1:9040" listening 2950 2350
 	r=$(getconf UseBridges DisableNetwork)
 	check "start: no bridges, network on" test "$r" = "250-UseBridges=0
 250 DisableNetwork=0
@@ -269,11 +336,37 @@ direct)
 	;;
 offline)
 	welcome offline new $SID1
-	check "start: the session is read" wait_until 30 status_has "\"session_id\":\"$SID1\""
+	check "start: the session is read" wait_until 30 status_has '"started":true'
 	sleep 4
 	check "start: offline keeps tor's network off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"
-	check "start: status shows offline" status_has '"mode":"offline","network":"disabled"'
+	check "start: status shows the network off" status_has '"network":"disabled"'
+	check "start: offline recorded" session_has tor_mode=offline
+	check "emulator: mobile data left alone" test -z "$(grep mobile_data $T/settings.log)"
+
+	# An app takes the filter's port while the filter restarts. service.sh
+	# is paused meanwhile, so that the app gets there first.
+	svc=$(cat $A/state/module/service.lock/pid)
+	kill -STOP "$svc"
+	old=$(dns_pid)
+	kill -9 "$old"
+	sleep 1
+	squat_bg udp 5353 60
+	sq=$!
+	wait_until 5 grep -q '^bound$' $T/squat.out
+	kill -CONT "$svc"
+	check "filter's port taken: an app bound 127.0.0.1:5353" grep -q '^bound$' $T/squat.out
+	check "filter's port taken: the firewall goes back to armed" wait_until 15 eval 'test "$(fw_rc)" = 1'
+	check "filter's port taken: status names the port and the uid" wait_until 10 status_has '5353/udp held by uid 10200'
+	r=$(as_app dns example.org)
+	check "filter's port taken: an app's query is not passed on ($r)" test "$r" != NOERROR
+	check "filter's port taken: the squatter received no query" test -z "$(grep received $T/squat.out)"
+	kill "$sq"
+	wait "$sq" 2>/dev/null
+	check "filter's port free: the filter runs again" wait_until 70 eval 'test "$(proc_field "$(dns_pid)" Uid)" = "2951	2951	2951	2951"'
+	check "filter's port free: the firewall is live again" wait_until 40 prop_is_live
+	r=$(as_app dns "$blocked")
+	check "filter's port free: blocking again ($r)" test "$r" = NXDOMAIN
 
 	# Removal: during a boot (post-fs-data) the restore waits for boot.
 	/system/bin/setprop sys.boot_completed ''
@@ -286,17 +379,43 @@ offline)
 	check "uninstall: unset keys deleted" grep -q '^delete captive_portal_mode$' $T/settings.log
 	check "uninstall: private_dns_mode put back" grep -q '^put private_dns_mode opportunistic$' $T/settings.log
 	check "uninstall: the restore script removed itself" test ! -e /data/adb/service.d/antumbra-restore.sh
+	check "uninstall: the early arm script removed" test ! -e /data/adb/post-fs-data.d/antumbra-arm.sh
 	;;
 pt)
 	welcome bridges new $SID1 "obfs4 1.2.3.4:443 $FP cert=AAAA iat-mode=0"
-	check "start: the session is read" wait_until 30 status_has "\"session_id\":\"$SID1\""
+	check "start: the session is read" wait_until 30 status_has '"started":true'
 	check "start: status says pluggable transports are missing" wait_until 10 status_has 'pluggable transports'
 	check "start: tor's network stays off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"
+
+	# iptables stops working: neither the full rule set nor the arm set can
+	# be loaded or checked. The module reports the firewall open and
+	# switches airplane mode on and Wi-Fi off.
+	for t in iptables ip6tables iptables-restore ip6tables-restore iptables-save ip6tables-save; do
+		mv /system/bin/$t /system/bin/$t.real
+		printf '#!/system/bin/sh\nexit 1\n' >/system/bin/$t
+		chmod 0755 /system/bin/$t
+	done
+	check "firewall broken: status says open" wait_until 45 status_has '"firewall":{"state":"open"'
+	check "firewall broken: the property is removed" test -z "$(prop antumbra.fw.armed)"
+	check "firewall broken: airplane mode on" wait_until 10 grep -q '^connectivity airplane-mode enable$' $T/cmd.log
+	check "firewall broken: Wi-Fi off" grep -q '^wifi set-wifi-enabled disabled$' $T/cmd.log
+	check "firewall broken: status says why" status_has 'airplane mode on'
+	for t in iptables ip6tables iptables-restore ip6tables-restore iptables-save ip6tables-save; do
+		mv -f /system/bin/$t.real /system/bin/$t
+	done
+	check "firewall repaired: live again" wait_until 45 prop_is_live
 	;;
 badbridges)
+	# Another app answers for Welcome's provider while Welcome is not the
+	# device owner: its Start is not trusted.
+	printf 'User  0: admin=com.example.other/.Admin,DeviceOwner\n' >$T/owners
 	welcome bridges new $SID1 '1.2.3.4:443 "x' "5.6.7.8:9001"
-	check "start: the session is read" wait_until 30 status_has "\"session_id\":\"$SID1\""
+	sleep 6
+	check "not the device owner: Start ignored" status_has '"welcome":{"started":false}}'
+	check "not the device owner: status says why" status_has 'is not the device owner'
+	printf 'User  0: admin=org.antumbra.welcome/.AdminReceiver,DeviceOwner,Affiliated\n' >$T/owners
+	check "start: the session is read" wait_until 30 status_has '"started":true'
 	check "start: status says the bridges were refused" wait_until 10 status_has 'bridges refused'
 	check "start: tor's network stays off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"

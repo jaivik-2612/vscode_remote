@@ -12,19 +12,27 @@
 #   1. the DNS filter as uid 2951 (first, so that it holds 127.0.0.1:5353
 #      before Android's mDNS can take the port);
 #   2. tor as uid 2950, with the network off (DisableNetwork 1);
-#   3. 'antumbra-fw apply', checked with 'status'; only then
-#      'resetprop -n antumbra.fw.armed <hash prefix>';
+#   3. 'antumbra-fw apply', checked with 'status' and with who holds the
+#      service ports; only then 'resetprop -n antumbra.fw.armed <hash
+#      prefix>';
 #   4. run/status.json;
 #   5. IPv6 off on every interface, again whenever NetworkStack switches it
 #      on;
-#   6. once boot has completed: the fail-safe Settings;
-#   7. wait for the Welcome screen's Start (started=1 in its provider):
-#      offline keeps tor's network off; direct and bridges set the bridges,
-#      if any, and DisableNetwork 0 over tor's control socket;
-#   8. then, until shutdown: restart tor or the filter if they stop, check
-#      the firewall every 30 seconds and reload it if it is not live, and
-#      keep status.json up to date.
+#   6. once boot has completed: the fail-safe Settings, mobile data off;
+#   7. wait for the Welcome screen's Start (started=1 in its provider, and
+#      Welcome the device owner): offline keeps tor's network off; direct
+#      and bridges set the bridges, if any, and DisableNetwork 0 over tor's
+#      control socket, once the firewall is live and no other uid holds a
+#      service port;
+#   8. then, until shutdown: at every turn, check who holds 9040, 9053,
+#      5353 and 5380 and go back to the armed state while another uid
+#      does; restart tor or the filter if they stop; check the firewall
+#      every 30 seconds and reload it if it is not live; keep status.json
+#      up to date; at shutdown, put the fail-safe Settings back.
+#
+# Schedules use the time since boot (/proc/uptime), never the clock.
 
+umask 022
 MODDIR=${0%/*}
 LOG_TAG=service
 # shellcheck source=lib/antumbra.sh
@@ -33,17 +41,16 @@ LOG_TAG=service
 # Status shown in run/status.json (status_write).
 S_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null)
 S_PROBLEM=
+S_NOW_PROBLEM=
 S_FW_STATE=armed
 S_FW_HASH=
 S_TOR_RUNNING=0
-S_TOR_MODE=pending
 S_TOR_NETWORK=disabled
 S_TOR_BOOTSTRAP=
 S_TOR_SUMMARY=
 S_TOR_ERROR=
 S_DNS_RUNNING=0
 S_STARTED=0
-S_SESSION_ID=
 
 # The session, once read from Welcome (session_read).
 SES_MODE=
@@ -53,6 +60,12 @@ SES_KIND=
 # open: opened (or nothing to do: offline); failed: this session's bridges
 # cannot work.
 SES_NET=
+# Current problems, joined into S_NOW_PROBLEM for status.json.
+P_PORTS=
+P_WELCOME=
+# wanted: the firewall could not even be armed, so airplane mode and Wi-Fi
+# off as soon as the framework answers; switched: done.
+RADIOS=
 
 # --- 0. The runtime directory and a single copy of this script --------------
 
@@ -103,6 +116,34 @@ refresh_tor() {
 	return 0
 }
 
+# firewall_closed: the full rule set is not live (taken back, or it could
+# not be loaded). S_FW_STATE becomes "failed" if the arm set is in place
+# (or a partial set: its egress gates let out nothing but what they mark).
+# Otherwise one more 'flush' (back to armed); if even that leaves the
+# network open, S_FW_STATE becomes "open" and airplane mode and Wi-Fi go
+# off as soon as the framework answers (the second line of defence).
+firewall_closed() {
+	S_FW_HASH=
+	case $(fw_state) in
+	armed | partial)
+		S_FW_STATE=failed
+		return 0
+		;;
+	esac
+	fw flush >/dev/null 2>>"$LOGDIR/firewall.log"
+	case $(fw_state) in
+	armed | partial)
+		S_FW_STATE=failed
+		return 0
+		;;
+	esac
+	[ "$S_FW_STATE" = open ] ||
+		log "firewall: OPEN: not even the arm set could be loaded; airplane mode and Wi-Fi go off"
+	S_FW_STATE=open
+	[ "$RADIOS" = switched ] || RADIOS=wanted
+	return 1
+}
+
 # firewall_up: load and publish the full rule set (fw_publish).
 firewall_up() {
 	if S_FW_HASH=$(fw_publish); then
@@ -110,17 +151,17 @@ firewall_up() {
 		log "firewall: live, antumbra.fw.armed=$S_FW_HASH"
 		return 0
 	fi
-	S_FW_STATE=failed
-	S_FW_HASH=
+	firewall_closed
 	return 1
 }
 
 # apply_settings: the fail-safe Settings.Global values (lib/settings.conf,
-# which gives the reason for each), and Wi-Fi scanning for location off
-# now, in Wi-Fi's own store (in RAM); the Settings value is what Wi-Fi
-# copies at the next boot.
+# which gives the reason for each), mobile data off for every SIM (not on
+# the emulator), and Wi-Fi scanning for location off now, in Wi-Fi's own
+# store (in RAM); the Settings value is what Wi-Fi copies at the next boot.
 apply_settings() {
 	_as_bad=$(settings_apply)
+	mobile_data_off
 	/system/bin/cmd wifi set-scan-always-available disabled >/dev/null 2>&1
 	if [ -n "$_as_bad" ]; then
 		log "settings: could not set:$_as_bad"
@@ -129,10 +170,38 @@ apply_settings() {
 	fi
 }
 
+# shutdown_check: once Android has begun to shut down
+# (sys.shutdown.requested, set by ShutdownThread before anything else),
+# put the fail-safe Settings back, so that a start without the module
+# finds them: a new MAC address for every connection even after a "keep"
+# session, and mobile data off even if it was switched on in this session.
+# Best effort: the framework may be gone before this runs, and a crash or
+# a forced power-off skips it. Returns 0 if Android is shutting down.
+SHUTDOWN_DONE=0
+shutdown_check() {
+	[ "$SHUTDOWN_DONE" = 0 ] || return 0
+	[ -n "$(getprop sys.shutdown.requested 2>/dev/null)" ] || return 1
+	SHUTDOWN_DONE=1
+	settings_apply >/dev/null
+	mobile_data_off
+	log "shutdown: fail-safe Settings put back"
+	return 0
+}
+
+# nap SECONDS: sleep, a second at a time, watching for shutdown.
+nap() {
+	_np=$1
+	while [ "$_np" -gt 0 ]; do
+		sleep 1
+		_np=$((_np - 1))
+		[ "$SHUTDOWN_DONE" = 0 ] && shutdown_check && return 0
+	done
+}
+
 # session_read: read Welcome's row. Returns 0 once started=1 has been read
-# with valid values, and keeps that session (SES_*) for the rest of the
-# boot: Welcome starts a new, unstarted session if its process dies, and
-# that must not change what was chosen.
+# with valid values from Welcome as the device owner, and keeps that
+# session (SES_*) for the rest of the boot: Welcome starts a new, unstarted
+# session if its process dies, and that must not change what was chosen.
 session_read() {
 	_sr_row=$(welcome_query started:tor_mode:mac:session_id) || return 1
 	[ "$(row_get "$_sr_row" started)" = 1 ] || return 1
@@ -148,6 +217,16 @@ session_read() {
 		log "welcome: the row has an invalid $_sr_bad; still waiting"
 		return 1
 	fi
+	# Only Welcome's answer counts, and Welcome's only while it is the
+	# device owner (welcome_is_owner).
+	if ! welcome_is_owner; then
+		if [ -z "$P_WELCOME" ]; then
+			P_WELCOME="$WELCOME_PKG is not the device owner: Start is not trusted"
+			log "welcome: $P_WELCOME; still waiting"
+		fi
+		return 1
+	fi
+	P_WELCOME=
 	SES_KIND=
 	if [ "$_sr_mode" = bridges ]; then
 		# One query for the bridges, with the session ID in front: the
@@ -170,14 +249,17 @@ session_read() {
 	SES_MODE=$_sr_mode
 	SES_MAC=$_sr_mac
 	S_STARTED=1
-	S_SESSION_ID=$_sr_sid
-	S_TOR_MODE=$_sr_mode
+	# The session record stays in the root-only state directory; status.json,
+	# which every app can read, says only that a session started.
+	printf 'session_id=%s\ntor_mode=%s\nmac=%s\n' "$_sr_sid" "$SES_MODE" "$SES_MAC" >"$PRIV/session"
+	chmod 0600 "$PRIV/session"
 	log "welcome: session started (tor $SES_MODE, MAC $SES_MAC)"
 	return 0
 }
 
 # session_network: carry out the session's tor choice. Called when the
-# session starts and again whenever tor has been restarted.
+# session starts, and again at every turn while it is pending (tor
+# restarted, the firewall not live, a service port taken).
 session_network() {
 	case $SES_MODE in
 	offline)
@@ -197,8 +279,10 @@ session_network() {
 		log "tor: $S_TOR_ERROR"
 		return 1
 	fi
-	# Only over a live firewall; until then tor keeps the network off.
-	if [ "$S_FW_STATE" != live ] || ! tor_ready; then
+	# Only over a live firewall, and only while no other uid holds tor's
+	# ports (tor could not bind them, and the squatter would get the
+	# traffic); until then tor keeps the network off.
+	if [ "$S_FW_STATE" != live ] || ! listeners_ok || ! tor_ready; then
 		SES_NET=pending
 		return 1
 	fi
@@ -223,13 +307,15 @@ session_network() {
 	fi
 	# tor refused the whole SETCONF (55x: an option or value it cannot
 	# use): nothing changed, the network stays off, and sending the same
-	# settings again cannot help, so this session's network has failed. Any
-	# other failure (no answer, the control socket gone while tor restarts)
-	# is tried again. tor's reason is shown without quoted values, so it
-	# names no bridge.
+	# settings again cannot help, so this session's network has failed,
+	# unless tor could not bind a listener port (553 "Failed to bind"),
+	# which works once the port is free. Any other failure (no answer, the
+	# control socket gone while tor restarts) is tried again. tor's reason
+	# is shown without quoted values, so it names no bridge.
 	_sn_err=$(printf '%s\n' "$_sn_out" | tr -d '\r' | sed -n 's/^5[0-9][0-9][ -]//p' | head -n 1 |
 		sed 's/"[^"]*"//g' | cut -c1-100)
-	if printf '%s\n' "$_sn_out" | tr -d '\r' | grep -q '^55[0-9][ -]'; then
+	if printf '%s\n' "$_sn_out" | tr -d '\r' | grep -q '^55[0-9][ -]' &&
+		! printf '%s\n' "$_sn_out" | grep -q -i 'bind'; then
 		SES_NET=failed
 	else
 		SES_NET=pending
@@ -259,9 +345,26 @@ ipv6_guard() {
 
 # --- 1-5. Filter, tor, firewall, status, IPv6 ---------------------------------------
 
+# What post-fs-data.sh left: armed, unless arming failed.
+_st=$(fw_state)
+case $_st in
+armed) S_FW_STATE=armed ;;
+live | partial)
+	S_FW_STATE=armed
+	log "firewall: '$_st' at start; loading the full rule set again"
+	;;
+*)
+	S_FW_STATE=open
+	log "firewall: OPEN at start (state '$_st'): the arm set is not in place"
+	;;
+esac
+
 start_dnsfilter
 start_tor
 firewall_up || log "firewall: the network stays closed; trying again every 30 seconds"
+# A port taken already: the loop loads the rule set as soon as it is free.
+PORTS_LOGGED=
+listeners_ok || PORTS_LOGGED=$PORTS_BAD
 sleep 1
 pid_alive "$PRIV/dnsfilter.pid" "$DNS_UID" && S_DNS_RUNNING=1
 refresh_tor
@@ -272,35 +375,105 @@ ipv6_guard </dev/null >/dev/null 2>&1 &
 #
 # Every 2 seconds while something is changing (before Start, while tor's
 # network waits to be switched on, while tor connects, while a program is
-# down), else every 5. Schedules are in seconds of the clock.
+# down, while a port is taken), else every 5. Welcome's provider is asked
+# every 2 seconds for the first 3 minutes after the framework answers,
+# then every 5 ('content' starts a Java process each time).
 
 SETTINGS_DONE=0
+SETTINGS_AT=0
 TOR_FAILS=0
 DNS_FAILS=0
 TOR_NEXT=0
 DNS_NEXT=0
 ASK_NEXT=0
-FW_NEXT=$(($(date +%s) + 30))
+WELCOME_NEXT=0
+FW_NEXT=$(($(uptime_s) + 30))
 while :; do
-	NOW=$(date +%s)
+	NOW=$(uptime_s)
+	shutdown_check
 
-	# 6. Settings, once the framework answers.
+	# 8a. Who holds the service ports, at every turn. While another uid
+	# holds one, the property goes, the firewall goes back to armed (no
+	# redirect: the squatter is sent nothing), and tor's network is not
+	# switched on; once the ports are free, the full rule set is loaded
+	# again at once.
+	if listeners_ok; then
+		if [ -n "$PORTS_LOGGED" ]; then
+			log "ports: free again"
+			PORTS_LOGGED=
+			FW_NEXT=0
+		fi
+		P_PORTS=
+	else
+		P_PORTS="service port taken: $PORTS_BAD"
+		if [ "$PORTS_BAD" != "$PORTS_LOGGED" ]; then
+			log "ports: $PORTS_BAD"
+			PORTS_LOGGED=$PORTS_BAD
+		fi
+		if [ "$S_FW_STATE" = live ]; then
+			fw_unpublish "$PORTS_BAD"
+			firewall_closed
+		fi
+	fi
+
+	# 8b. The firewall, every 30 seconds (and at once when the ports are
+	# free again). If it is no longer live, the property goes at once, then
+	# the rule set is loaded again ('apply' arms first, so nothing leaves
+	# meanwhile). If that fails, it stays armed and is tried again 30
+	# seconds later. While a port is taken, only that it is still armed is
+	# checked.
+	if [ "$NOW" -ge "$FW_NEXT" ]; then
+		FW_NEXT=$((NOW + 30))
+		if [ -n "$P_PORTS" ]; then
+			firewall_closed
+		elif [ "$S_FW_STATE" = live ]; then
+			_st=$(fw status 2>/dev/null)
+			_rc=$?
+			_live=$(printf '%s\n' "$_st" | sed -n 's/^hash=//p' | cut -c1-16)
+			if [ "$_rc" -ne 0 ] || [ "$_live" != "$S_FW_HASH" ]; then
+				prop_clear "$FW_PROP"
+				log "firewall: no longer live (status $_rc); loading it again"
+				firewall_up
+			fi
+		else
+			firewall_up
+		fi
+	fi
+
+	# 6. Settings, once the framework answers; the radios, if the
+	# firewall is open.
 	if [ "$SETTINGS_DONE" = 0 ] && framework_ready; then
 		apply_settings
 		SETTINGS_DONE=1
+		SETTINGS_AT=$NOW
+	fi
+	if [ "$RADIOS" = wanted ] && framework_ready; then
+		radios_off
+		RADIOS=switched
+		S_PROBLEM="${S_PROBLEM:+$S_PROBLEM; }the firewall could not be loaded: airplane mode on, Wi-Fi off"
+		log "radios: airplane mode on, Wi-Fi off"
 	fi
 
 	# 7. The Welcome screen, until Start.
-	if [ "$SETTINGS_DONE" = 1 ] && [ "$S_STARTED" = 0 ] && session_read; then
-		if [ "$SES_MAC" = keep ]; then
-			settings_put non_persistent_mac_randomization_force_enabled 0
+	if [ "$SETTINGS_DONE" = 1 ] && [ "$S_STARTED" = 0 ]; then
+		if [ "$NOW" -ge "$WELCOME_NEXT" ]; then
+			if [ $((NOW - SETTINGS_AT)) -lt 180 ]; then
+				WELCOME_NEXT=$((NOW + 2))
+			else
+				WELCOME_NEXT=$((NOW + 5))
+			fi
+			if session_read; then
+				if [ "$SES_MAC" = keep ]; then
+					settings_put non_persistent_mac_randomization_force_enabled 0
+				fi
+				session_network
+			fi
 		fi
-		session_network
 	elif [ "$S_STARTED" = 1 ] && [ "$SES_NET" = pending ]; then
 		session_network
 	fi
 
-	# 8a. The DNS filter, restarted after a pause that doubles from 2 to 64
+	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64
 	# seconds. DNS fails (closed) while it is down.
 	if pid_alive "$PRIV/dnsfilter.pid" "$DNS_UID"; then
 		S_DNS_RUNNING=1
@@ -315,7 +488,7 @@ while :; do
 		fi
 	fi
 
-	# 8b. tor, restarted the same way. A new tor starts with the network
+	# 8d. tor, restarted the same way. A new tor starts with the network
 	# off, and the session's choice is applied to it again. Its progress is
 	# asked at every turn while it connects, else every 30 seconds.
 	_ask=
@@ -336,32 +509,14 @@ while :; do
 		fi
 	fi
 
-	# 8c. The firewall, every 30 seconds. If it is no longer live, the
-	# property goes at once, then the rule set is loaded again ('apply'
-	# arms first, so nothing leaves meanwhile). If that fails, it stays
-	# armed and is tried again 30 seconds later.
-	if [ "$NOW" -ge "$FW_NEXT" ]; then
-		FW_NEXT=$((NOW + 30))
-		if [ "$S_FW_STATE" = live ]; then
-			_st=$(fw status 2>/dev/null)
-			_rc=$?
-			_live=$(printf '%s\n' "$_st" | sed -n 's/^hash=//p' | cut -c1-16)
-			if [ "$_rc" -ne 0 ] || [ "$_live" != "$S_FW_HASH" ]; then
-				prop_clear "$FW_PROP"
-				log "firewall: no longer live (status $_rc); loading it again"
-				firewall_up
-			fi
-		else
-			firewall_up
-		fi
-	fi
-
+	S_NOW_PROBLEM=$P_PORTS
+	[ -z "$P_WELCOME" ] || S_NOW_PROBLEM=${S_NOW_PROBLEM:+$S_NOW_PROBLEM; }$P_WELCOME
 	status_write
 	if [ "$S_STARTED" = 0 ] || [ "$SES_NET" = pending ] || [ "$S_FW_STATE" != live ] ||
-		[ "$S_TOR_RUNNING" = 0 ] || [ "$S_DNS_RUNNING" = 0 ] ||
+		[ "$S_TOR_RUNNING" = 0 ] || [ "$S_DNS_RUNNING" = 0 ] || [ -n "$P_PORTS" ] ||
 		{ [ "$S_TOR_NETWORK" = enabled ] && [ "${S_TOR_BOOTSTRAP:-0}" != 100 ]; }; then
-		sleep 2
+		nap 2
 	else
-		sleep 5
+		nap 5
 	fi
 done

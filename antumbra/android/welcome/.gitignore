@@ -11,3 +11,6 @@
 *.aab
 # gradlew is a script that downloads the pinned Gradle; no wrapper jar.
 /gradle/wrapper/gradle-wrapper.jar
+# Gradle can also export the keyring in binary form; only the armored
+# verification-keyring.keys is used and committed.
+/gradle/verification-keyring.gpg

@@ -7,6 +7,7 @@
 # Usage:
 #   build-module.sh --tor DIR --dnsfilter DIR --blocklist FILE [options]
 #   build-module.sh --emulator --tor DIR --dnsfilter DIR --blocklist FILE [options]
+#   build-module.sh --emulator --zip FILE [--serial S] [--no-restart]
 #
 # Inputs (the other parts' outputs):
 #   --tor DIR           build-tor.sh --out DIR: DIR/<abi>/tor
@@ -26,7 +27,9 @@
 #   --out FILE          the zip (default: ./antumbra-module-<version>.zip)
 #   --stage DIR         also leave the unpacked module tree in DIR (must
 #                       not exist yet)
-#   --no-overlay        leave out the keepalive-offload overlay APK
+#   --no-overlay        leave out the keepalive-offload overlay APK (always
+#                       left out with --emulator: nothing mounts system/
+#                       there, so it would have no effect)
 #   --overlay-keystore FILE  sign the overlay with this PKCS#12 keystore
 #                       (alias "antumbra", password in
 #                       $ANTUMBRA_OVERLAY_KS_PASS); by default a new key is
@@ -41,6 +44,10 @@
 #                       install it as Magisk would (lib/emu-install.sh),
 #                       then run post-fs-data.sh and service.sh by hand in
 #                       the boot order (see README.md)
+#   --zip FILE          with --emulator: install exactly the files of this
+#                       module zip (as build-module.sh wrote it) instead of
+#                       building the tree from the checkout; --tor,
+#                       --dnsfilter and --blocklist are then not needed
 #   --serial S          adb device to use with --emulator
 #   --no-restart        with --emulator: do not stop the framework (netd,
 #                       zygote) around post-fs-data.sh
@@ -66,7 +73,7 @@ usage() { sed -n '3,/^set -eu/{/^set -eu/d;s/^# \{0,1\}//;p;}' "$0"; }
 TOR_DIR='' DNS_DIR='' BLOCKLIST='' DOH='' FIREWALL=$ANDROID_DIR/firewall/antumbra-fw
 LYRE_DIR='' HELPER_DIR='' ABI_ARG='' VERSION='' OUT='' STAGE_KEEP=''
 OVERLAY=1 KEYSTORE='' NDK=${ANDROID_NDK_ROOT:-/opt/android-sdk/ndk/28.2.13676358}
-SDK=${ANDROID_HOME:-/opt/android-sdk} EMULATOR=0 SERIAL='' RESTART=1 KEEP_WORK=0
+SDK=${ANDROID_HOME:-/opt/android-sdk} EMULATOR=0 SERIAL='' RESTART=1 KEEP_WORK=0 FROM_ZIP=
 API=34
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -86,6 +93,7 @@ while [ $# -gt 0 ]; do
 	--ndk) NDK=${2:?}; shift 2 ;;
 	--sdk) SDK=${2:?}; shift 2 ;;
 	--emulator) EMULATOR=1; shift ;;
+	--zip) FROM_ZIP=${2:?}; shift 2 ;;
 	--serial) SERIAL=${2:?}; shift 2 ;;
 	--no-restart) RESTART=0; shift ;;
 	--keep-work) KEEP_WORK=1; shift ;;
@@ -94,15 +102,25 @@ while [ $# -gt 0 ]; do
 	esac
 done
 
-if [ -z "$TOR_DIR" ] || [ -z "$DNS_DIR" ] || [ -z "$BLOCKLIST" ]; then
-	die "--tor, --dnsfilter and --blocklist are required (see --help)"
+# The overlay needs Magisk (or KernelSU) to mount system/; the emulator has
+# neither, so it is never built for it (and building it would need Java's
+# keytool on the CI runner).
+[ "$EMULATOR" = 1 ] && OVERLAY=0
+if [ -n "$FROM_ZIP" ]; then
+	[ "$EMULATOR" = 1 ] || die "--zip is used with --emulator"
+	[ -f "$FROM_ZIP" ] || die "no module zip at $FROM_ZIP"
+	FROM_ZIP=$(cd "$(dirname "$FROM_ZIP")" && pwd)/$(basename "$FROM_ZIP")
+else
+	if [ -z "$TOR_DIR" ] || [ -z "$DNS_DIR" ] || [ -z "$BLOCKLIST" ]; then
+		die "--tor, --dnsfilter and --blocklist are required (see --help)"
+	fi
+	[ -f "$BLOCKLIST" ] || die "no block list at $BLOCKLIST"
+	[ -f "$FIREWALL" ] || die "no firewall script at $FIREWALL"
+	if [ -z "$DOH" ] && [ -f "$(dirname "$BLOCKLIST")/doh-ipv4.txt" ]; then
+		DOH=$(dirname "$BLOCKLIST")/doh-ipv4.txt
+	fi
+	[ -z "$DOH" ] || [ -f "$DOH" ] || die "no DoH list at $DOH"
 fi
-[ -f "$BLOCKLIST" ] || die "no block list at $BLOCKLIST"
-[ -f "$FIREWALL" ] || die "no firewall script at $FIREWALL"
-if [ -z "$DOH" ] && [ -f "$(dirname "$BLOCKLIST")/doh-ipv4.txt" ]; then
-	DOH=$(dirname "$BLOCKLIST")/doh-ipv4.txt
-fi
-[ -z "$DOH" ] || [ -f "$DOH" ] || die "no DoH list at $DOH"
 [ -z "$STAGE_KEEP" ] || [ ! -e "$STAGE_KEEP" ] || die "--stage $STAGE_KEEP exists already"
 
 ADB=adb
@@ -122,6 +140,7 @@ arm64-v8a | x86_64) ABIS=$ABI_ARG ;;
 *) die "--abi must be arm64-v8a, x86_64 or all" ;;
 esac
 for abi in $ABIS; do
+	[ -z "$FROM_ZIP" ] || break
 	[ -f "$TOR_DIR/$abi/tor" ] || die "no $TOR_DIR/$abi/tor"
 	[ -f "$DNS_DIR/$abi/antumbra-dnsfilter" ] || die "no $DNS_DIR/$abi/antumbra-dnsfilter"
 	[ -z "$HELPER_DIR" ] || [ -f "$HELPER_DIR/$abi/antumbra-run" ] || die "no $HELPER_DIR/$abi/antumbra-run"
@@ -211,6 +230,26 @@ build_overlay() { # OUTPUT
 
 # --- 3. The module tree ----------------------------------------------------------------
 
+if [ -n "$FROM_ZIP" ]; then
+	# Exactly the zip's files: Magisk's installer unpacks the same, and
+	# customize.sh checks them against SHA256SUMS before it does anything.
+	say "unpacking $FROM_ZIP"
+	mkdir -p "$STAGE"
+	if command -v unzip >/dev/null 2>&1; then
+		unzip -q "$FROM_ZIP" -d "$STAGE" || die "cannot unpack $FROM_ZIP"
+	else
+		python3 -I -m zipfile -e "$FROM_ZIP" "$STAGE" || die "cannot unpack $FROM_ZIP"
+	fi
+	if [ ! -f "$STAGE/module.prop" ] || [ ! -f "$STAGE/SHA256SUMS" ]; then
+		die "$FROM_ZIP is not an Antumbra module zip"
+	fi
+	find "$STAGE" -type d -exec chmod 0755 {} +
+	find "$STAGE" -type f -exec chmod 0644 {} +
+	chmod 0755 "$STAGE"/*.sh
+	VERSION=$(sed -n 's/^version=//p' "$STAGE/module.prop")
+else
+# The tree from the checkout and the other parts' outputs (to the matching
+# 'fi' after SHA256SUMS).
 say "staging module $VERSION for: $ABIS"
 mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/etc" "$STAGE/lists" "$STAGE/META-INF/com/google/android"
 for f in customize.sh post-fs-data.sh service.sh uninstall.sh; do
@@ -251,12 +290,11 @@ if [ "$OVERLAY" = 1 ]; then
 	mkdir -p "$STAGE/system/product/overlay"
 	if build_overlay "$STAGE/system/product/overlay/AntumbraConnectivity.apk"; then
 		say "overlay: system/product/overlay/AntumbraConnectivity.apk"
-	elif [ "$EMULATOR" = 1 ]; then
-		rm -rf "$STAGE/system"
-		say "overlay: SDK build tools not found; left out (it has no effect without Magisk anyway)"
 	else
 		die "the overlay needs aapt2, zipalign and apksigner (build-tools) and platforms;android-36 in $SDK, or --no-overlay"
 	fi
+elif [ "$EMULATOR" = 1 ]; then
+	say "overlay: left out on the emulator (nothing mounts system/ there)"
 fi
 
 cat >"$STAGE/NOTICE" <<EOF
@@ -273,9 +311,8 @@ sources (see antumbra/android/*/README.md and sources.lock):
   bin/*/antumbra-dnsfilter  GPL-3.0-or-later, with golang.org/x/net
                             (BSD-3-Clause) and the Go runtime (BSD-3-Clause)
   bin/*/lyrebird            if present: BSD-2-Clause and BSD-3-Clause
-  lists/dnsfilter.list      compiled from HaGeZi's lists (GPL-3.0), the
-                            Exodus Privacy tracker list and Antumbra's own;
-                            its header names every source
+  lists/dnsfilter.list      compiled from HaGeZi's lists (GPL-3.0) and
+                            Antumbra's own; its header names every source
   lists/doh-ipv4.txt        from HaGeZi's DoH server list (GPL-3.0)
 EOF
 
@@ -295,7 +332,7 @@ chmod 0755 "$STAGE"/bin/*/* "$STAGE/bin/antumbra-fw" "$STAGE"/*.sh \
 )
 mv "$WORK/SHA256SUMS" "$STAGE/SHA256SUMS"
 find "$STAGE" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
-
+fi # --zip or the checkout
 [ -z "$STAGE_KEEP" ] || { cp -a "$STAGE" "$STAGE_KEEP" && say "module tree: $STAGE_KEEP"; }
 
 # --- 4a. The zip -------------------------------------------------------------------------

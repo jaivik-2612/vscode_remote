@@ -189,6 +189,11 @@ func (u *Loopback) exchangeTCP(ctx context.Context, query []byte, match func([]b
 	if !match(resp) {
 		return nil, ErrUpstreamReply
 	}
+	// Check again, as over UDP: the listener may have changed hands while
+	// the query was out.
+	if err := u.checkOwner("tcp"); err != nil {
+		return nil, err
+	}
 	return resp, nil
 }
 

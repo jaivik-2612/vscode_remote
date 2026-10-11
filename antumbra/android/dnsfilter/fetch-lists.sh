@@ -10,9 +10,11 @@
 #   OUT/dnsfilter.list   the filter's block list (/data/adb/antumbra/lists/
 #                        on the phone, and lists/ in the module zip)
 #   OUT/doh-ipv4.txt     DoH server addresses for antumbra-fw (same place)
+#   OUT/SHA256SUMS       checksums of the two lists, so that the pair can be
+#                        copied elsewhere and still checked
 #   OUT/sources/NAME     each download as it was received (for the record;
-#                        not shipped)
-#   OUT/SHA256SUMS       checksums of all of the above
+#                        not shipped), and OUT/sources/SHA256SUMS
+#   OUT/warnings.txt     empty, unless --fallback replaced a failed download
 #
 # The lists change several times a day, so a download cannot be pinned by
 # hash in advance. Each download's SHA-256 goes into the compiled list's
@@ -36,18 +38,25 @@ Usage: fetch-lists.sh --out DIR [options]
   --listc PATH       listc to use (default: build it with go)
   --downloads DIR    use the files already in DIR (one per source name)
                      instead of downloading
+  --fallback DIR     download as usual, but when a download fails, use
+                     DIR/NAME (an earlier OUT/sources) and say so in
+                     OUT/warnings.txt instead of failing
   --expect NAME=SHA  refuse source NAME unless its SHA-256 is SHA (repeatable)
+  --sources FILE     sources file (default: lists/sources.conf next to this
+                     script); relative names in it are read from its folder
 EOF
 }
 
-OUT='' VERSION='' LISTC='' DOWNLOADS='' EXPECT=()
+OUT='' VERSION='' LISTC='' DOWNLOADS='' FALLBACK='' EXPECT=() NAMES=''
 while [ $# -gt 0 ]; do
 	case $1 in
 	--out) OUT=$2; shift 2 ;;
 	--version) VERSION=$2; shift 2 ;;
 	--listc) LISTC=$2; shift 2 ;;
 	--downloads) DOWNLOADS=$2; shift 2 ;;
+	--fallback) FALLBACK=$2; shift 2 ;;
 	--expect) EXPECT+=("$2"); shift 2 ;;
+	--sources) SOURCES=$2; shift 2 ;;
 	-h | --help) usage; exit 0 ;;
 	*) echo "fetch-lists.sh: unknown option $1" >&2; usage >&2; exit 2 ;;
 	esac
@@ -60,8 +69,11 @@ case $VERSION in
 *[!A-Za-z0-9._+-]* | '') echo "fetch-lists.sh: version may use only letters, digits and ._+-" >&2; exit 2 ;;
 esac
 
+[ -r "$SOURCES" ] || { echo "fetch-lists.sh: cannot read $SOURCES" >&2; exit 2; }
+
 mkdir -p "$OUT/sources"
 OUT=$(cd "$OUT" && pwd)
+: >"$OUT/warnings.txt"
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
@@ -83,12 +95,23 @@ while read -r name url; do
 		echo "fetch-lists.sh: $name <- $url"
 		# HTTPS only, also after redirects; TLS 1.2 or later, verified; at
 		# most 64 MiB; retried on transient errors.
-		curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+		if ! curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
 			--fail --silent --show-error --location --max-redirs 3 \
 			--connect-timeout 20 --max-time 300 --max-filesize 67108864 \
 			--retry 3 --retry-delay 10 --retry-all-errors \
 			--user-agent 'antumbra-fetch-lists' \
-			--output "$dest.part" "$url"
+			--output "$dest.part" "$url"; then
+			if [ -z "$FALLBACK" ] || [ ! -f "$FALLBACK/$name" ]; then
+				echo "fetch-lists.sh: $name: download failed" >&2
+				exit 1
+			fi
+			# An earlier copy: the list is older, never less checked (MIN,
+			# guards and --expect apply to it as to a fresh download).
+			cp "$FALLBACK/$name" "$dest.part"
+			w="$name: download failed; used the earlier copy, sha256 $(sha256sum "$dest.part" | cut -d' ' -f1)"
+			echo "fetch-lists.sh: WARNING: $w" >&2
+			echo "$w" >>"$OUT/warnings.txt"
+		fi
 	fi
 	sum=$(sha256sum "$dest.part" | cut -d' ' -f1)
 	for e in "${EXPECT[@]+"${EXPECT[@]}"}"; do
@@ -98,6 +121,7 @@ while read -r name url; do
 		fi
 	done
 	mv "$dest.part" "$dest"
+	NAMES="$NAMES $name"
 	echo "fetch-lists.sh: $name: $(stat -c %s "$dest") bytes, sha256 $sum"
 done <<EOF
 $remote
@@ -114,5 +138,9 @@ fi
 "$LISTC" -config "$SOURCES" -downloads "$OUT/sources" -version "$VERSION" \
 	-o "$OUT/dnsfilter.list" -doh-out "$OUT/doh-ipv4.txt"
 "$LISTC" -check "$OUT/dnsfilter.list"
-(cd "$OUT" && sha256sum dnsfilter.list doh-ipv4.txt sources/*) >"$OUT/SHA256SUMS"
+# shellcheck disable=SC2086 # the names were checked above: [a-z0-9.-] only
+(cd "$OUT/sources" && sha256sum $NAMES) >"$OUT/sources/SHA256SUMS"
+# Only the two lists, so that OUT/SHA256SUMS still checks when the lists
+# are copied without the downloads.
+(cd "$OUT" && sha256sum dnsfilter.list doh-ipv4.txt) >"$OUT/SHA256SUMS"
 echo "fetch-lists.sh: done, version $VERSION"

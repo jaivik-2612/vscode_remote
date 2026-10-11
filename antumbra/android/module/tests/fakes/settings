@@ -10,6 +10,9 @@ if [ ! -f $T/framework-up ]; then
 fi
 [ "${2-}" = global ] || { echo "settings: only 'global' is faked" >&2; exit 1; }
 case $1 in
+list)
+	cat $T/settings
+	;;
 get)
 	v=$(grep -F "$3=" $T/settings | sed -n "s/^$3=//p" | tail -n 1)
 	printf '%s\n' "${v:-null}"

@@ -198,6 +198,44 @@ func TestUpstreamOwnerCheck(t *testing.T) {
 	}
 }
 
+// TestOwnerCheckedAgainAfterTheReply: a socket that joins the port while
+// the query is out (here: shows up in the socket table after the query
+// reached tor, before its reply) makes the exchange fail, over UDP and TCP.
+func TestOwnerCheckedAgainAfterTheReply(t *testing.T) {
+	for _, network := range []string{"udp", "tcp"} {
+		e := newFakeEnv(t, network, 3*time.Second, 2950)
+		dir := t.TempDir()
+		e.up.SetProcNet(dir)
+		zero4 := procAddr(netip.MustParseAddr("0.0.0.0"), 0)
+		port := e.fake.Addr().Port()
+		st := map[string]string{"udp": "07", "tcp": "0A"}[network]
+		write := func(rows ...string) {
+			if err := os.WriteFile(filepath.Join(dir, network), []byte(procTable(rows...)), 0o644); err != nil {
+				t.Error(err)
+			}
+		}
+		tor := row(procAddr(netip.MustParseAddr("127.0.0.1"), port), zero4, st, 2950)
+		write(tor)
+		if m, _ := e.ask(t, "www.example.org.", dnsmessage.TypeA); m.RCode != dnsmessage.RCodeSuccess {
+			t.Fatalf("%s: tor alone: %v", network, m.RCode)
+		}
+
+		e.fake.SetDelay(600 * time.Millisecond)
+		go func() {
+			for deadline := time.Now().Add(2 * time.Second); e.fake.Queries() < 2 && time.Now().Before(deadline); {
+				time.Sleep(5 * time.Millisecond)
+			}
+			write(tor, row(procAddr(netip.MustParseAddr("0.0.0.0"), port), zero4, st, 10200))
+		}()
+		if m, _ := e.ask(t, "www.example.org.", dnsmessage.TypeA); m.RCode != dnsmessage.RCodeServerFailure || len(m.Answers) != 0 {
+			t.Errorf("%s: a squatter joined while the query was out: %v with %d answers, want SERVFAIL", network, m.RCode, len(m.Answers))
+		}
+		if _, _, code, _ := e.stats.Upstream(); code != "owner" {
+			t.Errorf("%s: state %q, want owner", network, code)
+		}
+	}
+}
+
 // procAddr formats an address the way /proc/net/{udp,tcp}{,6} print it on
 // this machine: each 32-bit word as a host-order integer.
 func procAddr(a netip.Addr, port uint16) string {
@@ -293,6 +331,24 @@ func TestParseProcAddr(t *testing.T) {
 		hex.EncodeToString(make([]byte, 9)) + ":0035"} {
 		if _, _, err := parseProcAddr(bad); err == nil {
 			t.Errorf("parseProcAddr(%q) accepted it", bad)
+		}
+	}
+}
+
+// BenchmarkOwnerCheck measures one owner check against this machine's real
+// socket tables (each forwarded query costs two over UDP). The cost grows
+// with the number of UDP sockets on the machine.
+func BenchmarkOwnerCheck(b *testing.B) {
+	if _, err := os.ReadFile("/proc/net/udp"); err != nil {
+		b.Skip("/proc/net/udp not readable here")
+	}
+	u, err := NewLoopback(netip.MustParseAddrPort("127.0.0.1:9053"), "udp", time.Second, 2950)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		if err := u.checkOwner("udp"); err != nil && err != ErrUpstreamDown && err != ErrUpstreamOwner {
+			b.Fatal(err)
 		}
 	}
 }

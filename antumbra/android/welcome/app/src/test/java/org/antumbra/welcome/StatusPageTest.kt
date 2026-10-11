@@ -60,9 +60,31 @@ class StatusPageTest {
 
     @Test
     fun addOnPresenceRule() {
+        // Only the property counts: a status page alone (which any app could
+        // serve while no firewall runs) never makes the add-on present.
         val answered = StatusPage.parse(full)
-        assertTrue(AddOnCheck(null, answered).present)
+        assertFalse(AddOnCheck(null, answered).present)
         assertTrue(AddOnCheck("0123abcd", AddOnStatus(null, null, "refused")).present)
         assertFalse(AddOnCheck(null, AddOnStatus(null, null, "refused")).present)
+    }
+
+    @Test
+    fun latchedSessionAndTorError() {
+        val latched = StatusPage.parse(
+            """{"service":"antumbra-dnsfilter","module":{"tor":{"error":"these bridges need pluggable transports"},
+               "welcome":{"started":true,"session_id":""}}}""",
+        )
+        assertEquals("these bridges need pluggable transports", latched.module!!.torError)
+        assertTrue(latched.module.sessionLatched)
+        // Believed only together with the property, and then it can only refuse.
+        assertTrue(AddOnCheck("0123abcd", latched).sessionLatched)
+        assertFalse(AddOnCheck(null, latched).sessionLatched)
+        // An older module: a session_id alone means latched.
+        val byId = StatusPage.parse("""{"service":"antumbra-dnsfilter","module":{"welcome":{"session_id":"5f0c"}}}""")
+        assertTrue(byId.module!!.sessionLatched)
+        val notYet = StatusPage.parse("""{"service":"antumbra-dnsfilter","module":{"welcome":{"started":false,"session_id":""}}}""")
+        assertFalse(notYet.module!!.sessionLatched)
+        assertNull(notYet.module.torError)
+        assertFalse(StatusPage.parse(full).module!!.sessionLatched)
     }
 }

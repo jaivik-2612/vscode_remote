@@ -15,6 +15,8 @@
 # Every source tarball is pinned by SHA-256 in sources.lock and checked
 # before it is unpacked. When gpg is installed, the publisher's OpenPGP
 # signature is checked too, against the key fingerprints in sources.lock.
+# The patches that sources.lock lists (patches/, Antumbra's own) are
+# applied after unpacking.
 #
 # Outputs, for each ABI built:
 #   OUT/<abi>/tor            the stripped executable
@@ -134,6 +136,8 @@ export SOURCE_DATE_EPOCH=$EPOCH
 cache_key() {
   local files=() f
   while read -r f; do files+=("$HERE/$f"); done < <(awk '$1 == "file" { print $2 }' "$HERE/cache-key.txt")
+  # Every patch named in sources.lock changes the binary too.
+  while read -r f; do files+=("$HERE/$f"); done < <(lock_fields patch | awk '{ print $2 }')
   [[ ${#files[@]} -gt 0 ]] || die "cache-key.txt lists no files"
   {
     printf 'abis=%s api=%s ndk=%s host=%s-%s\n' "${ABIS[*]}" "$API" "$NDK_WANT" "$(uname -s)" "$(uname -m)"
@@ -212,9 +216,40 @@ sha256_of() { sha256sum "$1" | awk '{ print $1 }'; }
 GNUPG_DIR=''
 gpgq() { gpg --homedir "$GNUPG_DIR" --batch --no-tty --no-autostart "$@"; }
 
+# to_epoch TIME: a gpg time (seconds since 1970, or ISO 8601 as
+# yyyymmddThhmmss) as seconds since 1970; nothing if it is neither.
+to_epoch() {
+  if [[ $1 =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$1"
+  elif [[ $1 =~ ^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})$ ]]; then
+    date -u -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}" +%s
+  fi
+}
+day() { date -u -d "@$1" +%Y-%m-%d; }
+
+# key_expiry SIGNKEY PRIMARY: when the signing key (a primary key or one of
+# its subkeys) expires, as seconds since 1970: the earlier of its own expiry
+# and its primary key's, from the newest self-signatures gpg has. Prints
+# nothing if neither expires, and "?" if gpg gives a time it cannot read.
+key_expiry() {
+  local e
+  e=$(gpgq --with-colons --fixed-list-mode --list-keys -- "$2" 2>/dev/null | awk -F: -v want="$1" '
+    $1 == "pub" || $1 == "sub" { ex = $7; ispub = ($1 == "pub"); wantfpr = 1; next }
+    $1 == "fpr" && wantfpr     { wantfpr = 0; if (ispub) { pexp = ex; seen = 1 } if ($10 == want) kexp = ex }
+    END {
+      if (!seen) { print "?"; exit }
+      if (kexp != "" && kexp !~ /^[0-9]+$/ || pexp != "" && pexp !~ /^[0-9]+$/) { print "?"; exit }
+      e = kexp
+      if (pexp != "" && (e == "" || pexp + 0 < e + 0)) e = pexp
+      print e
+    }')
+  printf '%s\n' "$e"
+}
+
 # check_signature NAME TARBALL SHA256: check the publisher's signature.
 check_signature() {
-  local name=$1 tarball=$2 sha=$3 type signed sig status n=0 u kf ok=0 primary f s
+  local name=$1 tarball=$2 sha=$3 type signed sig status u kf kc have=0 ok=0 primary f s
+  local signkey sigtime expiry listed now
   local -a urls signers
   if [[ $SIGS == skip ]]; then
     say "$name: signature check skipped (--signatures skip); relying on the pinned SHA-256"
@@ -231,23 +266,34 @@ check_signature() {
     mkdir -m 700 "$GNUPG_DIR"
   fi
   mkdir -p "$DOWNLOADS/keys"
-  # Keys are fetched again on every run so that renewals and revocations
-  # are seen; a cached copy is used only if the fetch fails.
+  # gpg exits non-zero when it cannot reach a gpg-agent, which public-key
+  # import and verification do not need. Its status is ignored: a key that
+  # was not imported cannot produce the VALIDSIG checked below, and only
+  # the fingerprints listed in sources.lock count.
+  # 1. The copy kept in this folder, so that a key server outage does not
+  #    stop the build.
+  while read -r kf; do
+    [[ $kf =~ ^keys/[A-Za-z0-9._-]+$ && -r $HERE/$kf ]] || die "sources.lock: cannot read keyfile '$kf' for $name"
+    gpgq --quiet --import "$HERE/$kf" >/dev/null 2>&1 || true
+    have=1
+  done < <(lock_fields keyfile "$name")
+  # 2. Every key URL, fetched again on every run so that renewals and
+  #    revocations are seen. A URL that fails is skipped; its last good
+  #    copy is used if there is one.
   while read -r u; do
-    n=$((n + 1))
-    kf=$DOWNLOADS/keys/$name-$n.key
-    if ! fetch "$kf.new" "$u"; then
-      [[ -s $kf ]] || die "$name: could not download a signing key from $u"
-      say "$name: using the cached copy of $u"
+    kc=$DOWNLOADS/keys/$name-$(printf '%s' "$u" | sha256sum | cut -c1-16).key
+    if fetch "$kc.new" "$u"; then
+      mv -f "$kc.new" "$kc"
+    elif [[ -s $kc ]]; then
+      say "$name: could not download $u; using its copy from an earlier run"
     else
-      mv -f "$kf.new" "$kf"
+      say "$name: could not download $u; going on with the other copies of the keys"
+      continue
     fi
-    # gpg exits non-zero when it cannot reach a gpg-agent, which public-key
-    # import and verification do not need. Ignore the status: a key that
-    # was not imported cannot produce the VALIDSIG checked below.
-    gpgq --quiet --import "$kf" >/dev/null 2>&1 || true
+    gpgq --quiet --import "$kc" >/dev/null 2>&1 || true
+    have=1
   done < <(lock_fields keyurl "$name")
-  ((n > 0)) || die "sources.lock: no keyurl for $name"
+  ((have)) || die "$name: no signing key: no keyfile in sources.lock and no keyurl could be downloaded"
 
   type=$(lock_one sigtype "$name")
   case $type in
@@ -274,17 +320,41 @@ check_signature() {
     die "$name: bad signature, or signed by a revoked key"
   fi
   mapfile -t signers < <(lock_fields signer "$name" | awk '{ print $1 }')
-  while read -r primary; do
+  now=$(date -u +%s)
+  # VALIDSIG fields: the signing key's fingerprint, the signature's date and
+  # time, ... and last the primary key's fingerprint. A signature counts
+  # only if its primary key is listed in sources.lock and the signing key
+  # had not expired when the signature was made: gpg itself reports a
+  # signature made by an already expired key as valid (EXPKEYSIG and
+  # VALIDSIG), because it judges expiry by today's date only.
+  while read -r signkey sigtime primary; do
+    listed=0
     for f in "${signers[@]}"; do
-      [[ $primary == "$f" ]] && ok=$((ok + 1))
+      [[ $primary == "$f" ]] && listed=1
     done
-  done < <(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print $NF }' <<<"$status")
-  ((ok > 0)) || die "$name: no valid signature by a key listed in sources.lock"
+    if ((listed == 0)); then
+      say "$name: a signature by $primary, a key not listed in sources.lock: not counted"
+      continue
+    fi
+    sigtime=$(to_epoch "$sigtime")
+    expiry=$(key_expiry "$signkey" "$primary")
+    if [[ -z $sigtime || $expiry == '?' ]]; then
+      say "$name: cannot read the times of the signature by $primary: not counted"
+      continue
+    fi
+    if [[ -n $expiry ]] && ((sigtime > expiry)); then
+      say "$name: the signature by $primary was made on $(day "$sigtime"), after its key had expired on $(day "$expiry"): not counted"
+      continue
+    fi
+    ok=$((ok + 1))
+    if [[ -n $expiry ]] && ((expiry < now)); then
+      say "$name:   signing key $signkey (primary $primary), signed $(day "$sigtime"); the key was valid then and expired on $(day "$expiry")"
+    else
+      say "$name:   signing key $signkey (primary $primary), signed $(day "$sigtime")"
+    fi
+  done < <(awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print $3, $5, $NF }' <<<"$status")
+  ((ok > 0)) || die "$name: no valid signature by a key listed in sources.lock that was valid when it signed"
   say "$name: OpenPGP signature verified; $ok valid signature(s) by keys in sources.lock"
-  awk '$1 == "[GNUPG:]" && $2 == "VALIDSIG" { print "[build-tor]   signing key " $3 ", primary key " $NF }' <<<"$status" >&2
-  if grep -q '^\[GNUPG:\] EXPKEYSIG' <<<"$status"; then
-    say "$name: note: at least one signing key has expired since (the signature itself is valid)"
-  fi
 }
 
 # get_source NAME: make sure DOWNLOADS holds the pinned, verified tarball.
@@ -341,7 +411,7 @@ step_zlib() (
 )
 
 # OpenSSL finds the NDK's clang on PATH and then names the compiler by its
-# bare target name (for example aarch64-linux-android34-clang), so no host
+# bare target name (for example aarch64-linux-android29-clang), so no host
 # path ends up in the "compiler:" string it stores in the library.
 step_openssl() (
   cd "$1" &&
@@ -379,6 +449,20 @@ step_tor_relink_static() (
   env "${TC[@]}" make -C "$1" src/app/tor LDFLAGS="-static" \
     LIBS="-Wl,--start-group -lc -ldl -Wl,--end-group"
 )
+
+# apply_patches NAME DIR: apply the patches sources.lock lists for NAME, in
+# order, to the unpacked source in DIR. A patch that does not apply cleanly
+# stops the build.
+apply_patches() {
+  local name=$1 dir=$2 f
+  command -v patch >/dev/null 2>&1 || die "'patch' is not installed (GNU patch)"
+  while read -r f; do
+    [[ $f =~ ^patches/[A-Za-z0-9._-]+\.patch$ && -r $HERE/$f ]] || die "sources.lock: cannot read patch '$f' for $name"
+    say "  $name: applying $f"
+    patch -d "$dir" -p1 --forward --batch --no-backup-if-mismatch --quiet <"$HERE/$f" ||
+      die "$name: $f does not apply"
+  done < <(lock_fields patch "$name")
+}
 
 build_abi() {
   local abi=$1 base src v_tor v_ossl v_lev v_zlib n torsrc
@@ -425,6 +509,10 @@ build_abi() {
     tar -xzf "$DOWNLOADS/$(src_field "$n" 3)" -C "$src" --no-same-owner
   done
   torsrc=$src/tor-$v_tor
+  apply_patches tor "$torsrc"
+  # 0001: tor's UDP listener (DNSPort) without SO_REUSEADDR.
+  grep -q 'if (is_stream && make_socket_reuseable(s) < 0)' "$torsrc/src/core/mainloop/connection.c" ||
+    die "[$abi] tor's DNSPort patch is not in the source"
 
   say "[$abi] zlib $v_zlib"
   run "$WORK/logs/$abi-zlib.log" step_zlib "$src/zlib-$v_zlib"
@@ -467,6 +555,9 @@ build_abi() {
     printf 'openssl_configure=%s %s\n' "$OSSL_TARGET" "${OSSL_OPTS[*]}"
     printf 'build_script_sha256=%s\n' "$(sha256_of "$HERE/build-tor.sh")"
     printf 'sources_lock_sha256=%s\n' "$(sha256_of "$LOCK")"
+    lock_fields patch | while read -r n f; do
+      printf 'patch=%s %s sha256:%s\n' "$n" "$f" "$(sha256_of "$HERE/$f")"
+    done
     printf 'tor_sha256=%s\n' "$(sha256_of "$OUT/$abi/tor")"
   } >"$OUT/$abi/tor.buildinfo"
 

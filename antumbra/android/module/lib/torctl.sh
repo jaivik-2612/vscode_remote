@@ -16,9 +16,14 @@
 # It sends AUTHENTICATE with the cookie as hex, then the commands, then
 # QUIT. If authentication fails, tor answers 515 and closes the
 # connection, so no command after it runs. Android's toybox netcat (0.8.12
-# in Android 16) speaks to Unix sockets with -U; after the end of its input
-# it half-closes the connection and keeps reading until tor closes it, at
-# most 10 seconds of silence (-q 10); 'timeout 20' bounds the whole call.
+# in Android 16) speaks to Unix sockets with -U. At the end of its input
+# it half-closes the connection and keeps reading until tor closes it
+# (after QUIT). -q 5 bounds that wait: its help says "quit SECONDS after
+# EOF on stdin", and pollinate() in toybox's lib/net.c (android16-release)
+# makes it the poll timeout once stdin has ended, so nc gives up after 5
+# seconds in which tor sent nothing. 'timeout 10' bounds the whole call.
+# tor answers these commands at once; the bounds only matter when tor
+# hangs, and keep service.sh's loop (and its firewall checks) going.
 set -u
 TB=/system/bin/toybox
 
@@ -42,4 +47,4 @@ fi
 	printf 'AUTHENTICATE %s\r\n' "$cookie"
 	$TB cat
 	printf 'QUIT\r\n'
-} | $TB timeout 20 $TB nc -q 10 -U "$2"
+} | $TB timeout 10 $TB nc -q 5 -U "$2"

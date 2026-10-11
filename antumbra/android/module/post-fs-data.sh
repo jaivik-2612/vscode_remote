@@ -12,16 +12,23 @@
 #
 # The order is fixed by the shared contract:
 #   1. 'antumbra-fw arm': only loopback traffic can move, IPv4 and IPv6,
-#      for every uid, until service.sh loads the full rule set.
+#      for every uid, until service.sh loads the full rule set. (The
+#      script customize.sh leaves in /data/adb/post-fs-data.d has armed
+#      already: Magisk runs those scripts before any module's.)
 #   2. /data/adb/antumbra on a new tmpfs: tor's state, logs, status and the
 #      session record live in RAM only.
-#   3. Wi-Fi's configuration store on a tmpfs: saved networks never reach
-#      flash, so a boot without this module has no network to join.
+#   3. Wi-Fi's shared configuration store on a tmpfs: saved networks
+#      never reach flash, so a boot without this module has no saved
+#      network to join (user 0's credential-encrypted store is not covered:
+#      README, "Known gaps").
 #   4. NetworkStack's IpMemoryStore (the DHCP lease memory) deleted, and on
 #      a tmpfs: a new MAC address is not linked to the old one by asking
 #      the router for the previous session's IP address.
 #   5. sysctls: IPv6 off, Qualcomm's crash-dump mode off.
 
+# Files and directories are created 0644/0755 whatever umask the caller
+# had (adb's shell on the CI emulator has 0).
+umask 022
 MODDIR=${0%/*}
 
 # 1. Arm, before anything else. The firewall's lock goes in /dev (RAM);
@@ -107,18 +114,20 @@ tmpfs_over() {
 	log "tmpfs over $_t_dir ($_t_uid:$_t_gid $_t_mode $_t_ctx)"
 }
 
-# 3. Wi-Fi's shared configuration store: saved networks, their MAC
-# settings and Wi-Fi's own settings. init's perform_apex_config creates it
-# (root:system 0771) earlier in the same trigger. The per-user store of
-# user 0 in device-encrypted storage is covered too; the credential-
-# encrypted one (/data/misc_ce/0/...) is still locked at this point and is
-# a known gap (README).
+# 3. Wi-Fi's shared configuration store (WifiConfigStore: the saved
+# networks, which are shared by default, their MAC settings, and Wi-Fi's
+# own settings): ApexEnvironment's device-protected directory of the Wi-Fi
+# APEX, /data/misc/apexdata/com.android.wifi. init's perform_apex_config
+# creates it (root:system 0771) earlier in the same trigger. Wi-Fi's
+# per-user store is credential-encrypted (getWifiUserDirectory:
+# /data/misc_ce/<user>/apexdata/com.android.wifi; android16-release
+# framework/java/android/net/wifi/util/Environment.java): user 0's holds
+# networks added without "share", approved network suggestions of apps and
+# per-user Passpoint configurations. It is still locked at this point and
+# is not covered: a known gap (README). Nothing of Wi-Fi's is kept in
+# /data/misc_de, so there is nothing to cover there.
 tmpfs_over /data/misc/apexdata/com.android.wifi 0 1000 0771 \
 	u:object_r:apex_system_server_data_file:s0
-if [ -d /data/misc_de/0/apexdata/com.android.wifi ]; then
-	tmpfs_over /data/misc_de/0/apexdata/com.android.wifi 0 1000 0771 \
-		u:object_r:apex_system_server_data_file:s0
-fi
 
 # 4. NetworkStack's IpMemoryStore: IpMemoryStoreV2.db (IpMemoryStore.db
 # before Android 12) in NetworkStack's device-encrypted data, keyed by a

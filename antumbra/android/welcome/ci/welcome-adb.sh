@@ -1,35 +1,50 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Drives the Antumbra Welcome app over adb: for the CI emulator job, and by
-# hand. It works the screen the way a person does (uiautomator finds each
-# control by its test tag, then 'input tap'), and checks results through
-# the state provider and the system's own dumps.
+# Drives the Antumbra Welcome app over adb, by hand or from a test script
+# (the CI emulator job has its own driver, antumbra/android/ci/
+# emulator-antumbra.sh, with the same test tags, and calls this script only
+# for 'check-policies --keep-adb' and 'check-addon'). It works the screen the
+# way a person does (uiautomator finds each control by its test tag, then
+# 'input tap'), and checks results through the state provider and the
+# system's own dumps.
+#
+# Welcome switches USB debugging off as soon as it is the device owner, in
+# every session. Only a debug (debuggable, testOnly) build honours the test
+# hook 'debug.antumbra.keep_adb=1', which leaves adb on; 'provision' sets it
+# unless --no-keep-adb is given. With a release build adb goes away at
+# 'provision'.
 #
 #   welcome-adb.sh [-s SERIAL] COMMAND [ARGS]
 #
 # Commands:
 #   install APK               Install or update (debug builds are testOnly: 'install -t').
-#   provision                 Make Welcome the device owner, then wait for its screen.
-#                             The device must have no accounts (a fresh emulator has none).
+#   provision [--no-keep-adb] Set the test hook, make Welcome the device owner, then wait
+#                             for its screen. The device must have no accounts (a fresh
+#                             emulator has none).
 #   wait-welcome [SECONDS]    Wait until the Start button is on screen (default 60).
 #   start [OPTIONS]           Make the choices on screen and press Start, then wait
 #                             for the status screen and check the provider's row.
 #       --tor direct|bridges|offline   Default: direct.
-#       --builtin-bridges              With --tor bridges (the default source).
-#       --bridges-file FILE            With --tor bridges: type these lines.
-#       --keep-mac --admin --unsafe-browser
-#       --expect-adb-loss              Without --admin, Start switches USB debugging
-#                                      off and adb disconnects: succeed when it does.
+#       --bridges-file FILE            With --tor bridges: type these lines (plain
+#                                      bridges; v0 refuses obfs4, webtunnel, meek_lite).
+#       --keep-mac --admin
+#       --expect-adb-loss              Clear the test hook first: Start then switches USB
+#                                      debugging off and adb disconnects; succeed when it does.
 #   query                     Print the provider's row (runs as the shell user, uid 2000).
 #   expect KEY=VALUE...       Fail unless the row has these values (bridges: give a count,
-#                             as bridges=7).
-#   check-policies [--admin]  Check the device-owner restrictions, automatic time and
-#                             the time zone after Start.
+#                             as bridges=2).
+#   check-policies [--admin] [--keep-adb] [--wifi-locked]
+#                             Check the device-owner restrictions, adb, automatic time and
+#                             the time zone after Start. --keep-adb: the test hook is on;
+#                             --wifi-locked: an offline session or one without the add-on.
+#   check-addon               Fail unless the status screen shows the firewall as live
+#                             (Welcome could read antumbra.fw.armed).
 #   screenshot FILE.png       Save the screen.
 #   emergency-tile            Add the Emergency off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
-#   remove                    Remove the test device owner (testOnly builds only) and the app.
+#   remove                    Clear the test hook, remove the test device owner (testOnly
+#                             builds only) and the app.
 #
 # Needs adb and python3 on the host. Exit status 0 means every check passed.
 
@@ -40,6 +55,7 @@ ADMIN=$PKG/.AdminReceiver
 TILE=$PKG/.EmergencyTileService
 URI=content://org.antumbra.welcome.state/session
 UI_DUMP=/data/local/tmp/antumbra-welcome-ui.xml
+HOOK=debug.antumbra.keep_adb
 
 adb_args=()
 if [ "${1:-}" = "-s" ]; then
@@ -74,6 +90,23 @@ for n in root.iter("node"):
         b = n.get("bounds", "").replace("][", ",").strip("[]").split(",")
         x1, y1, x2, y2 = (int(v) for v in b)
         print((x1 + x2) // 2, (y1 + y2) // 2, n.get("checked", "false"))
+        break
+' "$1"
+}
+
+# Prints the text of the node whose resource-id is $1 and of everything
+# inside it, joined by " | " (from the XML on stdin).
+node_text() {
+    python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+want = sys.argv[1]
+try:
+    root = ET.fromstring(sys.stdin.read())
+except ET.ParseError:
+    sys.exit(0)
+for n in root.iter("node"):
+    if n.get("resource-id") == want:
+        print(" | ".join(t for t in (m.get("text", "") for m in n.iter("node")) if t))
         break
 ' "$1"
 }
@@ -123,11 +156,14 @@ wait_for() {
 
 # Types one bridge line into the focused field. 'input text' takes %s for
 # a space; anything else outside this set is refused rather than escaped.
+# (A ']' must come first in a bracket expression; '\]' would end it.)
 type_line() {
-    local line=$1
-    [[ "$line" =~ ^[A-Za-z0-9\ .:=/+_,@\[\]-]+$ ]] || die "bridge line has characters this script cannot type: $line"
+    local line=$1 re='^[][A-Za-z0-9 .:=/+_,@-]+$'
+    [[ $line =~ $re ]] || die "bridge line has characters this script cannot type: $line"
     a shell input text "'${line// /%s}'"
 }
+
+hook_on() { [ "$(sh_ getprop "$HOOK")" = 1 ]; }
 
 row() {
     sh_ content query --uri "$URI" --projection started:tor_mode:mac:admin:unsafe_browser:persistent:session_id
@@ -161,90 +197,121 @@ cmd_expect() {
 }
 
 cmd_start() {
-    local tor=direct source=builtin file="" keep_mac=false admin=false unsafe=false expect_loss=false
+    local tor=direct file="" keep_mac=false admin=false expect_loss=false
     while [ $# -gt 0 ]; do
         case "$1" in
             --tor) tor=$2; shift ;;
-            --builtin-bridges) source=builtin ;;
-            --bridges-file) source=custom; file=$2; shift ;;
+            --bridges-file) file=$2; shift ;;
+            --builtin-bridges) die "start: the built-in (obfs4) bridges need lyrebird and are disabled in v0; use --bridges-file with plain bridges" ;;
+            --unsafe-browser) die "start: the Unsafe Browser is disabled in v0 (coming later)" ;;
             --keep-mac) keep_mac=true ;;
             --admin) admin=true ;;
-            --unsafe-browser) unsafe=true ;;
             --expect-adb-loss) expect_loss=true ;;
             *) die "start: unknown option $1" ;;
         esac
         shift
     done
     case "$tor" in direct|bridges|offline) ;; *) die "start: --tor must be direct, bridges or offline" ;; esac
-    if [ "$admin" = false ] && [ "$expect_loss" = false ]; then
-        die "start without --admin switches USB debugging off and adb disconnects; add --admin, or --expect-adb-loss"
+    if [ "$tor" = bridges ] && [ -z "$file" ]; then die "start: --tor bridges needs --bridges-file"; fi
+    if [ "$expect_loss" = false ] && ! hook_on; then
+        die "the test hook $HOOK is not set: Start would switch USB debugging off and adb would disconnect; run 'provision' (debug build), or add --expect-adb-loss"
     fi
 
     wait_for start_button 60
     tap "tor_$tor"
     if [ "$tor" = bridges ]; then
-        if [ "$source" = custom ]; then
-            [ -r "$file" ] || die "cannot read $file"
-            tap bridges_custom
-            tap bridges_text
-            local first=1 line
-            while IFS= read -r line || [ -n "$line" ]; do
-                [ -n "${line// /}" ] || continue
-                [ "$first" = 1 ] || a shell input keyevent KEYCODE_ENTER
-                type_line "$line"
-                first=0
-            done < "$file"
-            a shell input keyevent KEYCODE_BACK   # close the keyboard
-        else
-            tap bridges_builtin
-        fi
+        [ -r "$file" ] || die "cannot read $file"
+        tap bridges_custom
+        tap bridges_text
+        local first=1 line
+        while IFS= read -r line || [ -n "$line" ]; do
+            [ -n "${line// /}" ] || continue
+            [ "$first" = 1 ] || a shell input keyevent KEYCODE_ENTER
+            type_line "$line"
+            first=0
+        done < "$file"
+        a shell input keyevent KEYCODE_BACK   # close the keyboard
     fi
     set_switch switch_mac "$([ "$keep_mac" = true ] && echo false || echo true)"
     set_switch switch_admin "$admin"
-    set_switch switch_unsafe_browser "$unsafe"
+    # Without the hook, Welcome switches debugging off at Start.
+    if [ "$expect_loss" = true ]; then a shell setprop "$HOOK" 0; fi
     tap start_button
 
     if [ "$expect_loss" = true ]; then
         local end=$((SECONDS + 90))
         while [ $SECONDS -lt $end ]; do
             if ! a shell true >/dev/null 2>&1; then
-                say "adb disconnected after Start, as expected without Administration"
+                say "adb disconnected after Start, as expected without the test hook"
                 return 0
             fi
             sleep 2
         done
-        die "adb still answers 90 s after Start without Administration"
+        die "adb still answers 90 s after Start without the test hook"
     fi
 
     wait_for status_title 60
     local expect=(started=1 "tor_mode=$tor" "mac=$([ "$keep_mac" = true ] && echo keep || echo new)"
-        "admin=$([ "$admin" = true ] && echo 1 || echo 0)"
-        "unsafe_browser=$([ "$unsafe" = true ] && echo 1 || echo 0)" persistent=0)
+        "admin=$([ "$admin" = true ] && echo 1 || echo 0)" unsafe_browser=0 persistent=0)
     if [ "$tor" != bridges ]; then expect+=(bridges=0); fi
     cmd_expect "${expect[@]}"
 }
 
+# Fails (fail=1) unless restriction $1 is set ($2 = yes) or not set ($2 = no).
+restriction() {
+    if [ "$2" = yes ]; then
+        grep -qw "$1" <<<"$dump" || { say "missing restriction $1"; fail=1; }
+    else
+        ! grep -qw "$1" <<<"$dump" || { say "restriction $1 is set, but should not be"; fail=1; }
+    fi
+}
+
 cmd_check_policies() {
-    local admin=false
-    [ "${1:-}" = --admin ] && admin=true
-    local dump key fail=0
+    local admin=false keep_adb=false wifi_locked=false
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --admin) admin=true ;;
+            --keep-adb) keep_adb=true ;;
+            --wifi-locked) wifi_locked=true ;;
+            *) die "check-policies: unknown option $1" ;;
+        esac
+        shift
+    done
+    local dump key fail=0 sdk
     dump=$(sh_ dumpsys user)
-    for key in no_safe_boot no_config_tethering no_wifi_direct; do
-        grep -qw "$key" <<<"$dump" || { say "missing restriction $key"; fail=1; }
+    sdk=$(sh_ getprop ro.build.version.sdk)
+    for key in no_safe_boot no_config_tethering no_wifi_direct disallow_config_private_dns; do
+        restriction "$key" yes
     done
-    for key in no_debugging_features no_install_unknown_sources_globally no_bluetooth no_config_location; do
-        if [ "$admin" = true ]; then
-            ! grep -qw "$key" <<<"$dump" || { say "restriction $key set in an Administration session"; fail=1; }
-        else
-            grep -qw "$key" <<<"$dump" || { say "missing restriction $key"; fail=1; }
-        fi
+    if [ "${sdk:-0}" -ge 35 ]; then restriction no_near_field_communication_radio yes; fi
+    for key in no_install_unknown_sources_globally no_bluetooth no_config_location; do
+        restriction "$key" "$([ "$admin" = true ] && echo no || echo yes)"
     done
+    # Debugging stays off in every session, Administration included; only
+    # the debug-build test hook keeps it.
+    restriction no_debugging_features "$([ "$keep_adb" = true ] && echo no || echo yes)"
+    for key in no_change_wifi_state no_config_wifi no_add_wifi_config; do
+        restriction "$key" "$([ "$wifi_locked" = true ] && echo yes || echo no)"
+    done
+    if [ "$wifi_locked" = true ]; then
+        sh_ cmd wifi status | grep -q 'Wifi is disabled' || { say "Wi-Fi is not off"; fail=1; }
+    fi
     [ "$(sh_ settings get global auto_time)" = 0 ] || { say "automatic time is on"; fail=1; }
     [ "$(sh_ settings get global auto_time_zone)" = 0 ] || { say "automatic time zone is on"; fail=1; }
     [ "$(sh_ getprop persist.sys.timezone)" = UTC ] || { say "time zone is not UTC"; fail=1; }
     [ "$(sh_ settings get secure location_mode)" = 0 ] || { say "location is on"; fail=1; }
     [ "$fail" = 0 ] || die "policy checks failed"
-    say "policies as expected (administration: $admin)"
+    say "policies as expected (administration: $admin, test hook: $keep_adb, Wi-Fi locked: $wifi_locked)"
+}
+
+cmd_check_addon() {
+    local text
+    wait_for row_firewall 30
+    text=$(dump_ui | node_text row_firewall)
+    case $text in
+        *Live*) say "Welcome sees the firewall: $text" ;;
+        *) die "Welcome does not see antumbra.fw.armed: $text" ;;
+    esac
 }
 
 cmd_emergency_tile() {
@@ -265,7 +332,7 @@ cmd_emergency_tile() {
     die "the device did not restart within 240 s of Emergency off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,34p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,48p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -274,6 +341,13 @@ case "$command" in
         a install -r -t "$1"
         ;;
     provision)
+        case "${1:-}" in
+            "") a shell setprop "$HOOK" 1
+                sh_ dumpsys package "$PKG" | grep -q 'flags=.*DEBUGGABLE' ||
+                    say "warning: not a debuggable build; it ignores $HOOK and adb goes away now" ;;
+            --no-keep-adb) a shell setprop "$HOOK" 0 ;;
+            *) die "provision: unknown option $1" ;;
+        esac
         a shell dpm set-device-owner "$ADMIN"
         sh_ dpm list-owners | grep -q "$PKG" || die "Welcome is not the device owner"
         # Welcome opens itself on DEVICE_OWNER_CHANGED; open it anyway in
@@ -287,12 +361,14 @@ case "$command" in
     query) sh_ content query --uri "$URI" ;;
     expect) cmd_expect "$@" ;;
     check-policies) cmd_check_policies "$@" ;;
+    check-addon) cmd_check_addon ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"
         a exec-out screencap -p > "$1"
         ;;
     emergency-tile) cmd_emergency_tile ;;
     remove)
+        a shell setprop "$HOOK" 0 || true
         a shell dpm remove-active-admin "$ADMIN" || true
         a uninstall "$PKG"
         ;;

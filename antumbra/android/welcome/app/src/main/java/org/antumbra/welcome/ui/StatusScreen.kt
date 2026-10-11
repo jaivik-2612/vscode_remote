@@ -44,6 +44,8 @@ data class StatusUi(
     /** Null before the first check. */
     val check: AddOnCheck? = null,
     val policyFailures: List<String> = emptyList(),
+    /** Wi-Fi should be on for this session but airplane mode kept it off. */
+    val wifiNotOn: Boolean = false,
     /** Emergency off powers off (true) or restarts (false). */
     val canPowerOff: Boolean = false,
     /** A message, such as why Emergency off failed (an error) or that the tile was added. */
@@ -99,13 +101,16 @@ fun StatusScreen(
 private fun NotStarted(ui: StatusUi, onOpenWelcome: () -> Unit) {
     Title(stringResource(R.string.app_name))
     Spacer(Modifier.height(8.dp))
-    Body(stringResource(R.string.status_not_started))
-    // Tor's network is on although this process knows no session:
-    // Welcome was restarted after Start.
-    if (ui.check?.status?.module?.torNetworkEnabled == true) {
+    // The module holds a session although this process knows none:
+    // Welcome's process was restarted after Start. A new Start would change
+    // nothing, so only a restart helps.
+    if (ui.check?.sessionLatched == true) {
+        Body(stringResource(R.string.status_lost_title))
         Spacer(Modifier.height(16.dp))
         WarningBanner(stringResource(R.string.status_lost), tag = "warning_lost")
+        return
     }
+    Body(stringResource(R.string.status_not_started))
     Spacer(Modifier.height(24.dp))
     Button(onClick = onOpenWelcome, modifier = Modifier.fillMaxWidth().height(56.dp).testTag("open_welcome")) {
         Text(stringResource(R.string.status_open_welcome))
@@ -130,6 +135,10 @@ private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> U
             stringResource(R.string.policy_failures, ui.policyFailures.joinToString()),
             tag = "warning_policies",
         )
+    }
+    if (ui.wifiNotOn) {
+        Spacer(Modifier.height(16.dp))
+        WarningBanner(stringResource(R.string.wifi_not_on), tag = "warning_wifi_off")
     }
 
     Card(stringResource(R.string.card_tor), "card_tor") { TorPart(ui) }
@@ -206,6 +215,18 @@ private fun TorPart(ui: StatusUi) {
             }
         }
     }
+    // The module's reason when tor cannot connect (for example bridges
+    // that need lyrebird). Display only.
+    val error = module?.torError
+    if (error != null && ui.session.torMode != TorMode.OFFLINE) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.tor_error, error),
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.testTag("tor_error"),
+        )
+    }
 }
 
 @Composable
@@ -244,14 +265,17 @@ private fun SessionPart(ui: StatusUi) {
     ValueLine(stringResource(R.string.row_mac), stringResource(if (s.newMac) R.string.value_new else R.string.value_keep))
     ValueLine(stringResource(R.string.row_admin), if (s.admin) on else off)
     ValueLine(stringResource(R.string.row_unsafe), if (s.unsafeBrowser) on else off)
-    // The property set by root counts first; the module's status file
-    // (which tor's uid could also write) is only shown.
-    val module = ui.check?.status?.module
-    val hash = ui.check?.firewallHash ?: module?.firewallHash?.takeIf { module.firewallState == "live" }
+    // Only the property set by root counts. The module's status file (which
+    // tor's uid could also write, and any app could fake while the filter
+    // is down) is never shown as the firewall's state.
+    val hash = ui.check?.firewallHash
     ValueLine(
         stringResource(R.string.row_firewall),
-        if (hash != null) stringResource(R.string.value_firewall_live, hash.take(12))
-        else stringResource(R.string.value_firewall_unknown),
+        when {
+            hash != null -> stringResource(R.string.value_firewall_live, hash.take(12))
+            ui.check == null -> stringResource(R.string.tor_waiting_short)
+            else -> stringResource(R.string.value_firewall_absent)
+        },
         tag = "row_firewall",
     )
 }

@@ -3,14 +3,23 @@ package dnsfilter
 import (
 	"context"
 	"encoding/binary"
+	"regexp"
 	"testing"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
 
+// forwardable is what a name sent to tor must look like: one or more labels
+// of 1 to 63 bytes from [A-Za-z0-9_-], each followed by a dot, 254 bytes at
+// most. It is written out here independently of PlainName, as the oracle
+// for it.
+var forwardable = regexp.MustCompile(`^(?:[A-Za-z0-9_-]{1,63}\.)+$`)
+
 // FuzzHandle feeds arbitrary bytes to the query parser, as any app on the
-// phone can. The handler must never panic, and any answer must be a
-// well-formed reply with the query's ID that fits in a UDP message.
+// phone can. The handler must never panic, any answer must be a well-formed
+// reply with the query's ID that fits in a UDP message, and every name that
+// reaches tor must be a plain name (no NUL or other byte that tor or an
+// exit could read differently from the filter).
 func FuzzHandle(f *testing.F) {
 	f.Add(query(1, "www.example.org.", dnsmessage.TypeA))
 	f.Add(query(2, "a.tracker.example.", dnsmessage.TypeAAAA))
@@ -20,8 +29,18 @@ func FuzzHandle(f *testing.F) {
 	f.Add([]byte{0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0xC0, 12, 0, 1, 0, 1})
 	f.Add([]byte{0, 1, 0x10, 0, 0, 2, 0, 0, 0, 0, 0, 0})
 	f.Add([]byte{})
+	f.Add(rawQuery(6, dnsmessage.TypeA, "doubleclick", "net\x00"))
+	f.Add(rawQuery(7, dnsmessage.TypeA, "ads", "doubleclick", "net\x00x"))
+	f.Add(rawQuery(8, dnsmessage.TypePTR, "1", "0", "0", "127", "in-addr", "arpa"))
+	f.Add([]byte("00\x010\x00\x01000000\x00\x00\f\x00\x01")) // PTR for the root (found by fuzzing)
 	e := newEnv(f, nil)
 	f.Fuzz(func(t *testing.T, msg []byte) {
+		e.up.fn = func(id uint16, q dnsmessage.Question) ([]byte, error) {
+			if n := q.Name.String(); len(n) > 254 || !forwardable.MatchString(n) {
+				t.Fatalf("name %q was sent to tor", n)
+			}
+			return answerA(id, q)
+		}
 		resp := e.h.Handle(context.Background(), msg, MaxUDPSize)
 		if resp == nil {
 			return

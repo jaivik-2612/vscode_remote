@@ -2,6 +2,7 @@ package status
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,10 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func snap() Snapshot {
-	return Snapshot{Service: "antumbra-dnsfilter", Version: "test", Queries: 10, Blocked: 3, ServFail: 1,
+	return Snapshot{Service: "antumbra-dnsfilter", Version: "test", Counters: Counters{Queries: 10, Blocked: 3, ServFail: 1},
 		List:     ListInfo{Loaded: true, Version: "20261011", Size: 195887, SHA256: "ab"},
 		Upstream: UpstreamInfo{Address: "127.0.0.1:9053", Network: "udp", OwnerUID: 2950, State: "ok"},
 		Policy:   PolicyInfo{BlockedAnswer: "nxdomain", FilterAAAA: true, LocalNames: true}}
@@ -106,6 +108,68 @@ func TestStatusModuleFile(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+func TestModuleSessionIDNotShown(t *testing.T) {
+	dir := t.TempDir()
+	for name, c := range map[string]struct{ in, want string }{
+		"with session_id": {`{"tor":{"bootstrap":100},"welcome":{"started":true,"session_id":"0123456789abcdef"}}`,
+			`{"tor":{"bootstrap":100},"welcome":{"started":true}}`},
+		"without":        {`{"welcome":{"started":true},"x":[1,2]}`, `{"welcome":{"started":true},"x":[1,2]}`},
+		"welcome not {}": {`{"welcome":"session_id"}`, `{"welcome":"session_id"}`},
+		"given twice": {`{"welcome":{"session_id":"0123456789abcdef"},"welcome":{"started":false}}`,
+			`{"welcome":{"started":false}}`},
+		"key order":     {`{"z":1,"a":{"b":2}}`, `{"a":{"b":2},"z":1}`},
+		"not an object": {`["session_id"]`, `["session_id"]`},
+	} {
+		p := filepath.Join(dir, "status.json")
+		if err := os.WriteFile(p, []byte(c.in+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:5380/status", nil)
+		w := httptest.NewRecorder()
+		Handler(snap, p).ServeHTTP(w, req)
+		var doc struct {
+			Module json.RawMessage `json:"module"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &doc); err != nil {
+			t.Fatal(err)
+		}
+		if string(doc.Module) != c.want {
+			t.Errorf("%s: module %s, want %s", name, doc.Module, c.want)
+		}
+		if strings.Contains(w.Body.String(), "0123456789abcdef") {
+			t.Errorf("%s: the session ID is on the page", name)
+		}
+	}
+}
+
+func TestCoarsen(t *testing.T) {
+	var n uint64
+	live := func() Snapshot {
+		n++
+		s := snap()
+		s.UptimeSeconds = int64(n)
+		s.Queries, s.Upstream.LastSeen = n, fmt.Sprint(n)
+		return s
+	}
+	get := Coarsen(live, 80*time.Millisecond)
+	first := get()
+	if first.Queries != 1 || first.Upstream.LastSeen != "1" {
+		t.Fatalf("first snapshot %+v", first)
+	}
+	second := get()
+	if second.Queries != 1 || second.Upstream.LastSeen != "1" || second.UptimeSeconds != 2 {
+		t.Errorf("within the interval: queries %d last_seen %s uptime %d, want 1 1 2",
+			second.Queries, second.Upstream.LastSeen, second.UptimeSeconds)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if third := get(); third.Queries != 3 || third.Upstream.LastSeen != "3" {
+		t.Errorf("after the interval: queries %d, want 3", third.Queries)
+	}
+	if s := Coarsen(live, 0)(); s.Queries != 4 {
+		t.Errorf("interval 0: queries %d, want 4 (live)", s.Queries)
+	}
+}
 
 func TestStatusRefusals(t *testing.T) {
 	h := Handler(snap, "")

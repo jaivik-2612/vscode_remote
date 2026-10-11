@@ -19,6 +19,7 @@ type Stats struct {
 	Refused        atomic.Uint64 // answered REFUSED (ANY, AXFR, other classes)
 	FormErr        atomic.Uint64 // answered FORMERR (malformed question)
 	NotImp         atomic.Uint64 // answered NOTIMP (opcodes other than QUERY)
+	BadName        atomic.Uint64 // answered NXDOMAIN: a name with bytes other than [A-Za-z0-9_-] and dots
 	RateLimited    atomic.Uint64 // dropped by the per-client-port rate limit
 	Dropped        atomic.Uint64 // dropped: not a query, too short, or overload
 	UpstreamErrors atomic.Uint64 // failed exchanges with tor

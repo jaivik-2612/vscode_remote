@@ -23,14 +23,21 @@ data class FilterStatus(
  * What the module's status.json says, as far as Welcome shows it. Every
  * field is optional: the file is written by the module's service.sh and
  * passed on by the filter under "module". It lives in a directory that tor's
- * uid can also write, so it is shown, never trusted for a decision.
+ * uid can also write, and when the filter is down any app could answer on
+ * its port, so it is shown, never trusted to allow anything. The one
+ * decision it takes part in can only refuse: [sessionLatched] stops a
+ * second Start in the same boot.
  */
 data class ModuleStatus(
     val torBootstrap: Int?,
     val torSummary: String?,
     val torNetworkEnabled: Boolean?,
+    /** Why tor cannot connect, in the module's words (such as bridges that need lyrebird). */
+    val torError: String?,
     val firewallState: String?,
     val firewallHash: String?,
+    /** The module has latched a started session in this boot (welcome.started, or a session_id). */
+    val sessionLatched: Boolean,
 )
 
 data class AddOnStatus(
@@ -114,12 +121,19 @@ object StatusPage {
      * The module's part. Welcome reads these fields (README, "What Welcome
      * reads from the status page"):
      *   tor.bootstrap (0-100), tor.summary (text), tor.network
-     *   ("enabled"/"disabled"), firewall.state ("live", "armed", ...),
-     *   firewall.hash (the ruleset hash prefix).
+     *   ("enabled"/"disabled"), tor.error (text), firewall.state ("live",
+     *   "armed", ...), firewall.hash (the ruleset hash prefix),
+     *   welcome.started (true once the module latched a session) or, from
+     *   older modules, a non-empty welcome.session_id.
      */
     fun parseModule(m: JSONObject): ModuleStatus {
         val tor = m.optJSONObject("tor")
         val fw = m.optJSONObject("firewall")
+        val welcome = m.optJSONObject("welcome")
+        val latched = welcome != null && (
+            welcome.opt("started").let { it == true || it == 1 || it == "1" || it == "true" } ||
+                welcome.optString("session_id").isNotBlank()
+            )
         val bootstrap = tor?.let { t ->
             if (t.has("bootstrap") && !t.isNull("bootstrap")) t.optInt("bootstrap", -1).takeIf { it in 0..100 } else null
         }
@@ -132,39 +146,56 @@ object StatusPage {
             torBootstrap = bootstrap,
             torSummary = tor?.optString("summary")?.takeIf { it.isNotBlank() }?.take(200),
             torNetworkEnabled = network,
+            torError = tor?.optString("error")?.takeIf { it.isNotBlank() }?.take(300),
             firewallState = fw?.optString("state")?.takeIf { it.isNotBlank() }?.take(40),
             firewallHash = fw?.optString("hash")?.takeIf { it.isNotBlank() }?.take(64),
+            sessionLatched = latched,
         )
+    }
+}
+
+/** Reads a system property with the getprop tool (apps have no public API for it). */
+object SystemProperty {
+    fun read(name: String): String? = try {
+        val process = ProcessBuilder("/system/bin/getprop", name).redirectErrorStream(true).start()
+        val value = process.inputStream.bufferedReader().use { it.readText() }.trim()
+        if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroy()
+        value
+    } catch (e: Exception) {
+        null
     }
 }
 
 /**
  * The firewall's own sign of life: the module publishes the ruleset hash
  * with 'resetprop -n antumbra.fw.armed <hash>' only after 'antumbra-fw
- * apply' succeeded and was verified. Only root can set it. SELinux may hide
- * the property from apps; then this returns null, as when it is unset.
+ * apply' succeeded and was verified. Only root can set it. Apps can read
+ * it: an unlisted property is default_prop, which every coredomain process
+ * may read (android16 sepolicy, private/coredomain.te), and untrusted_app
+ * is a coredomain. If a future policy hid it, Welcome would see the add-on
+ * as absent and keep Wi-Fi off: it fails closed.
  */
 object FirewallProperty {
     const val NAME = "antumbra.fw.armed"
 
-    fun read(): String? = try {
-        val process = ProcessBuilder("/system/bin/getprop", NAME).redirectErrorStream(true).start()
-        val value = process.inputStream.bufferedReader().use { it.readText() }.trim()
-        if (!process.waitFor(2, TimeUnit.SECONDS)) process.destroy()
-        value.takeIf { Regex("[0-9a-f]{8,64}").matches(it) }
-    } catch (e: Exception) {
-        null
-    }
+    fun read(): String? = SystemProperty.read(NAME)?.takeIf { Regex("[0-9a-f]{8,64}").matches(it) }
 }
 
-/** Whether the add-on looks present, for the fail-closed Wi-Fi decision at Start. */
+/** Whether the add-on is present, for the fail-closed Wi-Fi decision at Start. */
 data class AddOnCheck(val firewallHash: String?, val status: AddOnStatus) {
     /**
-     * The firewall property alone is proof (only root sets it). If apps
-     * cannot read it, a DNS-filter answer on 127.0.0.1:5380 is taken as
-     * the sign instead; README "Open risks" explains why that is weaker.
+     * The firewall property is the only proof (only root sets it). The
+     * status page is shown but never counts: without the firewall, any app
+     * could answer on 127.0.0.1:5380 as the DNS filter.
      */
-    val present: Boolean get() = firewallHash != null || status.filterAnswered
+    val present: Boolean get() = firewallHash != null
+
+    /**
+     * The module already latched a session in this boot, so a new Start
+     * would change nothing in the module (it keeps the first one). Only
+     * believed while the firewall property is set; it can only refuse.
+     */
+    val sessionLatched: Boolean get() = present && status.module?.sessionLatched == true
 
     companion object {
         fun run(): AddOnCheck = AddOnCheck(FirewallProperty.read(), StatusPage.fetch())

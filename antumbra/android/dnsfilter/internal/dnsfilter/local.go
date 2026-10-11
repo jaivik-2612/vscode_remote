@@ -18,15 +18,17 @@ import (
 var localZones = func() []string {
 	z := []string{
 		// Special-use names (RFC 6761, 6762, 8375, 9476), ICANN's private-use
-		// top-level domain, and suffixes home routers use that the DNS root
-		// does not delegate.
-		"alt", "corp", "home", "home.arpa", "internal", "invalid", "lan",
-		"local", "localdomain", "test",
+		// top-level domain, the private suffixes RFC 6762 (Appendix G) lists,
+		// and suffixes home routers use that the DNS root does not delegate
+		// (fritz.box: AVM's FRITZ!Box routers; .box itself is a real domain).
+		"alt", "corp", "fritz.box", "home", "home.arpa", "internal", "intranet",
+		"invalid", "lan", "local", "localdomain", "private", "test",
 		// Reverse zones of private and special IPv4 ranges (RFC 6303,
-		// RFC 7793, RFC 5737).
+		// RFC 7793, RFC 5737, RFC 6890: 192.0.0.0/24, 198.18.0.0/15).
 		"0.in-addr.arpa", "10.in-addr.arpa", "127.in-addr.arpa",
 		"254.169.in-addr.arpa", "168.192.in-addr.arpa",
-		"2.0.192.in-addr.arpa", "100.51.198.in-addr.arpa",
+		"0.0.192.in-addr.arpa", "2.0.192.in-addr.arpa",
+		"18.198.in-addr.arpa", "19.198.in-addr.arpa", "100.51.198.in-addr.arpa",
 		"113.0.203.in-addr.arpa", "255.255.255.255.in-addr.arpa",
 		// Reverse zones of IPv6 unique-local, link-local and documentation
 		// addresses.

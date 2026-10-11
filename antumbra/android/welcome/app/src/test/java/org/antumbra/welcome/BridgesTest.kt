@@ -79,6 +79,28 @@ class BridgesTest {
     }
 
     @Test
+    fun refusesTransportsWhenNoneIsAvailable() {
+        val plain = "192.0.2.7:9001 0123456789ABCDEF0123456789ABCDEF01234567"
+        assertEquals(
+            Bridges.Problem.NeedsTransport(3, "obfs4"),
+            (Bridges.parse("$plain\n# comment\n$obfs4", transports = false) as Bridges.Result.Error).problem,
+        )
+        assertEquals(
+            Bridges.Problem.NeedsTransport(1, "webtunnel"),
+            (Bridges.parse(webtunnel, transports = false) as Bridges.Result.Error).problem,
+        )
+        assertEquals(listOf(plain), (Bridges.parse(plain, transports = false) as Bridges.Result.Ok).lines)
+        // Snowflake and unknown types keep their own, more precise reasons.
+        assertEquals(
+            Bridges.Problem.Snowflake(1),
+            (Bridges.parse("snowflake 192.0.2.3:80", transports = false) as Bridges.Result.Error).problem,
+        )
+        // v0 has no lyrebird: Welcome refuses transports and starts with "Bridges I enter".
+        assertTrue(!Bridges.TRANSPORTS_AVAILABLE)
+        assertEquals(BridgeSource.CUSTOM, Choices().bridgeSource)
+    }
+
+    @Test
     fun ipv4WithPort() {
         assertTrue(Bridges.isIpv4WithPort("255.255.255.255:65535"))
         listOf("1.2.3:4", "1.2.3.4", "1.2.3.4:", "01234.1.1.1:1", "1.2.3.4:65536", "a.b.c.d:1", "1.2.3.4:+1").forEach {

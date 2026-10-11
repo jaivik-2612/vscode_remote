@@ -3,6 +3,7 @@
 package status
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/net/netutil"
@@ -26,6 +28,16 @@ type Snapshot struct {
 	Version       string `json:"version"` // the program's version
 	UptimeSeconds int64  `json:"uptime_seconds"`
 
+	Counters // at the top level of the document
+
+	List     ListInfo     `json:"list"`
+	Upstream UpstreamInfo `json:"upstream"`
+	Policy   PolicyInfo   `json:"policy"`
+}
+
+// Counters are the query counters. They move with every lookup on the
+// phone, so the page shows them only as often as Coarsen allows.
+type Counters struct {
 	Queries        uint64 `json:"queries"`
 	Blocked        uint64 `json:"blocked"`
 	Forwarded      uint64 `json:"forwarded"`
@@ -34,13 +46,38 @@ type Snapshot struct {
 	Refused        uint64 `json:"refused"`
 	FormErr        uint64 `json:"formerr"`
 	NotImp         uint64 `json:"notimp"`
+	BadName        uint64 `json:"bad_name"` // names with bytes other than [A-Za-z0-9_-] and dots
 	RateLimited    uint64 `json:"rate_limited"`
 	Dropped        uint64 `json:"dropped"`
 	UpstreamErrors uint64 `json:"upstream_errors"`
+}
 
-	List     ListInfo     `json:"list"`
-	Upstream UpstreamInfo `json:"upstream"`
-	Policy   PolicyInfo   `json:"policy"`
+// Coarsen returns a snapshot function whose activity fields (the counters,
+// and the upstream's state, last error and last_seen time) are taken
+// afresh at most once per interval; uptime, the list, the policy and the
+// module part are always current. Every app on the phone can read the
+// status page, and counters that moved with each lookup would tell an app
+// when other apps look names up (Android hides other apps' network
+// activity for this reason). An interval of 0 or less turns this off.
+func Coarsen(snapshot func() Snapshot, interval time.Duration) func() Snapshot {
+	if interval <= 0 {
+		return snapshot
+	}
+	var (
+		mu    sync.Mutex
+		taken time.Time // monotonic
+		last  Snapshot
+	)
+	return func() Snapshot {
+		s := snapshot()
+		mu.Lock()
+		defer mu.Unlock()
+		if now := time.Now(); taken.IsZero() || now.Sub(taken) >= interval {
+			taken, last = now, s
+		}
+		s.Counters, s.Upstream = last.Counters, last.Upstream
+		return s
+	}
 }
 
 // ListInfo describes the block list in use.
@@ -145,7 +182,40 @@ func readModule(path string) (json.RawMessage, string) {
 	case !json.Valid(data):
 		return null, "invalid JSON"
 	}
-	return json.RawMessage(strings.TrimSpace(string(data))), ""
+	return dropPrivate(bytes.TrimSpace(data)), ""
+}
+
+// dropPrivate removes from the module's status what every app on the
+// phone must not read: welcome.session_id, a random identifier of this
+// boot's session. An object is written out again (keys sorted, a key
+// given twice kept once, as JSON readers take it), so that no copy of the
+// field can stay behind; anything else is passed on as it is.
+func dropPrivate(doc []byte) json.RawMessage {
+	null := json.RawMessage("null")
+	if len(doc) == 0 || doc[0] != '{' {
+		return doc
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(doc, &top) != nil {
+		return null
+	}
+	if w := bytes.TrimSpace(top["welcome"]); len(w) > 0 && w[0] == '{' {
+		var welcome map[string]json.RawMessage
+		if json.Unmarshal(w, &welcome) != nil {
+			return null
+		}
+		delete(welcome, "session_id")
+		nw, err := json.Marshal(welcome)
+		if err != nil {
+			return null
+		}
+		top["welcome"] = nw
+	}
+	out, err := json.Marshal(top)
+	if err != nil {
+		return null
+	}
+	return out
 }
 
 func localHost(host string) bool {

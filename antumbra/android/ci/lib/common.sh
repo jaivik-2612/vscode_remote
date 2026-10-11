@@ -8,6 +8,9 @@
 #   ANTUMBRA_CI_OUT   the report directory (the artifact's root); required
 #   ANTUMBRA_SERIAL   adb serial of the emulator (default emulator-5554)
 #   ANTUMBRA_CAPTURE  the emulator's -tcpdump file, for 'network capture stop'
+#   ANTUMBRA_CI_IMAGE the system image, as sdkmanager names it without the
+#                     'system-images;' prefix (default android-36;default;x86_64),
+#                     to record its revision
 #
 # Each scenario writes, under $ANTUMBRA_CI_OUT/<scenario>/:
 #   events.tsv   NAME TAB HOST-TIME TAB DETAIL: what happened when (the leak
@@ -94,6 +97,22 @@ wait_system_ready() {
 # The network Android uses by default ("none" when there is none).
 default_network() {
 	ash 'dumpsys connectivity' 2>/dev/null | sed -n 's/^ *Active default network: *//p' | head -n 1
+}
+
+# The transports of the default network (WIFI, CELLULAR, ...; "none" when
+# there is none), from the NetworkAgentInfo line that names it.
+default_transport() {
+	local d n t
+	d=$(ash 'dumpsys connectivity' 2>/dev/null)
+	n=$(printf '%s\n' "$d" | sed -n 's/^ *Active default network: *//p' | head -n 1)
+	case $n in '' | none) echo none; return 0 ;; esac
+	t=$(printf '%s\n' "$d" | grep -F "network{$n}" | grep -o 'Transports: [A-Z_|]*' | head -n 1)
+	if [ -z "$t" ]; then
+		t=$(printf '%s\n' "$d" | grep -F "network{$n}" | grep -o 'ni{[A-Z_]*' | head -n 1)
+	fi
+	t=${t#Transports: }
+	t=${t#ni\{}
+	echo "${t:-unknown}"
 }
 
 # wait_network up|down SECONDS
@@ -235,6 +254,9 @@ device_info() {
 		ash 'uname -a'
 		echo "# emulator on the host"
 		"${ANDROID_HOME:-/usr/local/lib/android/sdk}/emulator/emulator" -version 2>/dev/null | head -n 2
+		echo "# system image on the host (${ANTUMBRA_CI_IMAGE:-android-36;default;x86_64})"
+		grep -E '^(Pkg\.Revision|SystemImage\.TagId|AndroidVersion\.ApiLevel|AndroidVersion\.ExtensionLevel)=' \
+			"${ANDROID_HOME:-/usr/local/lib/android/sdk}/system-images/$(printf '%s' "${ANTUMBRA_CI_IMAGE:-android-36;default;x86_64}" | tr ';' '/')/source.properties" 2>/dev/null
 		echo "# interfaces"
 		ash 'ip addr'
 	} >"$LOGS/$SCEN-device.txt" 2>&1
@@ -253,15 +275,24 @@ proc_net_snapshot() {
 
 # capture_stop: close the emulator's packet capture (it is flushed when the
 # emulator exits in any case). The console wants the capture's file name.
+# The event is taken before the console is asked, so that the leak
+# analyser can tell whether the capture's last frame lies long before it
+# (frames lost at the end). Its detail says whether the console confirmed.
 capture_stop() {
-	local out
-	event capture_stop
+	local out t
+	t=$(now)
 	out=$(timeout 20 adb -s "$ANTUMBRA_SERIAL" emu network capture stop 2>&1)
 	if ! printf '%s' "$out" | grep -q '^OK' && [ -n "${ANTUMBRA_CAPTURE:-}" ]; then
 		out="$out
 $(timeout 20 adb -s "$ANTUMBRA_SERIAL" emu network capture stop "$(basename "$ANTUMBRA_CAPTURE")" 2>&1)"
 	fi
 	printf '%s\n' "$out" >"$LOGS/$SCEN-capture-stop.txt"
+	if printf '%s' "$out" | grep -q '^OK'; then
+		printf 'capture_stop\t%s\tconfirmed\n' "$t" >>"$SDIR/events.tsv"
+	else
+		printf 'capture_stop\t%s\tnot confirmed (the file is closed when the emulator exits)\n' "$t" >>"$SDIR/events.tsv"
+	fi
+	say "capture stopped"
 }
 
 # json_obj KEY=VALUE...: one JSON object of strings, on one line.

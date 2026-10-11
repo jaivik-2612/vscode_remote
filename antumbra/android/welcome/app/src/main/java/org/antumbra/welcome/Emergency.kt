@@ -24,6 +24,12 @@ import java.io.File
  *    reboot. The module is asked to power the phone off early in the next
  *    boot when it finds the marker (README, "Emergency off"). A restart
  *    alone ends the session, but memory keeps traces for a short while.
+ *
+ * The marker is not deleted at boot, where Welcome would race the module.
+ * Welcome deletes a leftover marker at Start and on becoming the device
+ * owner (the module had its chance by then), and at a shutdown that this
+ * process did not ask for, so a request the module did not act on never
+ * powers off a later boot.
  */
 object Emergency {
     private const val TAG = "AntumbraEmergency"
@@ -37,6 +43,11 @@ object Emergency {
     private const val EXTRA_KEY_CONFIRM = "android.intent.extra.KEY_CONFIRM"
     private const val EXTRA_USER_REQUESTED_SHUTDOWN = "android.intent.extra.USER_REQUESTED_SHUTDOWN"
     private const val SHUTDOWN_PERMISSION = "android.permission.SHUTDOWN"
+
+    /** Set when this process wrote the marker and asked for the restart. */
+    @Volatile
+    var requested: Boolean = false
+        private set
 
     fun canPowerOff(context: Context): Boolean =
         context.checkSelfPermission(SHUTDOWN_PERMISSION) == PackageManager.PERMISSION_GRANTED
@@ -71,7 +82,8 @@ object Emergency {
             if (inSession) runCatching { Home.unclaim(context) }
             return context.getString(R.string.power_off_unavailable)
         }
-        val marker = File(context.createDeviceProtectedStorageContext().filesDir, POWEROFF_MARKER)
+        val marker = marker(context)
+        requested = true
         try {
             marker.writeText("1\n")
         } catch (e: Exception) {
@@ -86,10 +98,18 @@ object Emergency {
             // IllegalStateException during a phone call: the session goes
             // on, so put things back as they were.
             Log.w(TAG, "reboot refused", e)
+            requested = false
             marker.delete()
             if (inSession) runCatching { Home.unclaim(context) }
             context.getString(R.string.power_off_failed, e.message ?: e.javaClass.simpleName)
         }
+    }
+
+    private fun marker(context: Context) = File(context.createDeviceProtectedStorageContext().filesDir, POWEROFF_MARKER)
+
+    /** Deletes a power-off request left from an earlier boot. */
+    fun clearRequest(context: Context) {
+        if (marker(context).delete()) Log.i(TAG, "removed a power-off request the module did not act on")
     }
 
     private fun claimForNextBoot(context: Context) {

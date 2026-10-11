@@ -18,6 +18,13 @@ import (
 // about 4 MB).
 const maxSourceSize = 64 << 20
 
+// MaxIPv4Entries is the most addresses the DoH address list may hold.
+// antumbra-fw makes one rule of each, checked for every new connection of
+// every app, and a list that suddenly grows this much is more likely
+// broken than right (1,434 addresses on 2026-10-11). More stops the build,
+// as too few does.
+const MaxIPv4Entries = 4096
+
 // SourceReport describes what one source contributed.
 type SourceReport struct {
 	Source
@@ -285,9 +292,9 @@ func parentIn(sorted []string, d string) bool {
 }
 
 // CompileIPv4 builds the DoH server address list for the firewall from the
-// "ipv4" sources: one address or prefix per line, sorted by address,
-// without duplicates, after a few '#' comment lines. antumbra-fw reads it
-// as lists/doh-ipv4.txt.
+// "ipv4" sources: one address per line, sorted, without duplicates, after
+// a few '#' comment lines; at most MaxIPv4Entries. antumbra-fw reads it as
+// lists/doh-ipv4.txt.
 func CompileIPv4(cfg *Config, downloads, version string) ([]byte, *Report, error) {
 	rep := &Report{}
 	set := map[netip.Prefix]struct{}{}
@@ -308,6 +315,10 @@ func CompileIPv4(cfg *Config, downloads, version string) ([]byte, *Report, error
 		}
 		rep.Sources = append(rep.Sources, sr)
 		comments = append(comments, sourceComment(sr, cfg.Licence[s.Name]))
+	}
+	if len(set) > MaxIPv4Entries {
+		return nil, nil, fmt.Errorf("%d DoH server addresses, at most %d expected (broken source?)",
+			len(set), MaxIPv4Entries)
 	}
 	ps := make([]netip.Prefix, 0, len(set))
 	for p := range set {

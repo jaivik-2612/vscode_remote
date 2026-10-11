@@ -1,4 +1,17 @@
 #!/system/bin/sh
 # Test stand-in for Android's cmd: logs to /antumbra-test/cmd.log.
+# 'cmd device_policy list-owners' prints /antumbra-test/owners, in the
+# format of Android 16's DevicePolicyManagerServiceShellCommand.
 [ -f /antumbra-test/framework-up ] || { echo "cmd: Can't find service: $1" >&2; exit 20; }
 echo "$*" >>/antumbra-test/cmd.log
+case "$*" in
+'device_policy list-owners')
+	if [ -s /antumbra-test/owners ]; then
+		echo "1 owner:"
+		cat /antumbra-test/owners
+	else
+		echo "no owners"
+	fi
+	;;
+esac
+exit 0

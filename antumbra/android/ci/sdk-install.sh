@@ -32,12 +32,36 @@ done
 if [ ${#pkgs[@]} -gt 0 ]; then
 	[ -x "$SDKMANAGER" ] || { echo "sdk-install: no sdkmanager at $SDKMANAGER" >&2; exit 1; }
 	echo "sdk-install: installing ${pkgs[*]}"
-	yes 2>/dev/null | "$SDKMANAGER" --install "${pkgs[@]}" >/dev/null
+	log=$(mktemp)
+	# 'yes' answers sdkmanager's licence prompts. When sdkmanager exits,
+	# 'yes' dies of SIGPIPE (status 141), which pipefail would report as the
+	# pipeline's status and set -e would act on even after a successful
+	# install; '|| true' keeps that out, so the status is sdkmanager's own.
+	if ! { yes 2>/dev/null || true; } | "$SDKMANAGER" --install "${pkgs[@]}" >"$log" 2>&1; then
+		tail -n 40 "$log" >&2
+		rm -f "$log"
+		echo "sdk-install: sdkmanager failed to install ${pkgs[*]}" >&2
+		exit 1
+	fi
+	rm -f "$log"
 else
 	echo "sdk-install: already installed: $*"
 fi
 
+# Check what was asked for, installed now or before.
 for want in "$@"; do
+	case $want in
+	platform)
+		[ -f "$SDK/platforms/android-36/android.jar" ] ||
+			{ echo "sdk-install: $SDK/platforms/android-36 is missing after the install" >&2; exit 1; }
+		echo "sdk-install: platform 36 at $SDK/platforms/android-36"
+		;;
+	build-tools)
+		[ -x "$SDK/build-tools/36.0.0/aapt2" ] ||
+			{ echo "sdk-install: $SDK/build-tools/36.0.0 is missing after the install" >&2; exit 1; }
+		echo "sdk-install: build tools 36.0.0 at $SDK/build-tools/36.0.0"
+		;;
+	esac
 	if [ "$want" = ndk ]; then
 		grep -q "^Pkg.Revision *= *$NDK_REV\$" "$SDK/ndk/$NDK_REV/source.properties" ||
 			{ echo "sdk-install: $SDK/ndk/$NDK_REV is not revision $NDK_REV" >&2; exit 1; }

@@ -23,8 +23,10 @@ import (
 // exchange, and again when the reply has arrived, the filter reads the
 // kernel's socket table and refuses to use the port unless every socket
 // bound to it belongs to tor's uid. (A process that binds, answers and
-// closes between the two reads is not caught; the firewall must also refuse
-// packets from port 9053 that do not come from tor's uid.)
+// closes between the two reads is not caught: it has seen the name, and
+// the query times out. The firewall must also refuse packets from port
+// 9053 that do not come from tor's uid, so that such a socket cannot
+// answer.)
 
 // portOwners returns the uids of the sockets bound to port on 127.0.0.1 or
 // on the wildcard address, in IPv4 or IPv4-mapped IPv6 form: the sockets

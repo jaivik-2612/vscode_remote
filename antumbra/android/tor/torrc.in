@@ -5,14 +5,21 @@
 ## with 'tor -f <this file>'. tor is built with --disable-system-torrc, so it
 ## reads no other configuration file.
 ##
-## Directories tor expects the module to create before it starts tor
-## (tor checks owner and mode itself and refuses to start otherwise):
-##   @ANTUMBRA_DIR@/state/tor  owner 2950:2950, mode 0700, on a tmpfs
-##                             mounted fresh at every boot, so guard
-##                             choices and time stamps never reach flash.
+## What the module creates before it starts tor (tor checks the owner and
+## mode of its own directories and refuses to start otherwise):
+##   @ANTUMBRA_DIR@            owner root, mode 0711, a tmpfs mounted fresh
+##                             at every boot, so guard choices, time stamps
+##                             and logs never reach flash.
+##   @ANTUMBRA_DIR@/state      owner root, mode 0711.
+##   @ANTUMBRA_DIR@/state/tor  owner 2950:2950, mode 0700.
 ##   @ANTUMBRA_DIR@/run        owner 2950, group 2950 or 0, mode 0751 or
 ##                             0750 (0751 lets uid 2951 open status.json).
-##   @ANTUMBRA_DIR@/log        writable by uid 2950.
+##   @ANTUMBRA_DIR@/log        owner root, mode 0755. tor cannot create
+##                             files there, so it cannot plant a link that
+##                             root's own log writes would follow.
+##   @ANTUMBRA_DIR@/log/tor.log  an existing plain file, owner 2950:2950,
+##                             mode 0600, which root creates before every
+##                             start of tor; tor only appends to it.
 ## Every directory above them (/data/adb, @ANTUMBRA_DIR@) must be
 ## searchable (x) by uid 2950.
 
@@ -63,9 +70,12 @@ CookieAuthFile @ANTUMBRA_DIR@/run/tor-control.authcookie
 CookieAuthFileGroupReadable 0
 
 ## --- Network ------------------------------------------------------------------
-## Start with the network off. After the Welcome screen the module sets
-## DisableNetwork 0 (and any bridges) over the control socket, unless the
-## person chose to stay offline.
+## Start with the network off. After the Welcome screen the module sends
+## one SETCONF with any bridges and DisableNetwork=0 over the control
+## socket, unless the person chose to stay offline; if tor refuses any part
+## of it, nothing changes and the network stays off. While the network is
+## off, tor holds no TransPort or DNSPort (tor's design): 127.0.0.1:9040
+## and :9053 are free, and the module must check who holds them.
 DisableNetwork 1
 ## IPv4 only. IPv6 is switched off on the phone and dropped by the firewall.
 ClientUseIPv4 1
@@ -73,9 +83,14 @@ ClientUseIPv6 0
 ClientPreferIPv6ORPort 0
 
 ## --- Logging ------------------------------------------------------------------
-## Notices only, to a file the module can show. SafeLogging (tor's default)
-## keeps addresses out of the log. Nothing goes to logcat, which other
-## system components and adb can read.
+## Notices only, to a file in RAM. Nothing goes to logcat, which other
+## system components and adb can read. SafeLogging (tor's default) keeps
+## what the person visits (stream destinations, client addresses) out of
+## the log, but not the addresses of the relays and bridges tor connects
+## to: a warning about a relay or bridge names its IP address and port. So
+## tor.log can hold the person's bridges, and it must never be shown or
+## exported as it is: not on the status page, not in the Welcome app, not
+## in a CI artifact from a run with real bridges.
 Log notice file @ANTUMBRA_DIR@/log/tor.log
 SafeLogging 1
 ## Same as Tails: do not warn about the POP3 and IMAP ports, so people are

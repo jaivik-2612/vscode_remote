@@ -3,18 +3,37 @@
 #   content query --user 0 --uri content://org.antumbra.welcome.state/session --projection A:B:...
 # like Welcome's StateProvider: one row with the asked columns in the
 # asked order. Values are NAME=VALUE lines in /antumbra-test/welcome;
-# bridges come from /antumbra-test/welcome.bridges (one per line).
+# bridges come from /antumbra-test/welcome.bridges (one per line). And
+#   content query --uri content://telephony/siminfo --projection _id
+# with one row per subscription ID in /antumbra-test/siminfo.
 T=/antumbra-test
 [ -f $T/framework-up ] || { echo "Error while accessing provider" >&2; exit 1; }
-[ -f $T/welcome ] || { echo "Error while accessing provider:org.antumbra.welcome.state" >&2; exit 1; }
-proj=
+proj='' uri=''
 while [ $# -gt 0 ]; do
 	case $1 in
 	--projection) proj=$2; shift 2 ;;
-	--uri) [ "$2" = content://org.antumbra.welcome.state/session ] || exit 1; shift 2 ;;
+	--uri) uri=$2; shift 2 ;;
 	*) shift ;;
 	esac
 done
+case $uri in
+content://telephony/siminfo)
+	[ "$proj" = _id ] || exit 1
+	n=0
+	if [ -s $T/siminfo ]; then
+		while read -r id; do
+			echo "Row: $n _id=$id"
+			n=$((n + 1))
+		done <$T/siminfo
+	else
+		echo "No result found."
+	fi
+	exit 0
+	;;
+content://org.antumbra.welcome.state/session) ;;
+*) exit 1 ;;
+esac
+[ -f $T/welcome ] || { echo "Error while accessing provider:org.antumbra.welcome.state" >&2; exit 1; }
 out='Row: 0 '
 sep=
 old=$IFS

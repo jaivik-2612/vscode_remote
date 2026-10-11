@@ -29,6 +29,7 @@ func TestFlagDefaultsMatchTheContract(t *testing.T) {
 	if o.listen != "127.0.0.1:5353" || o.statusListen != "127.0.0.1:5380" || o.upstream != "127.0.0.1:9053" ||
 		o.upstreamUID != 2950 || o.upstreamNet != "udp" || o.blockedAnswer != "nxdomain" || o.aaaa != "empty" ||
 		o.moduleStatus != "/data/adb/antumbra/run/status.json" || o.debugQueries || o.allowPrivileged ||
+		o.statusRefresh != time.Minute ||
 		len(o.lists.paths) != 1 || o.lists.paths[0] != "/data/adb/antumbra/lists/dnsfilter.list" {
 		t.Errorf("defaults %+v", o)
 	}
@@ -115,7 +116,8 @@ func TestRun(t *testing.T) {
 	}
 
 	o, err := parseFlags([]string{"-insecure-allow-privileged", "-listen", "127.0.0.1:0", "-status-listen", "127.0.0.1:0",
-		"-upstream", fake.Addr().String(), "-upstream-uid", owner, "-list", listPath, "-module-status", modPath})
+		"-upstream", fake.Addr().String(), "-upstream-uid", owner, "-list", listPath, "-module-status", modPath,
+		"-status-refresh", "0"})
 	if err != nil {
 		t.Fatal(err)
 	}

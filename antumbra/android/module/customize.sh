@@ -15,6 +15,8 @@
 # root can create it). That override exists for testing on other devices;
 # the firewall and the boot order have not been checked anywhere else.
 
+umask 022
+
 antumbra_prop() { sed -n "s/^$1=//p" "$MODPATH/module.prop" | head -n 1; }
 
 antumbra_forced() {
@@ -97,12 +99,59 @@ ANTUMBRA_OLD=/data/adb/modules/antumbra/settings.orig
 if [ -f "$ANTUMBRA_OLD" ]; then
 	cp -f "$ANTUMBRA_OLD" "$MODPATH/settings.orig"
 elif [ "$BOOTMODE" = true ] && /system/bin/settings get global airplane_mode_on >/dev/null 2>&1; then
-	sed -n 's/^\(lineage:\)\{0,1\}\([a-z0-9_]*\)=.*/\2/p' "$MODPATH/lib/settings.conf" |
+	sed -n -e 's/^lineage://' -e 's/^phone://' -e 's/^\([a-z0-9_]*\)=.*/\1/p' "$MODPATH/lib/settings.conf" |
 		while IFS= read -r k; do
 			printf '%s=%s\n' "$k" "$(/system/bin/settings get global "$k" 2>/dev/null)"
 		done >"$MODPATH/settings.orig"
 fi
 [ -f "$MODPATH/settings.orig" ] && set_perm "$MODPATH/settings.orig" 0 0 0600
+
+# 9. Arm early, and also when the module is disabled. Magisk runs the
+# scripts in /data/adb/post-fs-data.d before any module's post-fs-data.sh
+# (they share one 40-second budget, in directory order), and runs them
+# even when this module carries a 'disable' flag; it runs neither in Magisk
+# Safe Mode. This one only arms the firewall (loopback only), so a boot in
+# which the module is disabled has no network at all; removing the module
+# deletes it. Through it, a slow module or script that comes first in the
+# directory order cannot delay the arming either.
+ANTUMBRA_EARLY=/data/adb/post-fs-data.d/antumbra-arm.sh
+mkdir -p /data/adb/post-fs-data.d
+cat >"$ANTUMBRA_EARLY" <<'EOF'
+#!/system/bin/sh
+# Antumbra: arm the firewall (loopback only) before any Magisk module runs,
+# and also in a boot where the Antumbra module is disabled. Written by the
+# module's customize.sh; its uninstall.sh deletes it.
+umask 022
+fw=/data/adb/modules/antumbra/bin/antumbra-fw
+[ -f "$fw" ] || exit 0
+# Being removed in this boot (Magisk app, Remove): leave it to stock.
+[ -e /data/adb/modules/antumbra/remove ] && exit 0
+mkdir -p /dev/antumbra-fw
+ANTUMBRA_DIR=/dev/antumbra-fw "$fw" arm >/dev/null 2>/dev/antumbra-fw/arm-early.log
+exit 0
+EOF
+set_perm "$ANTUMBRA_EARLY" 0 0 0755 u:object_r:adb_data_file:s0
+ui_print "- Early arming: $ANTUMBRA_EARLY"
+
+# 10. Other boot scripts in the same window: each one that runs before this
+# module's post-fs-data.sh delays the rest of its work (the RAM stores,
+# the sysctls), and a slow one can use up Magisk's 40 seconds, after which
+# the boot goes on without waiting for this module.
+ANTUMBRA_OTHERS=
+for d in /data/adb/modules/*/; do
+	n=${d%/}
+	n=${n##*/}
+	[ "$n" = antumbra ] && continue
+	[ -f "$d/post-fs-data.sh" ] && [ ! -e "$d/disable" ] && ANTUMBRA_OTHERS="$ANTUMBRA_OTHERS $n"
+done
+for f in /data/adb/post-fs-data.d/*; do
+	[ -f "$f" ] && [ "$f" != "$ANTUMBRA_EARLY" ] && ANTUMBRA_OTHERS="$ANTUMBRA_OTHERS post-fs-data.d/${f##*/}"
+done
+if [ -n "$ANTUMBRA_OTHERS" ]; then
+	ui_print "! Other boot scripts share Magisk's post-fs-data window:"
+	ui_print "! $ANTUMBRA_OTHERS"
+	ui_print "! Antumbra's boot order assumes it runs alone: remove them unless you need them."
+fi
 
 ui_print "- At the next start, every saved Wi-Fi network is forgotten:"
 ui_print "  from then on, Wi-Fi networks are kept in memory only."

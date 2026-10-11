@@ -28,25 +28,27 @@ the item in `queue.md`.
 |---|---|---|---|
 | Local network observer, Wi-Fi operator, Internet provider | sees destinations and content | only tor's process leaves the phone; other TCP is passed into Tor, DNS goes through the filter to Tor, everything else is refused, IPv6 is dropped; nothing leaves before Welcome's Start | v0; emulator leak test; phone capture after the install |
 | Same | links sessions by MAC address | a new random address for every connection; Android's DHCP lease memory kept in RAM, so the phone does not ask for the last session's IP address | v0. Stage 1 still sends the DHCP vendor class `android-dhcp-16`; hidden networks are refused at import (W10) |
-| Same | learns the device's name, model or presence | no DHCP hostname (Android's default); Wi-Fi Direct and tethering forbidden; Bluetooth off outside Administration | v0; the vendor class names Android 16 |
+| Same | learns the device's name, model or presence | Android 15 and later send the device's name (`Settings.Global.DEVICE_NAME`, by default the model) in DHCP option 12 on every Wi-Fi network, from NetworkStack's packet socket below the firewall, unless restricted; Welcome restricts it on open and secure networks at boot and at every Start (`WifiManager.setSendDhcpHostnameRestriction`); Wi-Fi Direct and tethering forbidden; NFC off; Bluetooth off outside Administration | **[likely] fixed in v0**, unverified: no capture has checked option 12 yet; the leak analyser fails on it after arm (`dhcp-hostname`), in CI and in the phone capture (`install.md`, section 9). The vendor class still names Android 16 |
 | Same, on an IPv6 network | the phone gets a global IPv6 address that apps can read and send through Tor, revealing the household's /64 prefix | IPv6 switched off on every interface as it comes up, router advertisements dropped, the filter answers no AAAA records | v0; a short window per interface (at most 10 s) in which a link-local address can exist; the router-advertisement test in CI is planned. Prefer networks without IPv6 until the phone confirms it |
 | Same, on a network that hands out a public IPv4 address directly | any app can read the address and send it through Tor | none | residual |
 | An app | asks the router for the public IP address (UPnP, status pages) | TCP to the LAN is passed into Tor, which refuses private destinations; other LAN traffic is refused | v0 (sandbox test) |
 | An app | reaches tor's control interface and points tor at an address it controls | there is no ControlPort; tor's control socket is a file only root and uid 2950 can open; apps may use only loopback ports 9040, 5353 and 5380 | v0 |
+| An app (any app with network access, started at boot) | takes tor's TransPort `127.0.0.1:9040` (or 9053, or the filter's 5353 and 5380) while its owner is not listening: before Start (tor opens no ports while its network is off), for a whole offline session, while tor or the filter restarts. The firewall redirects every app's and system service's TCP there, so the squatter would receive other apps' connections with their original destinations and content, and tor could no longer open its port | only the owner may answer on these ports: the firewall drops packets from 9040 and 9053 whose socket is not tor's, and from 5353 and 5380 whose socket is not the filter's, so no handshake completes and no DNS answer arrives; the module checks who holds the ports at every turn of its loop (2 to 5 s) and before switching tor's network on, and while another uid holds one it removes `antumbra.fw.armed` and puts the firewall back to armed (nothing is redirected, nothing leaves) until the port is free; the filter checks that 9053 belongs to tor before each query | v0 (module end-to-end test: an app holding 9040 before Start). Residual: until the next check a squatter on 5353 receives DNS queries (names, which it cannot answer); a squatter can keep the network closed (denial of service). The complete fix, tor holding 9040 and 9053 from boot with the firewall keeping it off the Internet until Start, changes the contract (decision D11). CI probe planned (CI8) |
 | An app | goes around the tracker filter | DNS to any address is redirected to the filter; DNS over TLS and known DNS-over-HTTPS servers are refused; tor has no SOCKS port | v0. Not covered: DoH servers not on the list, hard-coded addresses, CNAME-cloaked trackers, first-party tracking (`design.md`, section 6) |
 | An app | asks the Wi-Fi firmware to send keepalive packets for it, from the real address, below the firewall | a resource overlay sets the number of keepalive offload slots to 0 | built; untested (GrapheneOS fixed this in its own code in October 2026; LineageOS has not) |
-| An app with location or nearby-device access | locates you through Tor (GNSS, Wi-Fi BSSIDs, scan results, Bluetooth) | Location off and its settings locked; Bluetooth off; scanning while off disabled; time zone forced to UTC | v0 outside Administration; sensor calibration and other hardware fingerprints are residual |
+| An app with location or nearby-device access | locates you through Tor (GNSS, Wi-Fi BSSIDs, scan results, Bluetooth) | Location off and its settings locked; Bluetooth off; scanning while off disabled; time zone forced to UTC | v0 outside Administration (its loosening lasts until shutdown); location and nearby-device permission grants are not yet set to denied for every app (planned); sensor calibration and other hardware fingerprints are residual |
 | An app | links sessions through what it can read (time zone, locale, hardware values) | UTC forced; locale is global and stays | partial |
 | An app that knows you (an account) | identifies you through Tor | out of scope, as in Tails | — |
 | Application exploit | gets root and removes the firewall | apps never get root: Magisk's "Device owner only" denies `su` outside user 0, and sessions run in other users (W8); the Magisk app is hidden outside updates (planned); tor and the filter hold no capabilities | partial (see *Root in Stage 1*) |
 | Application exploit in the DNS filter | turns a parsing bug into a way out | the filter is memory-safe Go, runs as uid 2951 with no capabilities, and the firewall lets it reach only tor's DNSPort | v0; its SELinux domain is still Magisk's (planned) |
-| Someone with a cable and an Administration session | gets a root shell through adb (official builds are userdebug) | target: debugging off in every session, `ro.debuggable=0`, adb settings and keys reset at boot | planned; in v0 an Administration session keeps USB debugging |
+| Someone with a cable | gets a shell, or a root shell, through adb (official builds are userdebug: "Rooted debugging", or Magisk's `su` for the shell) | Welcome switches USB and wireless debugging off when it becomes the device owner and keeps them off (`DISALLOW_DEBUGGING_FEATURES`, adb settings set to 0) at every boot and in every session, Administration included; target also `ro.debuggable=0` and adb keys deleted at boot | v0 for a release Welcome. Open: during the install, before Welcome is the device owner, adb is on; a testOnly Welcome with its test hook (CI, and the install's capture) keeps adb until the hook is switched off; `ro.debuggable=0` and deleting `adb_keys` are planned (MOD4) |
 | Malware in the session | persists across sessions | throwaway users from W8; module updates are never fetched automatically (no `updateJson`) | planned; in v0 sessions run in user 0 and persist |
 | Someone who takes the powered-off phone | reads the last session | session keys exist only in memory (W8); network state was on a tmpfs | partial: see *What Stage 1 leaves behind* |
 | Someone who takes the running phone and forces a warm reset | boots their own image with `fastboot boot` and reads memory, including the session's file-encryption keys, an unlocked Persistent Storage key and Tor Browser's memory | not defended: the bootloader is unlocked and wipes nothing first; Qualcomm's crash-dump mode is switched off at boot, which closes one capture path [likely]. Only powering off and waiting about a minute helps; a restart is not enough | residual, documented |
 | Evil maid with brief access | replaces the system, the boot image or the module | not defended: no verified boot on this phone, and EDL is reachable | residual, documented |
 | Censor | blocks Tor | bridges entered at the Welcome screen | partial: in v0 only plain bridges work (lyrebird for obfs4, WebTunnel and meek_lite is not built yet); Snowflake is never accepted, since it needs UDP; bridges must have IPv4 addresses |
 | Mobile network, IMSI catcher | tracks the phone by IMSI and IMEI, locates it by cell | no SIM by default | the modem stays powered and outside the firewall (*The phone itself*) |
+| Mobile network, Internet provider | sees the phone's own traffic over mobile data in a boot without the module | mobile data stored as off for every SIM Android knows, at every boot and at shutdown (Android reads it before any app runs) | v0, partial: a SIM Android has never seen starts with mobile data on, and so does one switched on in a session that ended in a crash; such a boot goes online in the clear (*When the module does not run*). Hence no SIM by default (D3) |
 | Global passive adversary | correlates traffic entering and leaving Tor | out of scope, as for Tails | — |
 | Hardware or firmware backdoor (baseband, TrustZone, GPU firmware) | anything | out of scope | — |
 | You | reveal who you are inside Tor | out of scope; Tails' warnings apply | — |
@@ -117,8 +119,14 @@ firewall before Android starts and keeps network state in RAM.
 - **The debug base:** official LineageOS builds are userdebug. With developer
   options, "Rooted debugging" and a cable, adb gives a root shell, and adb
   settings, persistent logging and adb keys are device-wide and persistent.
-  The target is debugging off in every session and `ro.debuggable=0`; v0
-  keeps USB debugging in Administration sessions (`design.md`, section 13).
+  Welcome switches USB and wireless debugging off as soon as it is the
+  device owner and keeps them off in every session, Administration
+  included; device-owner restrictions persist across restarts, so they hold
+  from the start of every boot. Still open in v0: `ro.debuggable=0`,
+  deleting `adb_keys` and resetting persistent logging at boot (MOD4); adb
+  during the install, before Welcome is the device owner; and a testOnly
+  Welcome's test hook, which keeps adb on for CI and must never stay on in
+  a phone in use (`design.md`, section 13).
 
 Stage 2, Antumbra's own non-debug build, removes Magisk and this whole
 section.
@@ -129,20 +137,46 @@ Without the module there is no firewall. It does not run after Magisk's Safe
 Mode (one volume-key press at boot, which disables every module for later
 boots too), after a LineageOS update installed without Magisk's "Install to
 inactive slot" step, after a slot switch, or after a major upgrade that
-replaced the boot image until Magisk is installed again.
+replaced the boot image until Magisk is installed again. (A module that is
+only switched off in the Magisk app is different: the module's early arm
+script in `post-fs-data.d` still arms the firewall, and that boot has no
+network at all.)
 
-What still protects such a boot: there is no saved Wi-Fi network on flash to
-join (while the module ran, networks were kept only in RAM); Android keeps the fail-safe settings (no
-connectivity check, no network time, no location assistance, no scanning);
-and Welcome keeps Wi-Fi off and locked when `antumbra.fw.armed` is not set.
-What does not: a network joined by hand in such a boot connects in the
-clear, and system services (time, the LineageOS Updater, location
-assistance) may then send traffic outside Tor. Welcome removes the network
-again at shutdown; after a crash or power loss it stays saved on flash, and
-the next boot without the module can join it for the seconds before Welcome
-removes it. Welcome's check also has a weaker fallback (the status page) if
-apps cannot read the property, which an app could fake when the module is
-absent (`../welcome/README.md`, Open risks).
+What still protects such a boot: there is no saved shared Wi-Fi network on
+flash to join (while the module ran, the shared store was kept only in
+RAM); Android keeps the fail-safe settings (no connectivity check, no
+network time, no location assistance, no scanning, mobile data off for
+every SIM Android knew); and Welcome keeps Wi-Fi off and locked when
+`antumbra.fw.armed` is not set. Welcome decides from that property alone,
+which only root can set; the status page, which any app could serve when
+the filter is absent, never counts.
+
+What does not:
+
+- **A SIM.** With a SIM whose mobile data is on, the phone goes online over
+  the mobile network as it starts, in the clear, with no saved network and
+  before Welcome runs; system traffic such as the LineageOS Updater leaves
+  outside Tor. Welcome cannot stop it: it locks Wi-Fi only, and a device
+  owner cannot switch airplane mode. The module stores mobile data as off
+  for every SIM Android knows, at every boot and at shutdown, so this
+  happens with a SIM Android has never seen (LineageOS switches mobile data
+  on for a new SIM), and with one switched on in a session that ended in a
+  crash or power loss instead of a clean shutdown. Hence no SIM by default
+  (D3), and none at LineageOS's first boot (`install.md`).
+- **Networks joined by hand.** A network joined by hand in such a boot
+  connects in the clear, and system services (the LineageOS Updater,
+  location assistance) may then send traffic outside Tor. Welcome removes
+  the network again at shutdown; after a crash or power loss it stays
+  saved on flash, and the next boot without the module can join it for the
+  seconds before Welcome removes it.
+- **User 0's credential-encrypted Wi-Fi store** (networks added without
+  "share", network suggestions apps had approved, Passpoint configurations)
+  is not kept in RAM. Welcome removes saved networks at every shutdown and
+  boot; whether that also clears approved suggestions and Passpoint
+  configurations is **[unknown]**. Whatever is left there can be joined.
+- **Airplane mode.** If Wi-Fi was switched on in airplane mode, Welcome
+  cannot switch it off (only Settings may); the removed networks and the
+  Wi-Fi restrictions leave it nothing to join.
 
 ## Apps with their own Tor
 
@@ -171,8 +205,8 @@ has no credential and the bootloader is unlocked, so anything stored with
 device-level keys can be read by whoever boots their own image, without any
 passphrase.
 
-Forgotten at power-off in v0: saved Wi-Fi networks, the DHCP lease memory,
-tor's state, the runtime directory and its logs. Planned for W8 (moved to
+Forgotten at power-off in v0: saved shared Wi-Fi networks, the DHCP lease
+memory, tor's state, the runtime directory and its logs. Planned for W8 (moved to
 RAM as well): DropBox crash records, tombstones and ANR traces,
 graphicsstats (the apps used in the last three days), netstats, procstats,
 the vendor's crash dumps, Wi-Fi Direct groups, location data, Bluetooth
@@ -184,10 +218,12 @@ What stays, also after W8:
   Persistent Storage user's metadata: that it exists, when it was created,
   when it was last unlocked.
 - batterystats and app-ops history; Settings, including the time zone and
-  locale.
+  locale. A session's own Settings changes (MAC "keep", mobile data switched
+  on) are undone at a clean shutdown only; after a crash or power loss they
+  stay until the next boot with the module.
 - Apps installed during a session (`/data/app`).
 - User 0's credential-encrypted Wi-Fi store (networks added in user 0
-  without sharing).
+  without sharing, approved network suggestions, Passpoint configurations).
 - Whatever the vendor's services keep under `/data/vendor` that is not on
   the list, `/persist`, `/metadata`, the modem's file system, and the
   gatekeeper's records.
@@ -244,6 +280,8 @@ the phone's own vendor traffic is known only after the install capture.
 - After every LineageOS update you follow the update steps, Magisk's
   "Install to inactive slot" included, before using a network.
 - You use no SIM card unless you accept that calls, SMS and the modem are
-  outside Tor.
+  outside Tor, and that a boot without the module may go online over mobile
+  data in the clear. In any case none is in the phone at LineageOS's first
+  boot, before the module exists.
 - You prefer networks without IPv6 until the phone has confirmed that IPv6
   stays off.

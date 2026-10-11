@@ -9,6 +9,10 @@
 #   ANTUMBRA_CAPTURE_DIR   holds baseline.pcap and antumbra.pcap (-tcpdump)
 #   ANTUMBRA_MODULE_TREE   optional: the unpacked module, for bin/x86_64/tor
 #                          (tor's compiled-in fallback directories)
+#   ANTUMBRA_CI_DESTINATIONS  learning (default) or strict: whether a name or
+#                          destination reached through Tor that is not in
+#                          expected-destinations.txt only shows in the report
+#                          or fails the run
 #
 # Writes <scenario>/analysis.json and analysis-exit for each scenario that
 # has a capture, leak-report.json, leak-report.md, and capture/: a copy of
@@ -41,15 +45,24 @@ else
 fi
 
 A=$OUT/antumbra
+# A second run (by hand) finds the consensus already compressed.
+if [ ! -s "$A/consensus" ] && [ -s "$A/consensus.gz" ]; then
+	gzip -dc "$A/consensus.gz" >"$A/consensus" || rm -f "$A/consensus"
+fi
 if [ -s "$CAP/antumbra.pcap" ]; then
 	mkdir -p "$A"
 	args=(analyse --scenario antumbra --pcap "$CAP/antumbra.pcap" --out "$A/analysis.json"
-		--arm-event install_start --require-tor-traffic)
+		--arm-event install_start --require-tor-traffic
+		--armed-window armed_probe_start:armed_probe_end --require-armed-window
+		--expected-destinations "$HERE/expected-destinations.txt"
+		--destinations-mode "${ANTUMBRA_CI_DESTINATIONS:-learning}"
+		--tor-streams "$A/tor-streams.txt" --filter-log "$A/dnsfilter.log")
 	[ -s "$A/events.tsv" ] && args+=(--events "$A/events.tsv")
 	[ -s "$A/consensus" ] && args+=(--consensus "$A/consensus")
 	[ -n "$TORBIN" ] && args+=(--tor-binary "$TORBIN")
 	[ -s "$A/bridges.txt" ] && args+=(--bridges "$A/bridges.txt")
 	[ -f "$A/tor-connections.txt" ] && args+=(--expect-seen "$A/tor-connections.txt")
+	[ -s "$A/device-ipv4.txt" ] && args+=(--expect-guest "$A/device-ipv4.txt")
 	"${LA[@]}" "${args[@]}"
 	echo $? >"$A/analysis-exit"
 	inputs+=(--in "$A/analysis.json")

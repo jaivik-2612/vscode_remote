@@ -22,21 +22,34 @@
 #   --scenarios      default: "bridges:busybox direct:mksh offline:mksh
 #                    pt:busybox badbridges:mksh"
 #
+# tests/build-test-tools.sh builds --toybox, --mksh and --busybox from
+# pinned sources.
+#
 # Each scenario gets a new sandbox: mount, network and PID namespaces, and
 # a chroot into an overlay of the host's root file system whose upper layer
 # holds /system/bin (Android's toybox and mksh, the host's iptables-legacy
 # and ip, and the stand-ins in tests/fakes), /data (a Wi-Fi store and a
 # NetworkStack database to be forgotten) and the staged module. Nothing in
 # it reaches the host: the overlay's upper layer is in a temporary
-# directory, and the network namespace has only loopback and a dummy
-# interface. tests/e2e-inner.sh then installs the module, runs
-# post-fs-data.sh and service.sh, and plays the scenario:
+# directory, and the network namespace has only loopback and one end of a
+# veth pair (with a default route through the other end). The scripts run
+# with umask 0, as adb's shell has on the CI emulator. tests/e2e-inner.sh
+# installs the module, runs the early arm script, post-fs-data.sh and
+# service.sh, and plays the scenario:
 #   bridges     plain bridges, MAC "keep"; Welcome restarting; tor, the
-#               filter and the firewall broken and repaired
-#   direct      on a LineageOS hotdog (by its properties): no bridges
-#   offline     tor stays off; then uninstall.sh puts the Settings back
-#   pt          obfs4 bridges without lyrebird: refused, network off
-#   badbridges  a bridge line with a quote: refused, network off
+#               filter and the firewall broken and repaired; shutdown puts
+#               the fail-safe Settings back
+#   direct      on a LineageOS hotdog (by its properties): an app takes
+#               127.0.0.1:9040 before Start (firewall back to armed, tor's
+#               network held off until the port is free); mobile data off
+#               for every SIM; no bridges
+#   offline     tor stays off; an app takes the filter's 5353 while the
+#               filter restarts; then uninstall.sh puts the Settings back
+#   pt          obfs4 bridges without lyrebird: refused, network off; then
+#               iptables broken: the firewall reports open, and airplane
+#               mode goes on and Wi-Fi off
+#   badbridges  Start from a Welcome that is not the device owner: ignored;
+#               then a bridge line with a quote: refused, network off
 #
 # What it cannot show: Android itself (SELinux, netd, Magisk's timing,
 # Welcome, the framework restart). The emulator job does that.
@@ -105,8 +118,7 @@ fi
 populate() {
 	U=$1
 	mkdir -p "$U/system/bin" "$U/magisk-bin" "$U/antumbra-test" "$U/data/adb" "$U/data/local/tmp" \
-		"$U/data/misc/apexdata/com.android.wifi" "$U/data/misc_de/0/apexdata/com.android.wifi" \
-		"$U/data/user_de/0/com.android.networkstack/databases"
+		"$U/data/misc/apexdata/com.android.wifi" "$U/data/user_de/0/com.android.networkstack/databases"
 	cp "$TOYBOX" "$U/system/bin/toybox"
 	cp "$MKSH" "$U/system/bin/sh"
 	for a in $("$TOYBOX"); do
@@ -138,15 +150,18 @@ populate() {
 		printf 'ro.boot.qemu=1\nro.hardware=ranchu\nro.product.device=emu64x\n' >"$U/antumbra-test/props"
 	fi
 	printf 'ro.build.version.sdk=36\nro.product.cpu.abi=x86_64\n' >>"$U/antumbra-test/props"
-	printf 'airplane_mode_on=0\nntp_server=time.android.com\nprivate_dns_mode=opportunistic\n' >"$U/antumbra-test/settings"
+	printf 'airplane_mode_on=0\nntp_server=time.android.com\nprivate_dns_mode=opportunistic\nmobile_data2=1\n' >"$U/antumbra-test/settings"
+	# Welcome is the device owner; two SIMs known to Android.
+	printf 'User  0: admin=org.antumbra.welcome/.AdminReceiver,DeviceOwner\n' >"$U/antumbra-test/owners"
+	printf '1\n3\n' >"$U/antumbra-test/siminfo"
 	: >"$U/antumbra-test/settings.log"
 	: >"$U/antumbra-test/cmd.log"
 	: >"$U/antumbra-test/resetprop.log"
 	# What Android left on flash: a saved network and a lease memory.
 	echo '<WifiConfigStoreData><NetworkList><Network>home</Network></NetworkList></WifiConfigStoreData>' \
 		>"$U/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml"
-	chown -R 0:1000 "$U/data/misc/apexdata/com.android.wifi" "$U/data/misc_de/0/apexdata/com.android.wifi"
-	chmod 0771 "$U/data/misc/apexdata/com.android.wifi" "$U/data/misc_de/0/apexdata/com.android.wifi"
+	chown -R 0:1000 "$U/data/misc/apexdata/com.android.wifi"
+	chmod 0771 "$U/data/misc/apexdata/com.android.wifi"
 	echo lease >"$U/data/user_de/0/com.android.networkstack/databases/IpMemoryStoreV2.db"
 	chown -R 1073:1073 "$U/data/user_de/0/com.android.networkstack"
 	chmod 0771 "$U/data/user_de/0/com.android.networkstack/databases"

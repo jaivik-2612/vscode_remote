@@ -27,7 +27,7 @@ folder). It has not been run under KernelSU.
 | `overlay/` | A static resource overlay that switches keepalive offload off. |
 | `META-INF/` | Recovery stub; the Magisk app replaces it. |
 | `build-module.sh` | Builds the zip, or installs on a running emulator. |
-| `tests/` | Unit tests, an end-to-end sandbox test and its stand-ins. |
+| `tests/` | Unit tests, an end-to-end sandbox test, its stand-ins, and `build-test-tools.sh`, which builds its toybox, mksh and busybox from pinned sources. |
 
 ## What runs when
 
@@ -48,7 +48,15 @@ directory and sources `customize.sh`, which:
 6. sets owner root and modes 0644/0755 (programs 0755), label `system_file`;
 7. records the current values of the keys in `lib/settings.conf` in
    `settings.orig` (0600), or carries over the record of the installed
-   version on an update.
+   version on an update;
+8. writes `/data/adb/post-fs-data.d/antumbra-arm.sh` (root, 0755), which
+   only arms the firewall (below);
+9. warns when other modules or `post-fs-data.d` scripts share Magisk's
+   post-fs-data window.
+
+Every script sets `umask 022` before it creates anything, whatever umask
+it was started with (adb's root shell, which starts them on the CI
+emulator, has 0).
 
 Checks 2 and 3 can be overridden with `ANTUMBRA_FORCE=1` in the installer's
 environment (for example `ANTUMBRA_FORCE=1 magisk --install-module zip`
@@ -58,30 +66,49 @@ boot order and the firewall have not been checked on other devices.
 **Installing the module forgets every saved Wi-Fi network** at the next
 start (see below).
 
+### Boot, early arming (`post-fs-data.d/antumbra-arm.sh`, blocking)
+
+Magisk v31.0 runs the scripts in `/data/adb/post-fs-data.d` first, then
+each module's `post-fs-data.sh`, in directory order, all within one
+40-second budget. The early script runs `antumbra-fw arm` (with its lock in
+`/dev/antumbra-fw`) before any module, so a slow module or script cannot
+delay the arming, and it also runs when the module carries a `disable`
+flag (Magisk app, switch off): such a boot is armed and stays without
+network, because nothing loads the full rule set. It does nothing when the
+module is being removed in this boot (`remove` flag) or is gone. Magisk
+Safe Mode runs neither it nor the module (gaps).
+
 ### Boot, post-fs-data (`post-fs-data.sh`, blocking)
 
 Magisk runs this at init's `post-fs-data` trigger and holds the boot until
-it ends (at most 40 s). `/data` is mounted and decrypted; init's own
+it ends (at most 40 s, shared with the scripts before it). `/data` is mounted and decrypted; init's own
 `post-fs-data` block has already run (it creates
 `/data/misc/apexdata/<apex>` in `perform_apex_config`); netd, zygote and
 everything that uses the network start after it. It takes well under a
 second (measured in the sandbox test).
 
-1. **`antumbra-fw arm`**, the first command. Only loopback traffic moves,
-   IPv4 and IPv6, for every uid. The firewall's lock goes in
-   `/dev/antumbra-fw` (RAM), because the runtime tmpfs does not exist yet.
+1. **`antumbra-fw arm`**, the first command (again, after the early
+   script). Only loopback traffic moves, IPv4 and IPv6, for every uid. The
+   firewall's lock goes in `/dev/antumbra-fw` (RAM), because the runtime
+   tmpfs does not exist yet.
 2. **The runtime directory**: a new tmpfs (128 MB limit, `nosuid,nodev,
    noexec`) over `/data/adb/antumbra`, laid out as in the table below.
    `/data/adb` gets mode 0711 (Magisk sets 0700 at every boot), so that
    uids 2950 and 2951 can pass through it; SELinux keeps apps out anyway.
-3. **Wi-Fi's configuration store** `/data/misc/apexdata/com.android.wifi`
-   (and user 0's `/data/misc_de/0/apexdata/com.android.wifi`): whatever is
-   on flash is deleted, then a tmpfs is mounted over it with the
-   directory's owner, mode and SELinux label (`apex_system_server_data_file`
-   on LineageOS 23.2). New files inherit that label; SELinux allows any
-   file type on a tmpfs (`allow file_type tmpfs:filesystem associate`).
-   Saved networks therefore never reach flash, and a boot without the
-   module has no network to join.
+3. **Wi-Fi's shared configuration store**
+   `/data/misc/apexdata/com.android.wifi` (`WifiConfigStore`: saved
+   networks, which are shared by default, their MAC settings, Wi-Fi's own
+   settings; the Wi-Fi APEX's device-protected directory,
+   `getWifiSharedDirectory()` in Android 16): whatever is on flash is
+   deleted, then a tmpfs is mounted over it with the directory's owner,
+   mode and SELinux label (`apex_system_server_data_file` on LineageOS
+   23.2). New files inherit that label; SELinux allows any file type on a
+   tmpfs (`allow file_type tmpfs:filesystem associate`). Saved shared
+   networks therefore never reach flash, and a boot without the module has
+   none to join. Wi-Fi's per-user store is credential-encrypted
+   (`getWifiUserDirectory()`: `/data/misc_ce/<user>/apexdata/com.android.wifi`),
+   still locked at this point, and not covered (gaps); Wi-Fi keeps nothing
+   in `/data/misc_de`.
 4. **NetworkStack's IpMemoryStore**: `IpMemoryStoreV2.db` (earlier
    `IpMemoryStore.db`) in
    `/data/user_de/0/com.android.networkstack/databases` (NetworkStack is
@@ -101,29 +128,44 @@ Problems are written to `state/module/problem` and shown in `status.json`.
 ### Boot, late (`service.sh`, runs until shutdown)
 
 Magisk starts it without waiting, while Android finishes booting.
+Schedules use the time since boot (`/proc/uptime`), never the clock, which
+the person may set by hand for tor.
 
+0. **The firewall's state** from `antumbra-fw status`: `armed` after
+   post-fs-data, or `open` if arming failed there (then step 3 tries
+   again, and switches the radios off if that fails too).
 1. **The DNS filter** as uid/gid 2951, first, so that it holds
    `127.0.0.1:5353` before Android's mDNS can bind that port.
 2. **tor** as uid/gid 2950 with `etc/torrc` (rendered from
    `tor/torrc.in`), `DisableNetwork 1`.
-3. **`antumbra-fw apply`**, then `antumbra-fw status`: only if the status
-   is live and its hash equals the one `apply` printed does the module run
+3. **`antumbra-fw apply`**, then `antumbra-fw status`, then the port check
+   (below): only if the status is live, its hash equals the one `apply`
+   printed and no other uid holds a service port does the module run
    `resetprop -n antumbra.fw.armed <first 16 hex digits>`. On failure the
-   firewall is back in the armed state and the property is removed.
+   firewall is back in the armed state and the property is removed. If
+   even that leaves it `open` (not even the arm set loads), airplane mode
+   goes on and Wi-Fi off as soon as the framework answers (`cmd
+   connectivity airplane-mode enable`, `cmd wifi set-wifi-enabled
+   disabled`), and `status.json` says so.
 4. **`run/status.json`** (below).
 5. **IPv6 guard**: NetworkStack switches IPv6 back on for every network it
    brings up. A background loop switches it off again on every interface
    whenever `ip monitor` reports a link or address change, and every 10
    seconds in any case.
 6. Once boot has completed and the settings provider answers: **the
-   Settings.Global values in `lib/settings.conf`**, and
+   Settings.Global values in `lib/settings.conf`**, **mobile data off**
+   for every SIM Android knows (not on the emulator; below), and
    `cmd wifi set-scan-always-available disabled`.
-7. **Welcome's Start**: every 2 seconds,
+7. **Welcome's Start**: every 2 seconds for the first 3 minutes after the
+   framework answers, then every 5,
    `content query --user 0 --uri content://org.antumbra.welcome.state/session
    --projection started:tor_mode:mac:session_id`. The first row with
-   `started=1` and valid values is kept for the rest of the boot (if
-   Welcome's process dies it starts a new, unstarted session, which is
-   ignored). For `tor_mode=bridges`, a second query
+   `started=1` and valid values counts only while Welcome is the device
+   owner (`cmd device_policy list-owners` shows
+   `admin=org.antumbra.welcome/…,DeviceOwner` for user 0; below). It is
+   kept for the rest of the boot (if Welcome's process dies it starts a
+   new, unstarted session, which is ignored), in the root-only
+   `state/module/session`. For `tor_mode=bridges`, a second query
    (`--projection session_id:bridges`) reads the bridge lines; the session
    ID in front shows they belong to the same session. Then:
    - `offline`: tor's network stays off;
@@ -136,14 +178,31 @@ Magisk starts it without waiting, while Android finishes booting.
    - `mac=keep`: `non_persistent_mac_randomization_force_enabled=0` (the
      boot default is 1: a new MAC address for every connection).
 
-   The network is switched on only while the firewall is live.
+   The network is switched on only while the firewall is live and no
+   other uid holds a service port; otherwise it is tried again at every
+   turn of the loop. A refused `SETCONF` (55x) fails the session's network
+   for good, except `553 … Failed to bind one of the listener ports`,
+   which is tried again once the port is free.
 8. **Supervision**, every 2 seconds while something changes, else every 5:
-   the filter and tor are restarted if they stop (pause doubling from 2 to
-   64 s), and a restarted tor gets the session's choice again; the
-   firewall is checked every 30 seconds with `status`, and if it is not
-   live the property is removed at once and `apply` runs again; tor's
-   bootstrap progress is asked while it connects; `status.json` is
-   rewritten when something changed, and at least once a minute.
+   - **who holds the service ports**, at every turn (below): while another
+     uid does, the property is removed and the firewall goes back to armed,
+     and the full rule set is loaded again as soon as the port is free;
+   - the filter and tor are restarted if they stop (pause doubling from 2
+     to 64 s), and a restarted tor gets the session's choice again;
+   - the firewall is checked every 30 seconds with `status`, and if it is
+     not live the property is removed at once and `apply` runs again;
+   - tor's bootstrap progress is asked while it connects;
+   - `status.json` is rewritten when something changed, and at least once
+     a minute;
+   - when Android begins to shut down (`sys.shutdown.requested`, which
+     ShutdownThread sets first), the fail-safe Settings are put back and
+     mobile data is switched off again, so that a start without the module
+     does not inherit a session's MAC "keep" or mobile data (best effort:
+     a crash or a forced power-off skips it).
+
+   A call to tor's control socket is bounded (5 s of silence, 10 s in
+   all), and nothing in the loop waits for tor, so a hung tor cannot hold
+   up the port and firewall checks.
 
 ### Removal (`uninstall.sh`)
 
@@ -154,7 +213,10 @@ copies `settings.orig` to `/data/adb/antumbra-restore.conf` and writes the
 one-time script `/data/adb/service.d/antumbra-restore.sh`, which waits
 for boot to complete, puts each value back (`null` = delete the key), and
 deletes itself and its data. While Android runs, the script is run at
-once. Saved Wi-Fi networks are not restored: there are none on flash.
+once. It also deletes the early arm script. Saved Wi-Fi networks are not
+restored: there are none on flash. Mobile data stays off for each SIM
+Android knew (the per-SIM values are not recorded); switch it on in
+Settings.
 
 ## Files on the phone
 
@@ -167,7 +229,7 @@ power-off.
 | `run/` | 2950:2950, 0751 | tor's control socket and cookie; `status.json` (0644) |
 | `state/` | root, 0711 | `fw-exempt.conf`, `fw-relays.conf` (not written in v0) |
 | `state/tor/` | 2950:2950, 0700 | tor's DataDirectory |
-| `state/module/` | root, 0700 | process IDs, the session's bridges, the firewall's lock and hash (`fw/`) |
+| `state/module/` | root, 0700 | process IDs, the session (`session`, 0600: session ID, tor mode, MAC) and its bridges, the firewall's lock and hash (`fw/`) |
 | `lists/` | root, 0755 | updated block list and DoH list (none in v0: the module's copies in `MODDIR/lists` are used) |
 | `log/` | root, 0755 | `module.log`, `firewall.log`, `dnsfilter.log`, `tor.stderr`, `tor.log` (2950, 0600) |
 
@@ -177,24 +239,33 @@ Logs never contain bridge lines or addresses.
 
 Written for display: the filter serves it under `"module"` on
 `http://127.0.0.1:5380/status`, and Welcome shows `firewall.state`,
-`firewall.hash`, `tor.bootstrap`, `tor.summary` and `tor.network`.
+`firewall.hash`, `tor.bootstrap`, `tor.summary`, `tor.network` and
+`tor.error`. Every app can read that page, so the file holds nothing more:
+no session ID and no tor mode (whether the session uses bridges would tell
+an app that the person is on a censored network). `tor.error` can still
+say that bridges were refused.
 
 ```json
 {"schema":1,
  "module":{"version":"0.1.0","updated":"2026-10-11T07:51:51Z","problem":null},
  "firewall":{"state":"live","hash":"9a4d326ea2eee9bf"},
- "tor":{"running":true,"mode":"bridges","network":"enabled","bootstrap":5,
+ "tor":{"running":true,"network":"enabled","bootstrap":5,
         "summary":"Connecting to a relay","error":null},
  "dnsfilter":{"running":true},
- "welcome":{"started":true,"session_id":"0123456789abcdef0123456789abcdef"}}
+ "welcome":{"started":true}}
 ```
 
-`firewall.state` is `armed` (before the first apply), `live` or `failed`;
-`tor.mode` is `pending` (before Start), `direct`, `bridges` or `offline`;
-`tor.network` is `enabled` or `disabled`; `tor.error` says why a session's
-bridges were refused. tor's uid can rewrite this file, so nothing may base
-a decision on it: the firewall's word is the property `antumbra.fw.armed`,
-which only root can set.
+`firewall.state` is `armed` (before the first apply), `live`, `failed`
+(the full rule set is not live; the arm set is in place, so nothing
+leaves) or `open` (not even the arm set could be loaded; airplane mode
+and Wi-Fi are switched off); `tor.network` is `enabled` or `disabled`;
+`tor.error` says why the session's network could not be switched on;
+`module.problem` joins the boot's problems with the current ones, for
+example `service port taken: 9040/tcp held by uid 10187` or
+`org.antumbra.welcome is not the device owner: Start is not trusted`.
+tor's uid can rewrite this file, so nothing may base a decision on it: the
+firewall's word is the property `antumbra.fw.armed`, which only root can
+set.
 
 ## Trust and privileges
 
@@ -203,11 +274,12 @@ which only root can set.
   path in `run/`: tor could have replaced it with a symbolic link to any
   file. The module reads the control cookie, talks to the socket and
   writes `status.json` through processes running as uid 2950 itself.
-- **The firewall's own files** (its lock and the recorded hash, by default
-  in `$ANTUMBRA_DIR/run`) are kept in `state/module/fw` instead, by calling
-  `antumbra-fw` with `ANTUMBRA_DIR=/data/adb/antumbra/state/module/fw` and
-  the three input files named explicitly (`ANTUMBRA_FW_EXEMPT`,
-  `ANTUMBRA_FW_RELAYS`, `ANTUMBRA_FW_DOH`). Run by hand,
+- **The firewall's own files** (its lock and the recorded hash, in a
+  root-only directory under `$ANTUMBRA_DIR`, never in `run/`) are kept
+  under `state/module/fw`, by calling `antumbra-fw` with
+  `ANTUMBRA_DIR=/data/adb/antumbra/state/module/fw` and the three input
+  files named explicitly (`ANTUMBRA_FW_EXEMPT`, `ANTUMBRA_FW_RELAYS`,
+  `ANTUMBRA_FW_DOH`). Run by hand,
   `ANTUMBRA_DIR=/data/adb/antumbra/state/module/fw antumbra-fw status`
   shows the live state.
 - **tor and the filter** run with every capability gone (permitted,
@@ -218,6 +290,11 @@ which only root can set.
   filter refuses to run otherwise.
 - **SELinux**: both run in Magisk's `magisk` domain, which Magisk
   describes as effectively permissive. See the gaps below.
+- **The service ports.** Only tor may hold `127.0.0.1:9040` (TCP) and
+  `:9053` (UDP, and TCP), only the filter `:5353` (UDP and TCP) and
+  `:5380` (TCP). See "Who holds the service ports" below.
+- **Welcome's provider** is trusted only while Welcome is the device
+  owner (below).
 
 ## Decisions
 
@@ -238,11 +315,78 @@ checks the result before it runs the program, and is tested on the host
 
 Android 16's toybox netcat connects to Unix sockets (`-U`; checked in AOSP
 `external/toybox` at `android16-release`). After the end of its input it
-half-closes the connection and reads until tor closes it (`-q 10` bounds
-the wait, `timeout 20` the whole call). `lib/torctl.sh` sends
+half-closes the connection and reads until tor closes it. `-q 5` bounds
+that wait: the help text says "quit SECONDS after EOF on stdin", and
+`pollinate()` in toybox's `lib/net.c` makes it the poll timeout once stdin
+has ended, so nc gives up after 5 seconds in which tor sent nothing.
+`timeout 10` bounds the whole call. `lib/torctl.sh` sends
 `AUTHENTICATE <cookie hex>`, the commands, and `QUIT`; if authentication
 fails, tor answers 515 and closes, so no command runs. No Go helper was
 needed.
+
+### Who holds the service ports
+
+The firewall redirects every app's TCP to `127.0.0.1:9040` and every DNS
+query to `127.0.0.1:5353`. tor holds no TransPort or DNSPort while its
+network is off (before Start, in an offline session, while it restarts),
+and the filter's ports are free while it restarts: then any app could bind
+them. The firewall drops the answers of a socket that is not the owner's
+(its `ANTUMBRA_SQUAT` chain), so no handshake completes, but it cannot keep
+a squatter from receiving SYNs and UDP queries, with the names in them;
+and a squatter on 9040 or 9053 makes tor's `DisableNetwork=0` fail (553).
+
+So `listeners_ok()` reads `/proc/net/{tcp,tcp6,udp,udp6}`: sockets bound
+to `127.0.0.1`, `0.0.0.0`, `::` or `::ffff:127.0.0.1` (the ones that receive
+what is sent to 127.0.0.1); TCP listeners on 9040 and 9053 must be uid
+2950's and on 5353 and 5380 uid 2951's; UDP sockets in any state on 9053
+must be 2950's and on 5353 2951's. No listener at all is fine. If
+`/proc/net/tcp` cannot be read, that counts as a failure. It runs before
+the full rule set is published (in `fw_publish`, before `apply` and after
+`status`), at every turn of the loop, and before tor's network is
+switched on. While another uid holds a port, the property is removed, the
+firewall goes back to armed (no redirect at all, so the squatter is sent
+nothing and nothing leaves), tor's network stays off, and `module.problem`
+names the port and the uid; once the port is free, the full rule set is
+loaded again at once. What remains: between a squatter's bind and the next
+turn (at most about 5 s) it can receive UDP queries to 5353 (names, no
+answers) and TCP SYNs.
+
+The complete fix, tor holding 9040 and 9053 from boot (`DisableNetwork 0`
+with the firewall keeping uid 2950 from the Internet until Start), changes
+the contract of tor and the firewall and was not taken in v0.
+
+### Welcome's provider: only from the device owner
+
+Any app could declare the authority `org.antumbra.welcome.state` while
+Welcome is not installed (between installing the module and Welcome, or if
+Welcome were ever removed) and answer `started=1` with `tor_mode=direct`
+or bridges of its choosing. The module therefore acts on a started row
+only while `org.antumbra.welcome` is the device owner of user 0 (`cmd
+device_policy list-owners`). A device owner cannot be uninstalled, an
+authority belongs to one package only, and the device owner is set by the
+person over adb at installation; no app can make itself one afterwards.
+So while Welcome is the device owner, the authority is Welcome's.
+Pinning Welcome's signing certificate as well was not done: a shell cannot
+compute an installed APK's certificate digest (`dumpsys package` prints
+only a hash code), and Welcome has no release key yet.
+
+### Mobile data off: stored per SIM
+
+A SIM connects whatever Wi-Fi's store holds, and LineageOS starts with
+mobile data on. Android 16 keeps the choice per subscription in
+Settings.Global (`mobile_data<subId>` in dual-SIM mode, which the hotdog's
+two slots use; `mobile_data` with one slot; `GlobalSettingsHelper` and
+`DataSettingsManager` in `frameworks/opt/telephony`, `android16-release`)
+and reads it when the SIM comes up, also in a boot without the module. At
+every boot the module sets `mobile_data=0` (`settings.conf`, `phone:`
+line) and `mobile_data<subId>=0` for every subscription it finds (the
+keys already in Settings.Global and the IDs in
+`content://telephony/siminfo`), and runs `cmd phone data disable` for the
+default data SIM now; again at shutdown. The person may switch mobile data
+on after Start; it then goes through Tor like everything else. Not on the
+emulator, whose only network in CI is its simulated mobile data. A SIM
+Android has never seen has no stored value and starts with mobile data on
+(`ro.com.android.mobiledata`, default true): gaps.
 
 ### `restricted_networking_mode`: on LineageOS only
 
@@ -313,13 +457,18 @@ out. The overlay is signed with a new RSA key at every build unless
 ### The CI emulator (`--emulator`)
 
 ```sh
+build-module.sh --emulator --zip antumbra-module-0.1.0.zip [--serial emulator-5554] [--no-restart]
 build-module.sh --emulator --tor TOR_OUT --dnsfilter DNSFILTER_OUT \
     --blocklist LISTS_OUT/dnsfilter.list [--serial emulator-5554] [--no-restart]
 ```
 
 Google's `default` system image has no Magisk but gives a root shell with
-`adb root`. This mode builds for the emulator's ABI and then does by hand
-what Magisk would do at boot, in the same order:
+`adb root`. With `--zip`, this mode installs exactly the files of a built
+zip (what Magisk's installer would unpack; `customize.sh` checks them
+against `SHA256SUMS`). Without it, it builds the tree for the emulator's
+ABI from the checkout and the other parts' outputs. The overlay is never
+built for the emulator: nothing mounts `system/` there. Then it does by
+hand what Magisk would do at boot, in the same order:
 
 1. `adb root`; push the module tree; `lib/emu-install.sh` installs it as
    Magisk's installer would (it prepares `/data/adb/modules_update/antumbra`,
@@ -336,6 +485,16 @@ what Magisk would do at boot, in the same order:
    and `antumbra-fw status`.
 
 Installing Welcome and making it the device owner is the CI job's part.
+The module's `customize.sh` also writes the early arm script there, which
+nothing runs on the emulator.
+
+On the emulator only, `start_dnsfilter` honours the CI's switch
+`debug.antumbra.log_queries=1` (set before the install): it starts the
+filter with `-debug-log-queries -status-refresh 0`, so the leak test can
+list every name looked up. The switch is ignored on any other device
+(`is_emulator`), so a phone never logs query names. The firewall's state by hand:
+`ANTUMBRA_DIR=/data/adb/antumbra/state/module/fw sh
+/data/adb/modules/antumbra/bin/antumbra-fw status`.
 
 ## Tests
 
@@ -347,9 +506,11 @@ shellcheck -s sh -x *.sh lib/*.sh tests/*.sh tests/fakes/* META-INF/com/google/a
 ```
 
 **`tests/unit.sh`** (no root): bridge-line checks (27 cases), IPv4
-addresses, provider-row parsing, control-reply parsing, JSON helpers and
-the Settings list, under `sh`, dash, busybox and mksh (`MKSH=` names
-Android's).
+addresses, provider-row parsing, control-reply parsing, JSON helpers, the
+Settings list on the emulator and on the phone, and `ports_bad()` against
+`/proc/net` fixtures (owners, other uids, wildcard and IPv6 addresses,
+TIME_WAIT, connected sockets, an unreadable file), under `sh`, dash,
+busybox and mksh (`MKSH=` names Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
 real firewall, tor, DNS filter and `antumbra-run`, without Android. Each
@@ -358,25 +519,27 @@ overlay of the host whose upper layer holds `/system/bin` (Android 16's
 toybox and mksh built for the host, the host's `iptables-legacy` and `ip`,
 and the stand-ins in `tests/fakes` for `getprop`, `setprop`, `resetprop`,
 `settings`, `cmd` and `content`), a Wi-Fi store and a lease database "on
-flash", and the staged module. It installs the module through
-`emu-install.sh` (so `customize.sh` runs), then runs `post-fs-data.sh` and
-`service.sh` and checks, among other things: the arm set and that root
-cannot send while armed; the runtime tmpfs, owners and modes; the Wi-Fi
-and lease stores on tmpfs and their flash copies deleted; the property
-equal to the live hash and published only through `resetprop -n`; tor and
-the filter with their uids, no capabilities, `no_new_privs` and group
-3003; `status.json` and the filter's status page as an app sees them; an
-app's DNS for a tracker answered NXDOMAIN through the firewall's redirect,
-and other DNS failing closed while tor is offline; other UDP refused; no
-Settings before the framework is up, all of them after; and per scenario:
+flash", and the staged module. The module's scripts run with umask 0. It
+installs the module through `emu-install.sh` (so `customize.sh` runs),
+then runs the early arm script, `post-fs-data.sh` and `service.sh` and
+checks, among other things: modes despite umask 0; the arm set and that
+root cannot send while armed; the runtime tmpfs, owners and modes; the
+Wi-Fi and lease stores on tmpfs and their flash copies deleted; the
+property equal to the live hash and published only through `resetprop -n`;
+tor and the filter with their uids, no capabilities, `no_new_privs` and
+group 3003; `status.json` (without session ID or tor mode) and the
+filter's status page as an app sees them; an app's DNS for a tracker
+answered NXDOMAIN through the firewall's redirect, and other DNS failing
+closed while tor is offline; other UDP refused; no Settings before the
+framework is up, all of them after; and per scenario:
 
 | Scenario | Shell | Checks |
 |---|---|---|
-| `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`); MAC "keep"; no bridge line in the log; a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published |
-| `direct` | mksh, LineageOS hotdog properties | network on without bridges; `restricted_networking_mode=1` |
-| `offline` | mksh | network stays off; `uninstall.sh` during boot leaves the restore script, which puts the Settings back and deletes itself |
-| `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status |
-| `badbridges` | mksh | a quote in a bridge line: refused, network off |
+| `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
+| `direct` | mksh, LineageOS hotdog properties | mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
+| `offline` | mksh | network stays off; mobile data left alone (emulator); an app binds `127.0.0.1:5353` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script, which puts the Settings back and deletes itself, and deletes the early arm script |
+| `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; iptables broken → firewall `open`, property removed, airplane mode on and Wi-Fi off; repaired → live |
+| `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
 
 ```sh
 sudo tests/e2e-host.sh --tor-bin WORK/x86_64/tor-hostcheck \
@@ -385,13 +548,23 @@ sudo tests/e2e-host.sh --tor-bin WORK/x86_64/tor-hostcheck \
 ```
 
 `tor-hostcheck` is the static copy `build-tor.sh` leaves in its work
-directory. Toybox and mksh are built from AOSP `external/toybox` and
-`external/mksh` at `android16-release` (`make defconfig`, plus
-`CONFIG_TR=y`, which Android's device build has; `Build.sh -r`); busybox
-from upstream 1.37.0 with `FEATURE_SH_STANDALONE` and
-`FEATURE_PREFER_APPLETS`, as Magisk runs its scripts. If the kernel has no
-legacy IPv6 tables, IPv6 uses `ip6tables-nft`; if it boots with
-`ipv6.disable=1`, the IPv6 sysctl checks are skipped and say so.
+directory. `tests/build-test-tools.sh --out TOOLS` builds the three shell
+tools from pinned sources:
+
+| Tool | Source | Pin | Build |
+|---|---|---|---|
+| toybox | AOSP `external/toybox`, `android16-release` | commit `e21e76d30fa15996188b79affbc25cfd0c13deff` (checked by git) | `make defconfig`, plus `CONFIG_TR=y`, which Android's device build has |
+| mksh | AOSP `external/mksh`, `android16-release` | commit `103f7c36340298f42cee2f0fe7101a93a01a14e7` | `Build.sh -r` |
+| busybox | busybox.net 1.37.0 | SHA-256 `3311dff32e746499f4df0d5df04d7eb396382d7e108bb9250e7b519b837043a4`; signature by `C9E9 416F 76E6 10DB D09D 040F 47B7 0C55 ACC9 965B` (Denys Vlasenko) | `make defconfig`, plus `FEATURE_SH_STANDALONE` and `FEATURE_PREFER_APPLETS` (as Magisk runs its scripts), without `tc` |
+
+If the kernel has no legacy IPv6 tables, IPv6 uses `ip6tables-nft`; if it
+boots with `ipv6.disable=1`, the IPv6 sysctl checks are skipped and say so.
+
+In CI the module job runs `tests/unit.sh` only so far; shellcheck and this
+test need the workflow's steps (the CI part's file): `shellcheck -s sh -x`
+as above, `tests/build-test-tools.sh` (cached by its pins), and
+`sudo tests/e2e-host.sh` with tor's `tor-hostcheck` and the filter's
+x86_64 binary from the earlier jobs.
 
 What these tests cannot show is Android: SELinux, netd, Magisk's timing,
 Welcome, Wi-Fi and the overlay. The emulator job covers part of that; the
@@ -408,16 +581,24 @@ phone the rest.
   asks the person in the Magisk app. Welcome is meant to hide the Magisk
   app outside updates (pivot checks); the module does not enforce it.
 - `status.json` can be rewritten by tor's uid (display only, as above).
-- The firewall's lock and hash are moved out of `run/` with the
-  firewall's environment variables, which its README describes as for
-  tests and debugging. The firewall should keep them out of `run/` itself.
+- The firewall keeps its lock and recorded hash in a root-only directory
+  of its own (`$ANTUMBRA_DIR/state/fw`); the module points `ANTUMBRA_DIR`
+  at `state/module/fw`, so they end up in `state/module/fw/state/fw`, and
+  anything that asks `antumbra-fw status` by hand (CI included) passes the
+  same `ANTUMBRA_DIR`.
 
 **Amnesia**
 - Installing the module deletes every saved Wi-Fi network at the next
   boot.
 - User 0's credential-encrypted Wi-Fi store
-  (`/data/misc_ce/0/apexdata/com.android.wifi`, networks added in user 0
-  without "share") is still locked at post-fs-data and is not covered.
+  (`/data/misc_ce/0/apexdata/com.android.wifi`) is still locked at
+  post-fs-data and is not covered. It holds networks added without
+  "share", the network suggestions apps had approved, and user 0's
+  Passpoint configurations; they stay on flash, so "a start without the
+  module has no network to join" holds for the shared store only. Covering
+  it from `service.sh` as soon as user 0 is unlocked
+  (`sys.user.0.ce_available`) races Wi-Fi's own read of it at unlock; the
+  timing has to be measured on the phone first (design W8).
 - On the first boot after installation, NetworkStack's data directory may
   not exist yet; its lease memory is then written to flash in that boot
   and deleted at the next.
@@ -428,14 +609,33 @@ phone the rest.
   `/data/vendor/*` (modem dumps, Wi-Fi Direct groups, location, time),
   Persistent-user metadata.
 - Settings.Global values are stored by Android, so they persist by
-  design (they are the fail-safe for a boot without the module).
+  design (they are the fail-safe for a boot without the module). A
+  session's own changes (`non_persistent_mac_randomization_force_enabled=0`
+  for MAC "keep", mobile data switched on) are undone at shutdown only on
+  a clean shutdown that leaves `service.sh` a moment (best effort); after a
+  crash or a forced power-off, a start without the module keeps them.
+  Welcome resetting them at `ACTION_SHUTDOWN` would add a second chance
+  (Welcome's part).
 
 **Network**
 - Without the module (Magisk Safe Mode, an update without the Magisk
   step) there is no firewall. What remains is the RAM-only Wi-Fi store
-  (nothing to join), the stored Settings, and Welcome's check of
-  `antumbra.fw.armed`. A network joined by hand then connects in the
-  clear.
+  (nothing shared to join), the stored Settings (mobile data off for the
+  SIMs Android knew), and Welcome's check of `antumbra.fw.armed`. A network
+  joined by hand, a SIM Android has never seen (mobile data on by
+  default), or one whose mobile data was switched on in a session that
+  ended without a clean shutdown, then connects in the clear. With the
+  module only disabled (`disable` flag), the early arm script keeps the
+  network closed.
+- The port check runs at every turn of the loop (2 to 5 s); in between, a
+  squatter on 5353 can receive DNS queries (it cannot answer them, and
+  nothing leaves) and one on 9040 SYNs. On the phone, Android's mDNS
+  (system_server, uid 1000) on 5353 before the filter would count as a
+  squatter too: the firewall then stays armed, with the reason in the
+  status (closed, not open).
+- If the firewall cannot even be armed, airplane mode and Wi-Fi go off;
+  they stay off after the firewall comes back, until the person switches
+  them on.
 - Apps with their own tor (Tor Browser, Briar, OnionShare) cannot
   connect in v0: the module writes no exemptions (`fw-exempt.conf`,
   `fw-relays.conf`), so their tor is redirected into the system tor, and
@@ -469,8 +669,11 @@ phone the rest.
 
 **Operations**
 - Logs are in RAM: a failed boot's log is gone after the next start.
-- `content query` starts a Java process, about once every 2 seconds until
-  Start.
+- `content query` starts a Java process each time Welcome's provider is
+  asked: every 2 seconds for the first 3 minutes after the framework
+  answers, then every 5 until Start (so a late Start takes up to about 6
+  seconds to reach tor). A signal from Welcome that root can wait for
+  would remove the polling.
 - `uninstall.sh` restores the values recorded at installation, even if
   the person changed one of those keys since.
 - API 36 only: LineageOS 24 (Android 17) needs a new release (or

@@ -100,6 +100,13 @@ func selfTest(lists []string, listsGiven bool) int {
 	check("ANY is refused", expect("udp", "allowed.example", dnsmessage.TypeALL, dnsmessage.RCodeRefused, 0))
 	check("AXFR is refused", expect("tcp", "allowed.example", dnsmessage.TypeAXFR, dnsmessage.RCodeRefused, 0))
 	check("a .local name stays on the phone", expect("udp", "printer.local", dnsmessage.TypeA, dnsmessage.RCodeNameError, 0))
+	// tor reads names as C strings: "x.blocked.example\x00" would reach it
+	// as x.blocked.example. Names with such bytes are never forwarded.
+	check("a name with a NUL byte gets NXDOMAIN", expect("udp", "x.blocked.example\x00", dnsmessage.TypeA, dnsmessage.RCodeNameError, 0))
+	check("a name with a control byte gets NXDOMAIN", expect("tcp", "allowed.exa\x01mple", dnsmessage.TypeA, dnsmessage.RCodeNameError, 0))
+	if got := stats.BadName.Load(); got != 2 {
+		check("bad names are counted", fmt.Errorf("bad_name=%d, want 2", got))
+	}
 	if got := fake.Queries() - before; got != 3 {
 		check("only allowed names reach tor", fmt.Errorf("fake tor saw %d queries, want 3", got))
 	} else {

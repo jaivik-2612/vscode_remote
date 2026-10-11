@@ -156,12 +156,15 @@ func signatureDomain(s string) (string, bool) {
 	return s, blocklist.ValidDomain(s)
 }
 
-// ParseIPv4 reads a list of IPv4 addresses or prefixes ("192.0.2.1" or
-// "192.0.2.0/24", one per line, '#' comments) and calls add for each one
-// that is a public unicast address or prefix. Special-purpose addresses
-// (private, loopback, link-local, shared, multicast, reserved,
-// documentation) are counted as invalid: the firewall must never reject
-// the phone's own loopback services or its LAN because of a bad download.
+// ParseIPv4 reads a list of IPv4 addresses ("192.0.2.1" or "192.0.2.1/32",
+// one per line, '#' comments) and calls add for each one that is a public
+// unicast address. Wider prefixes are counted as invalid, so that a broken
+// or poisoned download cannot make the firewall reject whole ranges for
+// every app (today's source lists single addresses only). Special-purpose
+// addresses (private, loopback, link-local, shared, multicast, reserved,
+// documentation) are counted as invalid too: the firewall must never
+// reject the phone's own loopback services or its LAN because of a bad
+// download.
 func ParseIPv4(r io.Reader, add func(netip.Prefix)) (Counts, error) {
 	var c Counts
 	sc := bufio.NewScanner(r)
@@ -185,7 +188,7 @@ func ParseIPv4(r io.Reader, add func(netip.Prefix)) (Counts, error) {
 				p = netip.PrefixFrom(a, 32)
 			}
 		}
-		if err != nil || !p.Addr().Is4() || p != p.Masked() || p.Bits() < 8 || special(p) {
+		if err != nil || !p.Addr().Is4() || p.Bits() != 32 || special(p) {
 			c.Invalid++
 			continue
 		}

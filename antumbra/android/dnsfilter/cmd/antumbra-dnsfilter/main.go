@@ -75,7 +75,7 @@ type options struct {
 	rate                                        float64
 	burst, maxInflight, maxTCPConns             int
 	moduleStatus                                string
-	bindWait                                    time.Duration
+	statusRefresh, bindWait                     time.Duration
 	debugQueries, allowPrivileged               bool
 	selfTest, showVersion                       bool
 	checkList                                   string
@@ -105,6 +105,7 @@ func parseFlags(args []string) (*options, error) {
 	fs.IntVar(&o.maxInflight, "max-inflight", 128, "queries that may wait for tor at once; more get SERVFAIL")
 	fs.IntVar(&o.maxTCPConns, "max-tcp-conns", 64, "open TCP connections allowed at once")
 	fs.StringVar(&o.moduleStatus, "module-status", defaultModuleStatus, "module status file shown under \"module\" on the status page")
+	fs.DurationVar(&o.statusRefresh, "status-refresh", time.Minute, "show the status page's counters and upstream state afresh at most this often (every app can read the page); 0 shows them live")
 	fs.DurationVar(&o.bindWait, "bind-wait", 10*time.Second, "keep trying to bind the listening ports this long")
 	fs.BoolVar(&o.debugQueries, "debug-log-queries", false, "log every query name and decision (opt-in debug mode; names are never logged otherwise)")
 	fs.BoolVar(&o.allowPrivileged, "insecure-allow-privileged", false, "allow running as root or with capabilities (tests only)")
@@ -285,9 +286,9 @@ func run(o *options, sig <-chan os.Signal) error {
 	log.Printf("answering on %s (udp, tcp); upstream %s/%s, owner uid %d", srv.Addr(), up.Network(), up.Addr(), up.OwnerUID())
 
 	started := time.Now()
-	snapshot := func() status.Snapshot {
+	snapshot := status.Coarsen(func() status.Snapshot {
 		return makeSnapshot(started, stats, lists, up, cfg)
-	}
+	}, o.statusRefresh)
 	var statusAddr net.Addr
 	if o.statusListen != "" {
 		hs, addr, err := status.Serve(o.statusListen, status.Handler(snapshot, o.moduleStatus), log.Printf)
@@ -329,20 +330,23 @@ func run(o *options, sig <-chan os.Signal) error {
 
 func makeSnapshot(started time.Time, st *dnsfilter.Stats, lists *listState, up *dnsfilter.Loopback, cfg dnsfilter.Config) status.Snapshot {
 	s := status.Snapshot{
-		Service:        "antumbra-dnsfilter",
-		Version:        version,
-		UptimeSeconds:  int64(time.Since(started).Seconds()),
-		Queries:        st.Queries.Load(),
-		Blocked:        st.Blocked.Load(),
-		Forwarded:      st.Forwarded.Load(),
-		Local:          st.Local.Load(),
-		ServFail:       st.ServFail.Load(),
-		Refused:        st.Refused.Load(),
-		FormErr:        st.FormErr.Load(),
-		NotImp:         st.NotImp.Load(),
-		RateLimited:    st.RateLimited.Load(),
-		Dropped:        st.Dropped.Load(),
-		UpstreamErrors: st.UpstreamErrors.Load(),
+		Service:       "antumbra-dnsfilter",
+		Version:       version,
+		UptimeSeconds: int64(time.Since(started).Seconds()),
+		Counters: status.Counters{
+			Queries:        st.Queries.Load(),
+			Blocked:        st.Blocked.Load(),
+			Forwarded:      st.Forwarded.Load(),
+			Local:          st.Local.Load(),
+			ServFail:       st.ServFail.Load(),
+			Refused:        st.Refused.Load(),
+			FormErr:        st.FormErr.Load(),
+			NotImp:         st.NotImp.Load(),
+			BadName:        st.BadName.Load(),
+			RateLimited:    st.RateLimited.Load(),
+			Dropped:        st.Dropped.Load(),
+			UpstreamErrors: st.UpstreamErrors.Load(),
+		},
 		Policy: status.PolicyInfo{
 			BlockedAnswer: cfg.BlockMode.String(),
 			FilterAAAA:    cfg.FilterAAAA,

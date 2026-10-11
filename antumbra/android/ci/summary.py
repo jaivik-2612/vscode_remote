@@ -4,10 +4,15 @@
 
   summary.py REPORT_DIR [--run N]
       Writes REPORT_DIR/summary.md and prints it (for $GITHUB_STEP_SUMMARY).
-  summary.py REPORT_DIR --verdict
+  summary.py REPORT_DIR --verdict [--no-fail]
       Writes REPORT_DIR/verdict.json and exits 1 unless both scenarios ran
       to the end with no failed check, the baseline capture saw the phone,
-      and the ANTUMBRA scenario's leak analysis passed.
+      and the ANTUMBRA scenario's leak analysis passed. With --no-fail it
+      exits 0 either way (the workflow writes verdict.json before the
+      artifact is uploaded, and fails the job afterwards with --check).
+  summary.py REPORT_DIR --check
+      Reads REPORT_DIR/verdict.json, prints its problems and exits 1 unless
+      it says ok (also when it is missing or unreadable).
 
 REPORT_DIR is the artifact's root: <scenario>/{result,checks.tsv,
 events.tsv,analysis.json,...}, leak-report.json, screenshots/, build/.
@@ -95,6 +100,25 @@ def judge(root):
     return not problems, problems, facts
 
 
+def warnings(facts):
+    """What is worth a look but does not fail the run: warning checks, and
+    names or destinations through Tor that are not on the expected list
+    while that list is being learned."""
+    out = []
+    for s in SCENARIOS:
+        for c in facts[s]["checks"]:
+            if c[1] == "warn":
+                out.append("%s: %s: %s" % (s, c[0], c[2]))
+    a = facts["antumbra"]["analysis"] or {}
+    d = a.get("destinations") or {}
+    if d.get("mode") != "strict":
+        for u in d.get("unexpected", []):
+            out.append("through Tor, not on the expected list: " + u)
+        if d and not (d.get("sources") or {}).get("tor_streams"):
+            out.append("tor's STREAM events were not recorded: destinations through Tor are unknown")
+    return out
+
+
 def esc(s):
     return str(s).replace("|", "\\|").replace("\n", " ")
 
@@ -159,6 +183,8 @@ def summary(root, run):
                     r.get("name") or t.get("name"), " (control)" if t.get("control") else "",
                     r.get("rcode") or r.get("error"),
                     ", blocked" if r.get("blocked") else (" " + ", ".join(r.get("answers", [])) if r.get("answers") else "")))
+    if "wifi_default" in ev:
+        L.append("- Network: Wi-Fi (%s), mobile data off." % (ev["wifi_default"][1] or "default"))
     if a:
         L.append("- Leak analysis: %d packets after arm, %d of them to the Tor network; %d LEAK flow(s)." % (
             sum((a.get("phases", {}).get("post-arm") or {}).values()), a.get("post_arm_tor_packets", 0),
@@ -167,6 +193,22 @@ def summary(root, run):
         if cov.get("expected"):
             L.append("- Capture coverage: tor reported %d connection(s), the capture saw %d." % (
                 len(cov["expected"]), len(cov.get("seen", []))))
+        if cov.get("addresses"):
+            L.append("- The device's addresses: %s; all seen sending in the capture: %s." % (
+                ", ".join(cov["addresses"]), "no, missing " + ", ".join(cov["addresses_missing"])
+                if cov.get("addresses_missing") else "yes"))
+        aw = a.get("armed_window") or {}
+        if aw.get("status") not in (None, "not-asked"):
+            L.append("- Armed state with the network up: **%s** (%s s, %d packet(s) from the phone, %d of them "
+                     "ARP or DHCP, %d LEAK)." % (aw.get("status"), aw.get("seconds", "?"), aw.get("packets", 0),
+                                                aw.get("allowed", 0), aw.get("leaks", 0)))
+        d = a.get("destinations")
+        if d:
+            L.append("- Through Tor: %d name(s) looked up, %d destination(s) asked of the TransPort; %d not on "
+                     "the expected list (%s mode%s)." % (
+                         len(d.get("names", [])), len(d.get("targets", [])), len(d.get("unexpected", [])),
+                         d.get("mode"), "" if (d.get("sources") or {}).get("tor_streams")
+                         else "; tor's STREAM events were not recorded"))
         leaks = a.get("leaks", [])
         if leaks:
             L.append("")
@@ -177,6 +219,13 @@ def summary(root, run):
                     f.get("first"), f.get("kind"), dest(f), esc(", ".join(f.get("names", [])[:2])),
                     f.get("phases", {}).get("post-arm", 0), esc(f.get("reason"))))
     L.append("")
+    warns = warnings(facts)
+    if warns:
+        L.append("**Warnings (not judged):**")
+        L.append("")
+        for w in warns[:60]:
+            L.append("- " + esc(w))
+        L.append("")
     cs = facts["antumbra"]["checks"]
     if cs:
         L.append("| Check | Result | Detail |")
@@ -220,8 +269,10 @@ def summary(root, run):
     L.append("## In the artifact")
     L.append("")
     L.append("- Screenshots: " + (", ".join("`%s`" % s for s in shots) if shots else "none") + ".")
-    L.append("- `leak-report.md` and `leak-report.json` (both scenarios, every flow), `capture/` (the "
-             "captures, cut to 256 bytes per frame, and the full ones if they fit), `logs/`.")
+    L.append("- `verdict.json`, `leak-report.md` and `leak-report.json` (both scenarios, every flow, the armed "
+             "window, the names and destinations through Tor), `capture/` (the captures, cut to 256 bytes per "
+             "frame, and the full ones if they fit), `antumbra/` (tor's STREAM events, the filter's query log, "
+             "the probes), `logs/`.")
     L.append("")
     builds = sorted(glob.glob(os.path.join(root, "build", "*.md")))
     if builds:
@@ -241,16 +292,27 @@ def main(argv=None):
     ap.add_argument("root")
     ap.add_argument("--run")
     ap.add_argument("--verdict", action="store_true")
+    ap.add_argument("--no-fail", action="store_true")
+    ap.add_argument("--check", action="store_true")
     a = ap.parse_args(argv)
+    if a.check:
+        v = read_json(os.path.join(a.root, "verdict.json"))
+        if not isinstance(v, dict) or not isinstance(v.get("problems"), list):
+            print("::error::no readable verdict.json in %s" % a.root)
+            return 1
+        for p in v["problems"]:
+            print("::error::" + str(p).replace("\n", " "))
+        print("verdict: %s" % ("PASS" if v.get("ok") is True else "FAIL"))
+        return 0 if v.get("ok") is True else 1
     if a.verdict:
-        ok, problems, _ = judge(a.root)
+        ok, problems, facts = judge(a.root)
         with open(os.path.join(a.root, "verdict.json"), "w", encoding="utf-8") as f:
-            json.dump({"ok": ok, "problems": problems}, f, indent=1)
+            json.dump({"ok": ok, "problems": problems, "warnings": warnings(facts)}, f, indent=1)
             f.write("\n")
         for p in problems:
             print("::error::" + p.replace("\n", " "))
         print("verdict: %s" % ("PASS" if ok else "FAIL"))
-        return 0 if ok else 1
+        return 0 if ok or a.no_fail else 1
     sys.stdout.write(summary(a.root, a.run))
     return 0
 

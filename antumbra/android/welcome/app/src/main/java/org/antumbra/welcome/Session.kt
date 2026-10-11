@@ -18,10 +18,12 @@ enum class BridgeSource { BUILT_IN, CUSTOM }
 /** The Welcome screen's controls, before Start. */
 data class Choices(
     val torMode: TorMode = TorMode.DIRECT,
-    val bridgeSource: BridgeSource = BridgeSource.BUILT_IN,
+    // Built-in bridges are obfs4, which needs lyrebird (Bridges.TRANSPORTS_AVAILABLE).
+    val bridgeSource: BridgeSource = if (Bridges.TRANSPORTS_AVAILABLE) BridgeSource.BUILT_IN else BridgeSource.CUSTOM,
     val bridgeText: String = "",
     val newMac: Boolean = true,
     val admin: Boolean = false,
+    /** Always false in v0: the Unsafe Browser comes later (W11). */
     val unsafeBrowser: Boolean = false,
 )
 

@@ -32,6 +32,13 @@ remoteprovisioning.googleapis.com
 # does not ship OxygenOS apps; listed in case vendor parts carry it over.
 open.oneplus.net
 
+# Google's ad-serving and ad-conversion domains, whole. HaGeZi Pro blocks
+# only listed subdomains of them (so that ad links in search results keep
+# working); Antumbra has no use for either. The emulator's tracker test
+# asks for doubleclick.net.
+doubleclick.net
+googleadservices.com
+
 # Firefox's DNS-over-HTTPS canary. A "no such name" answer makes
 # Firefox-based browsers (not Tor Browser, which runs its own Tor) keep
 # using the system's lookups instead of their own encrypted DNS.

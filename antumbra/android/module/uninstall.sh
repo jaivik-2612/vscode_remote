@@ -15,8 +15,12 @@
 # /data/adb/service.d that does this once boot has completed, then deletes
 # itself and its data.
 #
-# Saved Wi-Fi networks are not restored: there are none on flash.
+# Saved Wi-Fi networks are not restored: there are none on flash. Mobile
+# data stays off for the SIMs Android knew (mobile_data<subId>); switch it
+# on in Settings. It also deletes the early arm script in
+# /data/adb/post-fs-data.d.
 
+umask 022
 MODDIR=${0%/*}
 RESTORE_CONF=/data/adb/antumbra-restore.conf
 RESTORE_SCRIPT=/data/adb/service.d/antumbra-restore.sh
@@ -25,7 +29,7 @@ if [ -f "$MODDIR/settings.orig" ]; then
 	cp -f "$MODDIR/settings.orig" "$RESTORE_CONF"
 else
 	# No record (installed from recovery): back to Android's defaults.
-	sed -n 's/^\(lineage:\)\{0,1\}\([a-z0-9_]*\)=.*/\2=null/p' "$MODDIR/lib/settings.conf" >"$RESTORE_CONF"
+	sed -n -e 's/^lineage://' -e 's/^phone://' -e 's/^\([a-z0-9_]*\)=.*/\1=null/p' "$MODDIR/lib/settings.conf" >"$RESTORE_CONF"
 fi
 chmod 0600 "$RESTORE_CONF"
 
@@ -34,6 +38,7 @@ cat >"$RESTORE_SCRIPT" <<'EOF'
 #!/system/bin/sh
 # Antumbra: put back the Settings.Global values the Antumbra module had
 # changed. Left by the module's uninstall.sh; deletes itself when done.
+umask 022
 conf=/data/adb/antumbra-restore.conf
 [ -f "$conf" ] || { rm -f "$0"; exit 0; }
 i=0
@@ -70,5 +75,5 @@ fi
 if ! grep -q ' /data/adb/antumbra ' /proc/mounts 2>/dev/null; then
 	rmdir /data/adb/antumbra 2>/dev/null
 fi
-rm -f /data/adb/antumbra-force
+rm -f /data/adb/antumbra-force /data/adb/post-fs-data.d/antumbra-arm.sh
 exit 0

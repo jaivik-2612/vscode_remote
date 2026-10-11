@@ -551,6 +551,7 @@ def dhcp_options(payload):
         if len(payload) < 240 or payload[236:240] != b"\x63\x82\x53\x63":
             return None
         out = {"op": payload[0], "ciaddr": str(ipaddress.IPv4Address(payload[12:16])),
+               "yiaddr": str(ipaddress.IPv4Address(payload[16:20])),
                "chaddr": mac_str(payload[28:34])}
         pos = 240
         while pos < len(payload):
@@ -566,6 +567,8 @@ def dhcp_options(payload):
                 out["message_type"] = DHCP_MESSAGE_TYPES.get(val[0], str(val[0]))
             elif code == 50 and ln == 4:
                 out["requested_ip"] = str(ipaddress.IPv4Address(val))
+            elif code == 54 and ln == 4:
+                out["server_id"] = str(ipaddress.IPv4Address(val))
             elif code == 12:
                 out["hostname"] = val.decode("ascii", "replace")
             elif code == 60:

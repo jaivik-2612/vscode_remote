@@ -12,8 +12,9 @@
 #   - no text relocations; BIND_NOW, FLAGS_1 NOW and PIE, and a GNU_RELRO
 #     segment (full RELRO);
 #   - a non-executable stack and no segment both writable and executable;
-#   - the API level in the Android note is at most N (default 34), so the
-#     binary loads on that Android version and later;
+#   - the API level in the Android note is N, by default the 'api' record
+#     in sources.lock next to this script (the binary then loads on that
+#     Android version and later);
 #   - the tor version string is present, and none of the forbidden strings
 #     (for example the build directory) is.
 # LOAD segments aligned to less than 16 KiB give a warning only: the phone
@@ -23,7 +24,8 @@
 set -Eeuo pipefail
 export LC_ALL=C
 
-ABI='' API=34 VERSION='' BIN=''
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ABI='' API='' VERSION='' BIN=''
 FORBID=()
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -36,6 +38,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n $BIN && -f $BIN ]] || { echo "check-tor-binary.sh: no binary given" >&2; exit 2; }
+if [[ -z $API ]]; then
+  API=$(awk '$1 == "api" { print $2; n++ } END { if (n != 1) exit 1 }' "$HERE/sources.lock") ||
+    { echo "check-tor-binary.sh: no single 'api' record in $HERE/sources.lock; pass --api" >&2; exit 2; }
+fi
+[[ $API =~ ^[0-9]+$ ]] || { echo "check-tor-binary.sh: --api must be a number" >&2; exit 2; }
 case $ABI in
   arm64-v8a) MACHINE='AArch64' ;;
   x86_64)    MACHINE='X86-64' ;;
@@ -118,10 +125,10 @@ if [[ ${#note_bytes[@]} -ge 4 && ${note_bytes[0]} =~ ^[0-9a-f]{2}$ && ${note_byt
 fi
 if [[ -z $note_api ]]; then
   fail "Android note (.note.android.ident) present"
-elif ((note_api <= API)); then
-  pass "built for API level $note_api (runs on API $API and later)"
+elif ((note_api == API)); then
+  pass "built for API level $note_api (runs on that Android version and later)"
 else
-  fail "built for API level $note_api, newer than the requested $API"
+  fail "built for API level $note_api, not the expected $API"
 fi
 
 if [[ -n $VERSION ]]; then
