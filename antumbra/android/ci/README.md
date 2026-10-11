@@ -39,7 +39,9 @@ stops it.
     `-welcome-2-choices.png`, `-status-1-started.png`,
     `-status-2-bootstrapped.png`, `-status-3-after-tracker-test.png`
     (`-final.png` after a failure)
-  - `baseline/` and `antumbra/`: `events.tsv`, `checks.tsv`, `analysis.json`;
+  - `baseline/` and `antumbra/`: `events.tsv`, `checks.tsv`, `analysis.json`,
+    `guest-links.txt` (the guest's `ip -o link` and `ip -o addr`, which
+    name the interfaces of the capture inside the guest);
     for ANTUMBRA also `tracker-test.json`, `probes-live.tsv`,
     `filter-status.json` (the DNS filter's `/status`, which includes the
     module's `status.json`), `bootstrap-progress.tsv`, `provider-row.txt`,
@@ -47,15 +49,23 @@ stops it.
     `dnsfilter.log` (the filter's log with every query; dropped first if
     the artifact is too large), `device-ipv4.txt`, `disable-ipv6.txt`,
     `consensus.gz`
-  - `capture/`: each capture cut to 256 bytes per frame (`*.slim.pcap`),
-    and the full captures when they fit (dropped first otherwise; the list
-    is in `omitted.txt`)
+  - `capture/`: per scenario the emulator's capture of eth0
+    (`<scenario>.pcap`) and the capture inside the guest of every
+    interface (`<scenario>-guest.pcap`, Linux cooked v2), each also cut to
+    256 bytes per frame (`*.slim.pcap`); the full captures are dropped
+    first when the artifact would be too large (the list is in
+    `omitted.txt`)
   - `logs/`: filtered logcat, `tor.log`, the module's, firewall's and
     filter's logs, `build-module.sh`'s output, the firewall's state
     (`iptables-save`) and the armed phase, Wi-Fi, Welcome's policy checks,
     process capabilities, IPv6 addresses, the mount tables of
     system_server and NetworkStack, device facts (emulator version and
-    system image revision)
+    system image revision), tcpdump's own output in the guest
+    (`<scenario>-guest-capture.txt`), and, at the end of ANTUMBRA,
+    `antumbra-netfilter-counters.txt`: `iptables-save -c` and
+    `ip6tables-save -c` (every rule's packet and byte counters: which drop
+    rules were hit), `/proc/net/stat/nf_conntrack`, and `nstat -asz` (or
+    `/proc/net/netstat`) with `/proc/net/snmp`
   - `build/`: one note per build job
 - `antumbra-android-module-<n>` (the Magisk zip) and
   `antumbra-android-welcome-<n>` (the debug APK), 5 days; also
@@ -72,23 +82,50 @@ v2.38.0 pinned by commit, with the emulator pinned too (`emulator-build:
 dl.google.com). The system image is sdkmanager's current revision of the
 package, recorded in `logs/<scenario>-device.txt`. Each scenario is a fresh
 AVD with `-wipe-data` and `-no-snapshot`, started with `-tcpdump <file>`:
-every frame on the emulator's virtual network from the first moment of
-boot. `-feature -WiFiPacketStream` keeps Wi-Fi on that network: from
-emulator 36.5 on, Wi-Fi otherwise goes through netsim, which `-tcpdump`
-does not see (the analyser's address coverage check would then fail the
-run as blind).
+every frame of the emulator's first network card (the guest's `eth0`, the
+emulated radio) from the first moment of boot. That is not every path out
+of the phone: Wi-Fi (`wlan0`) leaves another way, and run 4 saw none of
+it (`wlan0` 10.0.2.16 never sending, none of tor's five connections). So
+each scenario also runs tcpdump inside the guest, as root (`adb root`;
+found with `command -v tcpdump`: userdebug builds normally carry
+`/system/bin/tcpdump`):
+
+    tcpdump -i any -y LINUX_SLL2 -n -s 0 -U -B 4096 -w /data/local/tmp/antumbra-ci-guest.pcap
+
+`-i any` takes in every interface, also those that appear later (`wlan0`
+is created after boot and again when Wi-Fi is switched on); Linux cooked
+v2 headers carry each frame's direction and interface index (a tcpdump
+without them falls back to v1, and the analyser names the interface by
+its hardware or IP address instead). A frame leaving an interface is
+recorded on its way to the driver, after netfilter: what the guest
+capture shows leaving is what left the phone, packet sockets included
+(DHCP). It is started (`setsid`, so that it outlives the adb shell and
+adbd's restarts) before the clock marker, so before the module is
+installed, and stopped at the very end with SIGTERM, on which tcpdump
+writes its counters into `logs/<scenario>-guest-capture.txt`; the event
+`guest_capture_stop` carries them (`captured=`, `received=`,
+`dropped=`), and the file is pulled into `capture/<scenario>-guest.pcap`.
+The guest's interfaces (`ip -o link`, `ip -o addr`) are recorded when it
+starts, after Wi-Fi is joined and at the end. The emulator's capture stays
+as a second, independent view of `eth0`. An image without tcpdump (a
+`user` build) would need a static x86_64 tcpdump pushed to
+`/data/local/tmp`; ANTUMBRA fails its `guest_capture` check without one,
+and the analyser goes blind on `wlan0`. `-feature -WiFiPacketStream`
+keeps the emulator's Wi-Fi off netsim.
 
 ### BASELINE (`emulator-baseline.sh`)
 
-Plain Android, nothing installed. A clock marker, three minutes alone, a
-screenshot of the home screen, the open connections and the logs, then the
-capture is stopped. The report lists every destination and says how
-Antumbra would judge it. Not judged, except that the capture must show
-traffic from the phone.
+Plain Android, nothing installed. `adb root` and the capture inside the
+guest (a warning if it cannot start), a clock marker, three minutes
+alone, a screenshot of the home screen, the open connections and the
+logs, then both captures are stopped. The report lists every destination,
+Wi-Fi's included, and says how Antumbra would judge it. Not judged, except
+that the captures must show traffic from the phone.
 
 ### ANTUMBRA (`emulator-antumbra.sh`)
 
-1. `adb root`, device facts, Wi-Fi's hardware address, a clock marker.
+1. `adb root`, device facts, Wi-Fi's hardware address, the capture inside
+   the guest (the check `guest_capture` fails without it), a clock marker.
 2. Airplane mode on until Android has no network.
 3. `setprop debug.antumbra.log_queries 1` (the module then starts the DNS
    filter with `-debug-log-queries`, on the emulator only), event
@@ -98,7 +135,8 @@ traffic from the phone.
    restarts the framework around `post-fs-data.sh` (`antumbra-fw arm`
    first), starts `service.sh`, and waits for `antumbra.fw.armed`, which
    must equal the first 16 hex digits of `antumbra-fw status`'s `hash=`
-   with the state `live`. From here tor's STREAM events are recorded
+   with the state `live`. The device's clock is read once more (event
+   `device_clock`). From here tor's STREAM events are recorded
    (`lib/tor-streams.sh`, run on the device as tor's uid 2950 through the
    module's `antumbra-run`: root never opens tor's cookie or socket).
 4. Airplane mode off and mobile data off (`svc data disable`): the phone
@@ -117,7 +155,8 @@ traffic from the phone.
 7. Wi-Fi joined as a person would (`cmd wifi connect-network AndroidWifi
    open`, once Welcome has switched Wi-Fi on); Wi-Fi must become the
    default network (the `Transports:` of `dumpsys connectivity`'s default
-   network), else the check fails. Wi-Fi's hardware address must differ
+   network), else the check fails. The guest's interfaces are recorded
+   again (`guest-links.txt`). Wi-Fi's hardware address must differ
    from the one before the module (a warning). Welcome's own checks through
    `welcome/ci/welcome-adb.sh`: `check-policies --keep-adb` (the
    device-owner restrictions of a default session) and `check-addon` (the
@@ -168,8 +207,12 @@ traffic from the phone.
     NetworkStack's (a warning only); IPv6 is off: no IPv6 address on any
     interface but `lo`, and `disable_ipv6` = 1 for every entry but `lo`;
     the DNS filter ran with its query log (a warning). The device's IPv4
-    addresses (`ip -4 addr`) go to the analyser. Then the capture is
-    stopped (the event `capture_stop` says whether the console confirmed).
+    addresses (`ip -4 addr`) go to the analyser. For diagnosis (not
+    judged): `logs/antumbra-netfilter-counters.txt`, every firewall rule's
+    counters and the kernel's network counters at the end. Then the
+    capture inside the guest is stopped and pulled (`guest_capture_pulled`
+    checks its size), and the emulator's capture is stopped (the event
+    `capture_stop` says whether the console confirmed).
 
 Steps 2 and 4 are not in the plain install procedure. They stop plain
 Android's own traffic before the firewall is armed, so that nothing is in
@@ -181,9 +224,9 @@ hand after boot, so that path itself is not what runs here.
 
 ## The leak analyser
 
-`leak_analyser.py analyse` reads the capture with `pcapread.py` (pcap and
-pcapng; Ethernet, raw IP, Linux cooked, 802.11 and radiotap; standard
-library only) and classifies every packet the phone sent:
+`leak_analyser.py analyse` reads the captures with `pcapread.py` (pcap and
+pcapng; Ethernet, raw IP, Linux cooked v1 and v2, 802.11 and radiotap;
+standard library only) and classifies every packet the phone sent:
 
 | Class | Meaning | Allowed after arm |
 |---|---|---|
@@ -223,28 +266,74 @@ phone, or on a hotspot) is attributed by address instead, with
 when it comes from one of the phone's MAC addresses or when its source is
 one of the phone's addresses; other stations' frames are not counted.
 
+**Two views.** `--pcap` is the emulator's capture of `eth0`
+(`--pcap-iface eth0`); `--guest-pcap` the capture inside the guest, whose
+Linux cooked headers say which frames the phone sent. Its frames on
+loopback are left out (they never leave the phone); every other frame is
+named with its interface, by the index in its header, else by its hardware
+or IP address, from `--guest-links`. Both views are judged: a LEAK in
+either fails the run. Each flow says which views saw it ("Seen on" in the
+report: `wlan0 (guest 3)`, `eth0 (emulator 2, guest 2)`); in totals a
+packet that two captures of one interface saw counts once (each interface
+counts with its larger view).
+
 The phone's addresses are those seen acting as a client (TCP SYN, queries to
 low UDP ports, ARP requests, echo requests, IPv6 solicitations, DHCP) from a
 MAC address that is not slirp's, in private, link-local or site-local
 ranges; `--guest` overrides. With `--expect-guest` (the device's
 `ip -4 addr` at the end), every address the device had must appear as a
-sender in the capture, or the capture missed an interface: `blind`.
+sender on its own interface (or one the capture could not name), or the
+captures missed an interface: `blind`.
 
-**The arm cutoff.** Capture time stamps come from the emulator, events from
-the CI host. The clock marker (one UDP datagram `ANTUMBRA-CLOCK <nonce>` to
-10.0.2.2:9, sent before the module is installed, between two host time
-stamps) gives the offset between the two clocks. The cutoff is the host
-time of `install_start`, which is taken before `build-module.sh` starts and
-so before `antumbra-fw arm` runs, moved to the capture's clock with the
-lower bound of the offset, minus 1 s (3 s without a marker). Every packet
+**Clocks and the arm cutoff.** Events come from the CI host; each capture
+has its own clock: the emulator's (in run 4, 0.84 s or more behind the
+host's), and the device's for the capture inside the guest. The clock
+marker is sent before the module is installed, by one
+adb call between two host time stamps (events `clock_marker_before` and
+`clock_marker_after`, a second or two apart): an ICMP echo request to
+10.0.2.2 from each interface with an IPv4 address (`ping -I IFACE -p
+414e54554d425241<nonce>`: its data holds `ANTUMBRA` and the nonce), and a
+UDP datagram `ANTUMBRA-CLOCK <nonce>` to 10.0.2.2:9 by the default route.
+Each command has a time limit. Run 4's marker used `toybox nc -u -w 1`,
+which never exits after the end of its input (`-w` only limits the
+connect, and without `-q` it waits for the socket forever): `adb shell`'s
+60 s time-out killed it, the fallback ran the same command for another
+60 s, and the two stamps were 120 s apart. The cutoff then lay two minutes
+early, so mDNS sent a minute before `install_start` was judged after arm,
+and the armed window came out negative. In each capture, every marker the
+phone sent bounds that capture's offset to the host (several markers:
+their bounds intersect; bounds that do not meet make the verdict
+`blind`); the analyser counts only what the phone sent, since slirp's echo
+reply may come after the second stamp. The cutoff is the host time of
+`install_start`, which is taken before `build-module.sh` starts and so
+before `antumbra-fw arm` runs, moved to each capture's clock with the
+lower bound of its offset, minus 1 s (3 s without a marker). Every packet
 from the cutoff on counts. The cutoff can only be early, never late.
 `--judge-from-start` judges every packet instead (a capture on the phone,
 which has neither marker nor arm event).
 
+The capture inside the guest must hold a marker: it shows the capture ran
+from before the module was installed, and places its clock. The device's
+clock is read again between two host stamps after the module is live and
+at the end (events `device_clock`); a reading more than 0.5 s outside the
+marker's bounds means the device's clock moved (Android may set it), and
+the guest capture's times cannot be trusted: `blind`.
+
+The module's own log line `post-fs-data: firewall armed` (`--module-log`)
+is placed on the time line by the device's clock, and must not lie before
+`install_start` (else the device's clock moved: `blind` when the guest
+capture depends on it, a note otherwise). It is not the cutoff: it is
+written after `antumbra-fw arm` and after the runtime directory is set
+up, to the second, by the device's clock, so it bounds the arm only from
+above. `install_start` bounds it from below by construction, and with a
+bracket of a second or two the cutoff lies only a few seconds before the
+real arm (run 4, replayed with such a bracket: 4.6 s or more before the
+module's line).
+
 **The armed window** (`--armed-window armed_probe_start:armed_probe_end`).
-Moved inward by the clock's uncertainty plus 0.5 s at each end (3 s without
-a marker), so that it never takes in a packet sent before the flush or
-after the rule set was loaded again. Every packet from the phone in it,
+In each capture, moved inward by its clock's uncertainty plus 0.5 s at each
+end (3 s without a marker), so that it never takes in a packet sent before
+the flush or after the rule set was loaded again. Every packet from the phone in it,
 other than ARP and DHCP, is a LEAK (`armed`), Tor traffic included. With
 `--require-armed-window`, a window that is missing or shorter than 5 s
 makes the verdict `blind`.
@@ -277,10 +366,14 @@ but never "reached".
 
 **Verdicts.** ANTUMBRA passes only when, after the cutoff, there is no LEAK,
 there is Tor traffic, the consensus was read, every connection tor reported
-in `/proc/net/tcp` is in the capture, every address the device had is a
-sender in it, the armed window ran and stayed clean, and the capture is
-whole: a capture file cut in the middle of a frame, or whose last frame lies
-more than 120 s before `capture_stop` (`--max-tail-gap`), makes it `blind`.
+in `/proc/net/tcp` is in the captures, every address the device had is a
+sender in them on its own interface, the armed window ran and stayed clean
+in every capture, and the captures are whole: a capture file cut in the
+middle of a frame, or whose last frame lies more than 120 s before
+`capture_stop` (`guest_capture_stop` for the one inside the guest;
+`--max-tail-gap`), makes it `blind`, and so do, for the capture inside the
+guest, no clock marker, no counters from tcpdump when it was stopped, any
+packet tcpdump dropped, or the device's clock moving.
 BASELINE is `info`, and fails only if the capture shows nothing from the
 phone (`blind`) or cannot be read (`error`). `summary.py --verdict` writes
 `verdict.json` (fails when either scenario did not run to the end, a check
@@ -289,9 +382,11 @@ artifact is uploaded and fails the job afterwards with `summary.py --check`.
 
 ### What it cannot see
 
-- Only the emulator's virtual network is captured. Hardware paths of the
-  phone (Wi-Fi keep-alive offload, the modem, Qualcomm's IPA) do not exist
-  here; the capture on the phone in January covers them. The module's
+- The captures see what the guest's kernel sends: the emulator's capture
+  of `eth0`, and tcpdump inside the guest on every interface after
+  netfilter. Hardware paths of the phone (Wi-Fi keep-alive offload, the
+  modem, Qualcomm's IPA) do not exist here; the capture on the phone in
+  January covers them. The module's
   keep-alive overlay has no effect in CI either: without Magisk nothing
   mounts it.
 - A capture cannot tell which app sent a packet: a connection to a Tor
@@ -337,7 +432,7 @@ bash antumbra/android/ci/emulator-antumbra.sh
 | File | What it is |
 |---|---|
 | `emulator-baseline.sh`, `emulator-antumbra.sh` | the two scenarios |
-| `lib/common.sh` | adb, uiautomator, events, checks, screenshots, logs |
+| `lib/common.sh` | adb, uiautomator, events, checks, screenshots, logs; the clock marker, the device's clock, the capture inside the guest |
 | `lib/tor-streams.sh` | runs on the device as uid 2950: records tor's STREAM events |
 | `analyse.sh` | runs the analyser on both captures after the emulator exits |
 | `pcapread.py` | the capture reader and decoder |

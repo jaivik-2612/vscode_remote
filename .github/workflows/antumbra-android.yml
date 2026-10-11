@@ -13,13 +13,15 @@ name: Antumbra Android
 #             Wi-Fi only; tor; a tracker lookup; probes; the firewall's
 #             armed state with the network up.
 #
-# The emulator records every packet of the phone ('-tcpdump'), and
-# antumbra/android/ci/leak_analyser.py classifies each: Tor relay, Tor
-# directory, configured bridge, link-level (ARP, DHCP), or LEAK; every frame
-# that is not the emulator's own counts as the phone's. The run passes only
-# with zero LEAK after the moment the firewall was armed, nothing but ARP and
-# DHCP while it was only armed, a capture that saw every connection tor
-# reported and every address the phone had, the tracker names blocked, and
+# The emulator records its first network card ('-tcpdump': eth0, the
+# emulated radio) and tcpdump inside the guest records every interface,
+# Wi-Fi included, after the firewall; antumbra/android/ci/leak_analyser.py
+# classifies each packet: Tor relay, Tor directory, configured bridge,
+# link-level (ARP, DHCP), or LEAK; every frame that is not the emulator's
+# own counts as the phone's. The run passes only with zero LEAK after the
+# moment the firewall was armed, nothing but ARP and DHCP while it was only
+# armed, captures that saw every connection tor reported and every address
+# the phone had on its own interface, the tracker names blocked, and
 # every scenario check passed (antumbra/android/ci/README.md). The names and
 # destinations the phone reached through Tor are listed (tor's STREAM
 # events, the DNS filter's query log) and compared with
@@ -597,8 +599,10 @@ jobs:
       # build 16428233, from dl.google.com over HTTPS); the system image is
       # sdkmanager's current revision of the package, recorded in
       # logs/<scenario>-device.txt. -feature -WiFiPacketStream keeps the
-      # emulator's Wi-Fi on its own virtual network instead of netsim, so that
-      # -tcpdump records Wi-Fi as well as mobile data.
+      # emulator's Wi-Fi on its own virtual network instead of netsim.
+      # -tcpdump records only the first network card (eth0, the emulated
+      # radio; run 4 saw none of Wi-Fi's traffic): each scenario also runs
+      # tcpdump inside the guest on every interface (ci/README.md).
       - name: 'BASELINE: plain Android, left alone for 3 minutes'
         timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
@@ -674,7 +678,9 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 -B -I antumbra/android/ci/citool.py pack "$ANTUMBRA_CI_OUT" --limit-mb 39 \
+            --optional 'capture/baseline-guest.pcap' \
             --optional 'capture/antumbra.pcap' --optional 'capture/baseline.pcap' \
+            --optional 'capture/antumbra-guest.pcap' \
             --optional 'antumbra/consensus.gz' --optional 'antumbra/dnsfilter.log' \
             --optional 'capture/*.slim.pcap'
 

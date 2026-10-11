@@ -189,6 +189,12 @@ def summary(root, run):
         L.append("- Leak analysis: %d packets after arm, %d of them to the Tor network; %d LEAK flow(s)." % (
             sum((a.get("phases", {}).get("post-arm") or {}).values()), a.get("post_arm_tor_packets", 0),
             len(a.get("leaks", []))))
+        caps = a.get("captures") or []
+        if caps:
+            L.append("- Captures: %s." % ", ".join("`%s` (%s)" % (
+                c.get("name") or os.path.basename(c.get("path") or "?"),
+                "inside the guest, every interface" if c.get("kind") == "guest" else "the emulator's, eth0")
+                for c in caps))
         cov = a.get("coverage", {})
         if cov.get("expected"):
             L.append("- Capture coverage: tor reported %d connection(s), the capture saw %d." % (
@@ -212,12 +218,14 @@ def summary(root, run):
         leaks = a.get("leaks", [])
         if leaks:
             L.append("")
-            L.append("| First (t+s) | Kind | Destination | Name | Packets after arm | Why |")
-            L.append("|---|---|---|---|---|---|")
+            L.append("| First (t+s) | Kind | Destination | Name | Packets after arm | Seen on | Why |")
+            L.append("|---|---|---|---|---|---|---|")
             for f in leaks[:30]:
-                L.append("| %s | %s | `%s` | %s | %s | %s |" % (
+                L.append("| %s | %s | `%s` | %s | %s | %s | %s |" % (
                     f.get("first"), f.get("kind"), dest(f), esc(", ".join(f.get("names", [])[:2])),
-                    f.get("phases", {}).get("post-arm", 0), esc(f.get("reason"))))
+                    f.get("phases", {}).get("post-arm", 0),
+                    ", ".join(sorted({v.split(":", 1)[-1] for v in f.get("seen") or {}})) or "-",
+                    esc(f.get("reason"))))
     L.append("")
     warns = warnings(facts)
     if warns:
@@ -270,9 +278,10 @@ def summary(root, run):
     L.append("")
     L.append("- Screenshots: " + (", ".join("`%s`" % s for s in shots) if shots else "none") + ".")
     L.append("- `verdict.json`, `leak-report.md` and `leak-report.json` (both scenarios, every flow, the armed "
-             "window, the names and destinations through Tor), `capture/` (the captures, cut to 256 bytes per "
-             "frame, and the full ones if they fit), `antumbra/` (tor's STREAM events, the filter's query log, "
-             "the probes), `logs/`.")
+             "window, the names and destinations through Tor), `capture/` (the emulator's captures of eth0 and "
+             "the captures inside the guest of every interface, cut to 256 bytes per frame, and the full ones if "
+             "they fit), `antumbra/` (tor's STREAM events, the filter's query log, the probes), `logs/` (with "
+             "`antumbra-netfilter-counters.txt`: every firewall rule's counters at the end).")
     L.append("")
     builds = sorted(glob.glob(os.path.join(root, "build", "*.md")))
     if builds:

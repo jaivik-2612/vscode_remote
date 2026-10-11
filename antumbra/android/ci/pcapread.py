@@ -8,13 +8,14 @@ cut off in the middle of a record, as an emulator that was killed may
 leave, is read up to the last whole record and marked as truncated.
 
 Decodes the link types the Android emulator and on-device captures use:
-Ethernet (with VLAN tags), raw IP, Linux "cooked" captures (SLL and SLL2),
-and IEEE 802.11 with or without a radiotap header (netsim's Wi-Fi
-captures). Above them: ARP, IPv4 (with fragments), IPv6 (with extension
-headers), TCP, UDP, ICMP and ICMPv6. It also pulls out the few
-application details the leak report shows: the name in a DNS question,
-the server name (SNI) in a TLS ClientHello, the Host header of an HTTP
-request, and the options of a DHCP message.
+Ethernet (with VLAN tags), raw IP, Linux "cooked" captures (SLL and SLL2,
+as tcpdump -i any writes them: the direction, the link's hardware type
+and, in SLL2, the interface's index), and IEEE 802.11 with or without a
+radiotap header (netsim's Wi-Fi captures). Above them: ARP, IPv4 (with
+fragments), IPv6 (with extension headers), TCP, UDP, ICMP and ICMPv6. It
+also pulls out the few application details the leak report shows: the
+name in a DNS question, the server name (SNI) in a TLS ClientHello, the
+Host header of an HTTP request, and the options of a DHCP message.
 
 Nothing here trusts the capture: every length is checked, and a malformed
 frame is returned with what could be decoded, never an exception.
@@ -46,6 +47,8 @@ ETH_VLAN = (0x8100, 0x88A8, 0x9100)
 
 # Linux SLL packet types: the capturing host's own view of the direction.
 SLL_OUTGOING = 4
+# The hardware type of a loopback link (ARPHRD_LOOPBACK) in SLL headers.
+ARPHRD_LOOPBACK = 772
 
 
 class CaptureError(Exception):
@@ -232,11 +235,14 @@ class Packet:
     such as an encrypted 802.11 frame or another EtherType). proto is
     "tcp", "udp", "icmp", "icmpv6", "ip-N" for another protocol number, or
     "fragment" for a non-first IP fragment (which carries no ports).
+    payload is what follows the TCP, UDP or ICMP header. ifindex and
+    hatype come from SLL headers (the interface's index, SLL2 only, and
+    its hardware type: ARPHRD_LOOPBACK for lo).
     """
 
     __slots__ = ("ts", "linktype", "length", "src_mac", "dst_mac", "ethertype",
                  "direction_hint", "l3", "src", "dst", "proto", "sport", "dport",
-                 "tcp_flags", "icmp_type", "payload", "arp_op", "note")
+                 "tcp_flags", "icmp_type", "payload", "arp_op", "note", "ifindex", "hatype")
 
     def __init__(self, ts, linktype, length):
         self.ts = ts
@@ -257,6 +263,8 @@ class Packet:
         self.payload = b""
         self.arp_op = None
         self.note = None
+        self.ifindex = None
+        self.hatype = None
 
     @property
     def tcp_syn_only(self):
@@ -297,7 +305,7 @@ def _decode_link(p, linktype, b):
     elif linktype == LINKTYPE_LINUX_SLL:
         if len(b) < 16:
             return
-        pkttype, _hatype, alen = struct.unpack(">HHH", b[0:6])
+        pkttype, p.hatype, alen = struct.unpack(">HHH", b[0:6])
         if alen == 6:
             p.src_mac = mac_str(b[6:12])
         p.direction_hint = "out" if pkttype == SLL_OUTGOING else "in"
@@ -306,6 +314,7 @@ def _decode_link(p, linktype, b):
         if len(b) < 20:
             return
         proto = struct.unpack(">H", b[0:2])[0]
+        p.ifindex, p.hatype = struct.unpack(">IH", b[4:10])
         pkttype, alen = b[10], b[11]
         if alen == 6:
             p.src_mac = mac_str(b[12:18])
@@ -438,9 +447,11 @@ def _decode_l4(p, proto, l4, v6):
     elif proto == 1 and not v6 and len(l4) >= 2:
         p.proto = "icmp"
         p.icmp_type = l4[0]
+        p.payload = l4[8:]
     elif proto == 58 and v6 and len(l4) >= 2:
         p.proto = "icmpv6"
         p.icmp_type = l4[0]
+        p.payload = l4[8:]
     else:
         p.proto = "ip-%d" % proto
 

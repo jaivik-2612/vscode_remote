@@ -52,6 +52,17 @@ marks it outgoing, when it comes from one of the phone's MAC addresses, or
 when its source is one of the phone's addresses; other stations' frames are
 not counted.
 
+Two views. The emulator's own capture (--pcap) records only its first
+network card, the guest's eth0 (the emulated radio). The capture inside the
+guest (--guest-pcap: tcpdump -i any, as root) records every interface,
+Wi-Fi included, on its way out after netfilter: a frame it shows leaving is
+a frame that left the phone. Its frames on loopback are left out (they
+never leave), and every other frame is named with its interface: by the
+index in its SLL2 header, else by its hardware or IP address, from the
+guest's 'ip -o link' and 'ip -o addr' (--guest-links). Both views are
+judged; a packet seen in both counts once in totals (the larger count per
+interface), and each flow says which views saw it.
+
 The phone's addresses: those given with --guest, or else every private,
 link-local or site-local address seen acting as a client (sending a TCP
 SYN, a query to a low UDP port, an ARP request, an echo request, an IPv6
@@ -60,17 +71,29 @@ is not slirp's, leaving out slirp's own addresses. With --expect-guest,
 every address the device had at the end must be among them, or the
 capture missed an interface ("blind").
 
-Clocks. pcap time stamps come from the emulator, the scenario's events
-(events.tsv) from the CI host. Before the module is installed the
-scenario sends one UDP datagram "ANTUMBRA-CLOCK <nonce>" to 10.0.2.2:9 and
-records the host time just before and just after. The analyser finds that
-datagram and so knows the offset between the two clocks to within that
-interval. The arm cutoff is the host time of the arm event (taken just
-before the module's installation starts, so before 'antumbra-fw arm' ran)
-moved into the capture's clock with the lower bound of the offset, minus
-a margin. Every packet at or after the cutoff counts. The cutoff can only
-be early, never late. --judge-from-start judges every packet instead (a
-capture on the phone, which has no marker and no arm event).
+Clocks. Each capture has its own clock: the emulator's (in run 4, 0.84 s
+or more behind the host's), and the device's for the capture inside the
+guest. The scenario's events (events.tsv) come from the CI host. Before
+the module is installed the scenario sends the clock marker between two
+host time stamps a second or two apart: an ICMP echo request whose data
+holds "ANTUMBRA" and a nonce from each interface with an address, and a UDP
+datagram "ANTUMBRA-CLOCK <nonce>" by the default route. In each capture,
+every marker sent by the phone bounds that capture's offset to the host
+(the bounds of several markers are intersected; bounds that do not meet
+make the capture blind). The arm cutoff is the host time of the arm event
+(taken just before the module's installation starts, so before
+'antumbra-fw arm' ran) moved into each capture's clock with the lower
+bound of its offset, minus a margin. Every packet at or after the cutoff
+counts. The cutoff can only be early, never late. The capture inside the
+guest must hold a marker (which also shows it ran before the module was
+installed), and the device's clock, read between two host time stamps
+again later (device_clock events), must not have moved from it by more
+than 0.5 s. The module's own log line "post-fs-data: firewall armed"
+(--module-log) is placed on the time line and checked against the arm
+event, but it is not the cutoff: it is written after the arm and after the
+runtime directory is set up, to the second, by the device's clock.
+--judge-from-start judges every packet instead (a capture on the phone,
+which has no marker and no arm event).
 
 The armed window (--armed-window START:END). Between two events the
 scenario puts the firewall back into its armed state ('antumbra-fw flush')
@@ -99,15 +122,17 @@ missing records make it blind.
 
 Verdicts: "pass" (zero LEAK after arm, the capture saw the guest, and,
 when asked, saw Tor traffic, every connection tor reported, every address
-the device had, a whole armed window, and no unexpected destination in
-strict mode), "fail" (a LEAK after arm, or an unexpected destination in
-strict mode), "blind" (the capture missed traffic or ended early: it cannot
-prove anything), "error" (an input is missing or unreadable), and "info"
-for a scenario without an arm event (the baseline).
+the device had sending on its own interface, a whole armed window, and no
+unexpected destination in strict mode), "fail" (a LEAK after arm, or an
+unexpected destination in strict mode), "blind" (a capture missed traffic,
+ended early, dropped packets or cannot be placed in time: it cannot prove
+anything), "error" (an input is missing or unreadable), and "info" for a
+scenario without an arm event (the baseline).
 
 Usage:
-  leak_analyser.py analyse --scenario NAME --pcap FILE [--pcap FILE...]
-      [--network emulator|lan] [--events FILE]
+  leak_analyser.py analyse --scenario NAME [--pcap FILE...] [--pcap-iface NAME]
+      [--guest-pcap FILE] [--guest-links FILE]
+      [--network emulator|lan] [--events FILE] [--module-log FILE]
       [--arm-event NAME | --judge-from-start] [--arm-margin SECONDS]
       [--armed-window START:END [--require-armed-window]]
       [--consensus FILE] [--tor-binary FILE] [--bridges FILE]
@@ -160,6 +185,14 @@ SLIRP_DNS = {"10.0.2.3", "10.0.2.4", "10.0.2.5", "10.0.2.6", "fec0::3"}
 # addresses and to its own hosts (10.0.2.2 is the host machine).
 SLIRP_NETS = [ipaddress.ip_network("10.0.2.0/24"), ipaddress.ip_network("fec0::/64")]
 MARKER = b"ANTUMBRA-CLOCK "
+# The ICMP marker's data (ping -p): "ANTUMBRA" and the nonce's bytes.
+ICMP_MARKER = b"ANTUMBRA"
+# How far the device's clock may move from the host's after the marker
+# before the capture inside the guest, which runs on it, is not trusted
+# (the arm cutoff's margin is 1 s, the armed window's 0.5 s).
+DEVICE_CLOCK_TOLERANCE = 0.5
+# The module's log line written once 'antumbra-fw arm' has succeeded.
+_MODULE_ARM_RE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ) post-fs-data: firewall armed\b")
 # The phone's own network: RFC 1918, shared (carrier-grade NAT), link-local,
 # unique-local and site-local addresses. Python's is_private is wider (it
 # also covers documentation and benchmark ranges), so it is not used.
@@ -367,6 +400,84 @@ def load_events(path):
                 continue
             events.append((parts[0], t, parts[2] if len(parts) > 2 else ""))
     return events
+
+
+def marker_brackets(events):
+    """{nonce: (host time before, host time after)} of the clock markers.
+    The nonce is the first word of the events' detail."""
+    before = {}
+    out = {}
+    for n, t, d in events:
+        words = d.split()
+        if not words:
+            continue
+        if n == "clock_marker_before":
+            before.setdefault(words[0], t)
+        elif n == "clock_marker_after" and words[0] in before:
+            out.setdefault(words[0], (before[words[0]], t))
+    return out
+
+
+def _detail_values(detail):
+    return dict(w.split("=", 1) for w in detail.split() if "=" in w)
+
+
+def device_clock_samples(events):
+    """[(host time, low, high)]: the device's clock minus the host's, from
+    each reading of it between two host time stamps (the marker's
+    "device=", and the device_clock events' "device=" and "host_after=")."""
+    brackets = marker_brackets(events)
+    out = []
+    for n, t, d in events:
+        kv = _detail_values(d)
+        try:
+            dev = float(kv["device"])
+            if n == "clock_marker_after":
+                low, high = dev - t, dev - brackets[d.split()[0]][0]
+            elif n == "device_clock":
+                low, high = dev - float(kv["host_after"]), dev - t
+            else:
+                continue
+        except (KeyError, ValueError, IndexError):
+            continue
+        out.append((t, low, high))
+    return out
+
+
+def load_module_arm(path):
+    """The device time (seconds, to the second) of the module's first
+    "post-fs-data: firewall armed" line, or None."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = _MODULE_ARM_RE.match(line)
+            if m:
+                return datetime.datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=datetime.timezone.utc).timestamp()
+    return None
+
+
+def load_links(path):
+    """The guest's interfaces by index, hardware address and IP address,
+    from 'ip -o link' and 'ip -o addr' output (one-line or not), as
+    lib/common.sh's guest_links records it. Later lines win."""
+    links = {"index": {}, "mac": {}, "addr": {}}
+    iface = None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = re.match(r"^(\d+):\s+([^:@\s]+)", line)
+            if m:
+                iface = m.group(2)
+                links["index"][int(m.group(1))] = iface
+            if iface is None or line.startswith("#"):
+                continue
+            m = re.search(r"\blink/\S+\s+([0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5})\b", line)
+            if m and m.group(1) != "00:00:00:00:00:00":
+                links["mac"][m.group(1).lower()] = iface
+            for m in re.finditer(r"\binet6?\s+([0-9a-fA-F:.]+)", line):
+                ip = ip_or_none(m.group(1))
+                if ip is not None:
+                    links["addr"][str(ip)] = iface
+    return links
 
 
 def _hex_addr(h):
@@ -695,20 +806,80 @@ def attribute(p, guest, guest_macs, emulator):
     return "other"
 
 
-def find_clock(packets, events):
-    """Offset (capture time minus host time) from the clock marker."""
-    before = {d: t for n, t, d in events if n == "clock_marker_before"}
-    after = {d: t for n, t, d in events if n == "clock_marker_after"}
-    for p in packets:
-        if p.proto != "udp" or not p.payload.startswith(MARKER):
-            continue
+def marker_nonce(p, brackets):
+    """The nonce of the clock marker p is, or None: the UDP datagram
+    "ANTUMBRA-CLOCK <nonce>", or an ICMP echo request whose data holds
+    "ANTUMBRA" and the nonce's bytes (ping -p). Only what the phone sends:
+    an echo reply may arrive after the second time stamp."""
+    if p.proto == "udp" and p.payload.startswith(MARKER):
         words = p.payload[len(MARKER):].split()
         nonce = words[0].decode("ascii", "replace") if words else ""
-        if nonce in before and nonce in after:
-            low, high = p.ts - after[nonce], p.ts - before[nonce]
-            return {"source": "marker", "nonce": nonce, "offset_low": low, "offset_high": high,
-                    "offset": (low + high) / 2}
-    return {"source": "none", "nonce": None, "offset_low": 0.0, "offset_high": 0.0, "offset": 0.0}
+        return nonce if nonce in brackets else None
+    if p.proto == "icmp" and p.icmp_type == 8 and ICMP_MARKER in p.payload:
+        for nonce in brackets:
+            try:
+                pattern = ICMP_MARKER + bytes.fromhex(nonce)
+            except ValueError:
+                continue
+            if pattern in p.payload:
+                return nonce
+    return None
+
+
+def find_clock(packets, brackets):
+    """Offset (capture time minus host time) from the clock markers in one
+    capture: each was sent between its two host time stamps, so the offset
+    lies in every marker's interval. "conflict" when they do not meet."""
+    lows, highs, nonces = [], [], []
+    for p in packets:
+        nonce = marker_nonce(p, brackets)
+        if nonce is None:
+            continue
+        before, after = brackets[nonce]
+        lows.append(p.ts - after)
+        highs.append(p.ts - before)
+        nonces.append(nonce)
+    if not lows:
+        return {"source": "none", "nonce": None, "markers": 0, "offset_low": 0.0, "offset_high": 0.0,
+                "offset": 0.0}
+    low, high = max(lows), min(highs)
+    clock = {"source": "marker", "nonce": nonces[0], "markers": len(lows)}
+    if low > high:
+        clock["conflict"] = True
+        low, high = min(lows), max(highs)
+    clock.update({"offset_low": low, "offset_high": high, "offset": (low + high) / 2})
+    return clock
+
+
+def iface_of(p, default, links):
+    """The name of the interface a frame was captured on, or None: by the
+    SLL2 header's index, the loopback hardware type, the frame's hardware
+    addresses, the capture's own interface (default), or its IP
+    addresses."""
+    if p.ifindex:
+        return links["index"].get(p.ifindex, "if%d" % p.ifindex)
+    if p.hatype == pcapread.ARPHRD_LOOPBACK:
+        return "lo"
+    for mac in (p.src_mac, p.dst_mac):
+        if mac in links["mac"]:
+            return links["mac"][mac]
+    if default:
+        return default
+    for addr in (p.src, p.dst):
+        if addr in links["addr"]:
+            return links["addr"][addr]
+    return None
+
+
+def merged(counts):
+    """A total over views ("capture:interface" -> count). Two captures of
+    one interface see the same packets: each interface counts with its
+    largest view, and the interfaces add up."""
+    best = {}
+    for view, n in counts.items():
+        iface = view.split(":", 1)[1]
+        best[iface] = max(best.get(iface, 0), n)
+    return sum(best.values())
 
 
 def app_name(p):
@@ -722,12 +893,11 @@ def app_name(p):
     return None
 
 
-def classify(p, tordir, marker_nonce, phase):
+def classify(p, tordir, brackets, phase):
     """(class, kind, reason, label) for one outbound packet."""
     if p.proto == "arp":
         return ("link-arp", None, "ARP: link-level, never routed", "who-has " + (p.dst or "?"))
-    if (marker_nonce and phase != "post-arm" and p.proto == "udp"
-            and p.payload.startswith(MARKER + marker_nonce.encode())):
+    if phase != "post-arm" and marker_nonce(p, brackets):
         return ("ci-marker", None, "the CI's clock marker, sent before the module was installed", None)
     hit = tordir.lookup(p.dst, p.dport) if p.proto == "tcp" else None
     if p.l3 == "ipv6":
@@ -773,6 +943,10 @@ def classify(p, tordir, marker_nonce, phase):
 
 def iso(ts):
     return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z"
+
+
+def iso_s(ts):
+    return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def event_time(events, name, after=None):
@@ -898,6 +1072,8 @@ def analyse(args):
     }
     if args.judge_from_start and args.arm_event:
         errors.append("--judge-from-start and --arm-event exclude each other")
+    if not args.pcap and not args.guest_pcap:
+        errors.append("no capture: give --pcap or --guest-pcap")
 
     # The Tor network.
     tordir = TorDirectory()
@@ -917,75 +1093,157 @@ def analyse(args):
         except OSError as e:
             errors.append("bridges: %s" % e)
 
-    # The captures.
-    records = []
-    captures = []
-    capture_problems = []
-    for path in args.pcap:
-        try:
-            recs, info = pcapread.read_capture(path)
-        except (OSError, pcapread.CaptureError) as e:
-            errors.append("capture: %s" % e)
-            continue
-        d = info.as_dict()
-        with open(path, "rb") as f:
-            d["sha256"] = hashlib.sha256(f.read()).hexdigest()
-        unsupported = sorted(set(info.linktypes) - pcapread.SUPPORTED_LINKTYPES)
-        if unsupported:
-            notes.append("%s: link types %s are not decoded" % (path, unsupported))
-        if info.truncated:
-            capture_problems.append("%s ends in the middle of a frame (the emulator did not close it): "
-                                    "frames at the end may be missing" % os.path.basename(path))
-        captures.append(d)
-        records.extend(recs)
-    records.sort(key=lambda r: r.ts)
-    packets = [pcapread.decode(r) for r in records]
-    result["captures"] = captures
-    result["tor_directory"] = dict(tordir.info, orports=len(tordir.orports))
-
     events = []
     if args.events:
         try:
             events = load_events(args.events)
         except OSError as e:
             errors.append("events: %s" % e)
+    brackets = marker_brackets(events)
+    links = {"index": {}, "mac": {}, "addr": {}}
+    if args.guest_links:
+        try:
+            links = load_links(args.guest_links)
+        except OSError as e:
+            notes.append("the guest's interfaces were not read (%s): frames are not named by interface" % e)
 
-    first = packets[0].ts if packets else None
-    last = packets[-1].ts if packets else None
-    clock = find_clock(packets, events)
-    result["clock"] = clock
-    if clock["source"] == "none" and args.arm_event:
-        notes.append("no clock marker found: the capture's clock is taken to be the host's, "
-                     "with a wider margin")
+    # The captures, each on its own clock, placed by its own markers.
+    caps = []
+    capture_problems = []
+    inputs = [("emulator" if emulator else "capture", p) for p in args.pcap or []]
+    inputs += [("guest", p) for p in args.guest_pcap or []]
+    for kind, path in inputs:
+        try:
+            recs, info = pcapread.read_capture(path)
+        except (OSError, pcapread.CaptureError) as e:
+            errors.append("capture: %s" % e)
+            continue
+        d = info.as_dict()
+        d.update({"kind": kind, "name": os.path.basename(path),
+                  "iface": None if kind == "guest" else args.pcap_iface})
+        with open(path, "rb") as f:
+            d["sha256"] = hashlib.sha256(f.read()).hexdigest()
+        unsupported = sorted(set(info.linktypes) - pcapread.SUPPORTED_LINKTYPES)
+        if unsupported:
+            notes.append("%s: link types %s are not decoded" % (path, unsupported))
+        if info.truncated:
+            capture_problems.append("%s ends in the middle of a frame (it was not closed): "
+                                    "frames at the end may be missing" % d["name"])
+        recs.sort(key=lambda r: r.ts)
+        packets = [pcapread.decode(r) for r in recs]
+        d["clock"] = find_clock(packets, brackets)
+        d["totals"] = {"frames": len(packets), "loopback": 0, "outbound": 0}
+        caps.append((d, packets))
+    result["captures"] = [d for d, _ in caps]
+    result["tor_directory"] = dict(tordir.info, orports=len(tordir.orports))
+    result["clock"] = caps[0][0]["clock"] if caps else find_clock([], {})
 
-    cutoff = None
+    # Each capture's clock: placed, and, for the guest's (the device's
+    # clock), still where the marker put it at the device's later readings.
+    samples = device_clock_samples(events)
+    for d, _ in caps:
+        c = d["clock"]
+        if c.get("conflict"):
+            capture_problems.append("the clock markers in %s disagree: its clock cannot be placed" % d["name"])
+        if c["source"] == "none" and args.arm_event:
+            if d["kind"] == "guest":
+                capture_problems.append("%s, the capture inside the guest, holds no clock marker: it did not run "
+                                        "from before the module was installed, or its clock cannot be placed"
+                                        % d["name"])
+            else:
+                notes.append("no clock marker found in %s: its clock is taken to be the host's, with a wider margin"
+                             % d["name"])
+        if d["kind"] == "guest" and c["source"] == "marker" and samples:
+            moved = max(max(low - c["offset_high"], c["offset_low"] - high, 0.0) for _, low, high in samples)
+            d["device_clock_moved"] = round(moved, 3)
+            if moved > DEVICE_CLOCK_TOLERANCE:
+                capture_problems.append("the device's clock moved %.1f s or more from where the clock marker put it: "
+                                        "the times in %s, which runs on it, cannot be trusted" % (moved, d["name"]))
+
+    # One time line: host time, estimated with each capture's offset.
+    items = sorted(((p, ci) for ci, (_, pk) in enumerate(caps) for p in pk),
+                   key=lambda x: x[0].ts - caps[x[1]][0]["clock"]["offset"])
+    t0 = (items[0][0].ts - caps[items[0][1]][0]["clock"]["offset"]) if items else None
+
+    def t_of(host):
+        return (host - t0) if t0 is not None and host is not None else None
+
+    # The arm cutoff, in each capture's clock.
+    cutoffs = {}
+    arm_host = None
     if args.judge_from_start:
-        cutoff = first if first is not None else 0.0
+        for ci, (d, _) in enumerate(caps):
+            cutoffs[ci] = d["first"] if d["first"] is not None else 0.0
+            d.update({"cutoff": cutoffs[ci], "margin": 0.0, "cutoff_t": t_of(cutoffs[ci] - d["clock"]["offset"])})
+        c0 = cutoffs.get(0, 0.0)
         result["arm"] = {"event": "(start of the capture)", "host_time": None, "margin": 0.0,
-                         "cutoff": cutoff, "cutoff_utc": iso(cutoff), "cutoff_t": 0.0}
+                         "cutoff": c0, "cutoff_utc": iso(c0), "cutoff_t": 0.0}
     elif args.arm_event:
         arm_host = event_time(events, args.arm_event)
-        if arm_host is not None:
-            margin = args.arm_margin if args.arm_margin is not None else (
-                1.0 if clock["source"] == "marker" else 3.0)
-            cutoff = arm_host + clock["offset_low"] - margin
-            result["arm"] = {"event": args.arm_event, "host_time": arm_host, "margin": margin,
-                             "cutoff": cutoff, "cutoff_utc": iso(cutoff),
-                             "cutoff_t": (cutoff - first) if first is not None else None}
+        if arm_host is not None and caps:
+            for ci, (d, _) in enumerate(caps):
+                c = d["clock"]
+                margin = args.arm_margin if args.arm_margin is not None else (
+                    1.0 if c["source"] == "marker" else 3.0)
+                cutoffs[ci] = arm_host + c["offset_low"] - margin
+                d.update({"cutoff": cutoffs[ci], "margin": margin,
+                          "cutoff_t": t_of(cutoffs[ci] - c["offset"])})
+            earliest = min(cutoffs[ci] - caps[ci][0]["clock"]["offset"] for ci in cutoffs)
+            result["arm"] = {"event": args.arm_event, "host_time": arm_host, "margin": caps[0][0]["margin"],
+                             "cutoff": cutoffs[0], "cutoff_utc": iso(earliest), "cutoff_t": t_of(earliest)}
         else:
-            errors.append("the arm event '%s' is not in the events file" % args.arm_event)
+            if arm_host is None:
+                errors.append("the arm event '%s' is not in the events file" % args.arm_event)
             result["arm"] = None
     else:
         result["arm"] = None
 
     result["events"] = [
-        {"name": n, "host_time": t, "detail": d, "capture_time": t + clock["offset"],
-         "t": (t + clock["offset"] - first) if first is not None else None}
-        for n, t, d in events
+        {"name": n, "host_time": t, "detail": dt, "capture_time": t + result["clock"]["offset"], "t": t_of(t)}
+        for n, t, dt in events
     ]
 
-    # The armed window, moved inward by the clock's uncertainty.
-    window = None
+    # The module's own arm time, by the device's clock: on the time line,
+    # and no earlier than the arm event. Not the cutoff (see "Clocks").
+    module_arm = None
+    if args.module_log:
+        dev_t = None
+        try:
+            dev_t = load_module_arm(args.module_log)
+            if dev_t is None:
+                notes.append("the module's log has no 'post-fs-data: firewall armed' line")
+        except OSError as e:
+            notes.append("the module's log was not read (%s)" % e)
+        if dev_t is not None:
+            module_arm = {"device_time": dev_t, "device_utc": iso_s(dev_t)}
+            dev = next((d["clock"] for d, _ in caps if d["kind"] == "guest" and d["clock"]["source"] == "marker"),
+                       None)
+            bounds = (dev["offset_low"], dev["offset_high"]) if dev else (samples[0][1:] if samples else None)
+            if bounds:
+                # Written within [dev_t, dev_t + 1) by the device's clock.
+                module_arm.update({"host_low": dev_t - bounds[1], "host_high": dev_t + 1 - bounds[0]})
+                module_arm["t"] = t_of((module_arm["host_low"] + module_arm["host_high"]) / 2)
+                if result.get("arm") and result["arm"].get("cutoff_utc") is not None and cutoffs:
+                    earliest = min(cutoffs[ci] - caps[ci][0]["clock"]["offset"] for ci in cutoffs)
+                    module_arm["after_cutoff"] = round(module_arm["host_low"] - earliest, 1)
+                result["events"].append({"name": "module log: firewall armed", "host_time": None,
+                                         "detail": "device clock %s" % iso_s(dev_t),
+                                         "capture_time": None, "t": module_arm["t"]})
+                result["events"].sort(key=lambda e: (e["t"] is None, e["t"] or 0.0))
+                early = (arm_host - module_arm["host_high"]) if arm_host is not None else 0.0
+                if early > DEVICE_CLOCK_TOLERANCE:
+                    msg = ("the module logged 'firewall armed' %.1f s or more before %s, by the device's clock as "
+                           "the marker placed it: that clock moved, or the log is not this run's"
+                           % (early, args.arm_event))
+                    if any(d["kind"] == "guest" for d, _ in caps):
+                        capture_problems.append(msg)
+                    else:
+                        notes.append(msg)
+    result["module_arm"] = module_arm
+
+    # The armed window, in each capture's clock, moved inward by its
+    # uncertainty.
+    windows = {}
     armed = {"status": "not-asked"}
     if args.armed_window:
         start_ev, _, end_ev = args.armed_window.partition(":")
@@ -993,36 +1251,52 @@ def analyse(args):
         we_host = event_time(events, end_ev, after=ws_host) if ws_host is not None else None
         armed = {"status": "not-run", "start_event": start_ev, "end_event": end_ev,
                  "packets": 0, "allowed": 0, "leaks": 0}
-        if ws_host is not None and we_host is not None:
-            inward = 0.5 if clock["source"] == "marker" else 3.0
-            ws = ws_host + clock["offset_high"] + inward
-            we = we_host + clock["offset_low"] - inward
-            armed.update({"start": ws, "end": we, "seconds": round(we - ws, 1),
-                          "start_t": (ws - first) if first is not None else None,
-                          "end_t": (we - first) if first is not None else None})
-            if we - ws < 5.0:
-                armed["status"] = "too-short"
-            else:
-                window = (ws, we)
-                armed["status"] = "ok"
+        if ws_host is not None and we_host is not None and caps:
+            armed["status"] = "ok"
+            for ci, (d, _) in enumerate(caps):
+                c = d["clock"]
+                inward = 0.5 if c["source"] == "marker" else 3.0
+                ws = ws_host + c["offset_high"] + inward
+                we = we_host + c["offset_low"] - inward
+                d["armed_window"] = {"start": ws, "end": we, "seconds": round(we - ws, 1), "status": "ok"}
+                if we - ws < 5.0:
+                    d["armed_window"]["status"] = armed["status"] = "too-short"
+                else:
+                    windows[ci] = (ws, we)
+            w0 = caps[0][0]["armed_window"]
+            armed.update({"start": w0["start"], "end": w0["end"],
+                          "seconds": min(d["armed_window"]["seconds"] for d, _ in caps),
+                          "start_t": t_of(max(d["armed_window"]["start"] - d["clock"]["offset"] for d, _ in caps)),
+                          "end_t": t_of(min(d["armed_window"]["end"] - d["clock"]["offset"] for d, _ in caps))})
 
-    guest, guest_macs = find_guest(packets, args.guest or [], emulator)
+    # Loopback never leaves the phone; every other frame is named with its
+    # interface and its view ("capture:interface").
+    framed = []
+    for p, ci in items:
+        d = caps[ci][0]
+        iface = iface_of(p, d["iface"], links)
+        if p.hatype == pcapread.ARPHRD_LOOPBACK or iface == "lo":
+            d["totals"]["loopback"] += 1
+            continue
+        framed.append((p, ci, iface, "%s:%s" % (d["kind"], iface or "?")))
+
+    guest, guest_macs = find_guest([p for p, _, _, _ in framed], args.guest or [], emulator)
     result["guest"] = {"addresses": sorted(guest), "macs": sorted(guest_macs),
                        "source": "given" if args.guest else "detected"}
 
-    def phase_of(p):
-        if cutoff is None:
+    def phase_of(p, ci):
+        if ci not in cutoffs:
             return "baseline"
-        return "post-arm" if p.ts >= cutoff else "pre-arm"
+        return "post-arm" if p.ts >= cutoffs[ci] else "pre-arm"
 
     # The addresses the guest held before arm (sources, DHCP requests, and
     # the leases slirp acknowledged), for the DHCP lease-memory check.
     pre_leases = set()
     directions = []
-    for p in packets:
+    for p, ci, _, _ in framed:
         d = attribute(p, guest, guest_macs, emulator)
         directions.append(d)
-        if cutoff is None or p.ts >= cutoff or p.l3 != "ipv4":
+        if ci not in cutoffs or p.ts >= cutoffs[ci] or p.l3 != "ipv4":
             continue
         if d == "out" and p.src in guest:
             pre_leases.add(p.src)
@@ -1035,27 +1309,35 @@ def analyse(args):
     pre_leases.discard("0.0.0.0")
     pre_leases.discard(None)
 
-    totals = {"frames": len(packets), "outbound": 0, "from_emulator": 0, "not_the_phone": 0,
-              "unattributed": 0, "undecoded": 0}
+    def count(table, key, view):
+        table.setdefault(key, {})
+        table[key][view] = table[key].get(view, 0) + 1
+
+    tv = {}
     flows = {}
-    phase_counts = {}
-    names = {}
+    phase_v = {}
+    armed_v = {}
+    names_v = {}
     undecoded_notes = {}
-    sources_seen = set()
-    for p, direction in zip(packets, directions):
-        phase = phase_of(p)
+    seen_on = {}
+    iface_views = {}
+    for (p, ci, iface, view), direction in zip(framed, directions):
+        d = caps[ci][0]
+        phase = phase_of(p, ci)
+        iface_views.setdefault(iface or "?", set()).add(d["kind"])
         if p.l3 is None:
-            totals["undecoded"] += 1
+            count(tv, "undecoded", view)
             note = p.note or ("EtherType 0x%04x" % p.ethertype if p.ethertype is not None else "not decoded")
             undecoded_notes[note] = undecoded_notes.get(note, 0) + 1
         if direction == "emulator":
-            totals["from_emulator"] += 1
+            count(tv, "from_emulator", view)
             continue
         if direction != "out":
-            totals["not_the_phone"] += 1
+            count(tv, "not_the_phone", view)
             continue
-        totals["outbound"] += 1
-        in_window = window is not None and window[0] <= p.ts <= window[1]
+        count(tv, "outbound", view)
+        d["totals"]["outbound"] += 1
+        in_window = ci in windows and windows[ci][0] <= p.ts <= windows[ci][1]
         if p.l3 is None:
             # Something the guest sent that has no IP header here.
             if note.startswith(("802.11 management", "802.11 null")):
@@ -1066,12 +1348,13 @@ def analyse(args):
             key = ("link", note, p.src_mac, p.dst_mac)
             name = None
         else:
-            sources_seen.add(p.src)
-            cls = classify(p, tordir, clock["nonce"], phase)
+            known = iface if iface and not re.match(r"^if\d+$", iface) else None
+            seen_on.setdefault(p.src, set()).add(known)
+            cls = classify(p, tordir, brackets, phase)
             src_ip = ip_or_none(p.src)
             if (p.src not in guest and p.src not in ("0.0.0.0", "::")
                     and not (src_ip is not None and src_ip.is_link_local)):
-                totals["unattributed"] += 1
+                count(tv, "unattributed", view)
                 cls = (LEAK, "unattributed", "sent by the phone (MAC %s) with a source address that is "
                        "not one of its own: %s" % (p.src_mac or "?", cls[2]), cls[3])
             name = app_name(p)
@@ -1108,24 +1391,33 @@ def analyse(args):
             cls = (LEAK, "armed", "sent while the firewall was armed, when nothing but loopback may "
                    "pass (%s: %s)" % (cls[1] or cls[0], cls[2]), cls[3])
             key = ("armed",) + key
-            armed["leaks"] += 1
+            count(armed_v, "leaks", view)
         if in_window:
-            armed["packets"] += 1
+            count(armed_v, "packets", view)
             if cls[0] in ALLOWED_ARMED:
-                armed["allowed"] += 1
-        _add_flow(flows, key, p, cls, phase, name)
-        phase_counts.setdefault(phase, {}).setdefault(cls[0], 0)
-        phase_counts[phase][cls[0]] += 1
+                count(armed_v, "allowed", view)
+        _add_flow(flows, key, p, cls, phase, name, view, p.ts - d["clock"]["offset"])
+        count(phase_v, (phase, cls[0]), view)
         if name and p.dport == 53:
-            nk = (phase, name)
-            names[nk] = names.get(nk, 0) + 1
-    if armed["status"] == "ok" and armed["leaks"]:
-        armed["status"] = "fail"
+            count(names_v, (phase, name), view)
+    if args.armed_window and armed["status"] != "not-run":
+        armed.update({k: merged(armed_v.get(k, {})) for k in ("packets", "allowed", "leaks")})
+        if armed["status"] == "ok" and armed["leaks"]:
+            armed["status"] = "fail"
+
+    totals = {k: merged(tv.get(k, {})) for k in ("outbound", "from_emulator", "not_the_phone", "unattributed",
+                                                 "undecoded")}
+    totals["frames"] = sum(d["totals"]["frames"] for d, _ in caps)
+    totals["loopback"] = sum(d["totals"]["loopback"] for d, _ in caps)
+    phase_counts = {}
+    for (phase, cls), views in sorted(phase_v.items()):
+        phase_counts.setdefault(phase, {})[cls] = merged(views)
 
     flow_list = sorted(flows.values(), key=lambda f: f["first_ts"])
     for f in flow_list:
-        f["first"] = round(f["first_ts"] - first, 3) if first is not None else None
-        f["last"] = round(f["last_ts"] - first, 3) if first is not None else None
+        _finish_flow(f)
+        f["first"] = round(f["first_ts"] - t0, 3) if t0 is not None else None
+        f["last"] = round(f["last_ts"] - t0, 3) if t0 is not None else None
         f["first_utc"] = iso(f["first_ts"])
         f["names"] = sorted(f["names"])
         del f["first_ts"], f["last_ts"]
@@ -1135,15 +1427,16 @@ def analyse(args):
     result["phases"] = phase_counts
     result["armed_window"] = armed
     result["dhcp_pre_arm_leases"] = sorted(pre_leases)
-    result["dns_names"] = [{"phase": ph, "name": n, "queries": c} for (ph, n), c in sorted(names.items())]
+    result["dns_names"] = [{"phase": ph, "name": n, "queries": merged(v)} for (ph, n), v in sorted(names_v.items())]
+    result["interfaces"] = {i: sorted(k) for i, k in sorted(iface_views.items())}
     result["flows_total"] = len(flow_list)
     result["flows"] = flow_list[:MAX_FLOWS_JSON]
     if len(flow_list) > MAX_FLOWS_JSON:
         notes.append("only the first %d of %d flows are listed" % (MAX_FLOWS_JSON, len(flow_list)))
     result["leaks"] = leaks
 
-    # Coverage: did the capture see the connections tor said it had, and
-    # every address the device had?
+    # Coverage: did the captures see the connections tor said it had, and
+    # every address the device had, sending on its own interface?
     coverage = {"status": "not-checked", "expected": [], "seen": [], "missing": [],
                 "addresses": [], "addresses_missing": []}
     checked = False
@@ -1167,8 +1460,13 @@ def analyse(args):
             errors.append("expect-guest: %s" % e)
         if addrs is not None:
             checked = True
+
+            def sent(iface, addr):
+                # On that interface, or on one the capture could not name.
+                got = seen_on.get(addr, set())
+                return bool(got) and (not iface or iface in got or None in got)
             coverage["addresses"] = ["%s %s" % a for a in addrs]
-            coverage["addresses_missing"] = ["%s %s" % a for a in addrs if a[1] not in sources_seen]
+            coverage["addresses_missing"] = ["%s %s" % a for a in addrs if not sent(*a)]
     if checked:
         if coverage["missing"] or coverage["addresses_missing"]:
             coverage["status"] = "incomplete"
@@ -1178,14 +1476,31 @@ def analyse(args):
             coverage["status"] = "nothing-to-check"
     result["coverage"] = coverage
 
-    # The end of the capture.
-    stop_host = event_time(events, "capture_stop")
-    if stop_host is not None and last is not None:
-        gap = stop_host + clock["offset_low"] - last
-        result["tail_gap"] = round(gap, 1)
-        if gap > args.max_tail_gap:
-            capture_problems.append("the capture's last frame is %.0f s before the scenario stopped the "
-                                    "capture: frames at the end may be missing" % gap)
+    # The end of each capture, and the capture inside the guest's own
+    # counters (tcpdump's, when the scenario stopped it).
+    for d, _ in caps:
+        stop_ev = "guest_capture_stop" if d["kind"] == "guest" else "capture_stop"
+        stop_host = event_time(events, stop_ev)
+        if stop_host is not None and d["last"] is not None:
+            gap = stop_host + d["clock"]["offset_low"] - d["last"]
+            d["tail_gap"] = round(gap, 1)
+            if gap > args.max_tail_gap:
+                capture_problems.append("the last frame of %s is %.0f s before the scenario stopped the capture: "
+                                        "frames at the end may be missing" % (d["name"], gap))
+        if d["kind"] == "guest" and args.arm_event:
+            stops = [dt for n, _, dt in events if n == "guest_capture_stop"]
+            kv = _detail_values(stops[-1]) if stops else {}
+            d["tcpdump"] = kv
+            if not stops:
+                capture_problems.append("%s was never stopped by the scenario (no guest_capture_stop event): "
+                                        "frames at the end may be missing" % d["name"])
+            elif not kv.get("dropped", "").isdigit():
+                capture_problems.append("tcpdump in the guest gave no counters when it was stopped (%s): it may "
+                                        "have stopped early" % (stops[-1] or "no detail"))
+            elif kv["dropped"] != "0":
+                capture_problems.append("tcpdump in the guest dropped %s packet(s): %s misses them"
+                                        % (kv["dropped"], d["name"]))
+    result["tail_gap"] = caps[0][0].get("tail_gap") if caps else None
     result["capture_problems"] = capture_problems
 
     dest = destinations(args, notes, errors)
@@ -1205,13 +1520,13 @@ def analyse(args):
     if errors:
         verdict = "error"
         reasons += errors
-    elif not packets:
+    elif not items:
         verdict = "error"
         reasons.append("the capture holds no frames")
     elif totals["outbound"] == 0:
         verdict = "blind"
         reasons.append("the capture shows no packet from the guest: it cannot show a leak either")
-    elif cutoff is None:
+    elif not cutoffs:
         verdict = "info"
         reasons.append("no arm event: everything is listed, nothing is judged (baseline)")
         notes.extend(capture_problems)
@@ -1226,8 +1541,8 @@ def analyse(args):
                             "path out of the phone" % (len(coverage["missing"]), len(coverage["expected"]),
                                                        ", ".join(coverage["missing"][:5])))
         if coverage["addresses_missing"]:
-            verdict = blind("the device had address(es) the capture never saw sending (%s): the capture "
-                            "misses an interface" % ", ".join(coverage["addresses_missing"][:5]))
+            verdict = blind("the device had address(es) the capture never saw sending on their interface (%s): "
+                            "the capture misses an interface" % ", ".join(coverage["addresses_missing"][:5]))
         for problem in capture_problems:
             verdict = blind(problem)
         if args.require_armed_window and armed["status"] in ("not-asked", "not-run", "too-short"):
@@ -1262,7 +1577,8 @@ def analyse(args):
     return result
 
 
-def _add_flow(flows, key, p, cls, phase, name):
+def _add_flow(flows, key, p, cls, phase, name, view, host_ts):
+    """Adds packet p to its flow, counted under its view."""
     f = flows.get(key)
     if f is None:
         f = flows[key] = {
@@ -1270,16 +1586,18 @@ def _add_flow(flows, key, p, cls, phase, name):
             "dst": p.dst, "dport": p.dport if p.proto in ("tcp", "udp") else None,
             "icmp_type": p.icmp_type, "src_mac": p.src_mac, "class": cls[0], "kind": cls[1],
             "reason": cls[2], "label": cls[3], "packets": 0, "bytes": 0, "syn": False,
-            "phases": {}, "names": set(), "first_ts": p.ts, "last_ts": p.ts,
+            "phases": {}, "seen": {}, "names": set(), "first_ts": host_ts, "last_ts": host_ts,
         }
     elif cls[0] == LEAK and f["class"] != LEAK:
         # A flow that was allowed before arm and continues after it is a
         # LEAK from that packet on (for example the marker after arm).
         f.update({"class": cls[0], "kind": cls[1], "reason": cls[2], "label": cls[3]})
-    f["packets"] += 1
-    f["bytes"] += p.length or 0
-    f["last_ts"] = p.ts
-    f["phases"][phase] = f["phases"].get(phase, 0) + 1
+    s = f["seen"].setdefault(view, {"packets": 0, "bytes": 0})
+    s["packets"] += 1
+    s["bytes"] += p.length or 0
+    s[phase] = s.get(phase, 0) + 1
+    f["first_ts"] = min(f["first_ts"], host_ts)
+    f["last_ts"] = max(f["last_ts"], host_ts)
     if p.tcp_syn_only:
         f["syn"] = True
     if name:
@@ -1290,12 +1608,22 @@ def _add_flow(flows, key, p, cls, phase, name):
             f["dhcp"] = d
 
 
+def _finish_flow(f):
+    """A flow's packets, bytes and phases over its views (see merged)."""
+    seen = f["seen"]
+    f["packets"] = merged({v: s["packets"] for v, s in seen.items()})
+    f["bytes"] = merged({v: s["bytes"] for v, s in seen.items()})
+    phases = sorted({k for s in seen.values() for k in s if k not in ("packets", "bytes")})
+    f["phases"] = {ph: merged({v: s.get(ph, 0) for v, s in seen.items()}) for ph in phases}
+
+
 # ---------------------------------------------------------------------------
 # Reports
 # ---------------------------------------------------------------------------
 
 def _dest_rows(flows, phase_filter=None):
-    """Flows merged by (proto, destination, port, class)."""
+    """Flows merged by (proto, destination, port, class), with their
+    packets per view ("seen") and over the views (see merged)."""
     rows = {}
     for f in flows:
         if phase_filter and f["phases"].get(phase_filter, 0) == 0:
@@ -1306,16 +1634,31 @@ def _dest_rows(flows, phase_filter=None):
             r = rows[key] = {"proto": f["proto"], "l3": f["l3"], "dst": f["dst"], "dport": f["dport"],
                              "class": f["class"], "kind": f["kind"], "reason": f["reason"],
                              "label": f["label"], "flows": 0, "packets": 0, "names": set(),
-                             "first": f["first"], "dhcp": f.get("dhcp")}
+                             "first": f["first"], "dhcp": f.get("dhcp"), "seen": {}}
         r["flows"] += 1
-        r["packets"] += f["phases"].get(phase_filter, 0) if phase_filter else f["packets"]
+        views = f.get("seen") or {"?:?": dict(f["phases"], packets=f["packets"])}
+        for view, s in views.items():
+            n = s.get(phase_filter, 0) if phase_filter else s.get("packets", 0)
+            if n:
+                r["seen"][view] = r["seen"].get(view, 0) + n
         r["names"].update(f["names"])
         if f["first"] is not None and (r["first"] is None or f["first"] < r["first"]):
             r["first"] = f["first"]
     out = sorted(rows.values(), key=lambda r: (r["first"] if r["first"] is not None else 0))
     for r in out:
         r["names"] = sorted(r["names"])
+        r["packets"] = merged(r["seen"])
     return out
+
+
+def seen_text(seen):
+    """'wlan0 (guest 3), eth0 (emulator 2, guest 2)' from packets per view."""
+    by_iface = {}
+    for view, n in seen.items():
+        kind, iface = view.split(":", 1)
+        by_iface.setdefault(iface, []).append("%s %d" % (kind, n))
+    return ", ".join(("%s (%s)" % (i, ", ".join(sorted(v)))) if i != "?" else ", ".join(sorted(v))
+                     for i, v in sorted(by_iface.items()))
 
 
 def _dest(r):
@@ -1345,17 +1688,42 @@ def scenario_md(s):
     lines.append("")
     caps = s.get("captures", [])
     t = s.get("totals", {})
+    what = {"emulator": "the emulator's own, its first network card", "capture": "a capture",
+            "guest": "inside the guest, every interface after netfilter; loopback left out"}
     for c in caps:
         dur = (c["last"] - c["first"]) if c.get("first") is not None and c.get("last") is not None else 0
-        lines.append("- Capture `%s`: %s, %d frames over %.0f s%s." % (
-            os.path.basename(c["path"]), c["format"], c["records"], dur,
-            " (cut short at the end)" if c.get("truncated") else ""))
+        extra = []
+        clock = c.get("clock") or {}
+        if clock.get("source") == "marker":
+            extra.append("Clock: capture minus host = %.3f s (between %.3f and %.3f, from %d marker(s))" % (
+                clock["offset"], clock["offset_low"], clock["offset_high"], clock.get("markers", 1)))
+        else:
+            extra.append("Clock: no marker")
+        if c.get("cutoff_t") is not None:
+            extra.append("arm cutoff at t+%.1f s (margin %.1f s)" % (c["cutoff_t"], c.get("margin", 0)))
+        if (c.get("totals") or {}).get("loopback"):
+            extra.append("%d loopback frame(s) left out" % c["totals"]["loopback"])
+        if c.get("tcpdump"):
+            extra.append("tcpdump: %s" % ", ".join("%s %s" % kv for kv in sorted(c["tcpdump"].items())))
+        if c.get("device_clock_moved") is not None:
+            extra.append("the device's clock, read again later, %s" % (
+                "moved %.1f s beyond the marker's bounds" % c["device_clock_moved"] if c["device_clock_moved"]
+                else "stayed within the marker's bounds"))
+        lines.append("- Capture `%s` (%s%s): %s, %d frames over %.0f s%s. %s." % (
+            os.path.basename(c["path"]), what.get(c.get("kind"), c.get("kind")),
+            ": " + c["iface"] if c.get("iface") else "", c["format"], c["records"], dur,
+            " (cut short at the end)" if c.get("truncated") else "", "; ".join(extra)))
     lines.append("- Frames: %d; sent by the phone: %d (from an address not its own: %d); from the "
-                 "emulator's network: %d; other stations: %d; not decoded: %d. Attribution: %s." % (
+                 "emulator's network: %d; other stations: %d; not decoded: %d; on loopback: %d. Packets seen "
+                 "by two captures of one interface count once. Attribution: %s." % (
                      t.get("frames", 0), t.get("outbound", 0), t.get("unattributed", 0),
                      t.get("from_emulator", 0), t.get("not_the_phone", 0), t.get("undecoded", 0),
+                     t.get("loopback", 0),
                      "every frame that is not slirp's is the phone's" if s.get("network") == "emulator"
                      else "by address (a capture on a real network)"))
+    if s.get("interfaces"):
+        lines.append("- Interfaces in the captures: %s." % ", ".join(
+            "%s (%s)" % (i, ", ".join(k)) for i, k in sorted(s["interfaces"].items())))
     g = s.get("guest", {})
     lines.append("- The phone's addresses (%s): %s." % (g.get("source"), ", ".join(g.get("addresses", [])) or "none"))
     td = s.get("tor_directory", {})
@@ -1369,15 +1737,22 @@ def scenario_md(s):
             b.get("fallbacks", 0), b.get("authorities", 0)))
     if td.get("bridges"):
         lines.append("- Configured bridges: %d." % td["bridges"])
-    clock = s.get("clock", {})
-    if clock.get("source") == "marker":
-        lines.append("- Clock: capture minus host = %.3f s (between %.3f and %.3f, from the marker)." % (
-            clock["offset"], clock["offset_low"], clock["offset_high"]))
     arm = s.get("arm")
     if arm:
-        lines.append("- Arm cutoff: t+%.1f s in the capture (%s; event `%s`, margin %.1f s). "
-                     "Every packet from there on counts." % (
-                         arm.get("cutoff_t") or 0, arm.get("cutoff_utc"), arm.get("event"), arm.get("margin", 0)))
+        lines.append("- Arm cutoff: t+%.1f s (%s, host time; event `%s` minus each capture's margin and clock "
+                     "uncertainty). Every packet from there on counts." % (
+                         arm.get("cutoff_t") or 0, arm.get("cutoff_utc"), arm.get("event")))
+    ma = s.get("module_arm")
+    if ma:
+        if ma.get("t") is not None:
+            lines.append("- The module's log: `firewall armed` at %s by the device's clock, t+%.1f s (host time "
+                         "%s to %s)%s. It is written after the arm, so it is not the cutoff." % (
+                             ma["device_utc"], ma["t"], iso(ma["host_low"]), iso(ma["host_high"]),
+                             ", %.1f s or more after the cutoff" % ma["after_cutoff"]
+                             if ma.get("after_cutoff") is not None else ""))
+        else:
+            lines.append("- The module's log: `firewall armed` at %s by the device's clock (not placed: the "
+                         "device's clock was not read)." % ma["device_utc"])
     aw = s.get("armed_window") or {}
     if aw.get("status") not in (None, "not-asked"):
         if aw.get("start_t") is not None:
@@ -1412,22 +1787,23 @@ def scenario_md(s):
         lines.append("### LEAKs after arm: %d destination(s)" % len(leak_rows))
         lines.append("")
         if leak_rows:
-            lines.append("| First (t+s) | Kind | Destination | Name | Packets | Why |")
-            lines.append("|---|---|---|---|---|---|")
+            lines.append("| First (t+s) | Kind | Destination | Name | Packets | Seen on | Why |")
+            lines.append("|---|---|---|---|---|---|---|")
             for r in leak_rows[:200]:
-                lines.append("| %s | %s | `%s` | %s | %d | %s |" % (
+                lines.append("| %s | %s | `%s` | %s | %d | %s | %s |" % (
                     r["first"], r["kind"], _dest(r), _md_escape(", ".join(r["names"][:3]) or r["label"] or ""),
-                    r["packets"], _md_escape(r["reason"])))
+                    r["packets"], _md_escape(seen_text(r["seen"])), _md_escape(r["reason"])))
             lines.append("")
         tor_rows = [r for r in _dest_rows(flows, "post-arm") if r["class"] in ("tor-relay", "tor-directory", "bridge")]
         lines.append("### Tor network after arm: %d destination(s)" % len(tor_rows))
         lines.append("")
         if tor_rows:
-            lines.append("| First (t+s) | Class | Destination | What | Packets |")
-            lines.append("|---|---|---|---|---|")
+            lines.append("| First (t+s) | Class | Destination | What | Packets | Seen on |")
+            lines.append("|---|---|---|---|---|---|")
             for r in tor_rows[:60]:
-                lines.append("| %s | %s | `%s` | %s | %d |" % (r["first"], r["class"], _dest(r),
-                                                              _md_escape(r["label"] or ""), r["packets"]))
+                lines.append("| %s | %s | `%s` | %s | %d | %s |" % (
+                    r["first"], r["class"], _dest(r), _md_escape(r["label"] or ""), r["packets"],
+                    _md_escape(seen_text(r["seen"]))))
             lines.append("")
         other = [r for r in _dest_rows(flows, "post-arm") if r["class"] in ("lan-dhcp", "link-arp", "link-80211")]
         if other:
@@ -1459,7 +1835,7 @@ def scenario_md(s):
             len(cov.get("expected", [])), len(cov.get("seen", [])), ", ".join(cov.get("missing", [])) or "none"))
         if cov.get("addresses"):
             lines.append("")
-            lines.append("The device's addresses at the end: %s; never seen sending in the capture: %s." % (
+            lines.append("The device's addresses at the end: %s; never seen sending on their interface: %s." % (
                 ", ".join(cov["addresses"]), ", ".join(cov.get("addresses_missing", [])) or "none"))
         lines.append("")
     lines.extend(destinations_md(s.get("destinations")))
@@ -1552,11 +1928,13 @@ def _dest_table(rows, limit):
 
 BLIND_SPOTS = """### What this test cannot see
 
-- Only what passes the emulator's virtual network is captured. Traffic the
-  phone's hardware sends by itself (Wi-Fi keep-alive offload, the modem) has
-  no equivalent in the emulator; the January capture on the phone covers it.
-  The module's keep-alive overlay has no effect here either: without
-  Magisk nothing mounts it.
+- Two views are captured: the emulator's own capture of its first network
+  card (eth0, the emulated radio) and tcpdump inside the guest on every
+  interface (Wi-Fi included), which records a frame as it leaves an
+  interface, after netfilter. Traffic the phone's hardware sends by itself
+  (Wi-Fi keep-alive offload, the modem) has no equivalent in the emulator;
+  the January capture on the phone covers it. The module's keep-alive
+  overlay has no effect here either: without Magisk nothing mounts it.
 - A packet capture cannot tell which app sent a packet. A connection to a Tor
   relay counts as Tor traffic even if an app other than tor made it.
 - What travels through Tor is not in the capture. tor's STREAM events and
@@ -1637,11 +2015,17 @@ def main(argv=None):
 
     a = sub.add_parser("analyse", help="classify one scenario's capture")
     a.add_argument("--scenario", required=True)
-    a.add_argument("--pcap", action="append", required=True)
+    a.add_argument("--pcap", action="append",
+                   help="the emulator's capture (-tcpdump: its first network card), or a capture on a real network")
+    a.add_argument("--pcap-iface", help="the guest interface --pcap records (eth0 for the emulator's)")
+    a.add_argument("--guest-pcap", action="append",
+                   help="a capture inside the guest on every interface (tcpdump -i any), on the device's clock")
+    a.add_argument("--guest-links", help="the guest's 'ip -o link' and 'ip -o addr' (interface names)")
     a.add_argument("--network", choices=("emulator", "lan"), default="emulator",
                    help="emulator: every frame on the Ethernet that is not slirp's is the phone's "
                         "(default); lan: a capture on a real network, attributed by address")
     a.add_argument("--events")
+    a.add_argument("--module-log", help="the module's log: its 'firewall armed' line goes on the time line")
     a.add_argument("--arm-event")
     a.add_argument("--judge-from-start", action="store_true",
                    help="judge every packet (a capture on the phone, with no arm event)")

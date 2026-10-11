@@ -5,8 +5,12 @@
 # leak-report.json and leak-report.md, after the emulator has exited.
 #
 # Inputs (environment):
-#   ANTUMBRA_CI_OUT        the report directory the scenarios wrote
-#   ANTUMBRA_CAPTURE_DIR   holds baseline.pcap and antumbra.pcap (-tcpdump)
+#   ANTUMBRA_CI_OUT        the report directory the scenarios wrote; its
+#                          capture/<scenario>-guest.pcap is the capture
+#                          inside the guest (tcpdump -i any), and
+#                          <scenario>/guest-links.txt names its interfaces
+#   ANTUMBRA_CAPTURE_DIR   holds baseline.pcap and antumbra.pcap (-tcpdump:
+#                          the emulator's first network card, eth0)
 #   ANTUMBRA_MODULE_TREE   optional: the unpacked module, for bin/x86_64/tor
 #                          (tor's compiled-in fallback directories)
 #   ANTUMBRA_CI_DESTINATIONS  learning (default) or strict: whether a name or
@@ -32,16 +36,26 @@ TORBIN=
 mkdir -p "$OUT/capture"
 inputs=()
 
-if [ -s "$CAP/baseline.pcap" ]; then
-	mkdir -p "$OUT/baseline"
-	args=(analyse --scenario baseline --pcap "$CAP/baseline.pcap" --out "$OUT/baseline/analysis.json")
-	[ -s "$OUT/baseline/events.tsv" ] && args+=(--events "$OUT/baseline/events.tsv")
+# captures SCENARIO: the arguments naming the scenario's captures (the
+# emulator's, of eth0, and the one inside the guest) into the array args.
+captures() {
+	[ -s "$CAP/$1.pcap" ] && args+=(--pcap "$CAP/$1.pcap" --pcap-iface eth0)
+	[ -s "$OUT/capture/$1-guest.pcap" ] && args+=(--guest-pcap "$OUT/capture/$1-guest.pcap")
+	[ -s "$OUT/$1/guest-links.txt" ] && args+=(--guest-links "$OUT/$1/guest-links.txt")
+	[ -s "$OUT/$1/events.tsv" ] && args+=(--events "$OUT/$1/events.tsv")
 	[ -n "$TORBIN" ] && args+=(--tor-binary "$TORBIN")
+	return 0
+}
+
+if [ -s "$CAP/baseline.pcap" ] || [ -s "$OUT/capture/baseline-guest.pcap" ]; then
+	mkdir -p "$OUT/baseline"
+	args=(analyse --scenario baseline --out "$OUT/baseline/analysis.json")
+	captures baseline
 	"${LA[@]}" "${args[@]}"
 	echo $? >"$OUT/baseline/analysis-exit"
 	inputs+=(--in "$OUT/baseline/analysis.json")
 else
-	echo "analyse: no baseline capture at $CAP/baseline.pcap" >&2
+	echo "analyse: no baseline capture" >&2
 fi
 
 A=$OUT/antumbra
@@ -49,25 +63,25 @@ A=$OUT/antumbra
 if [ ! -s "$A/consensus" ] && [ -s "$A/consensus.gz" ]; then
 	gzip -dc "$A/consensus.gz" >"$A/consensus" || rm -f "$A/consensus"
 fi
-if [ -s "$CAP/antumbra.pcap" ]; then
+if [ -s "$CAP/antumbra.pcap" ] || [ -s "$OUT/capture/antumbra-guest.pcap" ]; then
 	mkdir -p "$A"
-	args=(analyse --scenario antumbra --pcap "$CAP/antumbra.pcap" --out "$A/analysis.json"
+	args=(analyse --scenario antumbra --out "$A/analysis.json"
 		--arm-event install_start --require-tor-traffic
 		--armed-window armed_probe_start:armed_probe_end --require-armed-window
 		--expected-destinations "$HERE/expected-destinations.txt"
 		--destinations-mode "${ANTUMBRA_CI_DESTINATIONS:-learning}"
 		--tor-streams "$A/tor-streams.txt" --filter-log "$A/dnsfilter.log")
-	[ -s "$A/events.tsv" ] && args+=(--events "$A/events.tsv")
+	captures antumbra
 	[ -s "$A/consensus" ] && args+=(--consensus "$A/consensus")
-	[ -n "$TORBIN" ] && args+=(--tor-binary "$TORBIN")
 	[ -s "$A/bridges.txt" ] && args+=(--bridges "$A/bridges.txt")
 	[ -f "$A/tor-connections.txt" ] && args+=(--expect-seen "$A/tor-connections.txt")
 	[ -s "$A/device-ipv4.txt" ] && args+=(--expect-guest "$A/device-ipv4.txt")
+	[ -s "$OUT/logs/antumbra-module.log" ] && args+=(--module-log "$OUT/logs/antumbra-module.log")
 	"${LA[@]}" "${args[@]}"
 	echo $? >"$A/analysis-exit"
 	inputs+=(--in "$A/analysis.json")
 else
-	echo "analyse: no antumbra capture at $CAP/antumbra.pcap" >&2
+	echo "analyse: no antumbra capture" >&2
 fi
 
 if [ ${#inputs[@]} -gt 0 ]; then
@@ -75,9 +89,13 @@ if [ ${#inputs[@]} -gt 0 ]; then
 fi
 
 for s in baseline antumbra; do
-	[ -s "$CAP/$s.pcap" ] || continue
-	"${LA[@]}" slim "$CAP/$s.pcap" "$OUT/capture/$s.slim.pcap" || true
-	cp "$CAP/$s.pcap" "$OUT/capture/$s.pcap"
+	if [ -s "$CAP/$s.pcap" ]; then
+		"${LA[@]}" slim "$CAP/$s.pcap" "$OUT/capture/$s.slim.pcap" || true
+		cp "$CAP/$s.pcap" "$OUT/capture/$s.pcap"
+	fi
+	if [ -s "$OUT/capture/$s-guest.pcap" ]; then
+		"${LA[@]}" slim "$OUT/capture/$s-guest.pcap" "$OUT/capture/$s-guest.slim.pcap" || true
+	fi
 done
 if [ -s "$A/consensus" ]; then
 	gzip -9 -c "$A/consensus" >"$A/consensus.gz" && rm -f "$A/consensus"

@@ -14,11 +14,14 @@
 #
 # Each scenario writes, under $ANTUMBRA_CI_OUT/<scenario>/:
 #   events.tsv   NAME TAB HOST-TIME TAB DETAIL: what happened when (the leak
-#                analyser places these on the capture's time line)
+#                analyser places these on the captures' time lines)
 #   checks.tsv   NAME TAB ok|warn|fail TAB DETAIL
+#   guest-links.txt  the guest's 'ip -o link' and 'ip -o addr' (interface
+#                names for the capture inside the guest)
 #   result       the scenario's exit status
-# and puts screenshots in $ANTUMBRA_CI_OUT/screenshots/<scenario>-*.png and
-# logs in $ANTUMBRA_CI_OUT/logs/<scenario>-*.
+# and puts screenshots in $ANTUMBRA_CI_OUT/screenshots/<scenario>-*.png,
+# logs in $ANTUMBRA_CI_OUT/logs/<scenario>-* and the capture inside the
+# guest in $ANTUMBRA_CI_OUT/capture/<scenario>-guest.pcap.
 
 # Several of these are used only by the scripts that source this file.
 # shellcheck disable=SC2034
@@ -244,17 +247,154 @@ ui_wait() {
 
 # --- Evidence ------------------------------------------------------------
 
-# clock_marker: one UDP datagram "ANTUMBRA-CLOCK <nonce>" to the emulator
-# host alias's discard port, between two host time stamps, so that the leak
-# analyser can line up the capture's clock with events.tsv. Sent only
+# clock_marker: between two host time stamps, one adb call reads the
+# device's clock and sends the clock marker: an ICMP echo request to the
+# emulator host alias 10.0.2.2 from each interface with an IPv4 address
+# (ping -I; its data holds "ANTUMBRA" and the nonce, ping -p), so that the
+# emulator's capture (eth0) and the capture inside the guest (every
+# interface) each hold one, and a UDP datagram "ANTUMBRA-CLOCK <nonce>" to
+# 10.0.2.2:9 by the default route. The leak analyser lines up each
+# capture's clock with events.tsv from them. Every command has a time
+# limit: toybox nc -u never exits by itself (-w only limits the connect),
+# and run 4's two 60 s time-outs made the stamps 120 s apart. Sent only
 # before the module is installed.
 clock_marker() {
-	local nonce
+	local nonce out
 	nonce=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')
 	event clock_marker_before "$nonce"
-	ash "echo 'ANTUMBRA-CLOCK $nonce' | toybox nc -u -w 1 10.0.2.2 9" >/dev/null 2>&1 ||
-		ash "echo 'ANTUMBRA-CLOCK $nonce' | nc -u -w 1 10.0.2.2 9" >/dev/null 2>&1
-	event clock_marker_after "$nonce"
+	out=$(ASH_TIMEOUT=15 ash "date +%s.%N
+echo 'ANTUMBRA-CLOCK $nonce' | toybox timeout 1 toybox nc -u 10.0.2.2 9 >/dev/null 2>&1 &
+for i in \$(ip -o -4 addr show | awk '\$2 != \"lo\" { sub(\"@.*\", \"\", \$2); print \$2 }' | sort -u); do
+	echo \"iface \$i\"
+	toybox timeout 2 ping -c 1 -W 1 -I \"\$i\" -p 414e54554d425241$nonce 10.0.2.2 >/dev/null 2>&1 &
+done
+wait")
+	event clock_marker_after "$nonce device=$(printf '%s\n' "$out" | head -n 1) ifaces=$(printf '%s\n' "$out" | sed -n 's/^iface //p' | paste -sd, -)"
+}
+
+# device_clock: one reading of the device's clock between two host time
+# stamps (event device_clock, "device=SECONDS host_after=SECONDS"). The
+# capture inside the guest runs on that clock; the leak analyser checks
+# that it stayed where the clock marker put it.
+device_clock() {
+	local t d
+	t=$(now)
+	d=$(ASH_TIMEOUT=15 ash 'date +%s.%N' | head -n 1)
+	printf 'device_clock\t%s\tdevice=%s host_after=%s\n' "$t" "$d" "$(now)" >>"$SDIR/events.tsv"
+	say "device clock $d"
+}
+
+# --- The capture inside the guest ------------------------------------------
+#
+# The emulator's -tcpdump records only its first network card (the guest's
+# eth0, the emulated radio); Wi-Fi leaves by another path (run 4: wlan0's
+# 10.0.2.16 and all five of tor's connections were missing). tcpdump runs
+# inside the guest as root on every interface ('-i any', which also takes
+# in interfaces that appear later, as wlan0 does). A frame leaving an
+# interface is recorded after netfilter, so it is what left the phone. The
+# emulator's capture stays as a second, independent view of eth0.
+
+GCAP_DEV=/data/local/tmp/antumbra-ci-guest.pcap
+GCAP_ERR=/data/local/tmp/antumbra-ci-guest.err
+GCAP_PIDFILE=/data/local/tmp/antumbra-ci-guest.pid
+GCAP_PID=
+GCAP_LEVEL=fail
+
+# guest_links NOTE: the guest's interfaces (index, name, hardware address)
+# and addresses, appended to <scenario>/guest-links.txt, for the analyser
+# to name each frame's interface. Taken when the capture starts, after
+# Wi-Fi is joined and at the end: Wi-Fi's interface comes and goes, and its
+# hardware address changes.
+guest_links() {
+	{
+		printf '# %s %s\n' "$1" "$(now)"
+		ash 'ip -o link; ip -o addr'
+	} >>"$SDIR/guest-links.txt" 2>&1
+}
+
+# guest_capture_start fail|warn: start tcpdump in the guest (whole frames,
+# each written as it comes; Linux cooked v2 headers, which carry the
+# interface's index, else v1). setsid: it outlives this adb shell and a
+# restart of adbd. The check's level when tcpdump is missing or will not
+# start: fail for ANTUMBRA, warn for the baseline (not judged).
+guest_capture_start() {
+	local level=$1 bin lt
+	GCAP_LEVEL=$level
+	guest_links capture_start
+	bin=$(ash 'command -v tcpdump' | head -n 1)
+	case $bin in
+	/*) ;;
+	*)
+		check guest_capture "$level" "no tcpdump in the guest ('command -v tcpdump'): only eth0 is recorded. Userdebug images normally carry /system/bin/tcpdump; without it, a static x86_64 tcpdump must be pushed to /data/local/tmp"
+		return 1
+		;;
+	esac
+	for lt in LINUX_SLL2 ''; do
+		ash "rm -f $GCAP_DEV $GCAP_ERR $GCAP_PIDFILE
+setsid sh -c 'echo \$\$ >$GCAP_PIDFILE; exec $bin -i any ${lt:+-y $lt} -n -s 0 -U -B 4096 -w $GCAP_DEV' </dev/null >/dev/null 2>$GCAP_ERR &" >/dev/null
+		sleep 3
+		GCAP_PID=$(ash "cat $GCAP_PIDFILE 2>/dev/null")
+		if [ -n "$GCAP_PID" ] && ash "grep -q tcpdump /proc/$GCAP_PID/cmdline && grep -q 'listening on' $GCAP_ERR" >/dev/null 2>&1; then
+			event guest_capture_start "$bin $(ash "grep -o 'link-type [^ ]*' $GCAP_ERR" | head -n 1)"
+			check guest_capture ok "$bin -i any${lt:+ -y $lt}, pid $GCAP_PID"
+			return 0
+		fi
+		say "tcpdump ${lt:+-y $lt }did not start: $(ash "cat $GCAP_ERR" | tr '\n' ' ' | cut -c1-200)"
+		GCAP_PID=
+	done
+	check guest_capture "$level" "tcpdump did not start in the guest: $(ash "cat $GCAP_ERR" | tr '\n' ' ' | cut -c1-300)"
+	return 1
+}
+
+# guest_capture_stop: stop tcpdump with SIGTERM (a background job of a
+# non-interactive shell may start with SIGINT ignored), on which it writes
+# its counters; record them in the event guest_capture_stop ("captured=N
+# received=N dropped=N", or why not; the analyser judges them), and pull
+# the file into capture/<scenario>-guest.pcap. The process is known by its
+# command line, not only by its number, which another process may reuse.
+guest_capture_stop() {
+	[ -n "$GCAP_PID" ] || return 0
+	local t out st n f size got
+	device_clock
+	guest_links capture_stop
+	t=$(now)
+	out=$(ASH_TIMEOUT=30 ash "running() { grep -q tcpdump /proc/$GCAP_PID/cmdline 2>/dev/null; }
+if running; then
+	kill -TERM $GCAP_PID
+	for i in 1 2 3 4 5 6 7 8 9 10; do running || break; sleep 1; done
+	if running; then echo 'antumbra-ci: still running'; else echo 'antumbra-ci: stopped'; fi
+else
+	echo 'antumbra-ci: not running'
+fi
+cat $GCAP_ERR")
+	printf '%s\n' "$out" >"$LOGS/$SCEN-guest-capture.txt"
+	case $(printf '%s\n' "$out" | sed -n 's/^antumbra-ci: //p' | head -n 1) in
+	stopped)
+		st=
+		for n in captured 'received by filter' 'dropped by kernel'; do
+			f=$(printf '%s\n' "$out" | sed -n "s/^\([0-9][0-9]*\) packets\{0,1\} $n\$/\1/p" | tail -n 1)
+			st="$st ${n%% *}=${f:-?}"
+		done
+		st=${st# }
+		case $st in *'=?'*) st="$st (tcpdump's counters incomplete)" ;; esac
+		;;
+	'still running') st="still running: tcpdump did not stop on SIGTERM" ;;
+	'not running') st="not running: tcpdump stopped before the end" ;;
+	*) st="unknown: no answer from the device" ;;
+	esac
+	printf 'guest_capture_stop\t%s\t%s\n' "$t" "$st" >>"$SDIR/events.tsv"
+	mkdir -p "$ANTUMBRA_CI_OUT/capture"
+	f=$ANTUMBRA_CI_OUT/capture/$SCEN-guest.pcap
+	timeout 600 adb -s "$ANTUMBRA_SERIAL" exec-out cat "$GCAP_DEV" >"$f" 2>/dev/null
+	size=$(ash "stat -c %s $GCAP_DEV" | head -n 1)
+	got=$(wc -c <"$f" | tr -d ' ')
+	if [ "$size" = "$got" ] && [ "$got" -gt 24 ]; then
+		check guest_capture_pulled ok "$got bytes; $st"
+	else
+		check guest_capture_pulled "$GCAP_LEVEL" "capture/$SCEN-guest.pcap: $got of ${size:-?} bytes; $st"
+	fi
+	GCAP_PID=
+	say "guest capture stopped ($st)"
 }
 
 device_info() {

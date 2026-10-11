@@ -10,8 +10,12 @@
 # with the network up.
 #
 # Runs inside reactivecircus/android-emulator-runner, which has started the
-# emulator with '-tcpdump <file>' and waited for sys.boot_completed. Steps:
-#   1. adb root; device facts; a clock marker for the leak analyser.
+# emulator with '-tcpdump <file>' (its first network card, eth0) and waited
+# for sys.boot_completed. Steps:
+#   1. adb root; device facts; tcpdump inside the guest on every interface
+#      (lib/common.sh, guest_capture_start: Wi-Fi leaves by a path the
+#      emulator's capture does not see); a clock marker for the leak
+#      analyser.
 #   2. Airplane mode on and wait until Android has no network. Plain
 #      Android's own traffic stops here, so nothing is sent close to the
 #      moment the firewall is armed.
@@ -24,7 +28,9 @@
 #      antumbra.fw.armed is set. The property must be the first 16 hex
 #      digits of the live rule set's hash. The leak analyser counts every
 #      packet from install_start on (the arm cutoff is earlier than the real
-#      'arm', never later). tor's STREAM events are recorded from here on.
+#      'arm', never later), and checks the device's clock, read once more
+#      here, against the marker. tor's STREAM events are recorded from here
+#      on.
 #   4. Airplane mode off and mobile data off: the phone has no SIM, so its
 #      only network is Wi-Fi, which has no saved network yet.
 #   5. The Welcome APK; the debug build's test hook debug.antumbra.keep_adb=1
@@ -61,7 +67,10 @@
 #      socket's mode and owner; Wi-Fi's store and NetworkStack's databases
 #      on a tmpfs as system_server and NetworkStack see them; IPv6 off on
 #      every interface; the device's addresses; the DNS filter's query log
-#      and tor's STREAM events; logs. Then the capture is stopped.
+#      and tor's STREAM events; logs; for diagnosis, the firewall's packet
+#      counters per rule, conntrack's and the kernel's network counters.
+#      Then the capture inside the guest is stopped and pulled, and the
+#      emulator's capture is stopped.
 #
 # Environment:
 #   ANTUMBRA_CI_OUT        report directory (required)
@@ -230,6 +239,7 @@ install_module() {
 		sleep 5
 	done
 	event module_live "$FW_DETAIL"
+	device_clock
 	if fw_live_matches; then
 		check module_install ok "$FW_DETAIL"
 	else
@@ -364,6 +374,7 @@ wifi_join() {
 		echo "# non_persistent_mac_randomization_force_enabled"
 		ash 'settings get global non_persistent_mac_randomization_force_enabled'
 	} >>"$LOGS/$SCEN-wifi.txt" 2>&1
+	guest_links wifi_join
 	case $t in
 	*WIFI*)
 		event wifi_default "$t"
@@ -754,6 +765,31 @@ collect_evidence() {
 	ash 'dumpsys connectivity' 2>/dev/null | head -n 400 >"$LOGS/$SCEN-connectivity.txt"
 	ash 'dumpsys user' 2>/dev/null | head -n 200 >"$LOGS/$SCEN-users.txt"
 	fetch_status "$SDIR/filter-status.json"
+	netfilter_counters
+}
+
+# netfilter_counters: for diagnosis only, at the very end: the packet and
+# byte counters of every rule (which drop rules were hit, for example while
+# tor bootstrapped), conntrack's statistics, and the kernel's protocol
+# counters (TCP retransmissions, UDP errors).
+netfilter_counters() {
+	{
+		echo "# iptables-save -c"
+		ash 'iptables-save -c'
+		echo "# ip6tables-save -c"
+		ash 'ip6tables-save -c'
+		echo "# /proc/net/stat/nf_conntrack, nf_conntrack_count, nf_conntrack_max"
+		ash 'cat /proc/net/stat/nf_conntrack /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max'
+		if ash 'command -v nstat' >/dev/null 2>&1; then
+			echo "# nstat -asz"
+			ash 'nstat -asz'
+		else
+			echo "# /proc/net/netstat (no nstat)"
+			ash 'cat /proc/net/netstat'
+		fi
+		echo "# /proc/net/snmp"
+		ash 'cat /proc/net/snmp'
+	} >"$LOGS/$SCEN-netfilter-counters.txt" 2>&1
 }
 
 finish() {
@@ -774,6 +810,7 @@ finish() {
 		check evidence fail "no root shell at the end: tor's connections, the consensus and the logs were not collected"
 	fi
 	collect_logcat
+	guest_capture_stop
 	capture_stop
 	timeout 10 adb -s "$ANTUMBRA_SERIAL" forward --remove-all >/dev/null 2>&1
 	if [ "$rc" -ne 0 ] || [ "$FAILED" -ne 0 ]; then rc=1; fi
@@ -799,6 +836,7 @@ wait_device 60
 check adb_root ok
 device_info
 WLAN_MAC_BEFORE=$(ash 'cat /sys/class/net/wlan0/address' 2>/dev/null)
+guest_capture_start fail
 clock_marker
 
 quiet_network

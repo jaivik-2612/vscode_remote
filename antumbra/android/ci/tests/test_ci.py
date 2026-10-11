@@ -101,6 +101,21 @@ def out4(dst, l4, proto, src=GUEST, src_mac=GUEST_MAC):
     return eth(src_mac, SLIRP_GW_MAC, 0x0800, ipv4(src, dst, proto, l4))
 
 
+def sll2(ifindex, l3, src_mac, pkttype=4, hatype=1, proto=0x0800):
+    """A frame as tcpdump -i any -y LINUX_SLL2 writes it (pkttype 4: sent)."""
+    return struct.pack(">HHIHBB8s", proto, 0, ifindex, hatype, pkttype, 6, mac(src_mac) + b"\0\0") + l3
+
+
+def sll(l3, src_mac, pkttype=4, hatype=1, proto=0x0800):
+    """A frame as tcpdump -i any writes it without -y (Linux cooked v1)."""
+    return struct.pack(">HHH8sH", pkttype, hatype, 6, mac(src_mac) + b"\0\0", proto) + l3
+
+
+def ping_marker(nonce, typ=8):
+    """ping -p 414e54554d425241<nonce>: a time stamp, then the pattern."""
+    return struct.pack(">BBHHH", typ, 0, 0, 1, 1) + b"\0" * 16 + (b"ANTUMBRA" + bytes.fromhex(nonce)) * 3
+
+
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
@@ -163,10 +178,12 @@ ARM_HOST = 1020.0  # install_start; cutoff = 1020 + 1.0 (offset low) - 1.0 (marg
 
 
 def events_text(arm=True, extra=(), stop=1100.0):
+    """events.tsv; extra events are (name, host time) or (name, host time,
+    detail)."""
     lines = ["boot_completed\t995.0\t", "clock_marker_before\t1008.0\t" + NONCE, "clock_marker_after\t1009.0\t" + NONCE]
     if arm:
         lines.append("install_start\t%s\t" % ARM_HOST)
-    lines.extend("%s\t%s\t" % e for e in extra)
+    lines.extend("%s\t%s\t%s" % (tuple(e) + ("",))[:3] for e in extra)
     lines.append("capture_stop\t%s\t" % stop)
     return "\n".join(lines) + "\n"
 
@@ -309,9 +326,14 @@ class PcapReaderTest(TempDir):
         self.assertEqual((p.src_mac, p.dst, p.dport), (GUEST_MAC, "198.51.100.7", 9001))
         p = pcapread.decode(pcapread.Record(0, 105, b"\x48\x01" + wifi[2:], 0))  # null data
         self.assertIsNone(p.l3)
-        sll2 = struct.pack(">HHIHBB8s", 0x0800, 0, 3, 1, 4, 6, mac(GUEST_MAC) + b"\0\0") + body
-        p = pcapread.decode(pcapread.Record(0, 276, sll2, 0))
-        self.assertEqual((p.direction_hint, p.dport), ("out", 9001))
+        p = pcapread.decode(pcapread.Record(0, 276, sll2(3, body, GUEST_MAC), 0))
+        self.assertEqual((p.direction_hint, p.dport, p.ifindex, p.hatype), ("out", 9001, 3, 1))
+        p = pcapread.decode(pcapread.Record(0, 113, sll(body, GUEST_MAC, pkttype=0, hatype=772), 0))
+        self.assertEqual((p.direction_hint, p.dport, p.ifindex, p.hatype), ("in", 9001, None, 772))
+        # ICMP keeps its data (the clock marker is in it).
+        p = pcapread.decode(pcapread.Record(0, 1, out4("10.0.2.2", ping_marker("abcd"), 1), 0))
+        self.assertEqual((p.proto, p.icmp_type), ("icmp", 8))
+        self.assertIn(b"ANTUMBRA\xab\xcd", p.payload)
 
     def test_write_pcap_slim(self):
         write_pcap(self.path("c.pcap"), base_frames())
@@ -676,6 +698,208 @@ class JudgementsTest(TempDir):
             self.assertIn("ends in the middle of a frame", json.load(f)["verdict_reasons"][0])
 
 
+class ClockTest(TempDir):
+    """The clock marker: one per interface (ICMP) and one by the default
+    route (UDP), each bounding its capture's offset to the host."""
+
+    def test_icmp_marker_and_tight_bracket(self):
+        # The UDP marker at 1010.0 (offset 1 to 2 s) and the ICMP marker at
+        # 1009.4: the offset lies in both intervals, 1.0 to 1.4 s.
+        frames = base_frames() + [(1009.4, out4("10.0.2.2", ping_marker(NONCE), 1)),
+                                  # slirp's echo reply may come after the second time stamp: not a marker.
+                                  (1012.5, eth(SLIRP_GW_MAC, GUEST_MAC, 0x0800, ipv4("10.0.2.2", GUEST, 1,
+                                                                                    ping_marker(NONCE, 0))))]
+        _, a = self.analyse(frames)
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        c = a["clock"]
+        self.assertEqual((c["source"], c["markers"]), ("marker", 2))
+        self.assertAlmostEqual(c["offset_low"], 1.0)
+        self.assertAlmostEqual(c["offset_high"], 1.4)
+        self.assertEqual(a["phases"]["pre-arm"]["ci-marker"], 2)
+        # The same ICMP marker after arm is a LEAK.
+        _, a = self.analyse(base_frames() + [(1040.0, out4("10.0.2.2", ping_marker(NONCE), 1))])
+        self.assertEqual([f["kind"] for f in a["leaks"]], ["icmp"])
+
+    def test_markers_that_disagree_are_blind(self):
+        frames = base_frames() + [(1030.5, out4("10.0.2.2", ping_marker(NONCE), 1))]
+        _, a = self.analyse(frames)
+        self.assertTrue(a["clock"].get("conflict"))
+        self.assertEqual(a["verdict"], "fail")  # the marker after arm is also a LEAK
+        self.assertTrue(any("markers in c.pcap disagree" in r for r in a["verdict_reasons"]))
+
+    def test_run4_bracket(self):
+        # Run 4: mDNS 60 s before install_start was judged after arm because
+        # nc's two time-outs left a 120 s bracket. With the bracket the
+        # marker now has (1 s), it is before the cutoff, and a packet sent
+        # just after install_start still counts.
+        def mdns(t):
+            return (t, out4("224.0.0.251", udp(5353, 5353, b"\0" * 12), 17))
+        wide = (("clock_marker_before", 948.0), ("clock_marker_after", 1069.0))
+        lines = [ln for ln in events_text(extra=()).splitlines() if not ln.startswith("clock_marker")]
+        self.write("wide.tsv", "\n".join(lines + ["%s\t%s\t%s" % (n, t, NONCE) for n, t in wide]) + "\n")
+        frames = base_frames() + [mdns(960.5)]
+        write_pcap(self.path("c.pcap"), frames)
+        with contextlib.redirect_stdout(io.StringIO()):
+            la.main(["analyse", "--scenario", "t", "--pcap", self.path("c.pcap"), "--events", self.path("wide.tsv"),
+                     "--arm-event", "install_start", "--consensus", self.write("consensus", CONSENSUS),
+                     "--out", self.path("a.json")])
+        with open(self.path("a.json")) as f:
+            self.assertIn("multicast", [x["kind"] for x in json.load(f)["leaks"]])
+        _, a = self.analyse(frames)
+        self.assertNotIn("multicast", [f["kind"] for f in a["leaks"]])
+        _, a = self.analyse(frames + [mdns(1022.0)])
+        self.assertIn("multicast", [f["kind"] for f in a["leaks"]])
+
+
+ETH0_MAC = "52:54:00:12:34:56"
+WLAN_MAC = "02:15:b2:00:00:01"
+WLAN = "10.0.2.16"
+LINKS = """# capture_start 1000.0
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN\\    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+15: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP\\    link/ether 52:54:00:12:34:56 brd ff:ff:ff:ff:ff:ff
+16: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP\\    link/ether 02:15:b2:00:00:01 brd ff:ff:ff:ff:ff:ff
+15: eth0    inet 10.0.2.15/24 brd 10.0.2.255 scope global eth0\\       valid_lft forever preferred_lft forever
+16: wlan0    inet 10.0.2.16/24 brd 10.0.2.255 scope global wlan0\\       valid_lft forever preferred_lft forever
+"""
+GUEST_STOP = ("guest_capture_stop", 1099.0, "captured=10 received=10 dropped=0")
+
+
+def guest_frames():
+    """tcpdump -i any inside the guest, on the device's clock (the markers
+    put it 0.69 s behind the host to 0.3 s ahead; the cutoff is 1018.31)."""
+    def tcp4(src, sport):
+        return ipv4(src, "198.51.100.7", 6, tcp(sport, 9001))
+    return [
+        (1008.30, sll2(15, ipv4(GUEST, "10.0.2.2", 1, ping_marker(NONCE)), ETH0_MAC)),
+        (1008.31, sll2(16, ipv4(WLAN, "10.0.2.2", 1, ping_marker(NONCE)), WLAN_MAC)),
+        (1008.32, sll2(16, ipv4("10.0.2.2", WLAN, 1, ping_marker(NONCE, 0)), SLIRP_GW_MAC, pkttype=0)),
+        # Loopback never leaves the phone, whatever it carries.
+        (1009.0, sll2(1, ipv4("127.0.0.1", "127.0.0.1", 17, udp(5000, 53, dns_query("x.example"))),
+                      "00:00:00:00:00:00", hatype=772)),
+        (1015.0, sll2(16, ipv4(WLAN, "224.0.0.251", 17, udp(5353, 5353, b"\0" * 12)), WLAN_MAC)),
+        # The emulator's capture has this one too (eth0, 1030.0): counted once.
+        (1028.3, sll2(15, tcp4(GUEST, 40010), ETH0_MAC)),
+        (1029.0, sll2(16, tcp4(WLAN, 41000), WLAN_MAC)),
+        (1029.2, sll2(16, ipv4("198.51.100.7", WLAN, 6, tcp(9001, 41000, 0x12)), SLIRP_GW_MAC, pkttype=0)),
+    ]
+
+
+class GuestCaptureTest(TempDir):
+    """The capture inside the guest: every interface, its own clock."""
+
+    def run_guest(self, gframes, events=(GUEST_STOP,), linktype=276, links=LINKS, extra=(), **kw):
+        write_pcap(self.path("g.pcap"), gframes, linktype=linktype)
+        args = ["--pcap-iface", "eth0", "--guest-pcap", self.path("g.pcap"),
+                "--expect-guest", self.write("ip.txt", "eth0 10.0.2.15/24\nwlan0 10.0.2.16/24\n")]
+        if links:
+            args += ["--guest-links", self.write("links.txt", links)]
+        return self.analyse(base_frames(), expect_seen="198.51.100.7:9001\n", events=events,
+                            extra=args + list(extra), **kw)
+
+    def test_pass_with_both_views(self):
+        rc, a = self.run_guest(guest_frames())
+        self.assertEqual((a["verdict"], rc), ("pass", 0), a["verdict_reasons"])
+        g = a["captures"][1]
+        self.assertEqual((g["kind"], g["clock"]["markers"]), ("guest", 2))
+        self.assertAlmostEqual(g["clock"]["offset_low"], -0.69)
+        self.assertAlmostEqual(g["clock"]["offset_high"], 0.3)
+        self.assertAlmostEqual(g["cutoff"], 1018.31)
+        self.assertEqual(g["totals"]["loopback"], 1)
+        self.assertEqual(g["tcpdump"]["dropped"], "0")
+        self.assertEqual(a["interfaces"], {"eth0": ["emulator", "guest"], "wlan0": ["guest"]})
+        self.assertEqual(a["coverage"]["status"], "complete")
+        self.assertIn(WLAN, a["guest"]["addresses"])
+        # eth0's tor connection: two packets in the emulator's view, one in
+        # the guest's; wlan0's: one more. Each interface counts its largest view.
+        flow = [f for f in a["flows"] if f["src"] == GUEST and f["dport"] == 9001][0]
+        self.assertEqual(flow["packets"], 2)
+        self.assertEqual(sorted(flow["seen"]), ["emulator:eth0", "guest:eth0"])
+        self.assertEqual(a["phases"]["post-arm"]["tor-relay"], 3)
+        # The markers: eth0's in both views (the emulator's UDP one, the
+        # guest's ICMP one: one per interface counts), and wlan0's.
+        self.assertEqual(a["phases"]["pre-arm"]["ci-marker"], 2)
+        # mDNS on wlan0 before the cutoff is listed, not judged.
+        self.assertEqual(a["phases"]["pre-arm"]["LEAK"], 4)
+        la.main(["report", "--in", self.path("a.json"), "--json", self.path("r.json"), "--md", self.path("r.md")])
+        md = read(self.path("r.md"))
+        self.assertIn("inside the guest, every interface", md)
+        self.assertIn("wlan0 (guest 1)", md)
+        self.assertIn("eth0 (emulator 2, guest 1)", md)
+
+    def test_wlan0_leak_seen_only_inside(self):
+        leak = (1040.0, sll2(16, ipv4(WLAN, "224.0.0.251", 17, udp(5353, 5353, b"\0" * 12)), WLAN_MAC))
+        rc, a = self.run_guest(guest_frames() + [leak])
+        self.assertEqual((a["verdict"], rc), ("fail", 1))
+        self.assertEqual([(f["kind"], sorted(f["seen"])) for f in a["leaks"]], [("multicast", ["guest:wlan0"])])
+
+    def test_address_on_the_wrong_interface_is_blind(self):
+        # wlan0's address seen only on eth0: wlan0 itself was not seen.
+        frames = [(t, f) for t, f in guest_frames() if f[4:8] != struct.pack(">I", 16)]
+        frames.append((1029.0, sll2(15, ipv4(WLAN, "198.51.100.7", 6, tcp(41000, 9001)), ETH0_MAC)))
+        _, a = self.run_guest(frames)
+        self.assertEqual(a["verdict"], "blind")
+        self.assertEqual(a["coverage"]["addresses_missing"], ["wlan0 10.0.2.16"])
+
+    def test_capture_problems_are_blind(self):
+        no_marker = [f for f in guest_frames() if b"ANTUMBRA" not in f[1]]
+        _, a = self.run_guest(no_marker)
+        self.assertEqual(a["verdict"], "blind")
+        self.assertTrue(any("holds no clock marker" in r for r in a["verdict_reasons"]))
+        for events, why in (((), "never stopped"),
+                            ((("guest_capture_stop", 1099.0, "captured=10 received=12 dropped=2"),), "dropped 2"),
+                            ((("guest_capture_stop", 1099.0, "not running: tcpdump stopped before the end"),),
+                             "gave no counters"),
+                            ((GUEST_STOP, ("device_clock", 1050.0, "device=1055.0 host_after=1050.1")),
+                             "device's clock moved")):
+            rc, a = self.run_guest(guest_frames(), events=events)
+            self.assertEqual((a["verdict"], rc), ("blind", 3), why)
+            self.assertTrue(any(why in r for r in a["verdict_reasons"]), (why, a["verdict_reasons"]))
+        # A reading of the device's clock that agrees with the marker is fine.
+        _, a = self.run_guest(guest_frames(), events=(GUEST_STOP, ("device_clock", 1050.0,
+                                                                   "device=1049.8 host_after=1050.1")))
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        self.assertAlmostEqual(a["captures"][1]["device_clock_moved"], 0.0)
+
+    def test_sll_v1_named_by_hardware_address(self):
+        frames = []
+        for t, f in guest_frames():
+            ifindex, hatype, pkttype = struct.unpack(">IHB", f[4:11])
+            frames.append((t, sll(f[20:], ETH0_MAC if ifindex == 15 else WLAN_MAC if pkttype == 4 else SLIRP_GW_MAC,
+                                  pkttype=pkttype, hatype=hatype)))
+        _, a = self.run_guest(frames, linktype=113)
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        self.assertEqual(a["captures"][1]["totals"]["loopback"], 1)
+        self.assertEqual(sorted(a["interfaces"]), ["eth0", "wlan0"])
+
+    def test_module_log(self):
+        log = "1970-01-01T00:17:02Z post-fs-data: firewall armed: only loopback until the full rule set is loaded\n"
+        _, a = self.run_guest(guest_frames(), extra=["--module-log", self.write("module.log", log)])
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        ma = a["module_arm"]
+        self.assertEqual(ma["device_utc"], "1970-01-01T00:17:02Z")
+        self.assertAlmostEqual(ma["host_low"], 1021.7)
+        self.assertAlmostEqual(ma["host_high"], 1023.69)
+        self.assertGreater(ma["after_cutoff"], 0)
+        self.assertIn("module log: firewall armed", [e["name"] for e in a["events"]])
+        # Logged before install_start by the device's clock: that clock moved,
+        # and the capture inside the guest runs on it.
+        early = log.replace("00:17:02Z", "00:16:50Z")
+        _, a = self.run_guest(guest_frames(), extra=["--module-log", self.write("module.log", early)])
+        self.assertEqual(a["verdict"], "blind")
+        self.assertTrue(any("before install_start" in r for r in a["verdict_reasons"]))
+        # Without that capture it is only a note (the marker's reading of the clock).
+        _, a = self.analyse(base_frames(), extra=["--module-log", self.path("module.log")],
+                            events=(("clock_marker_after", 1009.0, NONCE + " device=1008.5"),))
+        self.assertEqual(a["verdict"], "pass", a["verdict_reasons"])
+        self.assertTrue(any("before install_start" in n for n in a["notes"]))
+
+    def test_links(self):
+        links = la.load_links(self.write("links.txt", LINKS))
+        self.assertEqual(links["index"], {1: "lo", 15: "eth0", 16: "wlan0"})
+        self.assertEqual(links["mac"], {ETH0_MAC: "eth0", WLAN_MAC: "wlan0"})
+        self.assertEqual(links["addr"][WLAN], "wlan0")
+
+
 STREAMS = """ANTUMBRA-CI-STREAMS connect 120
 250 OK
 250 OK
@@ -879,6 +1103,23 @@ class SummaryTest(TempDir):
         os.remove(os.path.join(root, "verdict.json"))
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(summary.main([root, "--check"]), 1)
+
+    def test_captures_and_seen_on(self):
+        root = self.path("r")
+        self.scenario("baseline", 0, [], "info")
+        self.scenario("antumbra", 0, [], "fail")
+        leak = {"first": 1.0, "kind": "multicast", "dst": "224.0.0.251", "dport": 5353, "names": [],
+                "phases": {"post-arm": 3}, "reason": "UDP to a group", "seen": {"guest:wlan0": {"packets": 3}}}
+        self.write("r/antumbra/analysis.json", json.dumps({
+            "verdict": "fail", "verdict_reasons": ["r"], "flows": [], "leaks": [leak], "phases": {},
+            "captures": [{"name": "antumbra.pcap", "kind": "emulator"},
+                         {"name": "antumbra-guest.pcap", "kind": "guest"}]}))
+        with contextlib.redirect_stdout(io.StringIO()):
+            summary.main([root, "--run", "8"])
+        text = read(os.path.join(root, "summary.md"))
+        self.assertIn("`antumbra-guest.pcap` (inside the guest, every interface)", text)
+        self.assertIn("| Seen on |", text)
+        self.assertIn("| 3 | wlan0 |", text)
 
 
 if __name__ == "__main__":

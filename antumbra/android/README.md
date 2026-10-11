@@ -199,8 +199,9 @@ cancels a run still going. In order:
    mksh and busybox built from pinned sources (`module/README.md`, Tests).
 6. **emulator:** on a runner with KVM, Google's Android 16 image without
    Google services (`system-images;android-36;default;x86_64`), each
-   scenario a fresh device, every packet recorded from the first moment of
-   boot (`-tcpdump`):
+   scenario a fresh device, its first network card recorded from the first
+   moment of boot (`-tcpdump`) and every interface, Wi-Fi included,
+   recorded inside the guest by tcpdump (`ci/README.md`):
    - **BASELINE:** plain Android left alone for 3 minutes: what it contacts
      by itself.
    - **ANTUMBRA:** the module zip installed and started as Magisk would at
