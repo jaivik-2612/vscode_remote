@@ -87,4 +87,48 @@ class StatusPageTest {
         assertNull(notYet.module.torError)
         assertFalse(StatusPage.parse(full).module!!.sessionLatched)
     }
+
+    @Test
+    fun nullEmptyOrMissingTextMeansNone() {
+        // run/status.json as the module writes it (lib/antumbra.sh json_str:
+        // null for an empty field), served under the filter's "module".
+        val written = StatusPage.parse(
+            """{"service":"antumbra-dnsfilter","module":{"schema":1,
+               "module":{"version":"0.1.0","updated":"2026-10-11T14:28:37Z","problem":null},
+               "firewall":{"state":"live","hash":"40126cef05ee71bf"},
+               "tor":{"running":true,"network":"enabled","bootstrap":65,"summary":"Loading relay descriptors","error":null},
+               "dnsfilter":{"running":true},"welcome":{"started":true}}}""",
+        ).module!!
+        assertNull(written.torError)
+        assertEquals(65, written.torBootstrap)
+        assertEquals("Loading relay descriptors", written.torSummary)
+        assertTrue(written.sessionLatched)
+
+        val nulls = StatusPage.parse(
+            """{"service":"antumbra-dnsfilter","module":{"tor":{"network":null,"bootstrap":null,"summary":null,"error":null},
+               "firewall":{"state":null,"hash":null},"welcome":{"started":false,"session_id":null}}}""",
+        ).module!!
+        assertNull(nulls.torError)
+        assertNull(nulls.torSummary)
+        assertNull(nulls.torNetworkEnabled)
+        assertNull(nulls.torBootstrap)
+        assertNull(nulls.firewallState)
+        assertNull(nulls.firewallHash)
+        // A null session_id is no session; "null" would latch and refuse Start.
+        assertFalse(nulls.sessionLatched)
+
+        val empty = StatusPage.parse("""{"service":"antumbra-dnsfilter","module":{"tor":{"error":"","summary":"  "}}}""").module!!
+        assertNull(empty.torError)
+        assertNull(empty.torSummary)
+        val missing = StatusPage.parse("""{"service":"antumbra-dnsfilter","module":{"tor":{"bootstrap":0}}}""").module!!
+        assertNull(missing.torError)
+        assertNull(missing.torSummary)
+
+        // Only strings are text. (This JVM's org.json reads a JSON null as
+        // "" in optString, Android's as "null"; a boolean is "false" in both,
+        // so this case fails if the parser goes back to optString.)
+        val notText = StatusPage.parse("""{"service":"antumbra-dnsfilter","module":{"tor":{"error":false,"summary":0}}}""").module!!
+        assertNull(notText.torError)
+        assertNull(notText.torSummary)
+    }
 }

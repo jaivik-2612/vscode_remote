@@ -35,11 +35,12 @@
 #   expect KEY=VALUE...       Fail unless the row has these values (bridges: give a count,
 #                             as bridges=2).
 #   check-policies [--admin] [--keep-adb] [--wifi-locked]
-#                             Check the device-owner restrictions, adb, automatic time and
-#                             the time zone after Start. --keep-adb: the test hook is on;
+#                             Check user 0's device-owner restrictions, adb, automatic time
+#                             and the time zone after Start. --keep-adb: the test hook is on;
 #                             --wifi-locked: an offline session or one without the add-on.
-#   check-addon               Fail unless the status screen shows the firewall as live
-#                             (Welcome could read antumbra.fw.armed).
+#   check-addon [SECONDS]     Fail unless the status screen's firewall row shows the rules
+#                             of antumbra.fw.armed (Welcome could read it). Opens the status
+#                             screen and scrolls to the row; gives up after SECONDS (60).
 #   screenshot FILE.png       Save the screen.
 #   emergency-tile            Add the Emergency off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
@@ -257,12 +258,27 @@ cmd_start() {
     cmd_expect "${expect[@]}"
 }
 
+# Prints user 0's effective restrictions, one per line, from 'dumpsys user'
+# on stdin; fails if that block is missing. Only this block counts: the
+# dump also lists the guest's default restrictions (no_config_wifi among
+# them) and each user type's defaults.
+effective_restrictions() {
+    awk '
+        /^[^ ]/ { user0 = 0 }
+        /^  UserInfo\{/ { user0 = ($0 ~ /^  UserInfo\{0:/); inside = 0; next }
+        user0 && /^    Effective restrictions:/ { inside = 1; found = 1; next }
+        inside && /^      [^ ]/ { print $1; next }
+        { inside = 0 }
+        END { exit !found }
+    '
+}
+
 # Fails (fail=1) unless restriction $1 is set ($2 = yes) or not set ($2 = no).
 restriction() {
     if [ "$2" = yes ]; then
-        grep -qw "$1" <<<"$dump" || { say "missing restriction $1"; fail=1; }
+        grep -qxF "$1" <<<"$dump" || { say "missing restriction $1"; fail=1; }
     else
-        ! grep -qw "$1" <<<"$dump" || { say "restriction $1 is set, but should not be"; fail=1; }
+        ! grep -qxF "$1" <<<"$dump" || { say "restriction $1 is set, but should not be"; fail=1; }
     fi
 }
 
@@ -278,7 +294,7 @@ cmd_check_policies() {
         shift
     done
     local dump key fail=0 sdk
-    dump=$(sh_ dumpsys user)
+    dump=$(sh_ dumpsys user | effective_restrictions) || die "no effective restrictions for user 0 in 'dumpsys user'"
     sdk=$(sh_ getprop ro.build.version.sdk)
     for key in no_safe_boot no_config_tethering no_wifi_direct disallow_config_private_dns; do
         restriction "$key" yes
@@ -304,14 +320,47 @@ cmd_check_policies() {
     say "policies as expected (administration: $admin, test hook: $keep_adb, Wi-Fi locked: $wifi_locked)"
 }
 
+# What has the input focus, for the log.
+focus() { sh_ dumpsys window | grep -m 1 -o 'mCurrentFocus=.*' || true; }
+
+# The firewall row is in the "This session" card, below the fold of the
+# status screen, and uiautomator lists only what is on screen. So: open the
+# status screen (its launcher entry, as a person would) when something else
+# is in front, and scroll down until the row shows. Welcome reads the
+# property every 2 s; the row says "Checking…" until the first read.
 cmd_check_addon() {
-    local text
-    wait_for row_firewall 30
-    text=$(dump_ui | node_text row_firewall)
-    case $text in
-        *Live*) say "Welcome sees the firewall: $text" ;;
-        *) die "Welcome does not see antumbra.fw.armed: $text" ;;
-    esac
+    local seconds=${1:-60} end xml text='' w h armed
+    case $seconds in '' | *[!0-9]*) die "usage: check-addon [SECONDS]" ;; esac
+    end=$((SECONDS + seconds))
+    armed=$(sh_ getprop antumbra.fw.armed)
+    read -r w h < <(screen_size)
+    a shell input keyevent KEYCODE_WAKEUP
+    while [ $SECONDS -lt $end ]; do
+        xml=$(dump_ui || true)
+        # "Power off now" is pinned at the bottom of the status screen only.
+        if [ -z "$(find_node poweroff_button <<<"$xml")" ]; then
+            say "the status screen is not in front ($(focus)); opening it"
+            a shell am start -n "$PKG/.StatusActivity" >/dev/null
+            sleep 2
+            continue
+        fi
+        text=$(node_text row_firewall <<<"$xml")
+        # The row shows the first 12 hex digits of the property.
+        case $text in
+            *"Live (rules ${armed:0:12})"*)
+                say "Welcome sees the firewall: $text"
+                # Back to the top (Tor's progress) for later screenshots.
+                for _ in 1 2 3; do a shell input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 300; done
+                return 0
+                ;;
+            *Live*) die "the firewall row does not show antumbra.fw.armed=${armed:-(not set)}: $text" ;;
+            *"Not running"*) die "Welcome does not see antumbra.fw.armed: $text" ;;
+        esac
+        # Not on screen, cut off, or not read yet: scroll down and look again.
+        a shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 3 / 10)) 300
+        sleep 1
+    done
+    die "the status screen's firewall row did not say Live within $seconds s (last: ${text:-not on screen})"
 }
 
 cmd_emergency_tile() {
@@ -332,7 +381,7 @@ cmd_emergency_tile() {
     die "the device did not restart within 240 s of Emergency off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,48p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,49p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -361,7 +410,7 @@ case "$command" in
     query) sh_ content query --uri "$URI" ;;
     expect) cmd_expect "$@" ;;
     check-policies) cmd_check_policies "$@" ;;
-    check-addon) cmd_check_addon ;;
+    check-addon) cmd_check_addon "$@" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"
         a exec-out screencap -p > "$1"

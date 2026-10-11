@@ -245,7 +245,9 @@ shutdown for the next boot; `BootState`, `Home`):
    "Emergency off").
 8. The locked task ends, the home preference is cleared, the status screen
    opens, and WelcomeActivity is disabled, so the normal launcher is the
-   only home.
+   only home. The status screen has its own task affinity: in Welcome's
+   home task it was closed along with WelcomeActivity when Android acted
+   on the disabled component, about 10 s later.
 
 **During the session** the choices exist only in memory. The foreground
 service keeps the process alive, so the provider keeps answering, and so
@@ -337,6 +339,12 @@ connects nowhere else. Welcome accepts the document only if `service` is
 | `module.firewall.state`, `module.firewall.hash` | parsed, not shown (the firewall row uses the property only) |
 | `module.welcome.started` | `true` once the module latched a session in this boot (a non-empty `module.welcome.session_id` is read the same way) |
 
+The module writes `null` for an empty text field (`tor.error` is `null`
+while tor has no complaint). For every text field, `null`, `""`, a
+missing key and a value that is not a string all mean "none". (Android's
+`JSONObject.optString` turns a JSON `null` into the text `"null"`, so the
+parser does not use it.)
+
 The module's file sits in a directory tor's uid can also write, and while
 the filter is down any app could answer on its port. So Welcome only shows
 it, and the one decision it takes part in can only refuse:
@@ -357,7 +365,8 @@ it fails closed. The status page never makes the add-on present: without
 the firewall any app could serve that page. Without the add-on, Wi-Fi is
 turned off and locked off for the session, whatever the Tor choice.
 `welcome-adb.sh check-addon` checks on a device that Welcome reads the
-property (the status screen's firewall row says "Live").
+property (the status screen's firewall row says "Live" with the
+property's rules).
 
 ## Device-owner policies
 
@@ -584,7 +593,7 @@ $W screenshot welcome.png
 $W start --tor bridges --bridges-file plain-bridges.txt
 $W expect started=1 tor_mode=bridges bridges=2
 $W check-policies                              # add --admin, --keep-adb, --wifi-locked as they apply
-$W check-addon                                 # Welcome reads antumbra.fw.armed
+$W check-addon                                 # Welcome reads antumbra.fw.armed (opens the status screen, scrolls to the row)
 $W screenshot status.png
 $W emergency-tile                              # waits until the boot id changes
 $W wait-welcome 180
@@ -599,10 +608,17 @@ session, Administration or not; `start` refuses to run then unless
 `--expect-adb-loss` says that losing adb is the point.
 `ci/test-welcome-adb.sh` runs the script against a fake adb.
 
-**CI.** The emulator job (`antumbra/android/ci/emulator-antumbra.sh`) does
-not call this script; it drives Welcome itself with the same test tags and
-provider URI, and must set `debug.antumbra.keep_adb 1` before
-`dpm set-device-owner` to keep adb. The Welcome job in
+`check-policies` reads only user 0's "Effective restrictions" in
+`dumpsys user`: the dump also lists the guest's default restrictions
+(`no_config_wifi` among them) and each user type's. `check-addon` opens
+the status screen when something else is in front and scrolls down to the
+firewall row, since uiautomator lists only what is on screen.
+
+**CI.** The emulator job (`antumbra/android/ci/emulator-antumbra.sh`)
+drives Welcome itself with the same test tags and provider URI, and calls
+this script only for `check-policies --keep-adb` and `check-addon`. It
+must set `debug.antumbra.keep_adb 1` before `dpm set-device-owner` to keep
+adb. The Welcome job in
 `.github/workflows/antumbra-android.yml` builds the debug APK and runs the
 unit tests.
 
@@ -613,16 +629,18 @@ Verified locally (2026-10-11, no emulator here):
 - `./gradlew assembleDebug assembleRelease lintDebug testDebugUnitTest`
   passes with dependency verification on (checksums and signatures, key
   servers off; a build without the keyring fails verification): no lint
-  issues, 26 unit tests
+  issues, 27 unit tests
   (bridge rules, including transports refused while lyrebird is missing,
   and the built-in asset; the provider's columns, values, caller rule and
   projection; the status-page parser, the property-only add-on rule, the
-  latched-session and tor-error fields; the policy lists and which
-  failures refuse a network session).
+  latched-session and tor-error fields, null or empty text as none; the
+  policy lists and which failures refuse a network session).
 - `ci/welcome-adb.sh` and `ci/test-welcome-adb.sh` pass shellcheck, and the
   fake-adb test passes: bridge lines with `[`, `]`, `+`, `/`, `=` are
-  typed, `;`, quotes and `\` refused; the test-hook rule; check-policies,
-  check-addon and expect.
+  typed, `;`, quotes and `\` refused; the test-hook rule; check-policies
+  (user 0's restrictions only, the guest's defaults ignored); check-addon
+  (the launcher in front, the row below the fold, "Checking…", other
+  rules or "Not running" refused); expect.
 - `tools/builtin-bridges.sh` and its `--check` against the pinned source.
 - Framework behaviour read in Android 16 sources (android16-release):
   `ACTION_SHUTDOWN` is sent registered-only and deferred for cached

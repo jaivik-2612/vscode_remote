@@ -62,12 +62,17 @@
         </activity>
 
         <!-- After Start: Tor's progress, the tracker filter's counters and
-             "Power off now". Also the launcher entry. -->
+             "Power off now". Also the launcher entry. Its own task
+             affinity: with the package's, it joined Welcome's home task,
+             and when PackageManager finished the disabled WelcomeActivity
+             (about 10 s after Start) that task closed with it and the
+             launcher came to the front. -->
         <activity
             android:name=".StatusActivity"
             android:directBootAware="true"
             android:exported="true"
-            android:launchMode="singleTask">
+            android:launchMode="singleTask"
+            android:taskAffinity="org.antumbra.welcome.status">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

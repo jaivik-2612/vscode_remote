@@ -101,7 +101,7 @@ object StatusPage {
         } catch (e: JSONException) {
             return AddOnStatus(null, null, "not JSON")
         }
-        if (doc.optString("service") != "antumbra-dnsfilter") {
+        if (doc.text("service") != "antumbra-dnsfilter") {
             return AddOnStatus(null, null, "not the Antumbra DNS filter")
         }
         val list = doc.optJSONObject("list")
@@ -111,8 +111,8 @@ object StatusPage {
             blocked = doc.optLong("blocked"),
             listLoaded = list?.optBoolean("loaded") ?: false,
             listSize = list?.optLong("size") ?: 0,
-            listVersion = list?.optString("version").orEmpty(),
-            upstreamState = upstream?.optString("state").orEmpty(),
+            listVersion = list?.text("version").orEmpty(),
+            upstreamState = upstream?.text("state").orEmpty(),
         )
         return AddOnStatus(filter, doc.optJSONObject("module")?.let(::parseModule), null)
     }
@@ -125,6 +125,8 @@ object StatusPage {
      *   "armed", ...), firewall.hash (the ruleset hash prefix),
      *   welcome.started (true once the module latched a session) or, from
      *   older modules, a non-empty welcome.session_id.
+     * The module writes null for an empty text field (tor.error is null
+     * while tor has no complaint); null, "" and a missing key mean none.
      */
     fun parseModule(m: JSONObject): ModuleStatus {
         val tor = m.optJSONObject("tor")
@@ -132,26 +134,34 @@ object StatusPage {
         val welcome = m.optJSONObject("welcome")
         val latched = welcome != null && (
             welcome.opt("started").let { it == true || it == 1 || it == "1" || it == "true" } ||
-                welcome.optString("session_id").isNotBlank()
+                welcome.text("session_id") != null
             )
         val bootstrap = tor?.let { t ->
             if (t.has("bootstrap") && !t.isNull("bootstrap")) t.optInt("bootstrap", -1).takeIf { it in 0..100 } else null
         }
-        val network = when (tor?.optString("network")) {
+        val network = when (tor?.text("network")) {
             "enabled" -> true
             "disabled" -> false
             else -> null
         }
         return ModuleStatus(
             torBootstrap = bootstrap,
-            torSummary = tor?.optString("summary")?.takeIf { it.isNotBlank() }?.take(200),
+            torSummary = tor?.text("summary")?.take(200),
             torNetworkEnabled = network,
-            torError = tor?.optString("error")?.takeIf { it.isNotBlank() }?.take(300),
-            firewallState = fw?.optString("state")?.takeIf { it.isNotBlank() }?.take(40),
-            firewallHash = fw?.optString("hash")?.takeIf { it.isNotBlank() }?.take(64),
+            torError = tor?.text("error")?.take(300),
+            firewallState = fw?.text("state")?.take(40),
+            firewallHash = fw?.text("hash")?.take(64),
             sessionLatched = latched,
         )
     }
+
+    /**
+     * A text field, or null when it is missing, JSON null, not a string, or
+     * blank. Not optString: Android's returns "null" for a JSON null (the
+     * JVM's org.json used by the unit tests returns ""), which showed as
+     * "The add-on says: null".
+     */
+    private fun JSONObject.text(name: String): String? = (opt(name) as? String)?.takeIf { it.isNotBlank() }
 }
 
 /** Reads a system property with the getprop tool (apps have no public API for it). */
