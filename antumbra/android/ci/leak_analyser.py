@@ -1493,15 +1493,15 @@ def analyse(args):
 
     # The end of each capture, and the capture inside the guest's own
     # counters (tcpdump's, when the scenario stopped it).
-    for d, _ in caps:
+    tails = []
+    for ci, (d, _) in enumerate(caps):
         stop_ev = "guest_capture_stop" if d["kind"] == "guest" else "capture_stop"
         stop_host = event_time(events, stop_ev)
         if stop_host is not None and d["last"] is not None:
             gap = stop_host + d["clock"]["offset_low"] - d["last"]
             d["tail_gap"] = round(gap, 1)
             if gap > args.max_tail_gap:
-                capture_problems.append("the last frame of %s is %.0f s before the scenario stopped the capture: "
-                                        "frames at the end may be missing" % (d["name"], gap))
+                tails.append((ci, d, gap, stop_host))
         if d["kind"] == "guest" and args.arm_event:
             stops = [dt for n, _, dt in events if n == "guest_capture_stop"]
             kv = _detail_values(stops[-1]) if stops else {}
@@ -1515,6 +1515,35 @@ def analyse(args):
             elif kv["dropped"] != "0":
                 capture_problems.append("tcpdump in the guest dropped %s packet(s): %s misses them"
                                         % (kv["dropped"], d["name"]))
+    # A long silence at the end of the emulator's capture is either a file
+    # the emulator did not flush or an interface with nothing to send (run 7:
+    # eth0 quiet for five minutes once Wi-Fi carried everything). The capture
+    # inside the guest sees the same interface: when it is whole (stopped,
+    # counted, nothing dropped, no problem of its own, stopped just before)
+    # and saw nothing there after this capture's last frame, the interface
+    # was quiet. Otherwise frames may be missing.
+    n_before = len(capture_problems)
+    for ci, d, gap, stop_host in tails:
+        quiet = False
+        guests = [(gci, gd) for gci, (gd, _) in enumerate(caps) if gd["kind"] == "guest"]
+        if d["kind"] != "guest" and d.get("iface") and len(guests) == 1 and n_before == 0:
+            gci, gd = guests[0]
+            g_stop = event_time(events, "guest_capture_stop")
+            whole = (gd["clock"]["source"] == "marker" and gd.get("tcpdump", {}).get("dropped") == "0"
+                     and (gd.get("tail_gap") or 0) <= args.max_tail_gap
+                     and g_stop is not None and 0 <= stop_host - g_stop <= 15)
+            last_host = d["last"] - d["clock"]["offset_low"]
+            later = [p for p, fci, iface, _ in framed
+                     if fci == gci and iface == d["iface"] and p.ts - gd["clock"]["offset_high"] > last_host + 1.0]
+            seen_there = any(fci == gci and iface == d["iface"] for _, fci, iface, _ in framed)
+            quiet = whole and seen_there and not later
+        if quiet:
+            notes.append("the last frame of %s is %.0f s before the scenario stopped the capture; the capture "
+                         "inside the guest, whole, saw nothing on %s after it either: the interface was quiet"
+                         % (d["name"], gap, d["iface"]))
+        else:
+            capture_problems.append("the last frame of %s is %.0f s before the scenario stopped the capture: "
+                                    "frames at the end may be missing" % (d["name"], gap))
     result["tail_gap"] = caps[0][0].get("tail_gap") if caps else None
     result["capture_problems"] = capture_problems
 

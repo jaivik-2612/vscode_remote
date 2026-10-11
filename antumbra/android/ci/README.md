@@ -318,6 +318,8 @@ from the cutoff on counts. The cutoff can only be early, never late.
 `--judge-from-start` judges every packet instead (a capture on the phone,
 which has neither marker nor arm event).
 
+A long silence at the end of the emulator's capture (more than `--max-tail-gap`, 120 s) means an unflushed file or a quiet interface. Run 7's eth0 sent nothing for five minutes once Wi-Fi carried everything. The capture inside the guest sees eth0 too: when it is whole (its own marker, tcpdump's counters with nothing dropped, no problem of its own, stopped within 15 s before the emulator's) and saw nothing on eth0 after the emulator's last frame (with a second of slack for the two clocks), the silence is a note; otherwise the verdict is `blind`.
+
 The capture inside the guest must hold a marker: it shows the capture ran
 from before the module was installed, and places its clock. The device's
 clock is read again between two host stamps after the module is live and

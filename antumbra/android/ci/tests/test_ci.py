@@ -834,6 +834,26 @@ class GuestCaptureTest(TempDir):
         self.assertEqual((a["verdict"], rc), ("fail", 1))
         self.assertEqual([(f["kind"], sorted(f["seen"])) for f in a["leaks"]], [("multicast", ["guest:wlan0"])])
 
+    def test_quiet_eth0_at_the_end(self):
+        # Run 7: eth0 quiet for minutes at the end, once Wi-Fi carried
+        # everything. The guest's capture, whole, saw nothing on eth0 after
+        # the emulator's last frame either: a note, not a problem.
+        tail = [(1290.0, sll2(16, ipv4(WLAN, "198.51.100.7", 6, tcp(41000, 9001, 0x18)), WLAN_MAC))]
+        events = (("guest_capture_stop", 1295.0, "captured=10 received=10 dropped=0"), CLOCK_OK)
+        rc, a = self.run_guest(guest_frames() + tail, events=events, stop=1300.0)
+        self.assertEqual((a["verdict"], rc), ("pass", 0), a["verdict_reasons"])
+        self.assertTrue(any("the interface was quiet" in n for n in a["notes"]), a["notes"])
+        # The guest saw eth0 send after the emulator's last frame: the
+        # emulator's file may be missing frames.
+        eth0_late = [(1200.0, sll2(15, ipv4(GUEST, "198.51.100.7", 6, tcp(40010, 9001, 0x18)), ETH0_MAC))]
+        rc, a = self.run_guest(guest_frames() + tail + eth0_late, events=events, stop=1300.0)
+        self.assertEqual((a["verdict"], rc), ("blind", 3))
+        self.assertTrue(any("frames at the end may be missing" in r for r in a["verdict_reasons"]))
+        # The guest's capture stopped long before the emulator's: no proof.
+        early = (("guest_capture_stop", 1250.0, "captured=10 received=10 dropped=0"), CLOCK_OK)
+        rc, a = self.run_guest(guest_frames() + tail, events=early, stop=1300.0)
+        self.assertEqual((a["verdict"], rc), ("blind", 3))
+
     def test_empty_frame_is_link_level(self):
         # Run 6: an IPv4 frame of zero bytes on wlan0, from a packet socket,
         # complete in the capture. It carries no data: listed, not a LEAK.
