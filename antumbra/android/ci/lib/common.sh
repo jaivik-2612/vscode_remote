@@ -77,8 +77,18 @@ wait_device() {
 	timeout "${1:-120}" adb -s "$ANTUMBRA_SERIAL" wait-for-device
 }
 
+# user0_unlocked: user 0 is running and unlocked. sys.boot_completed stays
+# 1 when build-module.sh restarts the framework, so it cannot tell; device
+# owner and credential-encrypted storage need the user unlocked (run 3:
+# "User must be running and unlocked" five seconds after the restart).
+user0_unlocked() {
+	ash 'am get-started-user-state 0' 2>/dev/null | grep -q RUNNING_UNLOCKED ||
+		ash 'dumpsys user' 2>/dev/null | grep -q 'State: RUNNING_UNLOCKED'
+}
+
 # wait_system_ready SECONDS: the package manager and connectivity service
-# answer (after boot, or after build-module.sh restarted the framework).
+# answer and user 0 is unlocked (after boot, or after build-module.sh
+# restarted the framework).
 wait_system_ready() {
 	local end=$((SECONDS + ${1:-180}))
 	wait_device "${1:-180}" || return 1
@@ -86,7 +96,8 @@ wait_system_ready() {
 		if [ "$(ash 'getprop sys.boot_completed' 2>/dev/null)" = 1 ] &&
 			ash 'pm path android' >/dev/null 2>&1 &&
 			ash 'cmd connectivity airplane-mode' >/dev/null 2>&1 &&
-			[ "$(ash 'getprop init.svc.bootanim' 2>/dev/null)" != running ]; then
+			[ "$(ash 'getprop init.svc.bootanim' 2>/dev/null)" != running ] &&
+			user0_unlocked; then
 			return 0
 		fi
 		sleep 3

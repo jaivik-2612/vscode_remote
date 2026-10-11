@@ -266,8 +266,23 @@ install_welcome() {
 	# checked over adb. A release build never reads it.
 	ash 'setprop debug.antumbra.keep_adb 1' >/dev/null
 	[ "$(ash 'getprop debug.antumbra.keep_adb')" = 1 ] || abort welcome_test_hook "setprop debug.antumbra.keep_adb 1 did not hold"
-	out=$(ash "dpm set-device-owner $PKG/.AdminReceiver")
-	printf '%s\n' "$out" >>"$LOGS/$SCEN-welcome-install.txt"
+	# Device owner needs user 0 unlocked; one retry if the framework was
+	# still unlocking it. Android refuses device owner while any account
+	# exists, so the accounts are kept for the report when it does.
+	local try
+	for try in 1 2; do
+		wait_system_ready 120 || true
+		out=$(ash "dpm set-device-owner $PKG/.AdminReceiver" 2>&1)
+		printf 'attempt %s:\n%s\n' "$try" "$out" >>"$LOGS/$SCEN-welcome-install.txt"
+		case $out in
+		*"running and unlocked"*) sleep 10 ;;
+		*accounts*)
+			ash 'dumpsys account' >"$LOGS/$SCEN-accounts.txt" 2>&1
+			break
+			;;
+		*) break ;;
+		esac
+	done
 	sleep 3
 	wait_device 60
 	[ "$(ash 'id -u')" = 0 ] || abort adb_after_device_owner "adb lost its root shell when Welcome became the device owner (is the test hook honoured?)"
