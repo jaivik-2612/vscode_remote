@@ -99,6 +99,9 @@ if [ ! -s "$P/consensus" ] && [ -s "$P/consensus.gz" ]; then
 	gzip -dc "$P/consensus.gz" >"$P/consensus" || rm -f "$P/consensus"
 fi
 if [ -s "$CAP/apps.pcap" ] || [ -s "$OUT/capture/apps-guest.pcap" ]; then
+	# The emulator's capture exists even when the scenario never ran (the
+	# boot timed out).
+	mkdir -p "$P"
 	arm_event=install_start
 	grep -q "^post_fs_data_start$(printf '\t')" "$P/events.tsv" 2>/dev/null && arm_event=post_fs_data_start
 	args=(analyse --scenario apps --out "$P/analysis.json"

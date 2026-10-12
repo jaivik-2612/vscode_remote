@@ -444,18 +444,31 @@ shows what happened, screen by screen. It never blocks the workflow
 
 **The phone.** The emulator job's image (Android 16, `android-36;default`,
 x86_64, no Google services), with more room for apps: `ram-size: 6144M`
-(the runner has 16 GB), `heap-size: 576M` and `disk-size: 12G`, inputs of
-the pinned `android-emulator-runner` v2.38.0. The emulator captures eth0
-as in the emulator job (`-tcpdump`, `capture/apps.pcap`).
+(the runner has 16 GB) and `disk-size: 12G`, inputs of the pinned
+`android-emulator-runner` v2.38.0. The Java heap stays the `pixel_6`
+profile's 576 MB (`dalvik.vm.heapsize`): the action's `heap-size` input
+writes `hw.heapSize`, which the emulator ignores (its key is
+`vm.heapSize`, in the AVD's `config.ini`). The emulator captures eth0 as
+in the emulator job (`-tcpdump`, `capture/apps.pcap`).
+
+**Time.** Typically about 35 minutes, in parallel with the emulator job.
+The job has 60; its steps' limits (build tools 5, downloads 8, the
+emulator 36, the analysis 5, `apps.json` 2) and about 2 minutes for the
+rest fit inside, so a slow run ends with a failed step and still uploads
+its artifact.
 
 **Downloads, on the runner.** `applab.py fetch` runs before the emulator
-starts, 7 minutes at most (`--budget 420`: what is left then is recorded as
-not downloaded): every APK comes from its store's official source over
-HTTPS (curl, HTTPS only, redirects kept on HTTPS; a source slower than
-50 KB/s for a minute is given up for the next), and is checked before it
-goes near the phone. Every APK must verify with `apksigner` and be the package
-it claims to be (`aapt2 dump badging`); an item that fails any check is
-recorded with the reason and never installed.
+starts, 7 minutes at most (`--budget 420`: no download runs past it, and
+what is left then is recorded as not downloaded): every APK comes from its
+store's official source over HTTPS (curl, HTTPS only, redirects kept on
+HTTPS; a connection that fails or breaks off, or an HTTP 408, 429 or 5xx,
+is tried up to three times; a source slower than 50 KB/s for a minute, or
+out of time, is given up at once for the next URL, an F-Droid mirror where
+the index lists one), and is checked before it goes near the phone. Every
+APK must verify with `apksigner` and be the package it claims to be
+(`aapt2 dump badging`); `fetch` needs both programs, and an APK they did
+not check is never verified. An item that fails any check is recorded
+with the reason and never installed.
 
 | Store | Its client | Apps from it | Checks |
 |---|---|---|---|
@@ -492,7 +505,9 @@ goes through Tor or is refused.
 
 - a store: up to 90 s for its catalogue: the screen shows one (twelve or
   more distinct texts, no network error) and tor connected the phone since
-  the window began. A button that only dismisses a first-run screen (Skip,
+  the window began (a TransPort stream that its exit's CONNECTED cell
+  remapped, `REMAP ... SOURCE=EXIT`: tor sends `SUCCEEDED` only to SOCKS
+  clients, never for TransPort or DNSPort streams). A button that only dismisses a first-run screen (Skip,
   Not now, Don't allow; four at most) is pressed; never one that signs in,
   agrees, allows or continues;
 - an app: 45 s, and nothing on screen is touched;
@@ -512,10 +527,14 @@ crashed (a `FATAL EXCEPTION` in its process, a native crash), not
 responding (ANR), and whether it asked for Google Play services (a logcat
 line or a screen that says so: common on this image, recorded as such);
 for a store, whether its catalogue loaded through Tor (its screen, its own
-names resolved through Tor, a stream that succeeded) with the signals;
-every name the filter was asked in the window, with its decisions
-(forwarded, blocked, SERVFAIL); the names tor resolved; the destinations
-asked of tor's TransPort with tor's outcome; the screenshot. Also the
+names forwarded and answered by tor, not `forwarded nxdomain`, and a
+connection tor made) with the signals; every name the filter was asked in
+the window, with its decisions (forwarded, blocked, `servfail (...)`: the
+filter's own failures and tor's SERVFAIL alike); the names the filter
+asked tor for (`RESOLVED`, `UNRESOLVED` or tor's reason); the destinations
+asked of tor's TransPort with tor's outcome per stream (`CONNECTED`, or
+the reason: `PRIVATE_ADDR`, `TIMEOUT`, the exit's `CONNECTREFUSED` or
+`EXITPOLICY`...); the screenshot. Also the
 phone (ABIs, memory, free storage), the session (Tor's time, the checks)
 and the leak verdict. `apps.md` is the short summary, also the job's
 summary.
@@ -589,7 +608,9 @@ bar left out. Tests: `tests/test_daily.py`.
 ## Running the pieces by hand
 
 ```sh
-# Unit tests of the CI tools (synthetic captures, no emulator)
+# Unit tests of the CI tools (synthetic captures and recorded fixtures, no
+# emulator). In CI the emulator job runs test_ci and test_daily, and the
+# app-lab job test_applab, so that the app lab never stops the leak test.
 python3 -B -m unittest discover -s antumbra/android/ci/tests -v
 
 # The leak analysis of a capture made on a real network (for example on the

@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for applab.py, the app lab's helper. The F-Droid index, the
 Aptoide answers and the apksigner and aapt2 output under fixtures/applab/
-were recorded from the real services in October 2026 and trimmed; nothing
-here touches the network (downloads go through a fake), and the APKs are a
-few bytes each.
+were recorded from the real services in October 2026 and trimmed, and
+tor-streams-run10.txt holds lines of tor's STREAM events from CI run 10;
+nothing here touches the network (downloads go through a fake), and the
+APKs are a few bytes each.
 
-Run: python3 -B -m unittest discover -s antumbra/android/ci/tests -v
+Run: python3 -B -m unittest discover -s antumbra/android/ci/tests -p 'test_applab.py' -v
 """
 
 import contextlib
@@ -14,8 +15,10 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import struct
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -267,6 +270,66 @@ def getmeta(package, store, blob, sha1, path):
     return m
 
 
+class FakeCurl:
+    """curl's runs for curl_download: each answer is (exit code, HTTP code)."""
+
+    def __init__(self, answers):
+        self.answers = list(answers)
+        self.cmds = []
+
+    def __call__(self, cmd, capture_output=True, text=True, timeout=None):
+        self.cmds.append(cmd)
+        rc, code = self.answers.pop(0)
+        with open(cmd[cmd.index("-o") + 1], "wb") as f:
+            f.write(b"apk")
+        return subprocess.CompletedProcess(cmd, rc, "%s %s" % (code, cmd[-1]), "curl: (%d) failed" % rc if rc else "")
+
+
+class TestCurl(unittest.TestCase):
+    URL = "https://example.org/x.apk"
+
+    def get(self, answers, max_time=600):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        fake, slept = FakeCurl(answers), []
+        dest = os.path.join(tmp.name, "x.apk")
+        res = applab.curl_download(self.URL, dest, max_time, run=fake, sleep=slept.append)
+        return res, fake, slept, dest
+
+    def test_options(self):
+        (url, err), fake, _, dest = self.get([(0, "200")])
+        self.assertEqual((url, err), (self.URL, None))
+        self.assertTrue(os.path.isfile(dest))
+        cmd = fake.cmds[0]
+        for opt, value in (("--proto", "=https"), ("--proto-redir", "=https"), ("--max-time", "600"),
+                           ("--speed-limit", "51200"), ("--speed-time", "60")):
+            self.assertEqual(cmd[cmd.index(opt) + 1], value, opt)
+        self.assertFalse([c for c in cmd if c.startswith("--retry")])
+
+    def test_too_slow_is_given_up_at_once(self):
+        # curl's exit 28 (slower than 50 KB/s for a minute, or out of time):
+        # the caller tries the next URL instead.
+        (url, err), fake, slept, dest = self.get([(28, "200")])
+        self.assertIsNone(url)
+        self.assertIn("curl exit 28", err)
+        self.assertEqual((len(fake.cmds), slept), (1, []))
+        self.assertFalse(os.path.exists(dest) or os.path.exists(dest + ".part"))
+
+    def test_broken_connections_and_5xx_are_tried_again(self):
+        (url, err), fake, slept, dest = self.get([(56, "000"), (0, "503"), (0, "200")])
+        self.assertEqual((url, err), (self.URL, None))
+        self.assertEqual((len(fake.cmds), slept), (3, [5, 5]))
+        (url, err), fake, _, dest = self.get([(7, "000")] * 3)
+        self.assertIsNone(url)
+        self.assertEqual(len(fake.cmds), 3)
+        self.assertIn("(try 3)", err)
+        self.assertFalse(os.path.exists(dest))
+
+    def test_not_found_is_not_tried_again(self):
+        (url, err), fake, _, _ = self.get([(0, "404")])
+        self.assertEqual((url, err, len(fake.cmds)), (None, "HTTP 404", 1))
+
+
 class FakeNet:
     """URL -> bytes; anything else answers 404. Records what was asked."""
 
@@ -439,6 +502,30 @@ class TestFetch(unittest.TestCase):
         with open(os.path.join(self.tmp.name, "downloads.json")) as f:
             self.assertIn("done", json.load(f))
 
+    def test_nothing_verified_without_apksigner_and_aapt2(self):
+        # Even with the right bytes (SHA-256, MD5 and size as listed), an APK
+        # that apksigner and aapt2 did not look at is never installed.
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        with contextlib.redirect_stderr(io.StringIO()):
+            res = applab.fetch(CAT, self.tmp.name, applab.Tools(None, None, FakeNet(pages())))
+        items = {i["name"]: i for i in res["stores"] + res["apps"]}
+        for name in ("fdroid", "aptoide", "taptap", "org.schabi.newpipe", "com.whatsapp"):
+            self.assertFalse(items[name]["verified"], name)
+            self.assertIn("apksigner did not run", items[name]["error"])
+            self.assertIn("aapt2 did not run", items[name]["error"])
+        self.assertIn({"check": "its MD5 is the one Aptoide lists", "ok": True}, items["com.whatsapp"]["checks"])
+        self.assertEqual({ln.split("\t")[4] for ln in applab.plan_lines(res, "/dl")}, {"0"})
+
+    def test_cli_needs_apksigner_and_aapt2(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            applab.main(["fetch", "--catalogue", os.path.join(CI, "app-lab.txt"), "--out", tmp.name])
+        self.assertIn("--apksigner", err.getvalue())
+        self.assertEqual(os.listdir(tmp.name), [])
+
     def test_split_apks_skipped(self):
         p = pages()
         p[applab.aptoide_meta_url("com.whatsapp")]["data"]["aab"] = {"splits": [{"name": "a"}, {"name": "b"}]}
@@ -497,48 +584,106 @@ class TestUiSummary(unittest.TestCase):
         self.assertEqual(out.getvalue(), "1\t5\t5\tSkip\t-\n")
 
 
-STREAMS = """ANTUMBRA-CI-STREAMS connect 120
-250 OK
-250 OK
-650 STREAM 1 NEWRESOLVE 0 f-droid.org:0 SOURCE_ADDR=127.0.0.1:5000 PURPOSE=DNS_REQUEST
-650 STREAM 1 SUCCEEDED 3 f-droid.org:0
-650 STREAM 2 NEW 0 37.218.243.72:443 SOURCE_ADDR=127.0.0.1:40000 PURPOSE=USER
-650 STREAM 2 SENTCONNECT 3 37.218.243.72:443
-650 STREAM 2 SUCCEEDED 3 37.218.243.72:443
-650 STREAM 3 NEW 0 (Tor_internal):0 PURPOSE=DIR_FETCH
-650 STREAM 4 NEW 0 10.0.2.2:80 SOURCE_ADDR=127.0.0.1:40001 PURPOSE=USER
-650 STREAM 2 CLOSED 3 37.218.243.72:443 REASON=DONE
-650 STREAM 5 NEWRESOLVE 0 g.whatsapp.net:0 PURPOSE=DNS_REQUEST
-650 STREAM 6 NEW 0 157.240.0.53:443 PURPOSE=USER
-650 STREAM 4 FAILED 0 10.0.2.2:80 REASON=MISC
-650 STREAM 6 FAILED 0 157.240.0.53:443 REASON=TIMEOUT
-"""
+# tor's STREAM events as the module's tor sends them: lines of run 10's
+# ANTUMBRA transcript (antumbra/tor-streams.txt), verbatim, picked and put
+# in order for two windows. Lines 3..16 (an F-Droid window): a DNSPort
+# lookup (NEWRESOLVE, SENTRESOLVE, REMAP to its address, CLOSED DONE),
+# tor's own directory fetch (the only kind that gets SUCCEEDED), a
+# TransPort connection that worked (NEW, SENTCONNECT, REMAP SOURCE=EXIT,
+# CLOSED END/DONE: no SUCCEEDED) and one tor refused (CLOSED PRIVATE_ADDR).
+# Lines 17..30 (a WhatsApp window): a directory fetch that timed out, a
+# lookup, a connection, another refusal, and a lookup still open at the end.
+STREAMS = fixture("tor-streams-run10.txt")
 
+# The filter's query log. "servfail (timeout)" is the filter's own failure
+# (run 10 has it); "servfail (rcode RCodeServerFailure)" is how it logs
+# tor's SERVFAIL, and "forwarded nxdomain" tor's "no such name".
 FILTER = """antumbra-dnsfilter: 2026/10/12 06:38:00 debug mode: query names will be logged
 antumbra-dnsfilter: 2026/10/12 06:38:19 query "f-droid.org." A -> forwarded
 antumbra-dnsfilter: 2026/10/12 06:38:19 query "F-Droid.org." AAAA -> empty (type)
 antumbra-dnsfilter: 2026/10/12 06:38:20 query "doubleclick.net." A -> blocked
+antumbra-dnsfilter: 2026/10/12 06:38:21 query "nosuch.f-droid.org." A -> forwarded nxdomain
 antumbra-dnsfilter: 2026/10/12 06:39:00 query "g.whatsapp.net." A -> forwarded
-antumbra-dnsfilter: 2026/10/12 06:39:01 query "graph.facebook.com." A -> servfail (upstream timeout)
+antumbra-dnsfilter: 2026/10/12 06:39:01 query "graph.facebook.com." A -> servfail (timeout)
 antumbra-dnsfilter: 2026/10/12 06:39:02 query "app-measurement.com." A -> blocked
+antumbra-dnsfilter: 2026/10/12 06:39:03 query "mmg.whatsapp.net." A -> servfail (rcode RCodeServerFailure)
 """
+
+
+def stream(*lines):
+    return applab.stream_records(["650 STREAM 7 " + ln for ln in lines])[0]
 
 
 class TestWindows(unittest.TestCase):
     def test_streams_in_a_window(self):
         st = applab.stream_records(STREAMS.splitlines())
-        # Lines 3..9: the F-Droid part (resolve, connect, tor's own fetch, a refused LAN target).
-        targets, resolves = applab.window_streams(st, 3, 10)
-        self.assertEqual([t["target"] for t in targets], ["10.0.2.2:80", "37.218.243.72:443"])
+        # The F-Droid window: tor's own fetch is left out.
+        targets, resolves = applab.window_streams(st, 3, 17)
+        self.assertEqual([t["target"] for t in targets], ["10.0.2.2:80", "142.251.20.94:443"])
         by = {t["target"]: t for t in targets}
-        self.assertEqual(by["37.218.243.72:443"]["outcomes"], {"SUCCEEDED": 1})
-        self.assertEqual(by["10.0.2.2:80"]["outcomes"], {"FAILED": 1})
-        self.assertEqual(by["10.0.2.2:80"]["reasons"], ["MISC"])
-        self.assertEqual(resolves, [{"name": "f-droid.org", "count": 1, "outcomes": {"SUCCEEDED": 1}}])
-        targets, resolves = applab.window_streams(st, 11, 99)
-        self.assertEqual([t["target"] for t in targets], ["157.240.0.53:443"])
-        self.assertEqual(targets[0]["reasons"], ["TIMEOUT"])
-        self.assertEqual([r["name"] for r in resolves], ["g.whatsapp.net"])
+        self.assertEqual(by["142.251.20.94:443"]["outcomes"], {"CONNECTED": 1})
+        self.assertEqual(by["10.0.2.2:80"]["outcomes"], {"PRIVATE_ADDR": 1})
+        self.assertEqual(by["10.0.2.2:80"]["reasons"], ["PRIVATE_ADDR"])
+        self.assertEqual(resolves, [{"name": "check.torproject.org", "count": 1, "outcomes": {"RESOLVED": 1}}])
+        targets, resolves = applab.window_streams(st, 17, 99)
+        self.assertEqual({t["target"]: t["outcomes"] for t in targets},
+                         {"127.0.0.1:47000": {"PRIVATE_ADDR": 1}, "142.251.20.94:443": {"CONNECTED": 1}})
+        self.assertEqual(resolves, [{"name": "www.gstatic.com", "count": 2,
+                                     "outcomes": {"RESOLVED": 1, "NEWRESOLVE": 1}}])
+
+    def test_outcomes(self):
+        # Connected: the exit's REMAP, or its DONE; a SOCKS client's SUCCEEDED.
+        self.assertEqual(applab._outcome(stream("NEW 0 192.0.2.7:443 PURPOSE=USER CLIENT_PROTOCOL=TRANS",
+                                                "SENTCONNECT 4 192.0.2.7:443 CLIENT_PROTOCOL=TRANS",
+                                                "CLOSED 4 192.0.2.7:443 REASON=END REMOTE_REASON=DONE")),
+                         "CONNECTED")
+        self.assertEqual(applab._outcome(stream("NEW 0 192.0.2.7:443 PURPOSE=USER CLIENT_PROTOCOL=SOCKS5",
+                                                "SUCCEEDED 4 192.0.2.7:443")), "CONNECTED")
+        # Not connected: the exit's reason for END, else tor's; a REMAP that
+        # tor made from its own cache is not the exit's answer.
+        self.assertEqual(applab._outcome(stream("NEW 0 192.0.2.7:25 PURPOSE=USER CLIENT_PROTOCOL=TRANS",
+                                                "SENTCONNECT 4 192.0.2.7:25 CLIENT_PROTOCOL=TRANS",
+                                                "CLOSED 4 192.0.2.7:25 REASON=END REMOTE_REASON=EXITPOLICY")),
+                         "EXITPOLICY")
+        self.assertEqual(applab._outcome(stream("NEW 0 192.0.2.7:443 PURPOSE=USER CLIENT_PROTOCOL=TRANS",
+                                                "SENTCONNECT 4 192.0.2.7:443 CLIENT_PROTOCOL=TRANS",
+                                                "DETACHED 4 192.0.2.7:443 REASON=END REMOTE_REASON=CONNECTREFUSED",
+                                                "SENTCONNECT 5 192.0.2.7:443 CLIENT_PROTOCOL=TRANS",
+                                                "CLOSED 5 192.0.2.7:443 REASON=TIMEOUT")), "TIMEOUT")
+        self.assertEqual(applab._outcome(stream("NEW 0 192.0.2.7:443 PURPOSE=USER CLIENT_PROTOCOL=TRANS",
+                                                "REMAP 0 192.0.2.7:443 SOURCE=CACHE",
+                                                "SENTCONNECT 4 192.0.2.7:443 CLIENT_PROTOCOL=TRANS")),
+                         "SENTCONNECT")
+        # A lookup tor closed without an answer.
+        self.assertEqual(applab._outcome(stream("NEWRESOLVE 0 nosuch.example:0 PURPOSE=DNS_REQUEST",
+                                                "SENTRESOLVE 4 nosuch.example:0",
+                                                "CLOSED 4 nosuch.example:0 REASON=DONE")), "UNRESOLVED")
+
+    def test_store_loaded_needs_a_connection_and_its_own_names(self):
+        st = applab.stream_records(STREAMS.splitlines())
+        ui = applab.ui_summary(dump(*[node("App %d" % i) for i in range(15)]))
+        queries = applab.window_queries(FILTER.splitlines(), 0, 5)
+        hosts = ("f-droid.org",)
+        loaded, sig = applab._store_loaded({}, ui, applab.window_streams(st, 3, 17)[0], queries, hosts)
+        self.assertTrue(loaded)
+        self.assertEqual((sig["tor_streams_connected"], sig["own_names_through_tor"]), (1, ["f-droid.org"]))
+        # Only tor's own directory fetch (which SUCCEEDED), or only a refusal.
+        for start, end in ((4, 10), (12, 14)):
+            loaded, sig = applab._store_loaded({}, ui, applab.window_streams(st, start, end)[0], queries, hosts)
+            self.assertFalse(loaded)
+            self.assertEqual(sig["tor_streams_connected"], 0)
+        # Only a name tor said does not exist.
+        nx = [q for q in queries if q["name"] != "f-droid.org"]
+        self.assertFalse(applab._store_loaded({}, ui, applab.window_streams(st, 3, 17)[0], nx, hosts)[0])
+
+    def test_shell_connected_since_pattern(self):
+        # emulator-apps.sh's store wait: only the exits' REMAPs of TransPort
+        # streams count, not lookups (CLIENT_PROTOCOL=DNS) nor tor's own
+        # fetches (SUCCEEDED).
+        with open(os.path.join(CI, "emulator-apps.sh"), encoding="utf-8") as f:
+            pattern = re.search(r"grep -q -E '([^']*REMAP[^']*)'", f.read()).group(1)
+        r = subprocess.run(["grep", "-E", pattern], input=STREAMS, capture_output=True, text=True)
+        self.assertEqual([ln.split(" ")[2] for ln in r.stdout.splitlines()], ["95", "80"])
 
     def test_queries_in_a_window(self):
         lines = FILTER.splitlines()
@@ -546,10 +691,11 @@ class TestWindows(unittest.TestCase):
         self.assertEqual([r["name"] for r in q], ["doubleclick.net", "f-droid.org"])
         self.assertEqual(q[1]["decisions"], {"forwarded": 1, "empty (type)": 1})
         self.assertEqual(q[1]["types"], ["A", "AAAA"])
-        q = applab.window_queries(lines, 4, 7)
+        q = applab.window_queries(lines, 5, 9)
         self.assertEqual({r["name"]: list(r["decisions"]) for r in q},
-                         {"g.whatsapp.net": ["forwarded"], "graph.facebook.com": ["servfail (upstream timeout)"],
-                          "app-measurement.com": ["blocked"]})
+                         {"g.whatsapp.net": ["forwarded"], "graph.facebook.com": ["servfail (timeout)"],
+                          "app-measurement.com": ["blocked"],
+                          "mmg.whatsapp.net": ["servfail (rcode RCodeServerFailure)"]})
 
 
 LOGCAT = """10-12 06:40:00.000  1234  1234 I ActivityManager: Start proc 4321:com.whatsapp/u0a190 for top-activity
@@ -643,18 +789,18 @@ def report_dir(root, with_analysis=True):
         {"kind": "store", "name": "fdroid", "package": "org.fdroid.fdroid", "label": "F-Droid", "install": "ok",
          "launch": "ok", "focus": "yes", "running": "yes", "screenshot": "store-fdroid", "taps": "Skip",
          "ui": "logs/apps/store-fdroid-ui.xml", "logcat": "logs/apps/store-fdroid-logcat.txt",
-         "streams_from": "3", "streams_to": "10", "filter_from": "0", "filter_to": "4", "t_start": "1100",
+         "streams_from": "3", "streams_to": "17", "filter_from": "0", "filter_to": "5", "t_start": "1100",
          "t_end": "1190", "seconds": "90"},
         {"kind": "store", "name": "taptap", "package": "com.taptap.global", "label": "TapTap", "install": "failed",
          "install_detail": "Failure [INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]"},
         {"kind": "app", "name": "com.whatsapp", "package": "com.whatsapp", "label": "WhatsApp", "install": "ok",
          "launch": "ok", "focus": "yes", "running": "yes", "screenshot": "app-com.whatsapp",
          "logcat": "logs/apps/app-com.whatsapp-logcat.txt",
-         "streams_from": "11", "streams_to": "99", "filter_from": "4", "filter_to": "7"},
+         "streams_from": "17", "streams_to": "99", "filter_from": "5", "filter_to": "9"},
         {"kind": "app", "name": "org.schabi.newpipe", "package": "org.schabi.newpipe", "label": "NewPipe",
          "install": "ok", "launch": "ok", "focus": "no", "running": "no", "screenshot": "app-org.schabi.newpipe",
          "logcat": "logs/apps/app-org.schabi.newpipe-logcat.txt",
-         "streams_from": "99", "streams_to": "99", "filter_from": "7", "filter_to": "7"},
+         "streams_from": "99", "streams_to": "99", "filter_from": "9", "filter_to": "9"},
         {"kind": "app", "name": "org.telegram.messenger", "package": "org.telegram.messenger", "label": "Telegram",
          "install": "not-verified", "note": "Aptoide: APP-1: not found"},
     ]
@@ -685,10 +831,12 @@ class TestBuild(unittest.TestCase):
         ap = {i["name"]: i for i in res["apps"]}
         f = st["fdroid"]
         self.assertTrue(f["installed"] and f["launched"] and f["running"] and f["loaded"])
+        # nosuch.f-droid.org went through Tor too, but tor found no such name.
         self.assertEqual(f["loaded_signals"]["own_names_through_tor"], ["f-droid.org"])
+        self.assertEqual(f["loaded_signals"]["tor_streams_connected"], 1)
         self.assertEqual(f["taps"], ["Skip"])
         self.assertEqual(f["screenshot"], "store-fdroid.png")
-        self.assertEqual([t["target"] for t in f["tor_targets"]], ["10.0.2.2:80", "37.218.243.72:443"])
+        self.assertEqual([t["target"] for t in f["tor_targets"]], ["10.0.2.2:80", "142.251.20.94:443"])
         self.assertEqual(f["blocked"], ["doubleclick.net"])
         self.assertIn("catalogue loaded", f["outcome"])
         self.assertFalse(st["taptap"]["installed"])
@@ -696,8 +844,8 @@ class TestBuild(unittest.TestCase):
         w = ap["com.whatsapp"]
         self.assertTrue(w["running"] and w["gms_missing"] and not w["crashed"])
         self.assertEqual(w["blocked"], ["app-measurement.com"])
-        self.assertEqual(w["servfail"], ["graph.facebook.com"])
-        self.assertEqual(w["tor_resolves"][0]["name"], "g.whatsapp.net")
+        self.assertEqual(w["servfail"], ["graph.facebook.com", "mmg.whatsapp.net"])
+        self.assertEqual(w["tor_resolves"][0]["name"], "www.gstatic.com")
         self.assertIn("wants Google Play services", w["outcome"])
         n = ap["org.schabi.newpipe"]
         self.assertTrue(n["crashed"])
@@ -718,7 +866,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res["totals"]["crashed"], 1)
         self.assertEqual(res["totals"]["stores_loaded"], 1)
         self.assertEqual(res["device"]["abilist"], "x86_64")
-        self.assertIn("| WhatsApp (aptoide) | yes | running, wants Google Play services | 3 | 1 | 1 |", md)
+        self.assertIn("| WhatsApp (aptoide) | yes | running, wants Google Play services | 4 | 1 | 2 |", md)
         self.assertIn("PASS", md)
         self.assertIn("connected in 42 s", md)
 

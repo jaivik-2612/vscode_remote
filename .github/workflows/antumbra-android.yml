@@ -552,8 +552,11 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # test_ci.py and test_daily.py only: the app lab's test_applab.py runs
+      # in its own job, which never blocks this one.
       - name: Test the CI tools (pcap reader, leak analyser)
-        run: python3 -B -m unittest discover -s antumbra/android/ci/tests -v
+        working-directory: antumbra/android/ci/tests
+        run: python3 -B -m unittest -v test_ci test_daily
 
       - name: Directories
         run: |
@@ -707,15 +710,17 @@ jobs:
   # rules (ci/README.md, "The app lab"). Every APK is downloaded on the
   # runner from its store's official source and checked before it is
   # installed. Not blocking: a failure here never turns the workflow red.
-  # Typically about 40 minutes, 45 at most before the analysis: the
-  # downloads (7 at most), the emulator (38 at most: boot, the session, no
-  # store or app started after 24 minutes of the script, the evidence), then
-  # the analysis and the artifact, within the job's 50.
+  # Typically about 35 minutes. The step limits add up to 56 (build tools 5,
+  # downloads 8, the emulator 36: boot, the session, no store or app started
+  # after 24 minutes of the script, the evidence; the analysis 5, apps.json
+  # 2), and the steps without one take about 2: a slow run ends with a
+  # failed step and still uploads its artifact, never with the job's 60
+  # running out, which would cancel the upload.
   app-lab:
     name: app lab (stores and apps through Tor, not blocking)
     needs: [module, welcome]
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     continue-on-error: true
     env:
       ANTUMBRA_SERIAL: emulator-5554
@@ -756,14 +761,16 @@ jobs:
       # apksigner and aapt2 check every APK before it goes near the phone;
       # ImageMagick turns the screenshots into small JPEGs.
       - name: Build tools 36.0.0 and ImageMagick
+        timeout-minutes: 5
         run: |
           bash antumbra/android/ci/sdk-install.sh build-tools
           command -v convert >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends imagemagick; }
 
-      # 7 minutes for all the downloads: what is left then is recorded as not
-      # downloaded, and the lab goes on with the rest.
+      # 7 minutes for all the downloads (no try of curl's runs past them):
+      # what is left then is recorded as not downloaded, and the lab goes on
+      # with the rest.
       - name: Download and check the stores and apps (on the runner)
-        timeout-minutes: 10
+        timeout-minutes: 8
         run: |
           bt="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/36.0.0"
           python3 -B -I antumbra/android/ci/applab.py fetch --catalogue antumbra/android/ci/app-lab.txt \
@@ -777,10 +784,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      # As the emulator job's, with more memory (6 GB, the runner has 16),
-      # a larger Java heap for the apps and 12 GB of storage for them.
+      # As the emulator job's, with more memory (6 GB, the runner has 16)
+      # and 12 GB of storage for the apps. The Java heap stays the profile's
+      # 576 MB: the action's heap-size input writes hw.heapSize, a key the
+      # emulator does not read (its own is vm.heapSize).
       - name: 'APPS: the session (Administration on), the stores, the apps'
-        timeout-minutes: 38
+        timeout-minutes: 36
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
         env:
           ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/apps.pcap
@@ -791,7 +800,6 @@ jobs:
           profile: pixel_6
           cores: 3
           ram-size: 6144M
-          heap-size: 576M
           disk-size: 12G
           emulator-build: 16428233
           force-avd-creation: true
@@ -805,11 +813,12 @@ jobs:
 
       - name: Leak analysis
         if: ${{ !cancelled() }}
-        timeout-minutes: 10
+        timeout-minutes: 5
         run: bash antumbra/android/ci/analyse.sh
 
       - name: apps.json, apps.md and the job summary
         if: ${{ !cancelled() }}
+        timeout-minutes: 2
         run: |
           python3 -B -I antumbra/android/ci/applab.py build "$ANTUMBRA_CI_OUT" --run "${{ github.run_number }}" \
             --downloads "$ANTUMBRA_APPLAB_DL/downloads.json" >> "$GITHUB_STEP_SUMMARY"

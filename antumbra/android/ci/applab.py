@@ -34,8 +34,9 @@ before it goes near the phone:
             com.taptap.global (noted, not required).
 
 Every APK must also be the package it claims to be (aapt2) and verify with
-apksigner. An item that cannot be downloaded or verified is recorded with
-the reason and never installed; the others go on.
+apksigner; fetch needs both programs, and an item they did not check is
+never verified. An item that cannot be downloaded or verified is recorded
+with the reason and never installed; the others go on.
 
 Commands:
 
@@ -45,7 +46,7 @@ Commands:
   applab.py fdroid-pick --index INDEX-V2.json PACKAGE [--abi ABI]... [--sdk N]
   applab.py aptoide-pick --meta GETMETA.json
       The version to install and how to check it, as JSON.
-  applab.py fetch --catalogue FILE --out DIR [--apksigner PATH] [--aapt2 PATH]
+  applab.py fetch --catalogue FILE --out DIR --apksigner PATH --aapt2 PATH
                   [--abi ABI]... [--sdk N] [--stores fdroid,aptoide,taptap]
                   [--budget SECONDS]
       Downloads and checks the stores' clients and the catalogue's apps into
@@ -77,9 +78,13 @@ downloaded and how it was checked ("download": the fetch record), what
 happened on the phone ("installed", "launched", "running", "crashed",
 "fatal", "gms_missing", "anr", "loaded" for a store, "screenshot", "ui"),
 and the window's traffic: "names" (every name the DNS filter was asked, with
-its decisions), "blocked", "servfail", "tor_targets" (the destinations asked
-of tor's TransPort, with tor's outcome) and "tor_resolves" (the names tor
-resolved), with "window" (host times and the line ranges of both logs).
+its decisions), "blocked", "servfail" (every SERVFAIL the filter answered:
+its own failures and tor's, all logged "servfail (...)"), "tor_targets"
+(the destinations asked of tor's TransPort, with tor's outcome per stream:
+CONNECTED, or the reason tor gave, such as PRIVATE_ADDR or the exit's
+CONNECTREFUSED) and "tor_resolves" (the names the filter asked tor for:
+RESOLVED, UNRESOLVED or a reason), with "window" (host times and the line
+ranges of both logs).
 """
 
 import argparse
@@ -308,34 +313,58 @@ def aptoide_meta_url(package, store=None):
 # Downloads and checks (curl, apksigner, aapt2)
 # ---------------------------------------------------------------------------
 
-def curl_download(url, dest, max_time=APK_MAX_TIME, compressed=False):
+# Worth a second try of the same URL: a connection that could not be made
+# or broke off (curl's exits 7, 35, 52 and 56), and HTTP 408, 429 and 5xx.
+# Not curl's exit 28: a source that crawled or ran out of time is given up
+# at once, for the next URL (an F-Droid mirror) or item.
+CURL_RETRY_EXITS = (7, 35, 52, 56)
+HTTP_RETRY = ("408", "429", "500", "502", "503", "504")
+CURL_TRIES = 3
+
+
+def curl_download(url, dest, max_time=APK_MAX_TIME, compressed=False, run=subprocess.run, sleep=time.sleep):
     """Downloads URL into DEST with curl: HTTPS only, redirects followed and
-    kept on HTTPS, two retries on transient errors, given up when slower
-    than 50 KB/s for a minute (the caller then tries a mirror). Returns
+    kept on HTTPS, all tries within MAX_TIME seconds. A failed or broken
+    connection, or an HTTP 408, 429 or 5xx answer, is tried again (three
+    tries, 5 s apart); a transfer slower than 50 KB/s for a minute, or out
+    of time, is given up at once (the caller then tries a mirror). Returns
     (final URL, None) or (None, error). DEST is written only when the
     transfer ended with HTTP 200."""
     tmp = dest + ".part"
-    cmd = ["curl", "-sS", "-L", "--proto", "=https", "--proto-redir", "=https", "--retry", "2",
-           "--retry-delay", "5", "--connect-timeout", "30", "--max-time", str(int(max_time)),
-           "--speed-limit", "51200", "--speed-time", "60",
-           "-o", tmp, "-w", "%{http_code} %{url_effective}"]
-    if compressed:
-        cmd.append("--compressed")
-    cmd.append(url)
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=max_time + 60)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        _rm(tmp)
-        return None, "curl: %s" % e
-    code, _, final = r.stdout.strip().partition(" ")
-    if r.returncode != 0 or code != "200":
+    deadline = time.monotonic() + max_time
+    why = "no try"
+    for n in range(1, CURL_TRIES + 1):
+        left = int(deadline - time.monotonic()) if n > 1 else int(max_time)
+        if n > 1 and left < 5:
+            break
+        cmd = ["curl", "-sS", "-L", "--proto", "=https", "--proto-redir", "=https",
+               "--connect-timeout", "30", "--max-time", str(left),
+               "--speed-limit", "51200", "--speed-time", "60",
+               "-o", tmp, "-w", "%{http_code} %{url_effective}"]
+        if compressed:
+            cmd.append("--compressed")
+        cmd.append(url)
+        try:
+            r = run(cmd, capture_output=True, text=True, timeout=left + 30)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            _rm(tmp)
+            return None, "curl: %s" % e
+        code, _, final = r.stdout.strip().partition(" ")
+        if r.returncode == 0 and code == "200":
+            os.replace(tmp, dest)
+            return final or url, None
         _rm(tmp)
         why = "HTTP %s" % code if code and code != "000" else "no HTTP answer"
         if r.returncode != 0:
             why += "; curl exit %d: %s" % (r.returncode, r.stderr.strip().splitlines()[-1] if r.stderr.strip() else "")
-        return None, why
-    os.replace(tmp, dest)
-    return final or url, None
+        if n > 1:
+            why += " (try %d)" % n
+        if not (r.returncode in CURL_RETRY_EXITS or (r.returncode == 0 and code in HTTP_RETRY)):
+            break
+        if n == CURL_TRIES or deadline - time.monotonic() < 10:
+            break
+        sleep(5)
+    return None, why
 
 
 def _rm(p):
@@ -490,18 +519,19 @@ def _get(item, out, urls, dest_rel, tools, max_time=APK_MAX_TIME):
 
 
 def _common_checks(item, out, tools):
-    """apksigner and aapt2 on the downloaded file."""
+    """apksigner and aapt2 on the downloaded file. Without either program
+    the check fails: an APK they did not look at is never verified."""
     apk = os.path.join(out, item["file"])
     sig = tools.signers(apk)
     item["signer"] = sig
     if sig is None:
-        item["notes"].append("signing certificate not checked (no apksigner)")
+        _check(item, "apksigner verifies the signature (apksigner did not run)", False)
     else:
         _check(item, "apksigner verifies the signature", sig["verifies"])
     b = tools.badging(apk)
     item["apk"] = b
     if b is None:
-        item["notes"].append("package name not read (no aapt2)")
+        _check(item, "the APK is %s (aapt2 did not run)" % item["package"], False)
     else:
         _check(item, "the APK is %s" % item["package"], b.get("package") == item["package"])
     return sig
@@ -511,7 +541,7 @@ def _finish(item):
     item["verified"] = item["error"] is None and bool(item["checks"]) and all(c["ok"] for c in item["checks"])
     if item["error"] is None and not item["verified"]:
         item["error"] = "not verified: " + ("; ".join(c["check"] for c in item["checks"] if not c["ok"])
-                                            or "nothing could be checked (no apksigner, no aapt2)")
+                                            or "nothing was checked")
     return item
 
 
@@ -816,7 +846,10 @@ def ui_summary(xml_text):
 def stream_records(lines):
     """Every stream in a tor-streams.txt transcript, with the index of the
     line that announced it: [{"line", "target", "kind", "purpose",
-    "statuses", "reason", "remaps"}]. Parsed as leak_analyser does."""
+    "statuses", "reason", "remote_reason", "remaps", "exit_remap"}].
+    Parsed as leak_analyser does. "reason" and "remote_reason" are the
+    last line's that gave a REASON; "exit_remap" is a REMAP with
+    SOURCE=EXIT (the exit's CONNECTED or RESOLVED cell)."""
     streams = {}
     order = []
     epoch = 0
@@ -834,34 +867,56 @@ def stream_records(lines):
         st = streams.get(key)
         if st is None:
             st = streams[key] = {"line": i, "target": None, "kind": None, "purpose": kv.get("PURPOSE", ""),
-                                 "statuses": [], "reason": None, "remaps": []}
+                                 "statuses": [], "reason": None, "remote_reason": None, "remaps": [],
+                                 "exit_remap": False}
             order.append(key)
         if status in ("NEW", "NEWRESOLVE") and st["target"] is None:
             st["target"] = target
             st["kind"] = "resolve" if status == "NEWRESOLVE" else "connect"
         elif status == "REMAP":
             st["remaps"].append(target)
+            st["exit_remap"] = st["exit_remap"] or kv.get("SOURCE") == "EXIT"
         if kv.get("PURPOSE"):
             st["purpose"] = kv["PURPOSE"]
         if kv.get("REASON"):
             st["reason"] = kv["REASON"]
+            st["remote_reason"] = kv.get("REMOTE_REASON")
         if not st["statuses"] or st["statuses"][-1] != status:
             st["statuses"].append(status)
     return [streams[k] for k in order if streams[k]["target"]]
 
 
-def _outcome(statuses):
-    """SUCCEEDED when the stream got that far (it is CLOSED later anyway),
-    else its last status."""
-    if "SUCCEEDED" in statuses:
-        return "SUCCEEDED"
-    return statuses[-1] if statuses else "?"
+def _outcome(st):
+    """What became of a stream, from what tor reports. tor sends SUCCEEDED
+    only to a SOCKS client: a TransPort stream that worked goes NEW,
+    SENTCONNECT, REMAP ... SOURCE=EXIT (the exit's CONNECTED cell), CLOSED
+    REASON=END REMOTE_REASON=DONE, and a DNSPort lookup NEWRESOLVE,
+    SENTRESOLVE, REMAP <address>, CLOSED REASON=DONE. So: CONNECTED for a
+    connection the exit made (its REMAP, a SUCCEEDED, or its DONE), RESOLVED
+    for a lookup tor answered with an address (a REMAP), else the reason tor
+    gave (the exit's for END: CONNECTREFUSED, EXITPOLICY...; tor's own:
+    PRIVATE_ADDR, TIMEOUT...), UNRESOLVED for a lookup closed without an
+    answer, or the last status of a stream still open when the transcript
+    ends."""
+    if st["kind"] == "resolve":
+        if st["remaps"]:
+            return "RESOLVED"
+    elif st["exit_remap"] or "SUCCEEDED" in st["statuses"] or (
+            st["reason"] == "END" and st["remote_reason"] == "DONE"):
+        return "CONNECTED"
+    reason = st["remote_reason"] if st["reason"] == "END" and st["remote_reason"] else st["reason"]
+    if st["kind"] == "resolve" and reason in (None, "DONE") and st["statuses"][-1:] in (["CLOSED"], ["FAILED"]):
+        return "UNRESOLVED"
+    if reason:
+        return reason
+    return st["statuses"][-1] if st["statuses"] else "?"
 
 
 def window_streams(streams, start, end):
     """(targets, resolves) of the streams announced in lines [start, end):
     what the phone asked of tor's TransPort, and the names tor resolved for
-    the DNS filter. tor's own streams (directory fetches) are left out."""
+    the DNS filter, each with its streams' outcomes (_outcome). tor's own
+    streams (directory fetches) are left out."""
     targets, resolves = {}, {}
     for st in streams:
         if not start <= st["line"] < end:
@@ -869,7 +924,7 @@ def window_streams(streams, start, end):
         if st["purpose"] in la.TOR_INTERNAL_PURPOSES or st["target"].startswith(("(", "$")):
             continue
         host, port = la._split_target(st["target"])
-        out = _outcome(st["statuses"])
+        out = _outcome(st)
         if st["kind"] == "resolve":
             r = resolves.setdefault(la.normalise_name(host), {"name": la.normalise_name(host), "count": 0,
                                                               "outcomes": {}})
@@ -1023,13 +1078,14 @@ def shot_name(shots, stem):
 def _store_loaded(item, ui, targets, queries, hosts):
     """A store's catalogue counts as loaded through Tor when its screen
     shows a catalogue (CATALOGUE_TEXTS distinct texts or more, no network
-    error), its own names were resolved through Tor, and tor connected the
-    phone somewhere in that window."""
+    error), its own names were resolved through Tor (the filter forwarded
+    them and tor answered with addresses: not "forwarded nxdomain"), and
+    tor connected the phone somewhere in that window (a CONNECTED stream)."""
     own = [q["name"] for q in queries if any(q["name"] == h or q["name"].endswith("." + h) for h in hosts)
-           and any(d.startswith("forwarded") for d in q["decisions"])]
-    connected = sum(t["outcomes"].get("SUCCEEDED", 0) for t in targets)
+           and "forwarded" in q["decisions"]]
+    connected = sum(t["outcomes"].get("CONNECTED", 0) for t in targets)
     signals = {"ui_texts": ui["count"], "ui_error": ui["error"], "own_names_through_tor": own[:10],
-               "tor_streams_succeeded": connected}
+               "tor_streams_connected": connected}
     loaded = ui["count"] >= CATALOGUE_TEXTS and not ui["error"] and bool(own) and connected > 0
     return loaded, signals
 
@@ -1081,6 +1137,9 @@ def build_item(rec, dl, root, streams, filter_lines):
         "taps": [t for t in (rec.get("taps") or "").split("; ") if t],
         "names": queries,
         "blocked": [q["name"] for q in queries if any(d.startswith("blocked") for d in q["decisions"])],
+        # The filter logs every SERVFAIL it answers as "servfail (...)": its
+        # own failures ("servfail (timeout)"), tor's SERVFAIL or REFUSED
+        # ("servfail (rcode RCodeServerFailure)") and a malformed reply.
         "servfail": [q["name"] for q in queries if any(d.startswith("servfail") for d in q["decisions"])],
         "tor_targets": targets,
         "tor_resolves": resolves,
@@ -1331,8 +1390,8 @@ def main(argv=None):
     f = sub.add_parser("fetch")
     f.add_argument("--catalogue", required=True)
     f.add_argument("--out", required=True)
-    f.add_argument("--apksigner")
-    f.add_argument("--aapt2")
+    f.add_argument("--apksigner", required=True, help="apksigner (build tools): no APK is verified without it")
+    f.add_argument("--aapt2", required=True, help="aapt2 (build tools): no APK is verified without it")
     f.add_argument("--abi", action="append")
     f.add_argument("--sdk", type=int, default=36)
     f.add_argument("--stores", default="fdroid,aptoide,taptap")
@@ -1378,7 +1437,7 @@ def main(argv=None):
             print("applab: %s: %s" % (a.catalogue, e), file=sys.stderr)
             return 1
         for tool in (a.apksigner, a.aapt2):
-            if tool and not os.access(tool, os.X_OK):
+            if not os.access(tool, os.X_OK):
                 print("applab: %s is not an executable" % tool, file=sys.stderr)
                 return 1
         stores = tuple(s for s in a.stores.split(",") if s)

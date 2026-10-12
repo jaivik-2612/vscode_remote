@@ -198,11 +198,14 @@ filter_at() {
 	echo "${n:-0}"
 }
 
-# succeeded_since LINE: tor connected the phone somewhere (a TransPort
-# stream reached SUCCEEDED) after line LINE of tor's STREAM events.
-succeeded_since() {
+# connected_since LINE: tor connected the phone somewhere after line LINE
+# of tor's STREAM events: a TransPort stream that the exit's CONNECTED cell
+# remapped (REMAP ... SOURCE=EXIT). tor sends SUCCEEDED only to SOCKS
+# clients, never for a TransPort stream; the REMAPs of DNSPort lookups
+# (CLIENT_PROTOCOL=DNS) do not count.
+connected_since() {
 	tail -n +"$(($1 + 1))" "$SDIR/tor-streams.txt" 2>/dev/null |
-		grep -q -E '^650 STREAM [0-9]+ SUCCEEDED [0-9]+ [^ ]+:[1-9][0-9]*( |$)'
+		grep -q -E '^650 STREAM [0-9]+ REMAP [0-9]+ [^ ]+:[1-9][0-9]* SOURCE=EXIT .*CLIENT_PROTOCOL=TRANS( |$)'
 }
 
 # store_wait LINE: up to STORE_WAIT seconds for a store's catalogue: the
@@ -227,7 +230,7 @@ store_wait() {
 			sleep 3
 			continue
 		fi
-		if [ "${count:-0}" -ge 12 ] && [ "${err:--}" = - ] && succeeded_since "$from"; then
+		if [ "${count:-0}" -ge 12 ] && [ "${err:--}" = - ] && connected_since "$from"; then
 			LOADED=yes
 			# A moment for the pictures.
 			sleep 5
@@ -332,14 +335,16 @@ run_items() {
 }
 
 # The downloads, on the CI runner (the workflow fetches them before the
-# emulator starts; by hand they are fetched here).
+# emulator starts; by hand they are fetched here). apksigner and aapt2 check
+# every APK: without them nothing would be verified.
 downloads() {
 	if [ ! -s "$DL/downloads.json" ]; then
+		if [ ! -x "$APKSIGNER" ] || [ ! -x "$AAPT2" ]; then
+			abort applab_tools "no apksigner or aapt2 at $APKSIGNER, $AAPT2 (build tools 36.0.0; or set ANTUMBRA_APPLAB_APKSIGNER and ANTUMBRA_APPLAB_AAPT2)"
+		fi
 		say "fetching the stores and apps into $DL"
-		local tools=()
-		[ -x "$APKSIGNER" ] && tools+=(--apksigner "$APKSIGNER")
-		[ -x "$AAPT2" ] && tools+=(--aapt2 "$AAPT2")
-		"${APPLAB[@]}" fetch --catalogue "$CATALOGUE" --out "$DL" --abi x86_64 --sdk 36 --budget 420 "${tools[@]}" ||
+		"${APPLAB[@]}" fetch --catalogue "$CATALOGUE" --out "$DL" --abi x86_64 --sdk 36 --budget 420 \
+			--apksigner "$APKSIGNER" --aapt2 "$AAPT2" ||
 			abort applab_fetch "applab.py fetch failed (is $CATALOGUE well formed?)"
 	fi
 	cp "$DL/downloads.json" "$SDIR/downloads.json"
