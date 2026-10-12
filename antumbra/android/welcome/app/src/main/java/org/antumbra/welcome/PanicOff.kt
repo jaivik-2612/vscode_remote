@@ -9,8 +9,13 @@ import android.util.Log
 import java.io.File
 
 /**
- * Emergency off, from the Quick Settings tile, the session notification and
- * the status screen.
+ * Panic off, from the Quick Settings tile, the session notification and
+ * the status screen. (It was called "Emergency off"; it switches the phone
+ * off and has nothing to do with emergency calls, see [EmergencyCall].)
+ *
+ * It never cuts an emergency call short: during a call, in emergency
+ * callback mode and for a while after any call it refuses, and says why
+ * ([CallWatch]). The power menu's Power off is never held.
  *
  * A device owner cannot power the phone off: the only power action Android
  * gives it is DevicePolicyManager.reboot(). A real power-off needs the
@@ -22,7 +27,7 @@ import java.io.File
  *    a confirmation dialog.
  * 2. Without it: write [POWEROFF_MARKER] in device-protected storage, then
  *    reboot. The module is asked to power the phone off early in the next
- *    boot when it finds the marker (README, "Emergency off"). A restart
+ *    boot when it finds the marker (README, "Panic off"). A restart
  *    alone ends the session, but memory keeps traces for a short while.
  *
  * The marker is not deleted at boot, where Welcome would race the module.
@@ -31,8 +36,8 @@ import java.io.File
  * process did not ask for, so a request the module did not act on never
  * powers off a later boot.
  */
-object Emergency {
-    private const val TAG = "AntumbraEmergency"
+object PanicOff {
+    private const val TAG = "AntumbraPanic"
 
     /** In /data/user_de/0/org.antumbra.welcome/files/. */
     const val POWEROFF_MARKER = "poweroff-requested"
@@ -61,11 +66,18 @@ object Emergency {
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
     /**
-     * Powers off, or restarts. Returns only if neither was possible, with
-     * the reason. [startShutdown] starts the shutdown intent; the tile
-     * passes its own starter (startActivityAndCollapse).
+     * Powers off, or restarts. Returns only if neither was possible, or
+     * while a call or its callback period holds Panic off, with the reason.
+     * [startShutdown] starts the shutdown intent; the tile passes its own
+     * starter (startActivityAndCollapse).
      */
     fun trigger(context: Context, startShutdown: (Intent) -> Unit = { context.startActivity(it) }): String {
+        // Before anything is changed: a held Panic off leaves the session
+        // exactly as it was.
+        CallWatch.holdMessage(context)?.let {
+            Log.i(TAG, "held: a call, emergency callback mode, or a call that ended a short while ago")
+            return it
+        }
         val inSession = Session.current().started
         if (canPowerOff(context)) {
             // The next boot must show Welcome even if the shutdown

@@ -36,9 +36,9 @@ stops it.
   - `leak-report.md` and `leak-report.json`: both scenarios, every flow,
     the armed window, and the names and destinations reached through Tor
   - `screenshots/`: `baseline-home.png`, and `antumbra-welcome-1.png`,
-    `-welcome-2-choices.png`, `-status-1-started.png`,
-    `-status-2-bootstrapped.png`, `-status-3-after-tracker-test.png`
-    (`-final.png` after a failure)
+    `-welcome-emergency-dialer.png`, `-welcome-2-choices.png`,
+    `-status-1-started.png`, `-status-2-bootstrapped.png`,
+    `-status-3-after-tracker-test.png` (`-final.png` after a failure)
   - `baseline/` and `antumbra/`: `events.tsv`, `checks.tsv`, `analysis.json`,
     `guest-links.txt` (the guest's `ip -o link` and `ip -o addr`, which
     name the interfaces of the capture inside the guest);
@@ -147,8 +147,20 @@ that the captures must show traffic from the phone.
    testOnly builds; Welcome then leaves USB debugging on; `welcome/README.md`,
    "Test hook"); `dpm set-device-owner`; Welcome as the home app;
    screenshots.
-6. The choices, tapped where `uiautomator dump` shows them (by the test
-   tags in `welcome/README.md`, else by their text): Tor directly, new
+6. Emergency calls before Start (WEL7), check `welcome_emergency_dialer`:
+   `welcome/ci/welcome-adb.sh check-emergency` opens the emergency dialer
+   from Welcome's lock task, with Welcome's Emergency call button and with
+   `am start` in a task of its own (as the power menu does), checks in
+   `dumpsys activity activities` that the dialer is in front, presses Back
+   and checks that Welcome is in front again and its lock task still
+   `LOCKED`. It never dials: it touches nothing in the dialer and requires
+   an idle call state before and after each opening (a dump without a call
+   state fails the check). When it fails, the run starts WelcomeActivity
+   again (singleTask: its locked task comes to the front) and goes on;
+   `welcome_emergency_recover` warns if Welcome did not come back. Then the
+   choices, tapped where
+   `uiautomator dump` shows them (by the test tags in
+   `welcome/README.md`, else by their text): Tor directly, new
    Wi-Fi address, **Administration off** (the default session a user gets),
    Unsafe Browser off; then "Start Antumbra". adb must still answer; the
    provider row must say `started=1`, `tor_mode=direct` and `admin=0`.

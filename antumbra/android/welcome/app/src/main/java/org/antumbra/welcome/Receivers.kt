@@ -8,6 +8,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import android.widget.Toast
 import kotlin.concurrent.thread
 
 /** The device-admin receiver named in 'dpm set-device-owner org.antumbra.welcome/.AdminReceiver'. */
@@ -36,11 +37,15 @@ class BootReceiver : BroadcastReceiver() {
     }
 }
 
-/** The session notification's "Emergency off" action. */
-class EmergencyReceiver : BroadcastReceiver() {
+/** The session notification's "Panic off" action. */
+class PanicReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val problem = Emergency.trigger(context)
-        if (problem.isNotEmpty()) Log.w("AntumbraEmergency", problem)
+        val problem = PanicOff.trigger(context)
+        if (problem.isNotEmpty()) {
+            Log.w("AntumbraPanic", problem)
+            // Why it did not switch off (a call, for example), where the person looks.
+            Toast.makeText(context, problem, Toast.LENGTH_LONG).show()
+        }
     }
 }
 
@@ -81,13 +86,18 @@ object BootState {
         }
         // A fresh device owner: no power-off request can be meant for it.
         // At boot the marker stays, for the module to find.
-        if (why == DevicePolicyManager.ACTION_DEVICE_OWNER_CHANGED) Emergency.clearRequest(context)
+        if (why == DevicePolicyManager.ACTION_DEVICE_OWNER_CHANGED) PanicOff.clearRequest(context)
         val failures = policies.applyBaseline() +
             policies.lockWifiOff(waitMs = Policies.WIFI_WAIT_MS) +
             policies.forgetWifiNetworks()
         try {
             Home.claim(context)
-            Home.showWelcome(context)
+            // Not over a call's screen (BOOT_COMPLETED comes after the first
+            // unlock, which may be during an emergency call made from the
+            // keyguard): the call screen stays in front, and Welcome, still
+            // home, comes back when the call screen closes.
+            if (CallWatch.inCall(context)) Log.i(TAG, "$why: a call is in progress; Welcome stays behind it")
+            else Home.showWelcome(context)
         } catch (e: Exception) {
             Log.w(TAG, "$why: could not show Welcome", e)
         }
@@ -105,7 +115,7 @@ object BootState {
         if (!policies.isDeviceOwner) return
         // A shutdown this process did not ask for: a power-off request left
         // from an earlier boot must not power off the next one.
-        if (!Emergency.requested) Emergency.clearRequest(context)
+        if (!PanicOff.requested) PanicOff.clearRequest(context)
         try {
             Home.claim(context)
         } catch (e: Exception) {

@@ -36,10 +36,14 @@
 #   5. The Welcome APK; the debug build's test hook debug.antumbra.keep_adb=1
 #      (Welcome then leaves USB debugging on; see welcome/README.md, "Test
 #      hook"); 'dpm set-device-owner'; Welcome as the home app.
-#   6. The choices, tapped where uiautomator finds them: Tor directly, new
-#      Wi-Fi address on, Administration OFF (the default session), Unsafe
-#      Browser off. Then "Start Antumbra". adb must still answer; the
-#      provider row must say started=1 and tor_mode=direct.
+#   6. Before Start, emergency calls from Welcome's lock task (check
+#      welcome_emergency_dialer): the emergency dialer opens from Welcome's
+#      button and in a task of its own, and Back returns to Welcome, still
+#      locked. Nothing is dialled. Then the choices, tapped where
+#      uiautomator finds them: Tor directly, new Wi-Fi address on,
+#      Administration OFF (the default session), Unsafe Browser off. Then
+#      "Start Antumbra". adb must still answer; the provider row must say
+#      started=1 and tor_mode=direct.
 #   7. Wi-Fi joined as a person would ('cmd wifi connect-network AndroidWifi
 #      open'); Wi-Fi must become the default network. Welcome's policies and
 #      its status screen are checked with welcome/ci/welcome-adb.sh.
@@ -313,6 +317,33 @@ install_welcome() {
 	event welcome_installed
 }
 
+# welcome_emergency: before Start, with Welcome in its lock task, the
+# emergency dialer opens from Welcome's Emergency call button and in a task
+# of its own (as the power menu opens it), and Back returns to Welcome, still
+# locked (welcome-adb.sh check-emergency; WEL7). Nothing is dialled: the
+# check touches nothing in the dialer.
+welcome_emergency() {
+	if timeout 180 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-emergency \
+		--screenshot "$SHOTS/$SCEN-welcome-emergency-dialer.png" >"$LOGS/$SCEN-welcome-emergency.txt" 2>&1; then
+		check welcome_emergency_dialer ok "$(tail -n 1 "$LOGS/$SCEN-welcome-emergency.txt")"
+	else
+		check welcome_emergency_dialer fail "$(grep -v '^$' "$LOGS/$SCEN-welcome-emergency.txt" | tail -n 3 | tr '\n' ';')"
+		screenshot welcome-emergency-failed
+		# Welcome back in front for the rest of the run, whatever the check
+		# left (the dialer still open after Back, the keyguard up, the lock
+		# task ended). WelcomeActivity is singleTask: this brings its task to
+		# the front and finishes anything stacked above it there, and the
+		# locked task's own activity may always start. Nothing in the dialer
+		# is touched.
+		wake_screen
+		ash "am start -n $PKG/.WelcomeActivity" >/dev/null 2>&1
+		ui_wait start_button 30 'Start Antumbra' ||
+			check welcome_emergency_recover warn "Welcome did not come back after the emergency dialer check"
+	fi
+	# A failed screen capture leaves an empty file.
+	[ -s "$SHOTS/$SCEN-welcome-emergency-dialer.png" ] || rm -f "$SHOTS/$SCEN-welcome-emergency-dialer.png"
+}
+
 welcome_start() {
 	ui_wait start_button 120 'Start Antumbra' || {
 		screenshot welcome-missing
@@ -320,6 +351,7 @@ welcome_start() {
 	}
 	check welcome_screen ok
 	screenshot welcome-1
+	welcome_emergency
 	ui_tap tor_direct 'Connect to Tor directly' || abort welcome_choice "'Connect to Tor directly' not found"
 	ui_set_switch switch_mac true 'New Wi-Fi hardware address' || check welcome_mac warn "could not set the Wi-Fi address switch"
 	ui_set_switch switch_unsafe_browser false 'Unsafe Browser' || check welcome_unsafe warn "could not find the Unsafe Browser switch off"

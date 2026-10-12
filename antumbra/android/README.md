@@ -54,8 +54,8 @@ work queue is `docs/queue.md`.
   (deleted at the next) (`docs/threat-model.md`).
 - **Planned, not in v0:** a throwaway Android user for each session, Persistent
   Storage, Tor Browser and other apps with their own Tor, a signed app
-  repository, time over Tor, the emergency power-off as a privileged app
-  (`docs/queue.md`).
+  repository, time over Tor, a real power-off for Panic off (Welcome as a
+  privileged app) (`docs/queue.md`).
 
 ## What it is not
 
@@ -111,7 +111,7 @@ work queue is `docs/queue.md`.
 | Firewall | `antumbra-fw`: `arm`, `apply`, `status`, `flush` | root, one-shot | `firewall/` |
 | tor | The system tor, built for Android (API 29 and later) from pinned sources with one small Antumbra patch (no `SO_REUSEADDR` on the DNSPort, so no app can share it; `tor/patches/`); TransPort, DNSPort and a control socket, no SOCKS port | uid 2950 | `tor/` |
 | DNS filter | `antumbra-dnsfilter`: the tracker filter in front of tor's DNSPort, and a read-only status page | uid 2951 | `dnsfilter/` |
-| Welcome | The device-owner app: the Welcome screen, the session's policies, the status screen, the emergency tile | an app in user 0 | `welcome/` |
+| Welcome | The device-owner app: the Welcome screen, the session's policies, the status screen, the Emergency call button, the Panic off tile | an app in user 0 | `welcome/` |
 | Apps | Tor Browser and curated privacy apps from a signed repository | apps | planned (`docs/queue.md`, W9) |
 
 This is Stage 1. Stage 2, if build capacity is approved, moves the same

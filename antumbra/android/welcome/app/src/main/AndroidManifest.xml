@@ -16,17 +16,28 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The session service keeps the choices in memory until shutdown and
-         shows the ongoing "Emergency off" notification. -->
+         shows the ongoing notification with "Panic off". -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Only for "Return to call" before Start (TelecomManager.showInCallScreen,
+         EmergencyCall.kt). Welcome grants it to itself as the device owner. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- Granted only if the Antumbra module installs this app as a
          privileged app with a privapp-permissions allowlist entry. Then
-         Emergency off powers off; otherwise it can only restart
+         Panic off powers off; otherwise it can only restart
          (DevicePolicyManager.reboot). -->
     <uses-permission
         android:name="android.permission.SHUTDOWN"
         tools:ignore="ProtectedPermissions" />
+
+    <!-- The "Emergency call" button looks up the system's emergency dial
+         pad (EmergencyCall.kt); without this, package visibility hides it. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL_EMERGENCY" />
+        </intent>
+    </queries>
 
     <application
         android:name=".WelcomeApp"
@@ -105,10 +116,10 @@
             </intent-filter>
         </receiver>
 
-        <!-- The notification's "Emergency off" action (explicit, from this
+        <!-- The notification's "Panic off" action (explicit, from this
              app only). -->
         <receiver
-            android:name=".EmergencyReceiver"
+            android:name=".PanicReceiver"
             android:directBootAware="true"
             android:exported="false" />
 
@@ -132,11 +143,11 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the privacy session's choices in memory until shutdown and offers emergency power-off." />
+                android:value="Keeps the privacy session's choices in memory until shutdown and offers an immediate power-off (Panic off)." />
         </service>
 
         <service
-            android:name=".EmergencyTileService"
+            android:name=".PanicTileService"
             android:directBootAware="true"
             android:exported="true"
             android:icon="@drawable/ic_power"

@@ -52,17 +52,24 @@ data class WelcomeUi(
     val starting: Boolean = false,
     /** Why Start was refused (not the device owner, a protection failed, a session already held). */
     val startError: String? = null,
+    /** Why the emergency dial pad, or the call screen, did not open. */
+    val emergencyError: String? = null,
+    /** A call is in progress: "Return to call" is shown. */
+    val inCall: Boolean = false,
 )
 
 /**
  * Screen 1: the session choices, as Tails' Welcome Screen asks them, and a
- * large "Start Antumbra" button that stays on screen.
+ * large "Start Antumbra" button that stays on screen, with "Emergency call"
+ * above it, and "Return to call" above that during a call.
  */
 @Composable
 fun WelcomeScreen(
     ui: WelcomeUi,
     onChoices: (Choices) -> Unit,
     onStart: () -> Unit,
+    onEmergencyCall: () -> Unit,
+    onReturnToCall: () -> Unit,
     scrollState: ScrollState = rememberScrollState(),
 ) {
     val c = ui.choices
@@ -165,7 +172,8 @@ fun WelcomeScreen(
             Spacer(Modifier.height(24.dp))
         }
 
-        // The Start button stays visible above the navigation bar and the keyboard.
+        // The Start button stays visible above the navigation bar and the
+        // keyboard, and so does "Emergency call" above it.
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -174,6 +182,34 @@ fun WelcomeScreen(
                     .imePadding()
                     .padding(horizontal = 16.dp, vertical = 16.dp),
             ) {
+                if (ui.emergencyError != null) {
+                    Text(
+                        ui.emergencyError,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 480.dp)
+                            .padding(bottom = 12.dp),
+                    )
+                }
+                if (ui.inCall) {
+                    // Before Start the only way back to a call whose screen
+                    // has left the front (EmergencyCall.returnToCall).
+                    Button(
+                        onClick = onReturnToCall,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .widthIn(max = 480.dp)
+                            .height(56.dp)
+                            .testTag("return_to_call"),
+                    ) {
+                        Text(stringResource(R.string.return_to_call), style = MaterialTheme.typography.titleMedium)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                }
+                EmergencyCallButton(onEmergencyCall, Modifier.fillMaxWidth().widthIn(max = 480.dp))
+                Spacer(Modifier.height(12.dp))
                 if (ui.startError != null) {
                     Text(
                         ui.startError,

@@ -69,9 +69,12 @@ class WelcomeActivity : ComponentActivity() {
                     // the CI script can find the controls.
                     Box(Modifier.semantics { testTagsAsResourceId = true }) {
                         WelcomeScreen(
-                            ui = WelcomeModel.ui,
+                            // CallWatch follows the calls: "Return to call" while one is in progress.
+                            ui = WelcomeModel.ui.copy(inCall = CallWatch.callInProgress),
                             onChoices = { WelcomeModel.ui = WelcomeModel.ui.copy(choices = it, bridgeError = null) },
                             onStart = ::start,
+                            onEmergencyCall = ::emergencyCall,
+                            onReturnToCall = ::returnToCall,
                         )
                     }
                 }
@@ -107,6 +110,22 @@ class WelcomeActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         Home.lock(this)
+    }
+
+    /** Opens the emergency dial pad on top of Welcome, inside its locked task. */
+    private fun emergencyCall() {
+        val opened = EmergencyCall.open(this)
+        WelcomeModel.ui = WelcomeModel.ui.copy(
+            emergencyError = if (opened) null else getString(R.string.emergency_call_unavailable),
+        )
+    }
+
+    /** Brings the call screen back over Welcome during a call (the lock task keeps every other way off). */
+    private fun returnToCall() {
+        val asked = EmergencyCall.returnToCall(this)
+        WelcomeModel.ui = WelcomeModel.ui.copy(
+            emergencyError = if (asked) null else getString(R.string.return_to_call_failed),
+        )
     }
 
     private fun start() {
@@ -167,7 +186,7 @@ class WelcomeActivity : ComponentActivity() {
                 WelcomeModel.policyFailures = result.failed
                 WelcomeModel.wifiNotOn = result.wifiNotOn
                 // The module had its chance to act on a power-off request.
-                Emergency.clearRequest(this@WelcomeActivity)
+                PanicOff.clearRequest(this@WelcomeActivity)
                 Session.start(choices, bridges)
                 result
             }

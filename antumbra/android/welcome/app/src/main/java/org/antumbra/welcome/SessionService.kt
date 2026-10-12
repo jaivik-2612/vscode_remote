@@ -16,9 +16,8 @@ import android.os.IBinder
  * Runs in the foreground from Start until shutdown. It keeps this process
  * (and with it the session's choices, which exist only in memory) alive, so
  * that the state provider keeps answering started = 1, and so that the
- * shutdown broadcast reaches the app. Its ongoing notification carries an
- * "Emergency off" action, reachable from the notification shade at any
- * time.
+ * shutdown broadcast reaches the app. Its ongoing notification carries a
+ * "Panic off" action, reachable from the notification shade at any time.
  */
 class SessionService : Service() {
 
@@ -53,15 +52,15 @@ class SessionService : Service() {
                 Intent(context, StatusActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE,
             )
-            val emergency = PendingIntent.getBroadcast(
+            val panic = PendingIntent.getBroadcast(
                 context, 1,
-                Intent(context, EmergencyReceiver::class.java),
+                Intent(context, PanicReceiver::class.java),
                 PendingIntent.FLAG_IMMUTABLE,
             )
             val action = Notification.Action.Builder(
                 Icon.createWithResource(context, R.drawable.ic_power),
                 context.getString(R.string.tile_label),
-                emergency,
+                panic,
             ).setAuthenticationRequired(false).build()
             return Notification.Builder(context, CHANNEL)
                 .setSmallIcon(R.drawable.ic_launcher_monochrome)

@@ -558,6 +558,8 @@ class DailyTest(unittest.TestCase):
         self.assertEqual(daily.plain_check("wifi_mac_new", "warn"),
                          "The Wi-Fi hardware address did not change for the session")
         self.assertEqual(daily.plain_check("new_check", "fail"), "Not as expected: new check")
+        self.assertEqual(daily.plain_check("welcome_emergency_dialer", "fail"),
+                         "Emergency calls from the Welcome screen did not work as expected (nothing was dialled)")
         self.assertEqual(daily.plain_check("tracker_blocked:x.net", "ok"), "Tracker blocked: x.net")
 
     def test_odd_shapes_do_not_crash(self):

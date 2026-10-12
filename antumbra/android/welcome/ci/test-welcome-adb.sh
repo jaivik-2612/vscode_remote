@@ -4,7 +4,8 @@
 #
 # Runs welcome-adb.sh against a fake adb: the screen logic (finding
 # controls, typing bridge lines), the test hook rule, the provider checks
-# and check-policies / check-addon. No device or emulator needed.
+# and check-policies / check-addon / check-emergency. No device or emulator
+# needed.
 #
 #   ci/test-welcome-adb.sh        exit status 0 when every case passed
 
@@ -34,6 +35,34 @@ case "$*" in
         cat "$d/ui-$s.xml"
         if [ "$s" = status-checking ]; then echo status-bottom >"$d/screen"; fi ;;
     "shell am start -n org.antumbra.welcome/.StatusActivity") [ -s "$d/screen" ] && echo status-top >"$d/screen"; exit 0 ;;
+    # check-emergency: $d/front says what is in front (welcome or dialer),
+    # $d/lock the lock task's state and $d/calls the call state ("none":
+    # the dump has no call state); the lock task refuses the dialer opened
+    # by $d/refuse (button or am), with $d/stuck Back does not leave the
+    # dialer, with $d/droplock 'am start' ends the lock task, with
+    # $d/callafter Back finds a call, and with $d/nohandler no activity
+    # handles DIAL_EMERGENCY.
+    "shell cmd package query-activities --components -a android.intent.action.DIAL_EMERGENCY")
+        if [ -f "$d/nohandler" ]; then echo "No activities found"; else echo com.android.phone/.EmergencyDialer; fi ;;
+    "shell dumpsys activity activities")
+        r=org.antumbra.welcome/.WelcomeActivity
+        [ "$(cat "$d/front")" = dialer ] && r=com.android.phone/.EmergencyDialer
+        printf '%s\n' "  ResumedActivity: ActivityRecord{1f u0 $r t7}" '' 'ActivityTaskSupervisor state:' \
+            '  LockTaskController:' "    mLockTaskModeState=$(cat "$d/lock")" ;;
+    "shell dumpsys telephony.registry")
+        if [ "$(cat "$d/calls")" = none ]; then echo "Can't find service: telephony.registry"; exit 0; fi
+        printf '%s\n' 'last known state:' 'Phone Id=0' "  mCallState=$(cat "$d/calls")" ;;
+    "shell am start -n com.android.phone/.EmergencyDialer -a android.intent.action.DIAL_EMERGENCY")
+        if [ "$(cat "$d/refuse" 2>/dev/null)" = am ]; then echo "Error: Activity not started"; exit 0; fi
+        if [ -f "$d/droplock" ]; then echo NONE >"$d/lock"; fi
+        echo dialer >"$d/front"; echo "Starting: Intent { act=android.intent.action.DIAL_EMERGENCY }" ;;
+    "shell input tap "*)
+        if [ -f "$d/front" ] && [ "$(cat "$d/refuse" 2>/dev/null)" != button ]; then echo dialer >"$d/front"; fi ;;
+    "shell input keyevent KEYCODE_BACK")
+        if [ -f "$d/front" ] && [ ! -f "$d/stuck" ]; then echo welcome >"$d/front"; fi
+        if [ -f "$d/callafter" ]; then echo 2 >"$d/calls"; fi ;;
+    "shell wm dismiss-keyguard") exit 0 ;;
+    "exec-out screencap -p") printf '\211PNG\r\n\032\n' ;;
     "shell input swipe "*) [ "$(cat "$d/screen" 2>/dev/null)" = status-top ] && echo status-checking >"$d/screen"; exit 0 ;;
     "shell dumpsys window") echo "  mCurrentFocus=Window{1f u0 com.android.launcher3/com.android.launcher3.uioverride.QuickstepLauncher}" ;;
     "shell getprop antumbra.fw.armed") echo 0123abcd4567ef89 ;;
@@ -63,7 +92,7 @@ node() { printf '<node resource-id="%s" text="%s" checked="%s" bounds="[0,%d][10
     echo '<?xml version="1.0"?><hierarchy>'
     y=0
     for id in start_button tor_direct tor_bridges tor_offline bridges_custom bridges_text switch_admin \
-        switch_unsafe_browser status_title poweroff_button; do
+        switch_unsafe_browser status_title poweroff_button emergency_call; do
         node "$id" false "" $y
         y=$((y + 100))
     done
@@ -247,6 +276,89 @@ if "$script" check-policies --keep-adb 2>"$work/err"; then bad "check-policies p
     grep -q 'no effective restrictions for user 0' "$work/err" && pass "check-policies needs user 0's block" ||
         bad "check-policies without user 0: $(cat "$work/err")"
 fi
+
+# 7. check-emergency (WEL7), before Start: the dialer opens from Welcome's
+#    button and from 'am start', Back returns to Welcome, still locked, and
+#    nothing is dialled.
+emergency() { # STATE: lock calls; then the refuse, stuck, droplock, callafter, nohandler files as set by the case
+    echo welcome >"$work/front"
+    echo "$1" >"$work/lock"
+    echo "$2" >"$work/calls"
+    rm -f "$work/refuse" "$work/stuck" "$work/droplock" "$work/callafter" "$work/nohandler" "$work/dialer.png"
+    : >"$work/log"
+}
+emergency LOCKED 0
+if "$script" check-emergency --screenshot "$work/dialer.png" --wait 2 2>"$work/err"; then
+    [ "$(grep -c '^shell input tap ' "$work/log")" = 1 ] &&
+        grep -qx 'shell am start -n com.android.phone/.EmergencyDialer -a android.intent.action.DIAL_EMERGENCY' "$work/log" &&
+        [ "$(grep -c '^shell input keyevent KEYCODE_BACK$' "$work/log")" = 2 ] &&
+        [ "$(cat "$work/front")" = welcome ] &&
+        [ "$(head -c 4 "$work/dialer.png" | od -An -c | tr -d ' ')" = '211PNG' ] &&
+        grep -q 'nothing was dialled' "$work/err" &&
+        pass "check-emergency opens the dialer both ways and returns to Welcome" ||
+        bad "check-emergency: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-emergency failed: $(cat "$work/err")"
+fi
+# Nothing that could dial: no typed text, no call or digit keys, no number.
+if grep -Eq 'input text|KEYCODE_(CALL|ENDCALL|[0-9]|STAR|POUND|NUMPAD)|tel:|CALL_EMERGENCY|cmd phone|emergency-number' "$work/log"; then
+    bad "check-emergency sent something that could dial: $(cat "$work/log")"
+else
+    pass "check-emergency never dials"
+fi
+# The lock task refuses the dialer: the button, or a task of its own (no
+# LOCK_TASK_FEATURE_KEYGUARD).
+for way in button am; do
+    emergency LOCKED 0
+    echo "$way" >"$work/refuse"
+    if "$script" check-emergency --wait 2 2>"$work/err"; then bad "check-emergency passed with the $way refused"; else
+        how=$([ "$way" = am ] && echo am-start || echo button)
+        grep -q "did not come to the front from the lock task ($how; in front: org.antumbra.welcome/.WelcomeActivity; lock task: LOCKED" "$work/err" &&
+            pass "check-emergency fails when the lock task refuses the dialer ($how)" || bad "check-emergency, $way refused: $(cat "$work/err")"
+    fi
+done
+# Back does not leave the dialer.
+emergency LOCKED 0
+touch "$work/stuck"
+if "$script" check-emergency --wait 1 2>"$work/err"; then bad "check-emergency passed with the dialer stuck in front"; else
+    [ "$(grep -c '^shell input keyevent KEYCODE_BACK$' "$work/log")" = 3 ] &&
+        grep -q 'Welcome is not in front after Back from the emergency dialer (in front: com.android.phone/.EmergencyDialer)' "$work/err" &&
+        pass "check-emergency fails when Back does not return to Welcome" || bad "check-emergency, stuck: $(cat "$work/err")"
+fi
+# The lock task ends while the dialer is open (started in a task of its own).
+emergency LOCKED 0
+touch "$work/droplock"
+if "$script" check-emergency --wait 1 2>"$work/err"; then bad "check-emergency passed with the lock task ended"; else
+    grep -q "Welcome's lock task ended while the emergency dialer was open (lock task: NONE)" "$work/err" &&
+        pass "check-emergency fails when the lock task ends" || bad "check-emergency, lock dropped: $(cat "$work/err")"
+fi
+# A call appears after the first opening: fail, and never open the dialer again.
+emergency LOCKED 0
+touch "$work/callafter"
+if "$script" check-emergency --wait 1 2>"$work/err"; then bad "check-emergency passed with a call after the check"; else
+    grep -q 'a call is in progress after the check (button)' "$work/err" &&
+        ! grep -q '^shell am start -n com.android.phone' "$work/log" &&
+        pass "check-emergency fails when a call appears, and stops" || bad "check-emergency, call after: $(cat "$work/err")"
+fi
+# After Start (no lock task), with a call in progress, with no call state
+# to read, or with no emergency dialer: the dialer is never opened.
+for state in "NONE 0" "LOCKED 2" "LOCKED none" "LOCKED 0 nohandler"; do
+    # shellcheck disable=SC2086 # lock state and call state (a third word is the case's)
+    emergency $state
+    case $state in *nohandler) touch "$work/nohandler" ;; esac
+    if "$script" check-emergency --wait 1 2>"$work/err"; then bad "check-emergency passed with $state"; else
+        case $state in
+        "NONE 0") want='not in its lock task (lock task: NONE)' ;;
+        "LOCKED 2") want='a call is in progress; not opening' ;;
+        "LOCKED none") want='cannot read the call state' ;;
+        *) want='no activity handles android.intent.action.DIAL_EMERGENCY' ;;
+        esac
+        grep -qF "$want" "$work/err" &&
+            ! grep -Eq '^shell (input tap|am start -n com.android.phone)' "$work/log" &&
+            pass "check-emergency refuses to start ($state)" || bad "check-emergency with $state: $(cat "$work/err")"
+    fi
+done
+rm -f "$work/front"
 
 # 6. expect counts bridge lines.
 "$script" expect started=1 bridges=2 unsafe_browser=0 2>"$work/err" && pass "expect" || bad "expect: $(cat "$work/err")"

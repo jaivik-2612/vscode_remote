@@ -537,7 +537,7 @@ a public repository must never run on pull-request triggers.
 | `ro.debuggable=0`; debugging off in every session; adb settings reset at boot | `module/`, `welcome/` | debugging off and adb settings at 0 in every session, Administration included: done in Welcome (a test build's hook keeps adb, section 13); `ro.debuggable=0`, `adb_keys` and logging: todo (MOD4) |
 | Magisk app hidden outside updates | `welcome/` | todo |
 | Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the switch shown but disabled; the app W11 |
-| Emergency off powers off, not restarts | `welcome/`, `module/` | todo (v0 restarts) |
+| Panic off powers off, not restarts | `welcome/`, `module/` | todo (v0 restarts) |
 | System records moved to RAM (section 9) | `module/` | W8 |
 | Hidden networks refused; passphrase field without learning, `FLAG_SECURE` | `welcome/` | W10 |
 | Exempt apps: relays and bridges only, fail closed when stale | `firewall/`, helper | chain exists, empty (W9) |
@@ -572,7 +572,7 @@ These are decisions the parts took, each explained in its README:
   network Start**: Wi-Fi is set up by hand after Start until Persistent
   Storage brings networks back. They stay set before Start, in offline
   sessions and when the add-on is missing.
-- **The emergency tile restarts the phone** until Welcome is a privileged app
+- **The Panic off tile restarts the phone** until Welcome is a privileged app
   with `SHUTDOWN`, or the module carries out a power-off request.
 - **Only plain bridges work**: lyrebird (obfs4, WebTunnel, meek_lite) is not
   built yet; Snowflake is never accepted (it needs UDP).

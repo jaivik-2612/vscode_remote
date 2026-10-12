@@ -139,7 +139,7 @@ class Policies(private val context: Context) {
         if (choices.admin) {
             for (key in UNLESS_ADMIN) step(failures, key) { dpm.clearUserRestriction(admin, key) }
         }
-        // The session notification (Emergency off, progress).
+        // The session notification (Panic off, progress).
         step(failures, "notifications") {
             check(
                 dpm.setPermissionGrantState(

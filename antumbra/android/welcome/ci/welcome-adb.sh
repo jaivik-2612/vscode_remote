@@ -4,10 +4,10 @@
 # Drives the Antumbra Welcome app over adb, by hand or from a test script
 # (the CI emulator job has its own driver, antumbra/android/ci/
 # emulator-antumbra.sh, with the same test tags, and calls this script only
-# for 'check-policies --keep-adb' and 'check-addon'). It works the screen the
-# way a person does (uiautomator finds each control by its test tag, then
-# 'input tap'), and checks results through the state provider and the
-# system's own dumps.
+# for 'check-emergency', 'check-policies --keep-adb' and 'check-addon'). It
+# works the screen the way a person does (uiautomator finds each control by
+# its test tag, then 'input tap'), and checks results through the state
+# provider and the system's own dumps.
 #
 # Welcome switches USB debugging off as soon as it is the device owner, in
 # every session. Only a debug (debuggable, testOnly) build honours the test
@@ -41,8 +41,18 @@
 #   check-addon [SECONDS]     Fail unless the status screen's firewall row shows the rules
 #                             of antumbra.fw.armed (Welcome could read it). Opens the status
 #                             screen and scrolls to the row; gives up after SECONDS (60).
+#   check-emergency [--screenshot FILE.png] [--wait SECONDS]
+#                             Before Start, with Welcome in its lock task: open the
+#                             emergency dialer with Welcome's Emergency call button, then
+#                             with 'am start' in a task of its own (as the power menu does);
+#                             each time check the dialer is in front, press Back, and check
+#                             Welcome is in front and still locked. It never dials: it
+#                             touches nothing in the dialer, and no call may be in progress
+#                             before it starts or after each opening (a call state it cannot
+#                             read fails too). --screenshot saves the dialer's screen;
+#                             --wait: how long each screen may take to come up (15).
 #   screenshot FILE.png       Save the screen.
-#   emergency-tile            Add the Emergency off tile, click it, and wait until the
+#   panic-tile                Add the Panic off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
 #   remove                    Clear the test hook, remove the test device owner (testOnly
 #                             builds only) and the app.
@@ -53,7 +63,10 @@ set -euo pipefail
 
 PKG=org.antumbra.welcome
 ADMIN=$PKG/.AdminReceiver
-TILE=$PKG/.EmergencyTileService
+TILE=$PKG/.PanicTileService
+WELCOME=$PKG/.WelcomeActivity
+# Intent.ACTION_DIAL_EMERGENCY: the system's emergency dial pad.
+DIAL_EMERGENCY=android.intent.action.DIAL_EMERGENCY
 URI=content://org.antumbra.welcome.state/session
 UI_DUMP=/data/local/tmp/antumbra-welcome-ui.xml
 HOOK=debug.antumbra.keep_adb
@@ -369,7 +382,101 @@ cmd_check_addon() {
     die "the status screen's firewall row did not say Live within $seconds s (last: ${text:-not on screen})"
 }
 
-cmd_emergency_tile() {
+# The activity in front, as "package/.Class", from 'dumpsys activity
+# activities' ("  ResumedActivity: ActivityRecord{1f u0 pkg/.Class t12}").
+resumed() {
+    sh_ dumpsys activity activities |
+        sed -n 's/^ *ResumedActivity: ActivityRecord{[^ ]* u[0-9]* \([^ ]*\) .*/\1/p' | sed -n 1p || true
+}
+
+# LOCKED while Welcome holds its lock task (LockTaskController's dump).
+lock_state() {
+    sh_ dumpsys activity activities | sed -n 's/^ *mLockTaskModeState=//p' | sed -n 1p || true
+}
+
+# True while no phone has a call (TelephonyRegistry's mCallState, 0 = idle).
+# Fails closed: a dump without any call state (no service, a failed dump, a
+# renamed field) stops the check instead of counting as idle.
+calls_idle() {
+    local states
+    states=$(sh_ dumpsys telephony.registry | grep -o 'mCallState=[0-9]*' || true)
+    [ -n "$states" ] || die "cannot read the call state (no mCallState in dumpsys telephony.registry)"
+    ! grep -qv '^mCallState=0$' <<<"$states"
+}
+
+# Waits until $1 is the activity in front; gives up after $2 seconds.
+wait_resumed() {
+    local want=$1 end=$((SECONDS + $2))
+    while [ $SECONDS -lt $end ]; do
+        [ "$(resumed)" = "$want" ] && return 0
+        sleep 1
+    done
+    return 1
+}
+
+# Presses Back until Welcome is in front again (the dialer may need more
+# than one), waiting up to $1 seconds after each, then checks that its lock
+# task held.
+back_to_welcome() {
+    local i
+    for i in 1 2 3; do
+        a shell input keyevent KEYCODE_BACK
+        wait_resumed "$WELCOME" "$1" && break
+    done
+    [ "$(resumed)" = "$WELCOME" ] || die "Welcome is not in front after Back from the emergency dialer (in front: $(resumed))"
+    [ "$(lock_state)" = LOCKED ] || die "Welcome's lock task ended while the emergency dialer was open (lock task: $(lock_state))"
+}
+
+# WEL7. Never dials: nothing in the dialer is touched, no number is typed,
+# and the call state must be idle before and after.
+cmd_check_emergency() {
+    local shot='' wait=15 dialers first how out='' end now
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --screenshot) shot=$2; shift ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-emergency: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $wait in '' | *[!0-9]*) die "check-emergency: --wait takes a number of seconds" ;; esac
+    dialers=$(sh_ cmd package query-activities --components -a "$DIAL_EMERGENCY" | grep / || true)
+    [ -n "$dialers" ] || die "no activity handles $DIAL_EMERGENCY"
+    first=$(head -n 1 <<<"$dialers")
+    # The keyguard may be up (LOCK_TASK_FEATURE_KEYGUARD lets it show).
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    wait_for start_button 60
+    [ "$(resumed)" = "$WELCOME" ] || die "Welcome is not in front (in front: $(resumed))"
+    [ "$(lock_state)" = LOCKED ] || die "Welcome is not in its lock task (lock task: $(lock_state)); this check needs the state before Start"
+    calls_idle || die "a call is in progress; not opening the emergency dialer"
+    for how in button am-start; do
+        if [ "$how" = button ]; then
+            tap emergency_call
+        else
+            # A task of its own, as the power menu starts it: the lock task lets
+            # it in only with LOCK_TASK_FEATURE_KEYGUARD.
+            out=$(sh_ am start -n "$first" -a "$DIAL_EMERGENCY" 2>&1 || true)
+        fi
+        end=$((SECONDS + wait))
+        while [ $SECONDS -lt $end ]; do
+            now=$(resumed)
+            grep -qxF "$now" <<<"$dialers" && break
+            sleep 1
+        done
+        grep -qxF "$now" <<<"$dialers" ||
+            die "the emergency dialer did not come to the front from the lock task ($how; in front: ${now:-nothing}; lock task: $(lock_state)${out:+; am: $(tr '\n' ' ' <<<"$out")})"
+        say "the emergency dialer $now is in front ($how)"
+        if [ -n "$shot" ] && [ "$how" = button ]; then a exec-out screencap -p >"$shot" || true; fi
+        back_to_welcome "$wait"
+        say "Welcome is in front again and still locked"
+        # Never open the dialer again after a call appeared.
+        calls_idle || die "a call is in progress after the check ($how)"
+    done
+    say "the emergency dialer opens from Welcome's lock task (its button, and a task of its own); nothing was dialled"
+}
+
+cmd_panic_tile() {
     local before after end
     before=$(sh_ cat /proc/sys/kernel/random/boot_id)
     a shell cmd statusbar add-tile "$TILE" >/dev/null
@@ -384,10 +491,10 @@ cmd_emergency_tile() {
         fi
         sleep 3
     done
-    die "the device did not restart within 240 s of Emergency off"
+    die "the device did not restart within 240 s of Panic off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,49p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,59p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -417,11 +524,12 @@ case "$command" in
     expect) cmd_expect "$@" ;;
     check-policies) cmd_check_policies "$@" ;;
     check-addon) cmd_check_addon "$@" ;;
+    check-emergency) cmd_check_emergency "$@" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"
         a exec-out screencap -p > "$1"
         ;;
-    emergency-tile) cmd_emergency_tile ;;
+    panic-tile) cmd_panic_tile ;;
     remove)
         a shell setprop "$HOOK" 0 || true
         a shell dpm remove-active-admin "$ADMIN" || true

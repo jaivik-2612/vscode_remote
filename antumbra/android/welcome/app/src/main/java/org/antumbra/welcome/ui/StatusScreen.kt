@@ -46,9 +46,9 @@ data class StatusUi(
     val policyFailures: List<String> = emptyList(),
     /** Wi-Fi should be on for this session but airplane mode kept it off. */
     val wifiNotOn: Boolean = false,
-    /** Emergency off powers off (true) or restarts (false). */
+    /** Panic off powers off (true) or restarts (false). */
     val canPowerOff: Boolean = false,
-    /** A message, such as why Emergency off failed (an error) or that the tile was added. */
+    /** A message, such as why Panic off failed or waits (an error) or that the tile was added. */
     val message: String? = null,
     val messageIsError: Boolean = false,
 )
@@ -56,7 +56,7 @@ data class StatusUi(
 /**
  * Screen 2, after Start: Tor's bootstrap progress and the tracker filter's
  * counters, both read from http://127.0.0.1:5380/status, the session's
- * choices, and "Power off now".
+ * choices, "Emergency call" and "Power off now".
  */
 @Composable
 fun StatusScreen(
@@ -65,6 +65,7 @@ fun StatusScreen(
     onWifiSettings: () -> Unit,
     onAddTile: () -> Unit,
     onPowerOff: () -> Unit,
+    onEmergencyCall: () -> Unit,
     scrollState: ScrollState = rememberScrollState(),
 ) {
     Column(
@@ -84,13 +85,16 @@ fun StatusScreen(
             if (ui.session.started) Started(ui, onWifiSettings, onAddTile) else NotStarted(ui, onOpenWelcome)
             Spacer(Modifier.height(24.dp))
         }
-        // "Power off now" stays on screen, above the navigation bar.
+        // "Emergency call" and "Power off now" stay on screen, above the
+        // navigation bar.
         Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.fillMaxWidth()) {
             Column(
                 modifier = Modifier
                     .navigationBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 16.dp),
             ) {
+                EmergencyCallButton(onEmergencyCall, Modifier.fillMaxWidth())
+                Spacer(Modifier.height(12.dp))
                 PowerOff(ui, onPowerOff)
             }
         }
