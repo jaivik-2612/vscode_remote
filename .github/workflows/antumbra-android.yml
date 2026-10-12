@@ -32,7 +32,9 @@ name: Antumbra Android
 # A second emulator run on Android 16 QPR2 (36.1, google_apis: the Android
 # version of LineageOS 23.2, with Google services) does the same and does
 # not block the workflow. module-e2e runs the module's boot scripts as root
-# on Linux with the real firewall, tor and filter.
+# on Linux with the real firewall, tor and filter. The app lab (app-lab,
+# not blocking) installs real app stores and apps under Antumbra and
+# records what each did through Tor (artifact antumbra-android-apps-<n>).
 #
 # Artifact antumbra-android-<run number> (14 days, kept under 40 MB):
 # summary.md, verdict.json, leak-report.md and .json, screenshots/,
@@ -696,3 +698,135 @@ jobs:
       - name: Verdict
         if: ${{ !cancelled() }}
         run: python3 -B -I antumbra/android/ci/summary.py "$ANTUMBRA_CI_OUT" --check
+
+  # The app lab: real app stores (F-Droid, Aptoide, TapTap) and the apps of
+  # antumbra/android/ci/app-lab.txt on a virtual phone with more memory and
+  # storage, under Antumbra (Tor directly, Administration on so that apps
+  # may be installed), each started and given its time; what each did
+  # through Tor, and the leak analysis of the whole run with the ANTUMBRA
+  # rules (ci/README.md, "The app lab"). Every APK is downloaded on the
+  # runner from its store's official source and checked before it is
+  # installed. Not blocking: a failure here never turns the workflow red.
+  # Typically about 40 minutes, 45 at most before the analysis: the
+  # downloads (7 at most), the emulator (38 at most: boot, the session, no
+  # store or app started after 24 minutes of the script, the evidence), then
+  # the analysis and the artifact, within the job's 50.
+  app-lab:
+    name: app lab (stores and apps through Tor, not blocking)
+    needs: [module, welcome]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    continue-on-error: true
+    env:
+      ANTUMBRA_SERIAL: emulator-5554
+      ANTUMBRA_CI_IMAGE: android-36;default;x86_64
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test the app lab's helper
+        run: python3 -B -m unittest discover -s antumbra/android/ci/tests -p 'test_applab.py' -v
+
+      - name: Directories
+        run: |
+          {
+            echo "ANTUMBRA_CI_OUT=$RUNNER_TEMP/report"
+            echo "ANTUMBRA_CAPTURE_DIR=$RUNNER_TEMP/capture"
+            echo "ANTUMBRA_MODULE_TREE=$RUNNER_TEMP/module-tree"
+            echo "ANTUMBRA_WELCOME_APK=$RUNNER_TEMP/welcome/app-debug.apk"
+            echo "ANTUMBRA_APPLAB_DL=$RUNNER_TEMP/applab-downloads"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/report" "$RUNNER_TEMP/capture" "$RUNNER_TEMP/module-tree" "$RUNNER_TEMP/applab-downloads"
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-module-${{ github.run_number }}
+          path: ${{ runner.temp }}/module
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-welcome-${{ github.run_number }}
+          path: ${{ runner.temp }}/welcome
+
+      - name: The module zip (installed as it is; unpacked for the analyser)
+        run: |
+          zip=$(ls "$RUNNER_TEMP"/module/antumbra-module-*.zip)
+          echo "ANTUMBRA_MODULE_ZIP=$zip" >> "$GITHUB_ENV"
+          unzip -q "$zip" -d "$ANTUMBRA_MODULE_TREE"
+
+      # apksigner and aapt2 check every APK before it goes near the phone;
+      # ImageMagick turns the screenshots into small JPEGs.
+      - name: Build tools 36.0.0 and ImageMagick
+        run: |
+          bash antumbra/android/ci/sdk-install.sh build-tools
+          command -v convert >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends imagemagick; }
+
+      # 7 minutes for all the downloads: what is left then is recorded as not
+      # downloaded, and the lab goes on with the rest.
+      - name: Download and check the stores and apps (on the runner)
+        timeout-minutes: 10
+        run: |
+          bt="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/36.0.0"
+          python3 -B -I antumbra/android/ci/applab.py fetch --catalogue antumbra/android/ci/app-lab.txt \
+            --out "$ANTUMBRA_APPLAB_DL" --apksigner "$bt/apksigner" --aapt2 "$bt/aapt2" --abi x86_64 --sdk 36 \
+            --budget 420
+          du -sh "$ANTUMBRA_APPLAB_DL"
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # As the emulator job's, with more memory (6 GB, the runner has 16),
+      # a larger Java heap for the apps and 12 GB of storage for them.
+      - name: 'APPS: the session (Administration on), the stores, the apps'
+        timeout-minutes: 38
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
+        env:
+          ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/apps.pcap
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          cores: 3
+          ram-size: 6144M
+          heap-size: 576M
+          disk-size: 12G
+          emulator-build: 16428233
+          force-avd-creation: true
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -camera-back none -camera-front none -feature -WiFiPacketStream
+            -tcpdump ${{ runner.temp }}/capture/apps.pcap
+          script: bash antumbra/android/ci/emulator-apps.sh
+
+      - name: Leak analysis
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: bash antumbra/android/ci/analyse.sh
+
+      - name: apps.json, apps.md and the job summary
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -B -I antumbra/android/ci/applab.py build "$ANTUMBRA_CI_OUT" --run "${{ github.run_number }}" \
+            --downloads "$ANTUMBRA_APPLAB_DL/downloads.json" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the artifact under 60 MB
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -B -I antumbra/android/ci/citool.py pack "$ANTUMBRA_CI_OUT" --limit-mb 59 \
+            --optional 'capture/apps.pcap' --optional 'capture/apps-guest.pcap' \
+            --optional 'apps/dnsfilter.log' --optional 'logs/apps/*-ui.xml' \
+            --optional 'capture/apps.slim.pcap' --optional 'capture/apps-guest.slim.pcap'
+
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: antumbra-android-apps-${{ github.run_number }}
+          path: ${{ runner.temp }}/report
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: error

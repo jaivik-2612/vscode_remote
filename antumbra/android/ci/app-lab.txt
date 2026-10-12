@@ -1,0 +1,24 @@
+# Antumbra CI: the app lab's catalogue (emulator-apps.sh, applab.py).
+#
+# One app per line: STORE<TAB>PACKAGE<TAB>LABEL. STORE is fdroid (F-Droid's
+# main repository, f-droid.org) or aptoide (Aptoide's web service). Every APK
+# is downloaded on the CI runner from that store and checked before it is
+# installed (applab.py). Generic, well-known apps only; no account is ever
+# signed in to, and nothing is typed into any app.
+#
+# The two stores take turns, so that a run that runs out of time still tries
+# some of each. Package names checked in F-Droid's index-v2 and in Aptoide's
+# getMeta in October 2026. Not available then: Telegram (not on Aptoide;
+# Telegram FOSS no longer in F-Droid's main repository).
+
+fdroid	org.schabi.newpipe	NewPipe
+aptoide	com.whatsapp	WhatsApp
+fdroid	app.organicmaps	Organic Maps
+aptoide	com.spotify.music	Spotify
+fdroid	de.danoeh.antennapod	AntennaPod
+# Built for arm64-v8a only: installs only if the image translates ARM code.
+aptoide	com.instagram.android	Instagram
+fdroid	net.thunderbird.android	Thunderbird
+aptoide	com.discord	Discord
+fdroid	io.element.android.x	Element X
+aptoide	us.zoom.videomeetings	Zoom

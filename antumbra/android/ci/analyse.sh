@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Antumbra CI: run the leak analyser on both scenarios' captures and write
-# leak-report.json and leak-report.md, after the emulator has exited.
+# Antumbra CI: run the leak analyser on the scenarios' captures and write
+# leak-report.json and leak-report.md, after the emulator has exited: BASELINE
+# and ANTUMBRA in the emulator job, the app lab's scenario (apps) in the
+# app-lab job. A scenario without a capture is left out.
 #
 # Inputs (environment):
 #   ANTUMBRA_CI_OUT        the report directory the scenarios wrote; its
 #                          capture/<scenario>-guest.pcap is the capture
 #                          inside the guest (tcpdump -i any), and
 #                          <scenario>/guest-links.txt names its interfaces
-#   ANTUMBRA_CAPTURE_DIR   holds baseline.pcap and antumbra.pcap (-tcpdump:
-#                          the emulator's first network card, eth0)
+#   ANTUMBRA_CAPTURE_DIR   holds baseline.pcap and antumbra.pcap, or apps.pcap
+#                          (-tcpdump: the emulator's first network card, eth0)
 #   ANTUMBRA_MODULE_TREE   optional: the unpacked module, for bin/x86_64/tor
 #                          (tor's compiled-in fallback directories)
 #   ANTUMBRA_CI_DESTINATIONS  learning (default) or strict: whether a name or
@@ -88,11 +90,37 @@ else
 	echo "analyse: no antumbra capture" >&2
 fi
 
+# The app lab: real apps under Antumbra, judged by the same rules as
+# ANTUMBRA (anything after the arm cutoff that is not Tor or link-level is a
+# LEAK), without an armed window. Its apps reach names and destinations no
+# list expects: always listed, never failing (learning).
+P=$OUT/apps
+if [ ! -s "$P/consensus" ] && [ -s "$P/consensus.gz" ]; then
+	gzip -dc "$P/consensus.gz" >"$P/consensus" || rm -f "$P/consensus"
+fi
+if [ -s "$CAP/apps.pcap" ] || [ -s "$OUT/capture/apps-guest.pcap" ]; then
+	arm_event=install_start
+	grep -q "^post_fs_data_start$(printf '\t')" "$P/events.tsv" 2>/dev/null && arm_event=post_fs_data_start
+	args=(analyse --scenario apps --out "$P/analysis.json"
+		--arm-event "$arm_event" --require-tor-traffic
+		--expected-destinations "$HERE/expected-destinations.txt" --destinations-mode learning
+		--tor-streams "$P/tor-streams.txt" --filter-log "$P/dnsfilter.log")
+	captures apps
+	[ -s "$P/consensus" ] && args+=(--consensus "$P/consensus")
+	[ -s "$P/bridges.txt" ] && args+=(--bridges "$P/bridges.txt")
+	[ -f "$P/tor-connections.txt" ] && args+=(--expect-seen "$P/tor-connections.txt")
+	[ -s "$P/device-ipv4.txt" ] && args+=(--expect-guest "$P/device-ipv4.txt")
+	[ -s "$OUT/logs/apps-module.log" ] && args+=(--module-log "$OUT/logs/apps-module.log")
+	"${LA[@]}" "${args[@]}"
+	echo $? >"$P/analysis-exit"
+	inputs+=(--in "$P/analysis.json")
+fi
+
 if [ ${#inputs[@]} -gt 0 ]; then
 	"${LA[@]}" report "${inputs[@]}" --json "$OUT/leak-report.json" --md "$OUT/leak-report.md"
 fi
 
-for s in baseline antumbra; do
+for s in baseline antumbra apps; do
 	if [ -s "$CAP/$s.pcap" ]; then
 		"${LA[@]}" slim "$CAP/$s.pcap" "$OUT/capture/$s.slim.pcap" || true
 		cp "$CAP/$s.pcap" "$OUT/capture/$s.pcap"
@@ -101,7 +129,9 @@ for s in baseline antumbra; do
 		"${LA[@]}" slim "$OUT/capture/$s-guest.pcap" "$OUT/capture/$s-guest.slim.pcap" || true
 	fi
 done
-if [ -s "$A/consensus" ]; then
-	gzip -9 -c "$A/consensus" >"$A/consensus.gz" && rm -f "$A/consensus"
-fi
+for d in "$A" "$P"; do
+	if [ -s "$d/consensus" ]; then
+		gzip -9 -c "$d/consensus" >"$d/consensus.gz" && rm -f "$d/consensus"
+	fi
+done
 exit 0

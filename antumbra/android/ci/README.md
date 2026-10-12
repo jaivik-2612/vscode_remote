@@ -15,9 +15,11 @@ going. Every job has a time limit.
 | `module` | ubuntu-24.04 | shellcheck (`-s sh -x`) of every module script, `module/tests/unit.sh`, then `build-module.sh` with the outputs of the jobs above |
 | `module-e2e` | ubuntu-24.04 | `module/tests/e2e-host.sh` as root: the module's boot scripts on Linux with the real firewall, tor, DNS filter and `antumbra-run`, under Android 16's toybox and mksh and Magisk's busybox, built from the pins in `module/tests/build-test-tools.sh` (cached by that file's hash) |
 | `emulator` | ubuntu-24.04 with KVM | the two scenarios below, the leak analysis, the job summary, `verdict.json` and the artifact; twice: Android 16 (`android-36;default`, blocking) and Android 16 QPR2 (`android-36.1;google_apis`, the Android version of LineageOS 23.2, with Google services; `continue-on-error`) |
+| `app-lab` | ubuntu-24.04 with KVM | the app lab (below): real app stores and apps on a virtual phone with more memory, under Antumbra, through Tor; what each did, and the leak analysis of the whole run; `continue-on-error`, never blocking |
 
 `module` needs `firewall`, `dnsfilter`, `tor` and `welcome`; `module-e2e`
-needs `dnsfilter` and `tor`; `emulator` needs the first five.
+needs `dnsfilter` and `tor`; `emulator` needs the first five; `app-lab`
+needs `module` and `welcome`.
 
 `sdk-install.sh` installs the pinned NDK, platform 36 and build tools
 36.0.0 when the runner lacks them, and checks each afterwards. It answers
@@ -67,6 +69,13 @@ stops it.
     rules were hit), `/proc/net/stat/nf_conntrack`, and `nstat -asz` (or
     `/proc/net/netstat`) with `/proc/net/snmp`
   - `build/`: one note per build job
+- `antumbra-android-apps-<run number>` (14 days, kept under 60 MB): the app
+  lab's `apps.json` and `apps.md`, `screenshots/` (JPEGs 540 pixels wide:
+  `store-<name>`, `app-<package>`, `apps-home`, `apps-drawer` and the
+  session's screens), `apps/` (the scenario's events, checks, records,
+  downloads, tor's STREAM events, the filter's log, `analysis.json`),
+  `logs/apps/` (each item's install output, logcat and screen),
+  `leak-report.md` and `.json`, `capture/` (see "The app lab").
 - `antumbra-android-module-<n>` (the Magisk zip) and
   `antumbra-android-welcome-<n>` (the debug APK), 5 days; also
   `antumbra-android-tor-<n>`, `antumbra-android-dnsfilter-<n>` and
@@ -424,6 +433,116 @@ artifact is uploaded and fails the job afterwards with `summary.py --check`.
   Linux by `module-e2e`), a network change, IPv6 router advertisements,
   DHCP renewal over a long session, and the keep-alive offload check.
 
+## The app lab
+
+`app-lab` answers two questions with real apps: can a person install and
+use apps on Antumbra, through Tor, and does anything get past the firewall
+while they run? It is how the owner test-runs apps: there is no live
+emulator to hold, so the CI's virtual phone runs them and the artifact
+shows what happened, screen by screen. It never blocks the workflow
+(`continue-on-error`), and nothing it finds fails a run.
+
+**The phone.** The emulator job's image (Android 16, `android-36;default`,
+x86_64, no Google services), with more room for apps: `ram-size: 6144M`
+(the runner has 16 GB), `heap-size: 576M` and `disk-size: 12G`, inputs of
+the pinned `android-emulator-runner` v2.38.0. The emulator captures eth0
+as in the emulator job (`-tcpdump`, `capture/apps.pcap`).
+
+**Downloads, on the runner.** `applab.py fetch` runs before the emulator
+starts, 7 minutes at most (`--budget 420`: what is left then is recorded as
+not downloaded): every APK comes from its store's official source over
+HTTPS (curl, HTTPS only, redirects kept on HTTPS; a source slower than
+50 KB/s for a minute is given up for the next), and is checked before it
+goes near the phone. Every APK must verify with `apksigner` and be the package
+it claims to be (`aapt2 dump badging`); an item that fails any check is
+recorded with the reason and never installed.
+
+| Store | Its client | Apps from it | Checks |
+|---|---|---|---|
+| F-Droid | `f-droid.org/F-Droid.apk`, the file F-Droid's website hands out | `index-v2.json` from `f-droid.org/repo`: the version the client would suggest (the newest without a release channel, signed by the package's preferred signer, built for x86_64, for SDK 36); an HTTPS mirror from the index when f-droid.org fails or crawls | the index's SHA-256 is the one `entry.json` lists; each APK's SHA-256 is the index's, and its certificate one the index lists for that version; the client's SHA-256 is one the index lists for `org.fdroid.fdroid`, and its certificate F-Droid's own, pinned in `applab.py` (`43238d51…`) |
+| Aptoide | `cm.aptoide.pt` from Aptoide's own store `aptoide-web` (its website's) | Aptoide's web service, `ws75.aptoide.com/api/7/app/getMeta`: Aptoide's pick of the newest version | Aptoide's rank must be `TRUSTED` (the certificate is the one it knows for the developer); size and MD5 as listed; the certificate's SHA-1 as listed, among the certificates apksigner reports (a key rotated with APK Signature Scheme v3, as WhatsApp's, counts with its lineage). Aptoide publishes no checksum: SHA-256 and certificates are recorded. Split-only apps are skipped; an app that wants an OBB file is noted |
+| TapTap | the international client from `d.tap.io/latest`, the link of `taptap.io/download` | none | no published checksum: SHA-256 and certificates recorded; the certificate is compared with what Aptoide lists for `com.taptap.global` (noted, not required) |
+
+The apps are in `app-lab.txt` (`STORE<TAB>PACKAGE<TAB>LABEL`, `#` for
+comments): five well-known apps from F-Droid (NewPipe, Organic Maps,
+AntennaPod, Thunderbird, Element X) and five from Aptoide (WhatsApp,
+Spotify, Instagram, Discord, Zoom), taking turns. Instagram is built for
+arm64-v8a only and installs only if the image translates ARM code.
+`downloads.json` records, per item, the URL it came from, version, size,
+SHA-256, MD5, what it was checked against and how, every check with its
+result, the certificates, and why an item was not verified.
+
+**The session** (`emulator-apps.sh`; the ANTUMBRA scenario's functions,
+shared in `lib/common.sh`): `adb root`, tcpdump inside the guest (with a
+16 MB buffer), the clock marker, airplane mode, the module installed with
+`build-module.sh --emulator` and the filter's query log, tor's STREAM
+events recorded, mobile data off, Welcome as device owner, then Start with
+Tor directly, a new Wi-Fi address and **Administration on**: without it
+Welcome keeps `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY`, and Android
+refuses every install but the preinstalled store's. The provider row must
+say `admin=1`; `welcome-adb.sh check-policies --admin --keep-adb` checks
+that session's restrictions. Wi-Fi joined, tor's bootstrap (10 minutes at
+most), then the home screen (`apps-home`). The firewall and the filter
+are a normal session's: no app is exempted, and everything an app sends
+goes through Tor or is refused.
+
+**Each store, then each app**, in a window of its own: `adb install`
+(three minutes at most; the output kept), its launcher activity started
+(`am start -W`, else `monkey` with the LAUNCHER category), then
+
+- a store: up to 90 s for its catalogue: the screen shows one (twelve or
+  more distinct texts, no network error) and tor connected the phone since
+  the window began. A button that only dismisses a first-run screen (Skip,
+  Not now, Don't allow; four at most) is pressed; never one that signs in,
+  agrees, allows or continues;
+- an app: 45 s, and nothing on screen is touched;
+
+then a screenshot once the item's window has the input focus (10 s at
+most, else of whatever is in front: a permission dialog, a crash), its
+screen (`uiautomator dump`), whether its process still runs (`pidof`),
+`am force-stop`, and its logcat since the window began. The window
+records where tor's STREAM events and the filter's query log stood at its
+start and end. No item starts after 24 minutes of the script; one item
+never stops the others. At the end, the app drawer (`apps-drawer`), the
+ANTUMBRA scenario's evidence and checks, and both captures stopped.
+
+**`apps.json`** (`applab.py build`; schema in its docstring) has, per item:
+the download and its checks; installed, launched, running at the end,
+crashed (a `FATAL EXCEPTION` in its process, a native crash), not
+responding (ANR), and whether it asked for Google Play services (a logcat
+line or a screen that says so: common on this image, recorded as such);
+for a store, whether its catalogue loaded through Tor (its screen, its own
+names resolved through Tor, a stream that succeeded) with the signals;
+every name the filter was asked in the window, with its decisions
+(forwarded, blocked, SERVFAIL); the names tor resolved; the destinations
+asked of tor's TransPort with tor's outcome; the screenshot. Also the
+phone (ABIs, memory, free storage), the session (Tor's time, the checks)
+and the leak verdict. `apps.md` is the short summary, also the job's
+summary.
+
+**The leak test.** `analyse.sh` judges the scenario `apps` with the
+ANTUMBRA rules: after the arm cutoff, anything not to the Tor network
+(relays, directory authorities, fallback directories) and not link-level
+(ARP, DHCP, empty frames) is a LEAK, in either capture. There is no armed
+window. Every name and destination through Tor is listed against
+`expected-destinations.txt` in `learning` mode: real apps reach names no
+list expects. Real apps are a stress test of the firewall; the verdict
+goes into `apps.json` and `apps.md` and never fails the workflow.
+
+**Never.** No number is dialled and no SMS sent; no account is signed in
+to; nothing is typed into any app; no personal data is used. The
+catalogue is generic.
+
+**What it does not show.** The stores' own download and install flows are
+not driven: the APKs come from the runner, from the same sources. Most
+closed apps stop at a sign-in screen, and many want
+Google Play services, which this image does not have (LineageOS has none
+either, unless microG is added). Aptoide's pick may be an older version
+from one of its user stores; its rank, MD5 and certificate are checked,
+its age is not. ARM-only apps need the image's ARM translation (the
+phone's `ro.product.cpu.abilist` is in `apps.json`). The emulator is not
+the phone: no modem, no GPU drivers, and swiftshader draws the screen.
+
 ## The daily page
 
 `daily.py` turns one emulator run's artifact (unpacked `antumbra-android-<n>`),
@@ -490,12 +609,23 @@ python3 -B antumbra/android/ci/leak_analyser.py report --in phone.json \
 export ANTUMBRA_CI_OUT=/tmp/report ANTUMBRA_MODULE_ZIP=antumbra-module.zip \
     ANTUMBRA_WELCOME_APK=app-debug.apk
 bash antumbra/android/ci/emulator-antumbra.sh
+
+# The app lab's downloads and checks, on any Linux host with curl and the
+# build tools (apksigner, aapt2); then the scenario against a running
+# emulator (it fetches by itself when ANTUMBRA_APPLAB_DL has no
+# downloads.json), and apps.json from its report
+python3 -B -I antumbra/android/ci/applab.py fetch --catalogue antumbra/android/ci/app-lab.txt \
+    --out /tmp/applab --apksigner "$ANDROID_HOME/build-tools/36.0.0/apksigner" \
+    --aapt2 "$ANDROID_HOME/build-tools/36.0.0/aapt2"
+ANTUMBRA_APPLAB_DL=/tmp/applab bash antumbra/android/ci/emulator-apps.sh
+python3 -B -I antumbra/android/ci/applab.py build "$ANTUMBRA_CI_OUT"
 ```
 
 | File | What it is |
 |---|---|
 | `emulator-baseline.sh`, `emulator-antumbra.sh` | the two scenarios |
-| `lib/common.sh` | adb, uiautomator, events, checks, screenshots, logs; the clock marker, the device's clock, the capture inside the guest |
+| `emulator-apps.sh` | the app lab's scenario |
+| `lib/common.sh` | adb, uiautomator, events, checks, screenshots, logs; the clock marker, the device's clock, the capture inside the guest; the Antumbra session shared by ANTUMBRA and the app lab (the module, Welcome, Wi-Fi, tor's bootstrap and STREAM events, the evidence) |
 | `lib/tor-streams.sh` | runs on the device as uid 2950: records tor's STREAM events |
 | `analyse.sh` | runs the analyser on both captures after the emulator exits |
 | `pcapread.py` | the capture reader and decoder |
@@ -507,6 +637,8 @@ bash antumbra/android/ci/emulator-antumbra.sh
 | `sdk-install.sh` | the pinned NDK, platform 36 and build tools 36.0.0 |
 | `tests/test_ci.py` | unit tests with generated captures |
 | `tests/test_daily.py` | unit tests of `daily.py` with synthetic artifacts |
+| `applab.py`, `app-lab.txt` | the app lab's downloads and checks, its screen and log readers, `apps.json`; its catalogue |
+| `tests/test_applab.py`, `tests/fixtures/applab/` | unit tests of `applab.py`, with F-Droid's index, Aptoide's answers and apksigner's output recorded and trimmed |
 
 ## Contracts with the other parts
 
@@ -515,7 +647,9 @@ bash antumbra/android/ci/emulator-antumbra.sh
   `tor_direct`, `switch_mac`, `switch_admin`, `switch_unsafe_browser`,
   `start_button`, `status_title`, `row_firewall`; the provider row's
   `started`, `tor_mode` and `admin`; `welcome/ci/welcome-adb.sh -s SERIAL
-  check-policies --keep-adb` and `check-addon`. After Start with the add-on
+  check-policies --keep-adb` and `check-addon` (the app lab:
+  `check-policies --admin --keep-adb`, and `admin=1` after Start with
+  `switch_admin` on). After Start with the add-on
   present, Welcome switches Wi-Fi on and unlocks it.
 - **Module:** `build-module.sh --emulator --zip FILE --serial S
   --no-overlay`; `antumbra.fw.armed` = the first 16 hex digits of
