@@ -467,7 +467,18 @@ cmd_check_emergency() {
         grep -qxF "$now" <<<"$dialers" ||
             die "the emergency dialer did not come to the front from the lock task ($how; in front: ${now:-nothing}; lock task: $(lock_state)${out:+; am: $(tr '\n' ' ' <<<"$out")})"
         say "the emergency dialer $now is in front ($how)"
-        if [ -n "$shot" ] && [ "$how" = button ]; then a exec-out screencap -p >"$shot" || true; fi
+        if [ -n "$shot" ] && [ "$how" = button ]; then
+            # Resumed comes before drawn: wait for the dialer's window to
+            # take the focus, then a moment for its first frame (run 9's
+            # screenshot still showed Welcome).
+            end=$((SECONDS + wait))
+            while [ $SECONDS -lt $end ]; do
+                case $(focus) in *"${now%%/*}"*"${now##*.}"*) break ;; esac
+                sleep 1
+            done
+            sleep 1
+            a exec-out screencap -p >"$shot" || true
+        fi
         back_to_welcome "$wait"
         say "Welcome is in front again and still locked"
         # Never open the dialer again after a call appeared.
