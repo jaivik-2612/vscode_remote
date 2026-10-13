@@ -280,8 +280,12 @@ run_item() {
 	if [ "$install" = ok ]; then
 		comp=$(ash "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $pkg" |
 			grep / | tail -n 1)
+		# Quoted for the device's shell: a launcher alias such as YouTube's
+		# .app.honeycomb.Shell$HomeActivity lost "$HomeActivity" unquoted
+		# (run 12). Only a component's own characters get this far.
+		case $comp in *[!A-Za-z0-9._\$/]*) comp='' ;; esac
 		if [ -n "$comp" ]; then
-			out=$(ASH_TIMEOUT=60 ash "am start -W -n $comp")
+			out=$(ASH_TIMEOUT=60 ash "am start -W -n '$comp'")
 			ldetail=$(printf '%s\n' "$out" | grep -E '^(Status|LaunchState|TotalTime|Error)' | tr '\n' ' ')
 			case $out in *"Status: ok"* | *Complete*) launch=ok ;; *) launch=failed ;; esac
 		else
