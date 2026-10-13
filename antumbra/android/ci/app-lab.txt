@@ -22,3 +22,4 @@ fdroid	net.thunderbird.android	Thunderbird
 aptoide	com.discord	Discord
 fdroid	io.element.android.x	Element X
 aptoide	us.zoom.videomeetings	Zoom
+aptoide	com.google.android.youtube	YouTube
