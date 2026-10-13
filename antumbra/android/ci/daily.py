@@ -159,6 +159,12 @@ CHECK_WORDS = {
                                  "Emergency calls from the Welcome screen did not work as expected (nothing was dialled)"),
     "welcome_emergency_recover": ("Welcome came back after the emergency dialer check",
                                   "Welcome did not come back after the emergency dialer check"),
+    "welcome_power_menu_emergency": (
+        "The power menu's Emergency button showed over the Welcome screen (not pressed, nothing dialled)",
+        "The power menu check on the Welcome screen did not go as expected "
+        "(nothing in the power menu was pressed, nothing dialled)"),
+    "welcome_power_menu_recover": ("The phone was put back after the power menu check",
+                                   "The phone was not fully put back after the power menu check"),
     "welcome_mac": ("The new Wi-Fi address switch set in Welcome",
                     "The test could not set the new Wi-Fi address switch in Welcome"),
     "welcome_unsafe": ("The Unsafe Browser switch found off", "The test could not find the Unsafe Browser switch off"),

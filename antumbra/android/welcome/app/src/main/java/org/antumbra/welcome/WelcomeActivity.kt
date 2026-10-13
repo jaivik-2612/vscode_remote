@@ -186,7 +186,7 @@ class WelcomeActivity : ComponentActivity() {
                 WelcomeModel.policyFailures = result.failed
                 WelcomeModel.wifiNotOn = result.wifiNotOn
                 // The module had its chance to act on a power-off request.
-                PanicOff.clearRequest(this@WelcomeActivity)
+                QuickPowerOff.clearRequest(this@WelcomeActivity)
                 Session.start(choices, bridges)
                 result
             }

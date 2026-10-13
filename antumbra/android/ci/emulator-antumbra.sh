@@ -39,8 +39,13 @@
 #   6. Before Start, emergency calls from Welcome's lock task (check
 #      welcome_emergency_dialer): the emergency dialer opens from Welcome's
 #      button and in a task of its own, and Back returns to Welcome, still
-#      locked. Nothing is dialled. Then the choices, tapped where
-#      uiautomator finds them: Tor directly, new Wi-Fi address on,
+#      locked. Nothing is dialled. Then the power menu in the lock task
+#      (check welcome_power_menu_emergency, WEL12): opened with a long
+#      press on power, an item labelled Emergency found in it while the
+#      emergency affordance is off (so it is the item that opens the dial
+#      pad), never pressed; the menu closed and the long-press setting put
+#      back; a warning until it has passed on CI once. Then the choices,
+#      tapped where uiautomator finds them: Tor directly, new Wi-Fi address on,
 #      Administration OFF (the default session), Unsafe Browser off. Then
 #      "Start Antumbra". adb must still answer; the provider row must say
 #      started=1 and tor_mode=direct.
@@ -151,6 +156,35 @@ welcome_emergency() {
 	[ -s "$SHOTS/$SCEN-welcome-emergency-dialer.png" ] || rm -f "$SHOTS/$SCEN-welcome-emergency-dialer.png"
 }
 
+# welcome_power_menu: before Start, the power menu opened from Welcome's
+# lock task shows an item labelled Emergency (welcome-adb.sh
+# check-power-menu; WEL12). Presence only, and only while the emergency
+# affordance is off, so that the item is the one that opens the emergency
+# dial pad, not the one that calls at once; no emergency setting is
+# changed and the item is never pressed. The check closes the menu (Back,
+# then the screen off and on) and puts power_button_long_press back
+# itself; after a failure clear-power-menu-test does both again before
+# Welcome is brought back. WARN, not fail, until the check has passed on
+# CI once (then make it fail).
+welcome_power_menu() {
+	local log=$LOGS/$SCEN-welcome-power-menu.txt
+	if timeout 240 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-power-menu \
+		--screenshot "$SHOTS/$SCEN-welcome-power-menu.png" >"$log" 2>&1; then
+		check welcome_power_menu_emergency ok "$(tail -n 1 "$log")"
+	else
+		check welcome_power_menu_emergency warn "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+		screenshot welcome-power-menu-failed
+		timeout 120 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-power-menu-test >>"$log" 2>&1 ||
+			check welcome_power_menu_recover warn "the power menu could not be closed or the long-press setting put back: $(tail -n 1 "$log")"
+		# Welcome in front as after the emergency dialer check.
+		wake_screen
+		ash "am start -n $PKG/.WelcomeActivity" >/dev/null 2>&1
+		ui_wait start_button 30 'Start Antumbra' ||
+			check welcome_power_menu_recover warn "Welcome did not come back after the power menu check"
+	fi
+	[ -s "$SHOTS/$SCEN-welcome-power-menu.png" ] || rm -f "$SHOTS/$SCEN-welcome-power-menu.png"
+}
+
 welcome_start() {
 	ui_wait start_button 120 'Start Antumbra' || {
 		screenshot welcome-missing
@@ -159,6 +193,7 @@ welcome_start() {
 	check welcome_screen ok
 	screenshot welcome-1
 	welcome_emergency
+	welcome_power_menu
 	ui_tap tor_direct 'Connect to Tor directly' || abort welcome_choice "'Connect to Tor directly' not found"
 	ui_set_switch switch_mac true 'New Wi-Fi hardware address' || check welcome_mac warn "could not set the Wi-Fi address switch"
 	ui_set_switch switch_unsafe_browser false 'Unsafe Browser' || check welcome_unsafe warn "could not find the Unsafe Browser switch off"

@@ -4,8 +4,8 @@
 #
 # Runs welcome-adb.sh against a fake adb: the screen logic (finding
 # controls, typing bridge lines), the test hook rule, the provider checks
-# and check-policies / check-addon / check-emergency. No device or emulator
-# needed.
+# and check-policies / check-addon / check-emergency / check-power-menu. No
+# device or emulator needed.
 #
 #   ci/test-welcome-adb.sh        exit status 0 when every case passed
 
@@ -30,6 +30,8 @@ case "$*" in
     # screen at its top, a swipe scrolls it down to the firewall row, which
     # says "Checking…" for one dump before Welcome's first read.
     "exec-out cat "*)
+        # check-power-menu: the power menu, or the keyguard's bouncer, over Welcome.
+        case $(cat "$d/front" 2>/dev/null) in powermenu | bouncer) cat "$d/ui-$(cat "$d/front").xml"; exit 0 ;; esac
         s=$(cat "$d/screen" 2>/dev/null)
         if [ -z "$s" ]; then cat "$d/ui.xml"; exit 0; fi
         cat "$d/ui-$s.xml"
@@ -62,6 +64,31 @@ case "$*" in
         if [ -f "$d/front" ] && [ ! -f "$d/stuck" ]; then echo welcome >"$d/front"; fi
         if [ -f "$d/callafter" ]; then echo 2 >"$d/calls"; fi ;;
     "shell wm dismiss-keyguard") exit 0 ;;
+    # check-power-menu: global settings in $d/set/KEY ($d/noput-KEY makes a
+    # write do nothing), the saved long-press value in $d/longsave; a long
+    # press on power opens the menu ($d/ui-powermenu.xml) only with
+    # power_button_long_press=1 and without $d/nomenu (with $d/affordon it
+    # also switches the emergency affordance on; with $d/bouncer it shows
+    # the keyguard's bouncer instead), and with $d/hang then takes 20 s; the
+    # screen going off closes the menu unless $d/menustays ($d/stuck: Back
+    # does not).
+    "shell settings get global force_emergency_affordance" | "shell settings get global emergency_affordance_needed" | \
+        "shell settings get global power_button_long_press") cat "$d/set/$5" 2>/dev/null || echo null ;;
+    "shell settings put global power_button_long_press "*) [ -f "$d/noput-$5" ] || echo "$6" >"$d/set/$5" ;;
+    "shell settings delete global power_button_long_press") rm -f "$d/set/$5"; echo "Deleted 1 rows" ;;
+    "shell cat /data/local/tmp/antumbra-long-press-saved 2>/dev/null") cat "$d/longsave" 2>/dev/null ;;
+    "shell echo "*" > /data/local/tmp/antumbra-long-press-saved") v=${2#echo }; echo "${v%% >*}" >"$d/longsave" ;;
+    "shell rm -f /data/local/tmp/antumbra-long-press-saved") rm -f "$d/longsave" ;;
+    "shell input keyevent --longpress KEYCODE_POWER")
+        if [ -f "$d/bouncer" ]; then
+            echo bouncer >"$d/front"
+        elif [ "$(cat "$d/set/power_button_long_press" 2>/dev/null)" = 1 ] && [ ! -f "$d/nomenu" ]; then
+            echo powermenu >"$d/front"
+            if [ -f "$d/affordon" ]; then echo 1 >"$d/set/emergency_affordance_needed"; fi
+        fi
+        if [ -f "$d/hang" ]; then sleep 20; fi ;;
+    "shell input keyevent KEYCODE_SLEEP")
+        if [ "$(cat "$d/front" 2>/dev/null)" = powermenu ] && [ ! -f "$d/menustays" ]; then echo welcome >"$d/front"; fi ;;
     "exec-out screencap -p") printf '\211PNG\r\n\032\n' ;;
     "shell input swipe "*) [ "$(cat "$d/screen" 2>/dev/null)" = status-top ] && echo status-checking >"$d/screen"; exit 0 ;;
     "shell dumpsys window") echo "  mCurrentFocus=Window{1f u0 com.android.launcher3/com.android.launcher3.uioverride.QuickstepLauncher}" ;;
@@ -358,6 +385,160 @@ for state in "NONE 0" "LOCKED 2" "LOCKED none" "LOCKED 0 nohandler"; do
             pass "check-emergency refuses to start ($state)" || bad "check-emergency with $state: $(cat "$work/err")"
     fi
 done
+rm -f "$work/front"
+
+# 8. check-power-menu (WEL12), before Start: with the emergency affordance
+#    off, the power menu opened with a long press, its Emergency item seen
+#    and never pressed, no emergency setting changed, the menu closed and
+#    the long-press setting put back, whatever happened.
+menu() { # [with-emergency]: the power menu's nodes, as SystemUI's dialog shows them
+    {
+        echo '<?xml version="1.0"?><hierarchy>'
+        if [ "${1:-}" = with-emergency ]; then
+            printf '<node text="Emergency" resource-id="android:id/message" package="com.android.systemui" bounds="[100,800][400,900]" />\n'
+        fi
+        printf '<node text="Power off" resource-id="android:id/message" package="com.android.systemui" bounds="[500,800][800,900]" />\n'
+        printf '<node text="Restart" resource-id="android:id/message" package="com.android.systemui" bounds="[100,1000][400,1100]" />\n'
+        echo '</hierarchy>'
+    } >"$work/ui-powermenu.xml"
+}
+powermenu() { # STATE: fresh emulator, Welcome locked, no call, the affordance off
+    echo welcome >"$work/front"
+    echo LOCKED >"$work/lock"
+    echo 0 >"$work/calls"
+    rm -rf "$work/set" "$work/longsave" "$work/nomenu" "$work/hang" "$work/stuck" "$work/menustays" \
+        "$work/affordon" "$work/bouncer" "$work/menu.png" "$work"/noput-*
+    mkdir "$work/set"
+    menu with-emergency
+    # The keyguard's bouncer: a SystemUI button labelled "Emergency", no power menu.
+    printf '%s\n' '<?xml version="1.0"?><hierarchy>' \
+        '<node text="Emergency" resource-id="com.android.systemui:id/emergency_call_button" package="com.android.systemui" bounds="[100,2000][400,2100]" />' \
+        '</hierarchy>' >"$work/ui-bouncer.xml"
+    : >"$work/log"
+}
+# Put back: the menu closed, no saved value left, the long press as before ($1).
+reset_ok() {
+    [ "$(cat "$work/front")" != powermenu ] && [ ! -e "$work/longsave" ] &&
+        if [ "$1" = null ]; then [ ! -e "$work/set/power_button_long_press" ]; else
+            [ "$(cat "$work/set/power_button_long_press")" = "$1" ]; fi
+}
+# Line number of the first log line matching $1 (999 when none).
+at() { grep -n -m 1 -- "$1" "$work/log" | cut -d: -f1 | grep . || echo 999; }
+# Nothing that could dial, and no emergency setting or test number touched.
+never_dials() {
+    ! grep -Eq 'input tap|input text|KEYCODE_(CALL|ENDCALL|[0-9]|STAR|POUND|NUMPAD)|tel:|CALL_EMERGENCY|am start|emergency-number-test-mode|settings (put|delete) global (force_emergency_affordance|emergency_affordance)' "$work/log"
+}
+powermenu
+if "$script" check-power-menu --screenshot "$work/menu.png" --wait 1 2>"$work/err"; then
+    [ "$(at 'settings get global force_emergency_affordance')" -lt "$(at 'settings put global power_button_long_press 1')" ] &&
+        [ "$(at 'settings get global emergency_affordance_needed')" -lt "$(at 'settings put global power_button_long_press 1')" ] &&
+        [ "$(at 'settings put global power_button_long_press 1')" -lt "$(at 'input keyevent --longpress KEYCODE_POWER')" ] &&
+        [ "$(at 'input keyevent --longpress')" -lt "$(at 'input keyevent KEYCODE_BACK')" ] &&
+        ! grep -q KEYCODE_SLEEP "$work/log" &&
+        reset_ok null && [ "$(cat "$work/front")" = welcome ] && [ "$(head -c 4 "$work/menu.png" | od -An -c | tr -d ' ')" = '211PNG' ] &&
+        tail -n 1 "$work/err" | grep -q 'the item that opens the emergency dial pad); it was not pressed, nothing was dialled' &&
+        pass "check-power-menu sees the Emergency item, presses nothing and puts everything back" ||
+        bad "check-power-menu: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-power-menu failed: $(cat "$work/err")"
+fi
+never_dials && pass "check-power-menu never dials and changes no emergency setting" ||
+    bad "check-power-menu sent something that could dial or changed an emergency setting: $(cat "$work/log")"
+# A long-press setting the device had before comes back.
+powermenu
+echo 5 >"$work/set/power_button_long_press"
+"$script" check-power-menu --wait 1 2>"$work/err" && reset_ok 5 &&
+    pass "check-power-menu restores power_button_long_press" || bad "power_button_long_press not restored: $(cat "$work/err")"
+# Back does not close the menu: the screen off and on does, and the check passes.
+powermenu
+touch "$work/stuck"
+"$script" check-power-menu --wait 1 2>"$work/err" && reset_ok null && [ "$(cat "$work/front")" = welcome ] &&
+    [ "$(grep -c 'input keyevent KEYCODE_BACK' "$work/log")" = 3 ] &&
+    [ "$(at 'input keyevent KEYCODE_BACK')" -lt "$(at 'input keyevent KEYCODE_SLEEP')" ] && never_dials &&
+    pass "check-power-menu closes a menu Back does not close with the screen off and on" ||
+    bad "check-power-menu, Back stuck: $(cat "$work/err"); log: $(cat "$work/log")"
+# The menu shows no Emergency item: fail, after one long press (the menu's
+# items do not change while it is open), and put everything back.
+powermenu
+menu
+if "$script" check-power-menu --wait 1 2>"$work/err"; then bad "check-power-menu passed without an Emergency item"; else
+    grep -q 'did not show an Emergency item' "$work/err" &&
+        [ "$(grep -c 'input keyevent --longpress KEYCODE_POWER' "$work/log")" = 1 ] &&
+        reset_ok null && never_dials &&
+        pass "check-power-menu fails without the Emergency item and puts everything back" ||
+        bad "check-power-menu, no Emergency item: $(cat "$work/err"); log: $(cat "$work/log")"
+fi
+# No power menu at all, the keyguard's bouncer (its "Emergency" is not the
+# power menu's), the affordance coming on while the menu is open, a
+# long-press setting that does not take, and a kill while the menu is
+# open: fail, and put everything back (the menu closed first).
+for case_ in nomenu bouncer affordon noput hang; do
+    powermenu
+    case $case_ in
+        noput) touch "$work/noput-power_button_long_press" ;;
+        *) touch "$work/$case_" ;;
+    esac
+    if [ "$case_" = hang ]; then
+        timeout 6 "$script" check-power-menu --wait 1 2>"$work/err"
+    else
+        "$script" check-power-menu --wait 1 2>"$work/err"
+    fi && { bad "check-power-menu passed with $case_"; continue; }
+    case $case_ in
+        nomenu | bouncer) want='the power menu did not open' ;;
+        affordon) want='the emergency affordance came on during the check' ;;
+        noput) want='power_button_long_press did not take' ;;
+        hang) want='the power menu is closed and power_button_long_press is as it was' ;;
+    esac
+    grep -qF "$want" "$work/err" && reset_ok null && never_dials &&
+        { [ "$case_" != nomenu ] || [ "$(grep -c 'input keyevent --longpress KEYCODE_POWER' "$work/log")" = 2 ]; } &&
+        { [ "$case_" != hang ] || [ "$(at 'input keyevent --longpress')" -lt "$(at 'input keyevent KEYCODE_BACK')" ]; } &&
+        pass "check-power-menu puts everything back ($case_)" ||
+        bad "check-power-menu with $case_: $(cat "$work/err"); log: $(cat "$work/log")"
+done
+# A menu that stays open after Back and the screen off and on: fail, the
+# long-press setting still put back, and the cleanup says the menu is open.
+powermenu
+touch "$work/stuck" "$work/menustays"
+if "$script" check-power-menu --wait 1 2>"$work/err"; then bad "check-power-menu passed with a menu that stays open"; else
+    grep -qF 'the power menu did not close' "$work/err" && grep -qF 'clear-power-menu-test failed' "$work/err" &&
+        [ "$(cat "$work/front")" = powermenu ] && [ ! -e "$work/set/power_button_long_press" ] &&
+        [ ! -e "$work/longsave" ] && never_dials &&
+        pass "check-power-menu fails when the menu stays open, and still restores the long press" ||
+        bad "check-power-menu, menu stays open: $(cat "$work/err"); log: $(cat "$work/log")"
+fi
+# Refused before anything is changed: the emergency affordance forced or
+# needed here, or unreadable (the item would call at once), no lock task,
+# a call in progress.
+for case_ in forced needed unreadable unlocked call; do
+    powermenu
+    case $case_ in
+        forced) echo 1 >"$work/set/force_emergency_affordance"; want='the emergency affordance is on' ;;
+        needed) echo 1 >"$work/set/emergency_affordance_needed"; want='the emergency affordance is on' ;;
+        unreadable) echo >"$work/set/emergency_affordance_needed"; want='emergency_affordance_needed=unreadable' ;;
+        unlocked) echo NONE >"$work/lock"; want='not in its lock task' ;;
+        call) echo 2 >"$work/calls"; want='a call is in progress' ;;
+    esac
+    if "$script" check-power-menu --wait 1 2>"$work/err"; then bad "check-power-menu passed with $case_"; else
+        grep -qF "$want" "$work/err" &&
+            ! grep -Eq 'settings (put|delete)|KEYCODE_POWER|KEYCODE_BACK|long-press-saved' "$work/log" &&
+            pass "check-power-menu refuses and changes nothing ($case_)" ||
+            bad "check-power-menu with $case_: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# clear-power-menu-test: an open menu closed and a saved value put back; on
+# a clean device it passes and leaves a long-press setting it did not save.
+powermenu
+echo powermenu >"$work/front"
+echo 1 >"$work/set/power_button_long_press"
+echo null >"$work/longsave"
+"$script" clear-power-menu-test 2>"$work/err" && reset_ok null && never_dials &&
+    pass "clear-power-menu-test closes the menu and puts the long press back" ||
+    bad "clear-power-menu-test, menu open: $(cat "$work/err"); log: $(cat "$work/log")"
+powermenu
+echo 5 >"$work/set/power_button_long_press"
+"$script" clear-power-menu-test 2>"$work/err" && reset_ok 5 &&
+    pass "clear-power-menu-test on a clean device (a long-press setting it did not save stays)" ||
+    bad "clear-power-menu-test: $(cat "$work/err")"
 rm -f "$work/front"
 
 # 6. expect counts bridge lines.

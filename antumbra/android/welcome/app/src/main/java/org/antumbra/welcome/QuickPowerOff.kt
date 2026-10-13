@@ -9,9 +9,11 @@ import android.util.Log
 import java.io.File
 
 /**
- * Panic off, from the Quick Settings tile, the session notification and
- * the status screen. (It was called "Emergency off"; it switches the phone
- * off and has nothing to do with emergency calls, see [EmergencyCall].)
+ * Quick power off, from the Quick Settings tile, the session notification
+ * and the status screen. It switches the phone off and has nothing to do
+ * with emergency calls ([EmergencyCall]). It was called "Emergency off",
+ * then "Panic off" (WEL12): where the emergency number is 112, a "panic
+ * button" means an emergency call.
  *
  * It never cuts an emergency call short: during a call, in emergency
  * callback mode and for a while after any call it refuses, and says why
@@ -27,7 +29,7 @@ import java.io.File
  *    a confirmation dialog.
  * 2. Without it: write [POWEROFF_MARKER] in device-protected storage, then
  *    reboot. The module is asked to power the phone off early in the next
- *    boot when it finds the marker (README, "Panic off"). A restart
+ *    boot when it finds the marker (README, "Quick power off"). A restart
  *    alone ends the session, but memory keeps traces for a short while.
  *
  * The marker is not deleted at boot, where Welcome would race the module.
@@ -36,8 +38,8 @@ import java.io.File
  * process did not ask for, so a request the module did not act on never
  * powers off a later boot.
  */
-object PanicOff {
-    private const val TAG = "AntumbraPanic"
+object QuickPowerOff {
+    private const val TAG = "AntumbraPowerOff"
 
     /** In /data/user_de/0/org.antumbra.welcome/files/. */
     const val POWEROFF_MARKER = "poweroff-requested"
@@ -67,13 +69,14 @@ object PanicOff {
 
     /**
      * Powers off, or restarts. Returns only if neither was possible, or
-     * while a call or its callback period holds Panic off, with the reason.
+     * while a call or its callback period holds Quick power off, with the
+     * reason.
      * [startShutdown] starts the shutdown intent; the tile passes its own
      * starter (startActivityAndCollapse).
      */
     fun trigger(context: Context, startShutdown: (Intent) -> Unit = { context.startActivity(it) }): String {
-        // Before anything is changed: a held Panic off leaves the session
-        // exactly as it was.
+        // Before anything is changed: a held Quick power off leaves the
+        // session exactly as it was.
         CallWatch.holdMessage(context)?.let {
             Log.i(TAG, "held: a call, emergency callback mode, or a call that ended a short while ago")
             return it

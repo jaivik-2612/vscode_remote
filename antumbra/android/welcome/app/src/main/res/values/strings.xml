@@ -4,7 +4,10 @@
      Antumbra (config/rootfs/usr/bin/antumbra-welcome) where they apply. -->
 <resources>
     <string name="app_name">Antumbra</string>
-    <string name="tile_label">Panic off</string>
+    <!-- The immediate power-off (QuickPowerOff.kt): the tile, the session
+         notification's action and the status screen. Never a word that
+         means an emergency call where the emergency number is 112. -->
+    <string name="tile_label">Quick power off</string>
     <string name="tile_subtitle_poweroff">Powers off at once</string>
     <string name="tile_subtitle_restart">Restarts at once</string>
 
@@ -15,12 +18,12 @@
     <!-- Shown on the Welcome screen during a call: before Start nothing else leads back to the call screen. -->
     <string name="return_to_call">Return to call</string>
     <string name="return_to_call_failed">The call screen could not be opened. The call goes on until the other side hangs up, or until you switch the phone off from the power menu.</string>
-    <!-- Why Panic off waits (CallWatch). The power menu's Power off is never held. -->
-    <string name="panic_wait_call">Panic off waits until the call ends, so that it can never cut off an emergency call. To switch off now anyway, hold the power button and choose Power off.</string>
-    <string name="panic_wait_callback_mode">The phone is in emergency callback mode, so that the emergency service can call back. Panic off waits until that ends. To switch off now anyway, hold the power button and choose Power off.</string>
-    <plurals name="panic_wait_after_call">
-        <item quantity="one">A call ended a short while ago. If it was an emergency call, the emergency service may call back, so Panic off waits %1$d more minute. To switch off now anyway, hold the power button and choose Power off.</item>
-        <item quantity="other">A call ended a short while ago. If it was an emergency call, the emergency service may call back, so Panic off waits %1$d more minutes. To switch off now anyway, hold the power button and choose Power off.</item>
+    <!-- Why Quick power off waits (CallWatch). The power menu's Power off is never held. -->
+    <string name="power_off_wait_call">Quick power off waits until the call ends, so that it can never cut off an emergency call. To switch off now anyway, hold the power button and choose Power off.</string>
+    <string name="power_off_wait_callback_mode">The phone is in emergency callback mode, so that the emergency service can call back. Quick power off waits until that ends. To switch off now anyway, hold the power button and choose Power off.</string>
+    <plurals name="power_off_wait_after_call">
+        <item quantity="one">A call ended a short while ago. If it was an emergency call, the emergency service may call back, so Quick power off waits %1$d more minute. To switch off now anyway, hold the power button and choose Power off.</item>
+        <item quantity="other">A call ended a short while ago. If it was an emergency call, the emergency service may call back, so Quick power off waits %1$d more minutes. To switch off now anyway, hold the power button and choose Power off.</item>
     </plurals>
 
     <!-- Welcome screen -->
@@ -130,14 +133,14 @@
     <string name="wifi_not_on">Wi-Fi is off because airplane mode is on. Switch Wi-Fi on in Quick Settings to connect.</string>
 
     <string name="wifi_settings">Wi-Fi settings</string>
-    <string name="add_tile">Add Panic off to Quick Settings</string>
-    <string name="tile_added">Panic off is in Quick Settings.</string>
-    <string name="tile_not_added">Panic off was not added.</string>
+    <string name="add_tile">Add Quick power off to Quick Settings</string>
+    <string name="tile_added">Quick power off is in Quick Settings.</string>
+    <string name="tile_not_added">Quick power off was not added.</string>
     <string name="power_off_now">Power off now</string>
     <string name="power_off_detail_poweroff">Powers the phone off at once and ends this session.</string>
     <string name="power_off_detail_restart">Restarts the phone at once and ends this session. Memory can keep traces for a short while after a restart; when you have time, power off from the power menu instead.</string>
     <string name="power_off_failed">The phone could not be restarted: %1$s</string>
-    <string name="power_off_unavailable">Panic off needs Welcome to be the device owner.</string>
+    <string name="power_off_unavailable">Quick power off needs Welcome to be the device owner.</string>
 
     <!-- Session notification -->
     <string name="channel_session">Antumbra session</string>

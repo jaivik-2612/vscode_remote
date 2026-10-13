@@ -10,7 +10,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** WEL7 without Android: the lock task's features, when Panic off waits, and the texts. */
+/** WEL7 and WEL12 without Android: the lock task's features, when Quick power off waits, and the texts. */
 class EmergencyCallTest {
     private val minute = 60_000L
 
@@ -39,29 +39,29 @@ class EmergencyCallTest {
     }
 
     @Test
-    fun panicOffWaitsDuringACallAndInCallbackMode() {
+    fun quickPowerOffWaitsDuringACallAndInCallbackMode() {
         val r = CallRecord()
         assertNull(r.hold(callNow = false, callbackMode = false, now = 1_000))
-        assertEquals(PanicHold.CALL, r.hold(callNow = true, callbackMode = false, now = 1_000))
-        assertEquals(PanicHold.CALLBACK_MODE, r.hold(callNow = false, callbackMode = true, now = 1_000))
+        assertEquals(PowerOffHold.CALL, r.hold(callNow = true, callbackMode = false, now = 1_000))
+        assertEquals(PowerOffHold.CALLBACK_MODE, r.hold(callNow = false, callbackMode = true, now = 1_000))
         // The listener saw a call that the mode read now no longer shows: still a call.
         r.onMode(AudioManager.MODE_IN_CALL, now = 1_000)
-        assertEquals(PanicHold.CALL, r.hold(callNow = false, callbackMode = false, now = 2_000))
+        assertEquals(PowerOffHold.CALL, r.hold(callNow = false, callbackMode = false, now = 2_000))
     }
 
     @Test
-    fun panicOffWaitsFiveMinutesAfterAnyCall() {
+    fun quickPowerOffWaitsFiveMinutesAfterAnyCall() {
         val r = CallRecord()
         val end = 10 * minute
         r.onMode(AudioManager.MODE_RINGTONE, now = end - 3 * minute)
         r.onMode(AudioManager.MODE_IN_CALL, now = end - 2 * minute)
         r.onMode(AudioManager.MODE_NORMAL, now = end)
         assertEquals(end, r.lastEnd)
-        assertEquals(PanicHold.AFTER_CALL, r.hold(callNow = false, callbackMode = false, now = end))
+        assertEquals(PowerOffHold.AFTER_CALL, r.hold(callNow = false, callbackMode = false, now = end))
         assertEquals(5, r.minutesLeft(end))
         assertEquals(5, r.minutesLeft(end + 1))
         assertEquals(1, r.minutesLeft(end + 4 * minute + 59_999))
-        assertEquals(PanicHold.AFTER_CALL, r.hold(callNow = false, callbackMode = false, now = end + 5 * minute - 1))
+        assertEquals(PowerOffHold.AFTER_CALL, r.hold(callNow = false, callbackMode = false, now = end + 5 * minute - 1))
         assertNull(r.hold(callNow = false, callbackMode = false, now = end + 5 * minute))
         assertEquals(0, r.minutesLeft(end + 60 * minute))
         // A clock that went backwards counts as a call that just ended.
@@ -106,12 +106,26 @@ class EmergencyCallTest {
         assertEquals("android.intent.action.DIAL_EMERGENCY", EmergencyCall.ACTION_DIAL_EMERGENCY)
     }
 
-    /** What the person reads: "Panic off" only, and no emergency number anywhere. */
+    /**
+     * What the person reads: "Quick power off" (never "Emergency off" or
+     * "Panic off": where the emergency number is 112, a "panic button"
+     * means an emergency call), the tile and the notification action under
+     * that one label, and no emergency number anywhere.
+     */
     @Test
-    fun textsSayPanicOffAndNameNoNumber() {
+    fun textsSayQuickPowerOffAndNameNoNumber() {
         val xml = File("src/main/res/values/strings.xml").readText()
         assertFalse(xml.contains("Emergency off", ignoreCase = true))
-        assertTrue(xml.contains("<string name=\"tile_label\">Panic off</string>"))
+        assertFalse(xml.contains("panic", ignoreCase = true))
+        assertTrue(xml.contains("<string name=\"tile_label\">Quick power off</string>"))
+        val manifest = File("src/main/AndroidManifest.xml").readText()
+        assertFalse(manifest.contains("panic", ignoreCase = true))
+        assertTrue(
+            Regex("android:name=\"\\.QuickPowerOffTileService\"[^>]*android:label=\"@string/tile_label\"")
+                .containsMatchIn(manifest),
+        )
+        val notification = File("src/main/java/org/antumbra/welcome/SessionService.kt").readText()
+        assertTrue(notification.contains("context.getString(R.string.tile_label)"))
         val texts = Regex("<(string|item)[^>]*>([^<]*)</(string|item)>").findAll(xml)
             .map { it.groupValues[2] }
             .filter { it.contains("emergency", ignoreCase = true) }

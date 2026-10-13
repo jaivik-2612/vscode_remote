@@ -4,7 +4,8 @@
 # Drives the Antumbra Welcome app over adb, by hand or from a test script
 # (the CI emulator job has its own driver, antumbra/android/ci/
 # emulator-antumbra.sh, with the same test tags, and calls this script only
-# for 'check-emergency', 'check-policies --keep-adb' and 'check-addon'). It
+# for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb' and
+# 'check-addon'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -51,8 +52,27 @@
 #                             before it starts or after each opening (a call state it cannot
 #                             read fails too). --screenshot saves the dialer's screen;
 #                             --wait: how long each screen may take to come up (15).
+#   check-power-menu [--screenshot FILE.png] [--wait SECONDS]
+#                             Before Start, with Welcome in its lock task (WEL12): the
+#                             power menu shows an item labelled Emergency. Presence only,
+#                             and only while Android's emergency affordance is off
+#                             (force_emergency_affordance and emergency_affordance_needed
+#                             unset or 0), when that item is the one that opens the
+#                             emergency dial pad; otherwise it refuses, since the item
+#                             would call at once. It changes no emergency setting: it
+#                             opens the menu with a long press on power
+#                             (power_button_long_press=1 meanwhile), finds SystemUI's menu
+#                             and its "Emergency" in a uiautomator dump, and closes the
+#                             menu (Back, then the screen off and on). It never presses the
+#                             item and never dials. The menu is closed and the long-press
+#                             setting put back afterwards, also after a failure
+#                             ('clear-power-menu-test'), and Welcome must be in front and
+#                             still locked.
+#   clear-power-menu-test     Undo what check-power-menu may leave: the power menu closed
+#                             (Back, then the screen off and on), power_button_long_press as
+#                             it was. Checks both.
 #   screenshot FILE.png       Save the screen.
-#   panic-tile                Add the Panic off tile, click it, and wait until the
+#   power-off-tile            Add the Quick power off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
 #   remove                    Clear the test hook, remove the test device owner (testOnly
 #                             builds only) and the app.
@@ -63,13 +83,16 @@ set -euo pipefail
 
 PKG=org.antumbra.welcome
 ADMIN=$PKG/.AdminReceiver
-TILE=$PKG/.PanicTileService
+TILE=$PKG/.QuickPowerOffTileService
 WELCOME=$PKG/.WelcomeActivity
 # Intent.ACTION_DIAL_EMERGENCY: the system's emergency dial pad.
 DIAL_EMERGENCY=android.intent.action.DIAL_EMERGENCY
 URI=content://org.antumbra.welcome.state/session
 UI_DUMP=/data/local/tmp/antumbra-welcome-ui.xml
 HOOK=debug.antumbra.keep_adb
+# Where check-power-menu keeps power_button_long_press's earlier value
+# ("null" when unset), so that clear-power-menu-test can put it back.
+LONG_PRESS_SAVE=/data/local/tmp/antumbra-long-press-saved
 
 adb_args=()
 if [ "${1:-}" = "-s" ]; then
@@ -487,7 +510,193 @@ cmd_check_emergency() {
     say "the emergency dialer opens from Welcome's lock task (its button, and a task of its own); nothing was dialled"
 }
 
-cmd_panic_tile() {
+# Prints "x y" for the first node in package $1 whose text is one of $2...
+# (from the XML on stdin), or nothing.
+find_text() {
+    python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+package, texts = sys.argv[1], sys.argv[2:]
+try:
+    root = ET.fromstring(sys.stdin.read())
+except ET.ParseError:
+    sys.exit(0)
+for n in root.iter("node"):
+    if n.get("text") in texts and n.get("package") == package:
+        b = n.get("bounds", "").replace("][", ",").strip("[]").split(",")
+        x1, y1, x2, y2 = (int(v) for v in b)
+        print((x1 + x2) // 2, (y1 + y2) // 2)
+        break
+' "$@"
+}
+
+# The power menu in a dump (XML on stdin): SystemUI's "Power off",
+# "Restart", or "Power" when the menu groups those two under one item. Its
+# "Emergency" alone is not enough: the keyguard's bouncer has a SystemUI
+# button with that label too (lockscreen_emergency_call).
+power_menu_in() { find_text com.android.systemui "Power off" Restart Power | grep -q .; }
+
+# A global setting's value ("null" when unset).
+setting() { sh_ settings get global "$1"; }
+
+# "off" while Android's emergency affordance is off: then the power menu's
+# Emergency item is SystemUI's EmergencyDialerAction, which opens the
+# emergency dial pad and dials nothing. Otherwise the two settings that
+# switch it on (EmergencyAffordanceManager.needsEmergencyAffordance): the
+# test setting force_emergency_affordance, and emergency_affordance_needed,
+# which Android sets from the SIM's and the network's country. With either
+# on, the item is EmergencyAffordanceAction, which calls at once. Both items
+# are labelled "Emergency", so a dump cannot tell them apart; these settings
+# can.
+affordance_state() {
+    local force needed
+    force=$(setting force_emergency_affordance || true)
+    needed=$(setting emergency_affordance_needed || true)
+    case $force/$needed in
+        null/null | null/0 | 0/null | 0/0) echo off ;;
+        *) echo "force_emergency_affordance=${force:-unreadable}, emergency_affordance_needed=${needed:-unreadable}" ;;
+    esac
+}
+
+# power_button_long_press's value from before check-power-menu ("null"
+# when it was unset), or nothing when none is saved.
+saved_long_press() { sh_ "cat $LONG_PRESS_SAVE 2>/dev/null" || true; }
+
+# True while the power menu is open, or may be: a dump shows it, or the
+# dump fails.
+power_menu_open() {
+    local xml
+    xml=$(dump_ui) || return 0
+    power_menu_in <<<"$xml"
+}
+
+# Closes the power menu if it is open, touching nothing in it: Back, then,
+# while a dump still shows it (or cannot be read), the screen off and on
+# (SystemUI's GlobalActionsDialogLite closes on ACTION_SCREEN_OFF). Fails
+# when it still shows.
+close_power_menu() {
+    local try
+    for try in 1 2 3; do
+        power_menu_open || return 0
+        a shell input keyevent KEYCODE_BACK || true
+        sleep 1
+    done
+    power_menu_open || return 0
+    a shell input keyevent KEYCODE_SLEEP || true
+    sleep 2
+    a shell input keyevent KEYCODE_WAKEUP || true
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    sleep 2
+    power_menu_open || return 0
+    say "the power menu is still open (after Back, and the screen off and on)"
+    return 1
+}
+
+# clear-power-menu-test: the power menu closed, then
+# power_button_long_press as it was before check-power-menu. Idempotent.
+clear_power_menu_test() {
+    local fail=0 saved
+    close_power_menu || fail=1
+    saved=$(saved_long_press)
+    case $saved in
+        '') ;;
+        [0-9] | [0-9][0-9]) a shell settings put global power_button_long_press "$saved" >/dev/null 2>&1 || true ;;
+        *) [ "$saved" = null ] || say "unexpected saved power_button_long_press '$saved'; removing the setting"
+            saved=null
+            a shell settings delete global power_button_long_press >/dev/null 2>&1 || true ;;
+    esac
+    if [ -n "$saved" ]; then
+        if [ "$(setting power_button_long_press || true)" = "$saved" ]; then
+            a shell rm -f "$LONG_PRESS_SAVE" || true
+        else
+            say "power_button_long_press is not back to '$saved'"
+            fail=1
+        fi
+    fi
+    [ "$fail" = 0 ] || return 1
+    say "the power menu is closed and power_button_long_press is as it was"
+}
+
+# WEL12, presence only: the power menu's Emergency item before Start, with
+# Welcome in its lock task. Only while the emergency affordance is off, so
+# that the menu this check opens has no item that calls at once; it
+# changes no emergency setting and never presses the item.
+cmd_check_power_menu() {
+    local shot='' wait=15 xy='' menu='' xml try saved state
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --screenshot) shot=$2; shift ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-power-menu: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $wait in '' | *[!0-9]*) die "check-power-menu: --wait takes a number of seconds" ;; esac
+    # Nothing is changed before these hold.
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    wait_for start_button 60
+    [ "$(resumed)" = "$WELCOME" ] || die "Welcome is not in front (in front: $(resumed))"
+    [ "$(lock_state)" = LOCKED ] || die "Welcome is not in its lock task (lock task: $(lock_state)); this check needs the state before Start"
+    calls_idle || die "a call is in progress; not touching the power menu"
+    state=$(affordance_state)
+    [ "$state" = off ] ||
+        die "the emergency affordance is on or unreadable ($state): the power menu's Emergency item would call at once, so this check does not open the menu (PH4 covers that item, on the phone); nothing was changed"
+
+    # From here on, whatever happens, the menu is closed and the setting put back.
+    trap 'clear_power_menu_test || say "clear-power-menu-test failed; run it again"' EXIT
+    trap 'exit 1' INT TERM HUP
+    # AOSP's long press on power starts the assistant (config_longPressOnPowerBehavior
+    # 5); power_button_long_press=1 makes it the power menu for this check.
+    # Its value now is saved on the device first (kept if an earlier run
+    # left one), for clear-power-menu-test.
+    saved=$(saved_long_press)
+    if [ -z "$saved" ]; then
+        saved=$(setting power_button_long_press | tr -cd 'a-z0-9')
+        [ -n "$saved" ] || die "cannot read power_button_long_press"
+        a shell "echo $saved > $LONG_PRESS_SAVE"
+        [ "$(saved_long_press)" = "$saved" ] || die "cannot save power_button_long_press"
+    fi
+    a shell settings put global power_button_long_press 1 >/dev/null || true
+    [ "$(setting power_button_long_press)" = 1 ] || die "power_button_long_press did not take"
+    sleep 1
+    for try in 1 2; do
+        a shell input keyevent --longpress KEYCODE_POWER
+        for _ in $(seq "$wait"); do
+            xml=$(dump_ui || true)
+            if power_menu_in <<<"$xml"; then
+                menu=1
+                xy=$(find_text com.android.systemui Emergency <<<"$xml")
+                [ -z "$xy" ] || break
+            fi
+            sleep 1
+        done
+        # A menu without the item stays as it is (the items are built when it opens).
+        if [ -n "$xy" ] || [ -n "$menu" ]; then break; fi
+        # A press taken as a short one switches the screen off.
+        [ "$try" = 2 ] || { a shell input keyevent KEYCODE_WAKEUP; a shell wm dismiss-keyguard >/dev/null 2>&1 || true; sleep 2; }
+    done
+    if [ -n "$xy" ]; then
+        say "the power menu shows an item labelled Emergency in Welcome's lock task (not pressed)"
+        [ -z "$shot" ] || a exec-out screencap -p >"$shot" || true
+    fi
+    close_power_menu || die "the power menu did not close (after Back, and the screen off and on)"
+    if ! wait_resumed "$WELCOME" "$wait"; then
+        a shell input keyevent KEYCODE_WAKEUP
+        a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+        wait_resumed "$WELCOME" "$wait" || die "Welcome is not in front after the power menu (in front: $(resumed))"
+    fi
+    [ "$(lock_state)" = LOCKED ] || die "Welcome's lock task ended during the power menu check (lock task: $(lock_state))"
+    calls_idle || die "a call is in progress after the power menu check"
+    [ -n "$menu" ] || die "the power menu did not open in Welcome's lock task within ${wait} s (twice)"
+    [ -n "$xy" ] || die "the power menu opened in Welcome's lock task but did not show an Emergency item within ${wait} s"
+    state=$(affordance_state)
+    [ "$state" = off ] || die "the emergency affordance came on during the check ($state): the Emergency item seen may have been the one that calls at once"
+    trap - EXIT INT TERM HUP
+    clear_power_menu_test || die "the power menu showed its Emergency item, but it could not be closed or power_button_long_press put back"
+    say "the power menu shows its Emergency item in Welcome's lock task before Start (with the emergency affordance off, the item that opens the emergency dial pad); it was not pressed, nothing was dialled, and the menu and the long-press setting are back as they were"
+}
+
+cmd_power_off_tile() {
     local before after end
     before=$(sh_ cat /proc/sys/kernel/random/boot_id)
     a shell cmd statusbar add-tile "$TILE" >/dev/null
@@ -502,10 +711,10 @@ cmd_panic_tile() {
         fi
         sleep 3
     done
-    die "the device did not restart within 240 s of Panic off"
+    die "the device did not restart within 240 s of Quick power off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,59p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,79p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -536,11 +745,13 @@ case "$command" in
     check-policies) cmd_check_policies "$@" ;;
     check-addon) cmd_check_addon "$@" ;;
     check-emergency) cmd_check_emergency "$@" ;;
+    check-power-menu) cmd_check_power_menu "$@" ;;
+    clear-power-menu-test) clear_power_menu_test || die "the power menu is not closed or power_button_long_press is not as it was" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"
         a exec-out screencap -p > "$1"
         ;;
-    panic-tile) cmd_panic_tile ;;
+    power-off-tile) cmd_power_off_tile ;;
     remove)
         a shell setprop "$HOOK" 0 || true
         a shell dpm remove-active-admin "$ADMIN" || true

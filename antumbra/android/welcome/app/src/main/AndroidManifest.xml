@@ -16,7 +16,7 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The session service keeps the choices in memory until shutdown and
-         shows the ongoing notification with "Panic off". -->
+         shows the ongoing notification with "Quick power off". -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -25,7 +25,7 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- Granted only if the Antumbra module installs this app as a
          privileged app with a privapp-permissions allowlist entry. Then
-         Panic off powers off; otherwise it can only restart
+         Quick power off powers off; otherwise it can only restart
          (DevicePolicyManager.reboot). -->
     <uses-permission
         android:name="android.permission.SHUTDOWN"
@@ -116,10 +116,10 @@
             </intent-filter>
         </receiver>
 
-        <!-- The notification's "Panic off" action (explicit, from this
+        <!-- The notification's "Quick power off" action (explicit, from this
              app only). -->
         <receiver
-            android:name=".PanicReceiver"
+            android:name=".QuickPowerOffReceiver"
             android:directBootAware="true"
             android:exported="false" />
 
@@ -143,11 +143,11 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the privacy session's choices in memory until shutdown and offers an immediate power-off (Panic off)." />
+                android:value="Keeps the privacy session's choices in memory until shutdown and offers an immediate power-off (Quick power off)." />
         </service>
 
         <service
-            android:name=".PanicTileService"
+            android:name=".QuickPowerOffTileService"
             android:directBootAware="true"
             android:exported="true"
             android:icon="@drawable/ic_power"

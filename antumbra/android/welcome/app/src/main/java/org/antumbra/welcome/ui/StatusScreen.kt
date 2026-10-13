@@ -46,9 +46,9 @@ data class StatusUi(
     val policyFailures: List<String> = emptyList(),
     /** Wi-Fi should be on for this session but airplane mode kept it off. */
     val wifiNotOn: Boolean = false,
-    /** Panic off powers off (true) or restarts (false). */
+    /** Quick power off powers off (true) or restarts (false). */
     val canPowerOff: Boolean = false,
-    /** A message, such as why Panic off failed or waits (an error) or that the tile was added. */
+    /** A message, such as why Quick power off failed or waits (an error) or that the tile was added. */
     val message: String? = null,
     val messageIsError: Boolean = false,
 )

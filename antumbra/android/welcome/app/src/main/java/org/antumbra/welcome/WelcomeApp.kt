@@ -24,7 +24,7 @@ class WelcomeApp : Application() {
             IntentFilter(Intent.ACTION_SHUTDOWN),
             Context.RECEIVER_NOT_EXPORTED,
         )
-        // Panic off waits during and after a call; for that, the process
+        // Quick power off waits during and after a call; for that, the process
         // follows the calls from its start (the same lifetime as above).
         CallWatch.start(this)
     }

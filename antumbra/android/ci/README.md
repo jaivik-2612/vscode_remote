@@ -38,7 +38,8 @@ stops it.
   - `leak-report.md` and `leak-report.json`: both scenarios, every flow,
     the armed window, and the names and destinations reached through Tor
   - `screenshots/`: `baseline-home.png`, and `antumbra-welcome-1.png`,
-    `-welcome-emergency-dialer.png`, `-welcome-2-choices.png`,
+    `-welcome-emergency-dialer.png`, `-welcome-power-menu.png`,
+    `-welcome-2-choices.png`,
     `-status-1-started.png`, `-status-2-bootstrapped.png`,
     `-status-3-after-tracker-test.png` (`-final.png` after a failure)
   - `baseline/` and `antumbra/`: `events.tsv`, `checks.tsv`, `analysis.json`,
@@ -166,8 +167,25 @@ that the captures must show traffic from the phone.
    an idle call state before and after each opening (a dump without a call
    state fails the check). When it fails, the run starts WelcomeActivity
    again (singleTask: its locked task comes to the front) and goes on;
-   `welcome_emergency_recover` warns if Welcome did not come back. Then the
-   choices, tapped where
+   `welcome_emergency_recover` warns if Welcome did not come back.
+   Then the power menu's Emergency item in the lock task (WEL12), check
+   `welcome_power_menu_emergency`: `welcome-adb.sh check-power-menu` reads
+   that Android's emergency affordance is off (`force_emergency_affordance`
+   and `emergency_affordance_needed` unset or 0, before and after), so that
+   the menu's Emergency item is the one that opens the emergency dial pad,
+   not the one that calls at once (both are labelled "Emergency", and
+   `uiautomator dump` cannot tell them apart); it refuses otherwise. It
+   opens the power menu with a long press on power
+   (`power_button_long_press=1` meanwhile: AOSP's default long press starts
+   the assistant), checks in `uiautomator dump` that SystemUI's menu (its
+   "Power off" or "Restart") shows "Emergency", closes the menu with Back
+   (then the screen off and on if it is still open), and checks that
+   Welcome is in front and still locked. **Presence only**: it changes no
+   emergency setting, registers no test number and never presses the item.
+   The menu is closed and the long-press setting put back, also after a
+   failure, when the run calls `clear-power-menu-test` again and brings
+   Welcome back (`welcome_power_menu_recover`). A warning, not a failure,
+   until it has passed on CI once. Then the choices, tapped where
    `uiautomator dump` shows them (by the test tags in
    `welcome/README.md`, else by their text): Tor directly, new
    Wi-Fi address, **Administration off** (the default session a user gets),

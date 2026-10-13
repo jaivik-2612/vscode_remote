@@ -126,7 +126,7 @@ object Home {
     }
 
     /**
-     * Undoes [claim] during a session (when Panic off could not
+     * Undoes [claim] during a session (when Quick power off could not
      * restart the phone), without touching the current task.
      */
     fun unclaim(context: Context) {

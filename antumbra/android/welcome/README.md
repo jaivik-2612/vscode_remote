@@ -7,7 +7,7 @@ stay offline; use a new Wi-Fi hardware address; Administration. (The
 Unsafe Browser is shown but comes later.) It applies the device-owner
 policies for the session and hands the choices to the Antumbra module
 through a content provider. After Start it shows Tor's progress and the
-tracker filter's counters, and offers Panic off, an immediate power-off.
+tracker filter's counters, and offers Quick power off, an immediate power-off.
 Both screens have an **Emergency call** button, and emergency calls work
 from the locked Welcome screen before Start (see "Emergency calls").
 
@@ -18,8 +18,8 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 |---|---|
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
-| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features and when Panic off waits |
-| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-policies --keep-adb` and `check-addon`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
+| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits, and the texts |
+| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` and `check-addon`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
 | `gradlew`, `gradle/wrapper/gradle-wrapper.properties` | The pinned Gradle (see "Building") |
@@ -53,15 +53,16 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
    filter's counters (lookups, blocked, domains on the list, list version);
    the session's choices and the firewall row ("Live (rules …)" only from
    `antumbra.fw.armed`); buttons for Wi-Fi settings and for adding the
-   Quick Settings tile; and **Emergency call** and **Power off now** (Panic
-   off) buttons that stay on screen. It polls `http://127.0.0.1:5380/status` every two seconds while
+   Quick Settings tile; and **Emergency call** and **Power off now** (Quick
+   power off) buttons that stay on screen. It polls `http://127.0.0.1:5380/status` every two seconds while
    visible. If Welcome's process was restarted after Start and the module
    still holds the session, it says so and asks for a restart instead of
    offering the Welcome screen again.
-3. **Panic off**, a Quick Settings tile (`PanicTileService`), plus
-   the same action in the session's ongoing notification. One tap, no
-   question asked, except during a call and its callback period. See "Panic
-   off" for what it can and cannot do, also from the lock screen.
+3. **Quick power off**, a Quick Settings tile (`QuickPowerOffTileService`),
+   plus the same action in the session's ongoing notification. One tap, no
+   question asked, except during a call and its callback period. See "Quick
+   power off" for what it can and cannot do, also from the lock screen, and
+   why it is never on the power button.
 
 Visual design: the Material 3 "tonal spot" dark scheme from the seed
 `#4d2c9e`, the same values as the archived theme
@@ -243,14 +244,14 @@ shutdown for the next boot; `BootState`, `Home`):
 5. Only then are the session's choices loosened: Administration lifts its
    restrictions; for a network session with the add-on, the Wi-Fi lock is
    lifted and Wi-Fi switched on.
-6. A leftover power-off request is deleted (see "Panic off"), the
+6. A leftover power-off request is deleted (see "Quick power off"), the
    session's choices are fixed in memory, and the provider starts
    answering `started = 1`. Policies come first because the module opens
    the network as soon as it reads `started = 1`. Steps 4 to 6 hold a lock
    that a late boot broadcast also takes, so it cannot lock Wi-Fi again in
    between.
 7. The session service starts in the foreground (ongoing notification with
-   "Panic off").
+   "Quick power off").
 8. The locked task ends, the home preference is cleared, the status screen
    opens, and WelcomeActivity is disabled, so the normal launcher is the
    only home. The status screen has its own task affinity: in Welcome's
@@ -587,8 +588,8 @@ PIN is set) does not bring Welcome over the call screen. Limit: the
 button appears only once the audio mode says a call is in progress, not
 while the call is still connecting.
 
-**Panic off waits for emergency calls** (`CallWatch`). Panic off never
-cuts a call short and never switches off while the emergency service may
+**Quick power off waits for emergency calls** (`CallWatch`). Quick power
+off never cuts a call short and never switches off while the emergency service may
 call back. It refuses, and says why: during a call; while Android reports
 emergency callback mode; and for 5 minutes after any call ends (the length
 of Android's own default emergency callback mode,
@@ -604,7 +605,7 @@ itself. So every call counts. What Welcome reads, with no permission:
   means a SIM call is dialling, active or held. Only holders of
   `MODIFY_PHONE_STATE` may set those modes (`AudioService.setMode`), so no
   app can fake a call, and a VoIP call (`MODE_IN_COMMUNICATION`) does not
-  hold Panic off;
+  hold Quick power off;
 - emergency callback mode from the sticky, protected
   `ACTION_EMERGENCY_CALLBACK_MODE_CHANGED` broadcast, which the phone
   process sends without a permission, on networks that use the mode.
@@ -617,13 +618,33 @@ off is never held: the message says how to switch off on purpose.
 Android's own restart (`DevicePolicyManager.reboot()`) also refuses during
 any call.
 
-## Panic off
+## Quick power off
+
+The immediate power-off (`QuickPowerOff.kt`): the Quick Settings tile, the
+session notification's action and the status screen's **Power off now**.
+It was called "Emergency off" until WEL7 and "Panic off" until WEL12:
+where the emergency number is 112, a "panic button" on a phone means an
+emergency call, so the name must never suggest one. It has nothing to do
+with emergency calls, and it waits for them (see "Emergency calls").
+
+**Never on the power button.** No Antumbra action, in Welcome or in the
+module, is ever bound to presses of the power button, repeated or held.
+Android's own emergency gesture (pressing power five times quickly,
+"Emergency SOS"; whether anything handles it on the phone is PH4's
+question) and the power menu's **Emergency** item belong to the system,
+and Antumbra leaves both as they are: someone who presses power several
+times or opens the power menu in an emergency must reach an emergency
+call, never a power-off. A trigger from another app (WEL4: a PanicKit app
+such as Ripple) is acceptable only if it is not bound to the power button
+either. The power menu itself stays
+available before Start (`LOCK_TASK_FEATURE_GLOBAL_ACTIONS`), and CI checks
+that its Emergency item shows there (`check-power-menu`, below).
 
 A device owner cannot power the phone off. Android gives it one power
 action, `DevicePolicyManager.reboot()`. A real power-off needs
 `android.permission.SHUTDOWN`, which is `signature|privileged|role` in
-Android 16's core manifest. So `PanicOff.trigger`, unless a call holds it
-(see "Emergency calls"):
+Android 16's core manifest. So `QuickPowerOff.trigger`, unless a call holds
+it (see "Emergency calls"):
 
 1. If the app holds `SHUTDOWN`, starts the system's `ShutdownActivity`
    (`com.android.internal.intent.action.REQUEST_SHUTDOWN`, no confirmation).
@@ -651,7 +672,7 @@ Android 16's core manifest. So `PanicOff.trigger`, unless a call holds it
 The marker's life: Welcome never deletes it at boot, where it would race
 the module. It deletes a leftover marker at Start and on becoming the
 device owner (by then the module had its chance), and at a shutdown that
-its own process did not ask for (`PanicOff.requested`), so a request the
+its own process did not ask for (`QuickPowerOff.requested`), so a request the
 module did not act on never powers off a later boot.
 
 What this gives today, without the module's help: a restart. A restart ends
@@ -721,13 +742,14 @@ W=antumbra/android/welcome/ci/welcome-adb.sh
 $W install app-debug.apk
 $W provision                                   # test hook on, dpm set-device-owner, waits for Start
 $W check-emergency                             # before Start: the emergency dialer opens from the lock task; dials nothing
+$W check-power-menu                            # before Start: the power menu shows its Emergency item (never pressed); menu closed
 $W screenshot welcome.png
 $W start --tor bridges --bridges-file plain-bridges.txt
 $W expect started=1 tor_mode=bridges bridges=2
 $W check-policies                              # add --admin, --keep-adb, --wifi-locked as they apply
 $W check-addon                                 # Welcome reads antumbra.fw.armed (opens the status screen, scrolls to the row)
 $W screenshot status.png
-$W panic-tile                                  # waits until the boot id changes
+$W power-off-tile                              # waits until the boot id changes
 $W wait-welcome 180
 $W start --tor offline --expect-adb-loss       # last: clears the hook; adb goes away at Start
 ```
@@ -755,6 +777,49 @@ emergency number; for an end-to-end test use
 `cmd phone emergency-number-test-mode -a <harmless number>:normal` as root,
 never with `emergency` or `unknown` routing.
 
+`check-power-menu` (WEL12) also runs before Start, in Welcome's lock task,
+and only looks. The power menu has one of two items labelled
+**Emergency**, and a dump cannot tell them apart (same label, same view
+ids; only the icon differs): SystemUI's `EmergencyDialerAction`, which
+opens the emergency dial pad and dials nothing, or, while Android's
+emergency affordance is on, `EmergencyAffordanceAction`, which **calls at
+once** (`EmergencyAffordanceManager.performEmergencyCall`: `CALL_EMERGENCY`
+to `config_emergency_call_number`, 112 in AOSP). The affordance is on when
+`force_emergency_affordance` (a test setting) or `emergency_affordance_needed`
+(which Android sets when the SIM's or the network's country is in
+`config_emergency_iso_country_codes`) is not 0. So the check runs only
+while both are unset or 0, and then the item it sees is the dial-pad one.
+It changes no emergency setting, registers no test number, presses nothing
+on the keyguard, and never presses the item:
+
+1. Refuses, with nothing changed, unless Welcome is in front and `LOCKED`,
+   no call is in progress, and the emergency affordance is off (both
+   settings read back as unset or 0; unreadable counts as on).
+2. Opens the power menu with `input keyevent --longpress KEYCODE_POWER`,
+   with `power_button_long_press` set to 1 meanwhile (AOSP's
+   `config_longPressOnPowerBehavior` is 5, the assistant; the old value is
+   kept in `/data/local/tmp` and put back).
+3. Finds the menu in `uiautomator dump` by SystemUI's "Power off",
+   "Restart" or "Power" (the keyguard's bouncer also has a SystemUI button
+   labelled "Emergency", so that label alone does not prove the menu), and
+   "Emergency" in it; takes the screenshot if asked.
+4. Closes the menu without touching it: Back, and if a dump still shows
+   the menu (or fails), the screen off and on (SystemUI's
+   `GlobalActionsDialogLite` closes on `ACTION_SCREEN_OFF`).
+5. Checks that Welcome is in front, still `LOCKED`, with no call, and that
+   the affordance is still off (so the item seen was the dial-pad one),
+   then puts `power_button_long_press` back. A failure, a kill (`INT`,
+   `TERM`, `HUP`) or an error after step 1 runs the same reset
+   (`clear-power-menu-test`): the menu closed first, then the setting.
+
+The item that calls at once, and a call through either item with a
+stand-in number, stay PH4's, on the phone: forcing that item on the
+emulator would add a one-tap emergency call to every power menu opened
+meanwhile without proving anything a dump can show, and a test call is not
+proven to keep normal routing (with domain selection,
+`TelephonyConnectionService` can redial an emergency call with emergency
+routing, `EXTRA_USE_EMERGENCY_ROUTING`).
+
 `check-policies` reads only user 0's "Effective restrictions" in
 `dumpsys user`: the dump also lists the guest's default restrictions
 (`no_config_wifi` among them) and each user type's. `check-addon` opens
@@ -764,8 +829,9 @@ firewall row, since uiautomator lists only what is on screen.
 **CI.** The emulator job (`antumbra/android/ci/emulator-antumbra.sh`)
 drives Welcome itself with the same test tags and provider URI, and calls
 this script only for `check-emergency` (before Start, check
-`welcome_emergency_dialer`), `check-policies --keep-adb` and
-`check-addon`. It
+`welcome_emergency_dialer`), `check-power-menu` (right after it, check
+`welcome_power_menu_emergency`, a warning until it has passed on CI once),
+`check-policies --keep-adb` and `check-addon`. It
 must set `debug.antumbra.keep_adb 1` before `dpm set-device-owner` to keep
 adb. The Welcome job in
 `.github/workflows/antumbra-android.yml` builds the debug APK and runs the
@@ -773,8 +839,9 @@ unit tests.
 
 ## Verified, and not yet
 
-Verified locally (2026-10-11, and again for emergency calls on
-2026-10-12; no emulator here):
+Verified locally (2026-10-11, again for emergency calls on 2026-10-12, and
+for Quick power off and the power menu check on 2026-10-13; no emulator
+here):
 
 - `./gradlew assembleDebug assembleRelease lintDebug testDebugUnitTest`
   passes with dependency verification on (checksums and signatures, key
@@ -786,9 +853,10 @@ Verified locally (2026-10-11, and again for emergency calls on
   latched-session and tor-error fields, null or empty text as none; the
   policy lists and which failures refuse a network session; the lock
   task's features (keyguard and power menu, no Home, recents or shade);
-  which audio modes count as a call, when Panic off waits, and the call in
-  progress that shows "Return to call"; its permission and text; no
-  "Emergency off" and no number in the texts).
+  which audio modes count as a call, when Quick power off waits, and the
+  call in progress that shows "Return to call"; its permission and text;
+  no "Emergency off", no "panic" and no number in the texts, and the tile
+  and the notification action under the label "Quick power off").
 - `ci/welcome-adb.sh` and `ci/test-welcome-adb.sh` pass shellcheck, and the
   fake-adb test passes: bridge lines with `[`, `]`, `+`, `/`, `=` are
   typed, `;`, quotes and `\` refused; the test-hook rule; check-policies
@@ -798,7 +866,21 @@ Verified locally (2026-10-11, and again for emergency calls on
   the button and by `am start`, refused either way, stuck after Back, the
   lock task ending while the dialer is open, a call appearing after the
   first opening, no lock task, a call in progress, no call state to read,
-  no emergency dialer; nothing that could dial is ever sent); expect.
+  no emergency dialer; nothing that could dial is ever sent);
+  check-power-menu (the emergency affordance read as off before the menu
+  opens, the long-press setting set and put back, the menu found by its
+  own items and its Emergency item seen, never pressed, no emergency
+  setting or test number touched, the menu closed with Back, or with the
+  screen off and on when Back does not close it; a menu without the item,
+  no menu, the keyguard's bouncer (its "Emergency" is not the menu's), the
+  affordance coming on during the check, a long-press setting that does
+  not take, and a kill while the menu is open all fail and put everything
+  back, the earlier long-press value included; a menu that stays open
+  fails and still gets its long-press setting back; refused with nothing
+  changed when the affordance is forced, needed or unreadable, with no
+  lock task or a call in progress); clear-power-menu-test (an open menu
+  closed and the saved value put back; a value it did not save left
+  alone); expect.
 - `tools/builtin-bridges.sh` and its `--check` against the pinned source.
 - Framework behaviour read in Android 16 sources (android16-release):
   `ACTION_SHUTDOWN` is sent registered-only and deferred for cached
@@ -836,6 +918,28 @@ Verified locally (2026-10-11, and again for emergency calls on
   `MODIFY_PHONE_STATE` holders may set `MODE_IN_CALL`; the emergency
   callback mode broadcast is sticky, protected and sent without a
   permission, and its default length is 5 minutes.
+  For the power menu (WEL12): SystemUI's `GlobalActionsDialogLite` builds
+  its items when the menu opens (again only on a rotation or a
+  configuration change, never on a settings change) and, when
+  `EmergencyAffordanceManager.needsEmergencyAffordance()` (the global
+  `force_emergency_affordance`, on any build, or
+  `emergency_affordance_needed`, which `EmergencyAffordanceService` sets
+  from the SIM's and the network's country; nothing else) puts the
+  affordance's Emergency item first in place of the dial-pad one
+  (`EmergencyDialerAction`, shown whenever the device has telephony; AOSP's
+  `config_globalActionsList` starts with it); both are labelled
+  "Emergency", with the same view ids, and show over the keyguard and
+  before provisioning; the affordance's item sends `CALL_EMERGENCY` in a
+  new task to `config_emergency_call_number` (112 in AOSP), or to
+  `emergency_affordance_number` on debuggable builds only, read when it is
+  pressed; the menu closes on `ACTION_SCREEN_OFF`; the keyguard bouncer's
+  emergency button is labelled "Emergency" too
+  (`lockscreen_emergency_call`); `config_longPressOnPowerBehavior` is 5
+  (the assistant) in AOSP and the emulator's overlays do not change it,
+  `power_button_long_press` overrides it, and an injected long press
+  (`input keyevent --longpress`) reaches the power key's long-press rule;
+  Telephony can redial a normal-routed emergency number with emergency
+  routing.
 
 Only CI (the API 36 emulator) or the phone can verify: provisioning, the
 locked task and home switching, every policy taking effect (including the
@@ -844,10 +948,14 @@ Welcome reading `antumbra.fw.armed`, the Wi-Fi state check and airplane
 mode, the provider answering root and shell and refusing others, the status
 page through the real firewall, the tile and the restart, the shutdown
 receiver, `FLAG_SECURE`, the emergency dialer opening from the lock task
-(the emulator job's `welcome_emergency_dialer` check), and a stand-in
-emergency number reaching the call screen before Start, "Return to call"
-bringing it back after Back, Panic off waiting during that call, and the
-keyguard before Start with a swipe lock or a PIN (the phone, PH4).
+(the emulator job's `welcome_emergency_dialer` check), the power menu's
+Emergency item in the lock task (`welcome_power_menu_emergency`, not yet
+run on CI), and a stand-in emergency number reaching the call screen
+before Start, from the emergency dial pad and from the power menu's item
+(the dial-pad one, and the one that calls at once where the emergency
+affordance is on), "Return to call" bringing it back after Back, Quick power off waiting
+during that call, and the keyguard before Start with a swipe lock or a PIN
+(the phone, PH4).
 
 ## Open risks
 
@@ -864,7 +972,7 @@ keyguard before Start with a swipe lock or a PIN (the phone, PH4).
 - **Wi-Fi switched on by hand in airplane mode** cannot be switched off by
   Welcome; it has nothing to join, and a network session without the
   add-on is refused (see "Wi-Fi in airplane mode").
-- **Panic off waits after every call**, not only emergency calls: Welcome
+- **Quick power off waits after every call**, not only emergency calls: Welcome
   cannot tell them apart without system permissions. A call that is still
   connecting (a few seconds) is not seen, and the end of a call is known
   only to the process that saw it. The power menu's Power off always works.
@@ -876,7 +984,7 @@ keyguard before Start with a swipe lock or a PIN (the phone, PH4).
   settings, and what they start in that task (see "Emergency calls"). The
   same feature lets emergency calls through, so no setting avoids it;
   keeping the cellular radio off before Start (MOD6) does.
-- **Panic off restarts rather than powers off** unless the module
+- **Quick power off restarts rather than powers off** unless the module
   installs Welcome as a privileged app or implements the power-off request.
 - **Bridges need lyrebird**, which the tor part does not build yet; only
   plain bridges work in v0.

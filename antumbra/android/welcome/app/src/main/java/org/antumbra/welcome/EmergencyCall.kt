@@ -126,8 +126,8 @@ object EmergencyCall {
     }
 }
 
-/** Why Panic off waits. */
-enum class PanicHold { CALL, CALLBACK_MODE, AFTER_CALL }
+/** Why Quick power off waits. */
+enum class PowerOffHold { CALL, CALLBACK_MODE, AFTER_CALL }
 
 /**
  * The end of the last phone call, from the audio mode. Only the phone
@@ -153,7 +153,7 @@ class CallRecord {
         inCall = call
     }
 
-    /** Minutes Panic off still waits after the last call, rounded up; 0 when it does not. */
+    /** Minutes Quick power off still waits after the last call, rounded up; 0 when it does not. */
     @Synchronized
     fun minutesLeft(now: Long): Int {
         val end = lastEnd ?: return 0
@@ -163,15 +163,16 @@ class CallRecord {
     }
 
     /**
-     * What holds Panic off now: a call in progress (seen now, [callNow], or
-     * by the listener), emergency callback mode, or a call that ended less
-     * than [CallWatch.CALLBACK_WINDOW_MS] ago. Null when nothing does.
+     * What holds Quick power off now: a call in progress (seen now,
+     * [callNow], or by the listener), emergency callback mode, or a call
+     * that ended less than [CallWatch.CALLBACK_WINDOW_MS] ago. Null when
+     * nothing does.
      */
     @Synchronized
-    fun hold(callNow: Boolean, callbackMode: Boolean, now: Long): PanicHold? = when {
-        callNow || inCall -> PanicHold.CALL
-        callbackMode -> PanicHold.CALLBACK_MODE
-        minutesLeft(now) > 0 -> PanicHold.AFTER_CALL
+    fun hold(callNow: Boolean, callbackMode: Boolean, now: Long): PowerOffHold? = when {
+        callNow || inCall -> PowerOffHold.CALL
+        callbackMode -> PowerOffHold.CALLBACK_MODE
+        minutesLeft(now) > 0 -> PowerOffHold.AFTER_CALL
         else -> null
     }
 
@@ -182,18 +183,18 @@ class CallRecord {
 }
 
 /**
- * Keeps Panic off from cutting an emergency call short, or from switching
- * the phone off while the emergency service may call back.
+ * Keeps Quick power off from cutting an emergency call short, or from
+ * switching the phone off while the emergency service may call back.
  *
  * Welcome cannot tell an emergency call from any other.
  * TelecomManager.isInEmergencyCall needs MODIFY_PHONE_STATE and
  * TelephonyManager.getEmergencyCallbackMode needs
  * READ_PRIVILEGED_PHONE_STATE: system APIs behind permissions that only the
  * platform and privileged apps hold, not a device owner. So every call
- * counts. Panic off waits during a call, while Android reports emergency
- * callback mode (on networks that use it), and for [CALLBACK_WINDOW_MS]
- * after any call ends. The record is in memory only, like the session, and
- * starts with the process.
+ * counts. Quick power off waits during a call, while Android reports
+ * emergency callback mode (on networks that use it), and for
+ * [CALLBACK_WINDOW_MS] after any call ends. The record is in memory only,
+ * like the session, and starts with the process.
  */
 object CallWatch {
     private const val TAG = "AntumbraCallWatch"
@@ -243,16 +244,16 @@ object CallWatch {
         false
     }
 
-    /** Why Panic off must wait now, for the person; null when it may go ahead. */
+    /** Why Quick power off must wait now, for the person; null when it may go ahead. */
     fun holdMessage(context: Context): String? {
         val now = SystemClock.elapsedRealtime()
         val mode = context.getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
         return when (record.hold(CallRecord.isCallMode(mode), inCallbackMode(context), now)) {
             null -> null
-            PanicHold.CALL -> context.getString(R.string.panic_wait_call)
-            PanicHold.CALLBACK_MODE -> context.getString(R.string.panic_wait_callback_mode)
-            PanicHold.AFTER_CALL -> record.minutesLeft(now).let {
-                context.resources.getQuantityString(R.plurals.panic_wait_after_call, it, it)
+            PowerOffHold.CALL -> context.getString(R.string.power_off_wait_call)
+            PowerOffHold.CALLBACK_MODE -> context.getString(R.string.power_off_wait_callback_mode)
+            PowerOffHold.AFTER_CALL -> record.minutesLeft(now).let {
+                context.resources.getQuantityString(R.plurals.power_off_wait_after_call, it, it)
             }
         }
     }

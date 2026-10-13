@@ -54,7 +54,7 @@ class StatusActivity : ComponentActivity() {
                                 check = check,
                                 policyFailures = WelcomeModel.policyFailures,
                                 wifiNotOn = WelcomeModel.wifiNotOn,
-                                canPowerOff = PanicOff.canPowerOff(this@StatusActivity),
+                                canPowerOff = QuickPowerOff.canPowerOff(this@StatusActivity),
                                 message = message,
                                 messageIsError = messageIsError,
                             ),
@@ -62,7 +62,7 @@ class StatusActivity : ComponentActivity() {
                             onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
                             onAddTile = ::addTile,
                             onPowerOff = {
-                                message = PanicOff.trigger(this@StatusActivity).ifEmpty { null }
+                                message = QuickPowerOff.trigger(this@StatusActivity).ifEmpty { null }
                                 messageIsError = true
                             },
                             onEmergencyCall = ::emergencyCall,
@@ -99,7 +99,7 @@ class StatusActivity : ComponentActivity() {
     private fun addTile() {
         val statusBar = getSystemService(StatusBarManager::class.java)
         statusBar.requestAddTileService(
-            ComponentName(this, PanicTileService::class.java),
+            ComponentName(this, QuickPowerOffTileService::class.java),
             getString(R.string.tile_label),
             Icon.createWithResource(this, R.drawable.ic_power),
             mainExecutor,

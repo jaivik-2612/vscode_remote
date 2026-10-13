@@ -560,6 +560,11 @@ class DailyTest(unittest.TestCase):
         self.assertEqual(daily.plain_check("new_check", "fail"), "Not as expected: new check")
         self.assertEqual(daily.plain_check("welcome_emergency_dialer", "fail"),
                          "Emergency calls from the Welcome screen did not work as expected (nothing was dialled)")
+        self.assertEqual(daily.plain_check("welcome_power_menu_emergency", "ok"),
+                         "The power menu's Emergency button showed over the Welcome screen (not pressed, nothing dialled)")
+        self.assertEqual(daily.plain_check("welcome_power_menu_emergency", "warn"),
+                         "The power menu check on the Welcome screen did not go as expected "
+                         "(nothing in the power menu was pressed, nothing dialled)")
         self.assertEqual(daily.plain_check("tracker_blocked:x.net", "ok"), "Tracker blocked: x.net")
 
     def test_odd_shapes_do_not_crash(self):

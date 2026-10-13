@@ -120,12 +120,27 @@ CI in `.github/workflows/antumbra-android.yml`.
 | Tor Browser | The official Tor Browser for Android, unchanged and signature-checked (W9). It gets uBlock Origin only if Tor Browser 17 bundles it (Tor issue #17569, labelled "17.0 stable" **[verified as open]**). | **Good** | It cannot use the system's Tor (issue #43438 **[verified as open]**), so it runs its own and may connect only to Tor relays and bridges (section 5). Android's Firefox engine has weaker internal sandboxing than the desktop one. |
 | Unsafe Browser (captive portals) | Off by default. When ticked at Welcome: a dedicated WebView app with its own UID, launched by hand, bound to the Wi-Fi network, with a root helper that opens a clearnet and DNS exemption for that UID while it runs and closes it on exit, with Tails' warning (W11). Android's captive-portal detection stays off (`captive_portal_mode=0`) in every session. | **Partial** | A session-wide captive-portal switch was rejected: Android would probe Google on every connection, and any app can trigger a probe (`reportNetworkConnectivity`) at a time it chooses. |
 | Curated apps | KeePassDX (for KeePassXC), Thunderbird, OnionShare (beta), Scrambled Exif (for Metadata Cleaner), Electrum, Briar and the HeliBoard keyboard, from Antumbra's signed repository, over Tor (W9). | **Good** | Android equivalents of Tails' apps, not the same programs. |
-| Emergency shutdown | Stage 1: a Quick Settings tile (v0), a panic trigger (Ripple, PanicKit), and optionally a power-off after the phone has been locked for some hours. Each powers off: Welcome installed as a privileged app with the `SHUTDOWN` permission, or a power-off request the module carries out at once. Until then (v0) the tile restarts the phone. Stage 2: a power-menu entry. | **Good** once it powers off | An app cannot add a power-menu entry in Stage 1. A forced hardware reset skips all of this. |
+| Emergency shutdown | Quick power off. Stage 1: a Quick Settings tile and the session notification's action (v0), a trigger from a PanicKit app such as Ripple, and optionally a power-off after the phone has been locked for some hours. Each powers off: Welcome installed as a privileged app with the `SHUTDOWN` permission, or a power-off request the module carries out at once. Until then (v0) the tile restarts the phone. Stage 2: a power-menu entry. Never bound to the power button (below). | **Good** once it powers off | An app cannot add a power-menu entry in Stage 1. A forced hardware reset skips all of this. |
 | Memory wiping | Qualcomm's crash-dump mode off at boot (`download_mode=0`, v0) **[likely, Stage 1]**, to be checked with a forced panic on the phone. Freed memory zeroed (`init_on_free=1`) in Stage 1 only if the kernel command line can be changed **[unknown]**; certain in Stage 2. | **Weak to partial** | No memory wipe at shutdown as in Tails. EDL cannot be switched off. |
 | Nothing phones home | Android's own background connections off (section 6, L0). Anything missed cannot leave outside Tor, but it can reach its server through Tor, so tests log the system's name lookups and block every unexpected destination by name; a packet capture alone cannot show it. | **Good** | A modem with a SIM talks to the carrier outside Android, hence no SIM by default. |
 | Signed images and updates | Stage 1: the system is signed by LineageOS; the module, Welcome, the apps and the repository by Antumbra, with SHA-256 sums and build provenance. The module has no `updateJson`: Magisk never fetches it. Module updates go through Welcome after a pinned-key signature check (later). Stage 2: the whole system signed with Antumbra's keys, as a non-debug "user" build. | **Partial** | No verified boot on this phone, ever. |
 | Administration | The Administration option at Welcome lifts three restrictions from Start until the next shutdown: app installation from outside the preinstalled store, Bluetooth, and the location settings. Settings itself is reachable in every session once Start has ended Welcome's locked task. Apps never get root. Debugging stays off in every session, Administration included (v0, a test build's hook aside, section 13). | **Good**; `ro.debuggable=0` still to come (MOD4) | |
 | Tracker blocking (no Tails equivalent) | Section 6. | **Good for apps** | Tor Browser is deliberately not filtered. |
+
+**Quick power off, never on the power button.** Antumbra's immediate
+power-off is called Quick power off: where the emergency number is 112, a
+"panic button" on a phone means an emergency call, so no Antumbra text
+names it "panic" or "emergency" (it was "Emergency off", then "Panic off").
+No Antumbra action, in Welcome, the module or a later Stage 2 build, is
+ever bound to presses of the power button, repeated or held. Android's own
+emergency gesture (five quick presses) and the power menu's Emergency item
+belong to the system, and Antumbra leaves them as they are, before Start
+too: Welcome's locked task keeps the power menu
+(`LOCK_TASK_FEATURE_GLOBAL_ACTIONS`) and lets emergency calls through
+(`LOCK_TASK_FEATURE_KEYGUARD`), and CI checks that the power menu shows its
+Emergency item there (`welcome_power_menu_emergency`; the item is never
+pressed in a test). A power-menu entry for Quick power off (Stage 2) is an
+item to choose, not a press pattern.
 
 ## 5. The firewall policy
 
@@ -423,7 +438,7 @@ without re-root, and the emulator's mobile data.
 | Persistent Storage | A separate Android user | LUKS2/argon2id with Tails-style features **[unknown: where it lives]** |
 | Leak fixes | Settings, overlays, device-owner policies | GrapheneOS's patches ported: DHCP-state flush, per-connection MAC, keepalive, captive-portal and network-time changes, a neutral DHCP vendor class, IPv6 off in Wi-Fi provisioning |
 | Kernel | as shipped (crash-dump mode switched off at run time) | built without `QCOM_DLOAD_MODE`, with `INIT_ON_FREE_DEFAULT_ON` |
-| Emergency power-off | tile and panic trigger | also a power-menu entry |
+| Quick power off | tile, notification action and a PanicKit trigger | also a power-menu entry |
 | CI image | Google's Android 16 emulator image | Antumbra's own LineageOS emulator image (`sdk_phone` x86_64, buildable from LineageOS 21 on **[verified, LineageOS wiki]**) |
 
 **Stage 2's open points** **[unknown]**, to be measured before the Stage 2
@@ -537,7 +552,7 @@ a public repository must never run on pull-request triggers.
 | `ro.debuggable=0`; debugging off in every session; adb settings reset at boot | `module/`, `welcome/` | debugging off and adb settings at 0 in every session, Administration included: done in Welcome (a test build's hook keeps adb, section 13); `ro.debuggable=0`, `adb_keys` and logging: todo (MOD4) |
 | Magisk app hidden outside updates | `welcome/` | todo |
 | Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the switch shown but disabled; the app W11 |
-| Panic off powers off, not restarts | `welcome/`, `module/` | todo (v0 restarts) |
+| Quick power off powers off, not restarts; never bound to the power button | `welcome/`, `module/` | the name and the rule done (WEL12); powering off todo (v0 restarts) |
 | System records moved to RAM (section 9) | `module/` | W8 |
 | Hidden networks refused; passphrase field without learning, `FLAG_SECURE` | `welcome/` | W10 |
 | Exempt apps: relays and bridges only, fail closed when stale | `firewall/`, helper | chain exists, empty (W9) |
@@ -572,7 +587,7 @@ These are decisions the parts took, each explained in its README:
   network Start**: Wi-Fi is set up by hand after Start until Persistent
   Storage brings networks back. They stay set before Start, in offline
   sessions and when the add-on is missing.
-- **The Panic off tile restarts the phone** until Welcome is a privileged app
+- **The Quick power off tile restarts the phone** until Welcome is a privileged app
   with `SHUTDOWN`, or the module carries out a power-off request.
 - **Only plain bridges work**: lyrebird (obfs4, WebTunnel, meek_lite) is not
   built yet; Snowflake is never accepted (it needs UDP).

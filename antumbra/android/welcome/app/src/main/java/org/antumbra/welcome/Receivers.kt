@@ -37,12 +37,12 @@ class BootReceiver : BroadcastReceiver() {
     }
 }
 
-/** The session notification's "Panic off" action. */
-class PanicReceiver : BroadcastReceiver() {
+/** The session notification's "Quick power off" action. */
+class QuickPowerOffReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val problem = PanicOff.trigger(context)
+        val problem = QuickPowerOff.trigger(context)
         if (problem.isNotEmpty()) {
-            Log.w("AntumbraPanic", problem)
+            Log.w("AntumbraPowerOff", problem)
             // Why it did not switch off (a call, for example), where the person looks.
             Toast.makeText(context, problem, Toast.LENGTH_LONG).show()
         }
@@ -86,7 +86,7 @@ object BootState {
         }
         // A fresh device owner: no power-off request can be meant for it.
         // At boot the marker stays, for the module to find.
-        if (why == DevicePolicyManager.ACTION_DEVICE_OWNER_CHANGED) PanicOff.clearRequest(context)
+        if (why == DevicePolicyManager.ACTION_DEVICE_OWNER_CHANGED) QuickPowerOff.clearRequest(context)
         val failures = policies.applyBaseline() +
             policies.lockWifiOff(waitMs = Policies.WIFI_WAIT_MS) +
             policies.forgetWifiNetworks()
@@ -115,7 +115,7 @@ object BootState {
         if (!policies.isDeviceOwner) return
         // A shutdown this process did not ask for: a power-off request left
         // from an earlier boot must not power off the next one.
-        if (!PanicOff.requested) PanicOff.clearRequest(context)
+        if (!QuickPowerOff.requested) QuickPowerOff.clearRequest(context)
         try {
             Home.claim(context)
         } catch (e: Exception) {
