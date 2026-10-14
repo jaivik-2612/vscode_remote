@@ -19,16 +19,27 @@
 #   5. IPv6 off on every interface, again whenever NetworkStack switches it
 #      on;
 #   6. once boot has completed: the fail-safe Settings, mobile data off;
+#      then, at every turn, the cell radio's watch (lib/antumbra.sh, "The
+#      cell radio"): enable_cellular_on_boot and mobile_data_always_on 0,
+#      airplane mode's radio list narrowed to the cell radio once airplane
+#      mode has read off for 30 seconds, and the cell radio switched off
+#      (airplane mode) whenever something switched it on, unless a call,
+#      emergency callback mode or a call in the last 5 minutes holds it
+#      (enable_cellular_on_boot is kept at 1 while that hold lasts);
 #   7. wait for the Welcome screen's Start (started=1 in its provider, and
 #      Welcome the device owner): offline keeps tor's network off; direct
 #      and bridges set the bridges, if any, and DisableNetwork 0 over tor's
 #      control socket, once the firewall is live and no other uid holds a
-#      service port;
+#      service port; a session in Phone mode (WEL8; none yet) has the cell
+#      radio switched on at Start, mobile data off first;
 #   8. then, until shutdown: at every turn, check who holds 9040, 9053,
 #      5335 and 5380 and go back to the armed state while another uid
 #      does; restart tor or the filter if they stop; check the firewall
 #      every 30 seconds and reload it if it is not live; keep status.json
-#      up to date; at shutdown, put the fail-safe Settings back.
+#      up to date; after any radio switch-on, mobile data off again, and
+#      enable_cellular_on_boot 0 again once no hold lasts; at shutdown, put
+#      the fail-safe Settings back and store airplane mode off for the next
+#      start (unless a call holds it).
 #
 # Schedules use the time since boot (/proc/uptime), never the clock.
 
@@ -56,15 +67,20 @@ S_STARTED=0
 SES_MODE=
 SES_MAC=
 SES_KIND=
+# off, or phone (calls and texts: the cell radio on after Start, mobile data
+# off); session_cell decides it.
+SES_CELL=off
 # pending: the network is to be opened when tor and the firewall are ready;
 # open: opened (or nothing to do: offline); failed: this session's bridges
 # cannot work.
 SES_NET=
-# Current problems, joined into S_NOW_PROBLEM for status.json.
+# Current problems, joined into S_NOW_PROBLEM for status.json (with
+# P_CELL, which cell_step keeps).
 P_PORTS=
 P_WELCOME=
-# wanted: the firewall could not even be armed, so airplane mode and Wi-Fi
-# off as soon as the framework answers; switched: done.
+# wanted: the firewall could not even be armed, so Wi-Fi and mobile data
+# off as soon as the framework answers; waiting: done, and the cell radio
+# and Bluetooth go off as soon as no call holds them; switched: all done.
 RADIOS=
 
 # --- 0. The runtime directory and a single copy of this script --------------
@@ -120,8 +136,9 @@ refresh_tor() {
 # not be loaded). S_FW_STATE becomes "failed" if the arm set is in place
 # (or a partial set: its egress gates let out nothing but what they mark).
 # Otherwise one more 'flush' (back to armed); if even that leaves the
-# network open, S_FW_STATE becomes "open" and airplane mode and Wi-Fi go
-# off as soon as the framework answers (the second line of defence).
+# network open, S_FW_STATE becomes "open" and Wi-Fi and mobile data go
+# off as soon as the framework answers, the cell radio and Bluetooth when
+# no call holds them (the second line of defence).
 firewall_closed() {
 	S_FW_HASH=
 	case $(fw_state) in
@@ -138,9 +155,9 @@ firewall_closed() {
 		;;
 	esac
 	[ "$S_FW_STATE" = open ] ||
-		log "firewall: OPEN: not even the arm set could be loaded; airplane mode and Wi-Fi go off"
+		log "firewall: OPEN: not even the arm set could be loaded; the radios go off"
 	S_FW_STATE=open
-	[ "$RADIOS" = switched ] || RADIOS=wanted
+	case $RADIOS in waiting | switched) ;; *) RADIOS=wanted ;; esac
 	return 1
 }
 
@@ -156,9 +173,10 @@ firewall_up() {
 }
 
 # apply_settings: the fail-safe Settings.Global values (lib/settings.conf,
-# which gives the reason for each), mobile data off for every SIM (not on
-# the emulator), and Wi-Fi scanning for location off now, in Wi-Fi's own
-# store (in RAM); the Settings value is what Wi-Fi copies at the next boot.
+# which gives the reason for each; among them the cell radio's
+# enable_cellular_on_boot=0), mobile data off for every SIM, and Wi-Fi
+# scanning for location off now, in Wi-Fi's own store (in RAM); the
+# Settings value is what Wi-Fi copies at the next boot.
 apply_settings() {
 	_as_bad=$(settings_apply)
 	mobile_data_off
@@ -174,7 +192,14 @@ apply_settings() {
 # (sys.shutdown.requested, set by ShutdownThread before anything else),
 # put the fail-safe Settings back, so that a start without the module
 # finds them: a new MAC address for every connection even after a "keep"
-# session, and mobile data off even if it was switched on in this session.
+# session, mobile data off even if it was switched on in this session, and
+# the cell radio off at the next start (enable_cellular_on_boot=0, also
+# when the watch kept it at 1 for a hold: a restart is a new power-on, the
+# phone process is not restarted before it, and an emergency call still
+# switches the radio on at the next start). Then,
+# if airplane mode is on (the module's run-time switch-off), store it off
+# and cell_on=1 without a broadcast, unless a call holds it (cell_shutdown):
+# the next start then has the radio off and Wi-Fi under Welcome's control.
 # Best effort: the framework may be gone before this runs, and a crash or
 # a forced power-off skips it. Returns 0 if Android is shutting down.
 SHUTDOWN_DONE=0
@@ -185,6 +210,7 @@ shutdown_check() {
 	settings_apply >/dev/null
 	mobile_data_off
 	log "shutdown: fail-safe Settings put back"
+	[ "$SETTINGS_DONE" = 1 ] && cell_shutdown "$(uptime_s)"
 	return 0
 }
 
@@ -197,6 +223,15 @@ nap() {
 		[ "$SHUTDOWN_DONE" = 0 ] && shutdown_check && return 0
 	done
 }
+
+# session_cell ROW: the session's choice for the cell radio: "off", or
+# "phone" (calls and texts: the radio on after Start, mobile data off).
+# Welcome's row has no such column yet: WEL8 adds "cell" to the shared
+# contract (design section 3, Welcome's StateProvider, session_read's
+# projection and the e2e tests, changed together) and reads it here, with
+# a check of its value. Until then every session keeps the cell radio off.
+# This is the only place that decides it.
+session_cell() { echo off; }
 
 # session_read: read Welcome's row. Returns 0 once started=1 has been read
 # with valid values from Welcome as the device owner, and keeps that
@@ -248,12 +283,14 @@ session_read() {
 	fi
 	SES_MODE=$_sr_mode
 	SES_MAC=$_sr_mac
+	SES_CELL=$(session_cell "$_sr_row")
 	S_STARTED=1
 	# The session record stays in the root-only state directory; status.json,
 	# which every app can read, says only that a session started.
-	printf 'session_id=%s\ntor_mode=%s\nmac=%s\n' "$_sr_sid" "$SES_MODE" "$SES_MAC" >"$PRIV/session"
+	printf 'session_id=%s\ntor_mode=%s\nmac=%s\ncell=%s\n' "$_sr_sid" "$SES_MODE" "$SES_MAC" "$SES_CELL" \
+		>"$PRIV/session"
 	chmod 0600 "$PRIV/session"
-	log "welcome: session started (tor $SES_MODE, MAC $SES_MAC)"
+	log "welcome: session started (tor $SES_MODE, MAC $SES_MAC, cell radio $SES_CELL)"
 	return 0
 }
 
@@ -328,6 +365,31 @@ session_network() {
 	return 1
 }
 
+# ports_check: who holds the service ports. While another uid holds one,
+# the property goes, the firewall goes back to armed (no redirect: the
+# squatter is sent nothing), and tor's network is not switched on; once
+# the ports are free, the full rule set is loaded again at once (FW_NEXT).
+ports_check() {
+	if listeners_ok; then
+		if [ -n "$PORTS_LOGGED" ]; then
+			log "ports: free again"
+			PORTS_LOGGED=
+			FW_NEXT=0
+		fi
+		P_PORTS=
+	else
+		P_PORTS="service port taken: $PORTS_BAD"
+		if [ "$PORTS_BAD" != "$PORTS_LOGGED" ]; then
+			log "ports: $PORTS_BAD"
+			PORTS_LOGGED=$PORTS_BAD
+		fi
+		if [ "$S_FW_STATE" = live ]; then
+			fw_unpublish "$PORTS_BAD"
+			firewall_closed
+		fi
+	fi
+}
+
 # ipv6_guard: switch IPv6 off at once whenever an interface or address
 # changes (ip monitor), and every 10 seconds in any case.
 ipv6_guard() {
@@ -392,29 +454,8 @@ while :; do
 	NOW=$(uptime_s)
 	shutdown_check
 
-	# 8a. Who holds the service ports, at every turn. While another uid
-	# holds one, the property goes, the firewall goes back to armed (no
-	# redirect: the squatter is sent nothing), and tor's network is not
-	# switched on; once the ports are free, the full rule set is loaded
-	# again at once.
-	if listeners_ok; then
-		if [ -n "$PORTS_LOGGED" ]; then
-			log "ports: free again"
-			PORTS_LOGGED=
-			FW_NEXT=0
-		fi
-		P_PORTS=
-	else
-		P_PORTS="service port taken: $PORTS_BAD"
-		if [ "$PORTS_BAD" != "$PORTS_LOGGED" ]; then
-			log "ports: $PORTS_BAD"
-			PORTS_LOGGED=$PORTS_BAD
-		fi
-		if [ "$S_FW_STATE" = live ]; then
-			fw_unpublish "$PORTS_BAD"
-			firewall_closed
-		fi
-	fi
+	# 8a. Who holds the service ports, at every turn (ports_check).
+	ports_check
 
 	# 8b. The firewall, every 30 seconds (and at once when the ports are
 	# free again). If it is no longer live, the property goes at once, then
@@ -440,18 +481,11 @@ while :; do
 		fi
 	fi
 
-	# 6. Settings, once the framework answers; the radios, if the
-	# firewall is open.
+	# 6. Settings, once the framework answers.
 	if [ "$SETTINGS_DONE" = 0 ] && framework_ready; then
 		apply_settings
 		SETTINGS_DONE=1
 		SETTINGS_AT=$NOW
-	fi
-	if [ "$RADIOS" = wanted ] && framework_ready; then
-		radios_off
-		RADIOS=switched
-		S_PROBLEM="${S_PROBLEM:+$S_PROBLEM; }the firewall could not be loaded: airplane mode on, Wi-Fi off"
-		log "radios: airplane mode on, Wi-Fi off"
 	fi
 
 	# 7. The Welcome screen, until Start.
@@ -471,6 +505,17 @@ while :; do
 		fi
 	elif [ "$S_STARTED" = 1 ] && [ "$SES_NET" = pending ]; then
 		session_network
+	fi
+
+	# 6 (continued). The cell radio's watch, and the radios if the firewall
+	# is open: after Start has been read, so that a Phone-mode session's
+	# switch-on follows it in the same turn. It ends when Android begins to
+	# shut down (shutdown_check has stored what the next start needs). A
+	# turn in which it looked (two dumps, up to 8 s) checks the ports again
+	# at once, so that the look's time is not added to the next turn's wait.
+	if [ "$SETTINGS_DONE" = 1 ] && [ "$SHUTDOWN_DONE" = 0 ]; then
+		cell_step "$NOW"
+		[ "$CELL_LOOKED" = "$NOW" ] && ports_check
 	fi
 
 	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64
@@ -511,6 +556,7 @@ while :; do
 
 	S_NOW_PROBLEM=$P_PORTS
 	[ -z "$P_WELCOME" ] || S_NOW_PROBLEM=${S_NOW_PROBLEM:+$S_NOW_PROBLEM; }$P_WELCOME
+	[ -z "$P_CELL" ] || S_NOW_PROBLEM=${S_NOW_PROBLEM:+$S_NOW_PROBLEM; }$P_CELL
 	status_write
 	if [ "$S_STARTED" = 0 ] || [ "$SES_NET" = pending ] || [ "$S_FW_STATE" != live ] ||
 		[ "$S_TOR_RUNNING" = 0 ] || [ "$S_DNS_RUNNING" = 0 ] || [ -n "$P_PORTS" ] ||

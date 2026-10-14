@@ -151,7 +151,12 @@ that the captures must show traffic from the phone.
    module's `antumbra-run`: root never opens tor's cookie or socket).
 4. Airplane mode off and mobile data off (`svc data disable`): the phone
    has no SIM, so its only network is Wi-Fi, which has no saved network
-   (Wi-Fi's store is on an empty tmpfs).
+   (Wi-Fi's store is on an empty tmpfs). Airplane mode off switches the
+   emulated radio on; the module (its cell radio's watch, MOD6) stores
+   mobile data off again, narrows airplane mode's radio list to the cell
+   radio 30 seconds later, and about 5 minutes after this step switches
+   the emulated radio off with airplane mode, which Wi-Fi then does not
+   follow (`module/README.md`, "The cell radio").
 5. The Welcome APK; the debug build's test hook
    `setprop debug.antumbra.keep_adb 1` (honoured only by debuggable or
    testOnly builds; Welcome then leaves USB debugging on; `welcome/README.md`,

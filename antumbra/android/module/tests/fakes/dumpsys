@@ -1,0 +1,45 @@
+#!/system/bin/sh
+# Test stand-in for Android's dumpsys: 'dumpsys [-t SECONDS] SERVICE', in
+# the layout of Android 16's services, with placeholders for numbers.
+# telecom prints /antumbra-test/telecom (the tests write it).
+# telephony.registry prints the "last known state" part: one block per
+# phone (/antumbra-test/phones of them; /antumbra-test/registry.<n> when the
+# tests wrote one, idle otherwise) and mRadioPowerState from
+# /antumbra-test/radio. Every call is logged to /antumbra-test/dumpsys.log.
+# Before the framework is up, and while /antumbra-test/dumpsys-broken
+# exists, it answers as for a missing service.
+T=/antumbra-test
+[ "${1-}" = -t ] && shift 2
+echo "${1-}" >>$T/dumpsys.log
+if [ ! -f $T/framework-up ] || [ -e $T/dumpsys-broken ]; then
+	echo "Can't find service: ${1-}"
+	exit 1
+fi
+case ${1-} in
+telecom)
+	cat $T/telecom
+	;;
+telephony.registry)
+	echo 'last known state:'
+	n=$(cat $T/phones 2>/dev/null)
+	i=0
+	while [ "$i" -lt "${n:-1}" ]; do
+		echo "  Phone Id=$i"
+		if [ -f $T/registry.$i ]; then
+			cat $T/registry.$i
+		else
+			printf '    %s\n' mCallState=0 mRingingCallState=0 mForegroundCallState=0 mBackgroundCallState=0 \
+				'mCallIncomingNumber=' mECBMReason=0 mECBMDuration=0 mSCBMReason=0 mSCBMDuration=0
+		fi
+		i=$((i + 1))
+	done
+	echo '  mPhoneCapability=null'
+	echo "  mRadioPowerState=$(cat $T/radio 2>/dev/null)"
+	echo 'local logs:'
+	echo '  notifyCallState: mCallState=2 (after the part that is read)'
+	;;
+*)
+	echo "Can't find service: $1"
+	exit 1
+	;;
+esac

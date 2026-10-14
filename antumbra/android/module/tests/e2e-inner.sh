@@ -5,14 +5,16 @@
 # Antumbra module: the part of tests/e2e-host.sh that runs inside the
 # sandbox, as root, in its own mount, network and PID namespaces, chrooted
 # into an overlay of the host with Android's toybox and mksh in /system/bin
-# and stand-ins for getprop, setprop, resetprop, settings, cmd and content.
+# and stand-ins for getprop, setprop, resetprop, settings, cmd, content and
+# dumpsys.
 #
 # Usage: e2e-inner.sh SHELL SCENARIO
 #   SHELL     busybox: the module's scripts run in busybox ash with
 #             ASH_STANDALONE=1 and resetprop on PATH, as under Magisk;
 #             mksh: they run in Android's mksh without resetprop, as on the
 #             CI emulator
-#   SCENARIO  bridges, direct, offline, pt or badbridges (see e2e-host.sh)
+#   SCENARIO  bridges, direct, offline, pt, badbridges or cell (see
+#             e2e-host.sh)
 # Prints one line per check; exits 1 if any check failed. The module's
 # scripts run with umask 0, as from adb's shell on the CI emulator.
 set -u
@@ -107,6 +109,112 @@ is_mountpoint() { /system/bin/toybox mountpoint -q "$1"; }
 owner_mode() { /system/bin/toybox stat -c '%u:%g %a' "$1" 2>/dev/null; }
 sysctl_is() { [ "$(cat "/proc/sys/net/ipv6/conf/$1/$2")" = "$3" ]; }
 
+# --- The cell radio's stand-ins ------------------------------------------------
+IDLE='0 0 0 0 0 0'
+# telecom_set HISTORY [STATE...]: what 'dumpsys telecom' shows: one live
+# call per STATE (STATE:voip for a VoIP call), and Analytics lines for calls
+# 1 to HISTORY (Telecom numbers its calls TC@1, TC@2, ... within a boot).
+telecom_set() {
+	_tl_h=$1
+	shift
+	{
+		echo 'CallsManager: '
+		echo '  mCalls: '
+		_tl_i=0
+		for _tl_s in "$@"; do
+			_tl_i=$((_tl_i + 1))
+			_tl_v=false
+			case $_tl_s in *:voip)
+				_tl_v=true
+				_tl_s=${_tl_s%:voip}
+				;;
+			esac
+			printf '    [Call id=TC@%s, state=%s, tpac=***, cmgr=null, handle=tel:***, vidst=A, childs(0), has_parent(false), cap=[ hld], prop=[]], voip=%s\n' \
+				"$_tl_i" "$_tl_s" "$_tl_v"
+		done
+		echo '  mCallAudioManager: '
+		echo 'PhoneAccountRegistrar: '
+		echo 'Analytics:'
+		_tl_i=1
+		while [ "$_tl_i" -le "$_tl_h" ]; do
+			printf '  Call TC@%s: {\n  }\n' "$_tl_i"
+			_tl_i=$((_tl_i + 1))
+		done
+		echo '  Hardware Version: '
+		echo 'Flag Configurations: '
+	} >$T/telecom.new
+	mv -f $T/telecom.new $T/telecom
+}
+# phone_state "CALL RINGING FOREGROUND BACKGROUND ECBM SCBM": the first
+# phone's block in 'dumpsys telephony.registry' (mCallState; the precise
+# ringing, foreground and background states; the callback-mode durations).
+phone_state() {
+	# shellcheck disable=SC2086 # six numbers
+	set -- $1
+	printf '    %s\n' "mCallState=$1" "mRingingCallState=$2" "mForegroundCallState=$3" "mBackgroundCallState=$4" \
+		'mCallIncomingNumber=' 'mECBMReason=0' "mECBMDuration=$5" 'mSCBMReason=0' "mSCBMDuration=$6" >$T/registry.0.new
+	mv -f $T/registry.0.new $T/registry.0
+}
+# radio_power 0|1: the radio switched by something other than airplane
+# mode (as Android's emergency-call path switches it on).
+radio_power() { echo "$1" >$T/radio; }
+# person_airplane enable|disable: airplane mode switched by the person
+# (Quick Settings), through the stand-in for cmd, logged apart.
+person_airplane() { FAKE_CMD_LOG=$T/person.log /system/bin/cmd connectivity airplane-mode "$1"; }
+# The module's clock: /proc/uptime is a file the test writes (bound over it
+# in this mount namespace): the real time since boot plus a skew that
+# clock_jump moves on. A writer rewrites it in place every second (a bind
+# mount follows the file, not its name).
+U0=$(cut -d. -f1 /proc/uptime)
+D0=$(date +%s)
+echo 0 >$T/clock-skew
+uptime_line() {
+	_ul=$((U0 + $(date +%s) - D0 + $(cat $T/clock-skew)))
+	printf '%12d.00 %12d.00\n' "$_ul" "$_ul"
+}
+uptime_line >$T/uptime
+# clock_jump SECONDS: the module's clock moves on by SECONDS.
+clock_jump() {
+	echo $(($(cat $T/clock-skew) + $1)) >$T/clock-skew
+	uptime_line 1<>$T/uptime
+	sleep 2
+}
+# mark: from here on, new_cmd, new_log, new_setting and no_switch_off_for
+# look only at what follows.
+mark() {
+	MARK_CMD=$(wc -l <$T/cmd.log)
+	MARK_LOG=$(wc -l <$A/log/module.log)
+	MARK_SET=$(wc -l <$T/settings.log)
+}
+new_cmd() { tail -n +$((MARK_CMD + 1)) $T/cmd.log | grep -q -x -F "$1"; }
+new_log() { tail -n +$((MARK_LOG + 1)) $A/log/module.log | grep -q -F "$1"; }
+new_setting() { tail -n +$((MARK_SET + 1)) $T/settings.log | grep -q -x -F "$1"; }
+# new_log_before A B: since the mark, the module logged A before B.
+new_log_before() {
+	_la=$(tail -n +$((MARK_LOG + 1)) $A/log/module.log | grep -n -F "$1" | head -n 1 | cut -d: -f1)
+	_lb=$(tail -n +$((MARK_LOG + 1)) $A/log/module.log | grep -n -F "$2" | head -n 1 | cut -d: -f1)
+	[ -n "$_la" ] && [ -n "$_lb" ] && [ "$_la" -lt "$_lb" ]
+}
+# stored_boot VALUE: enable_cellular_on_boot as Android stores it now.
+stored_boot() { grep -q -x -F "enable_cellular_on_boot=$1" $T/settings; }
+# no_switch_off_for SECONDS: no airplane mode on and no Bluetooth off since
+# the mark, for SECONDS more.
+no_switch_off_for() {
+	sleep "$1"
+	! new_cmd 'connectivity airplane-mode enable' && ! new_cmd 'bluetooth_manager disable'
+}
+switched_off() { new_cmd 'connectivity airplane-mode enable'; }
+# wait_look: until the module has taken a look that began after this call
+# (a dump of Telecom and then of the registry), and a second more for what
+# it decides.
+wait_look() {
+	_wk=$(grep -c '^telecom$' $T/dumpsys.log)
+	wait_until 70 eval '[ "$(grep -c "^telecom\$" $T/dumpsys.log)" -gt "$_wk" ] && [ "$(tail -n 1 $T/dumpsys.log)" = telephony.registry ]'
+	_wk_rc=$?
+	sleep 1
+	return "$_wk_rc"
+}
+
 echo "== scenario $SCEN, module scripts in $SHELLKIND"
 
 # --- The sandbox network: loopback, and a dummy interface with a default
@@ -123,9 +231,38 @@ HAVE_IPV6=0
 [ "$HAVE_IPV6" = 1 ] || echo "  SKIP  IPv6 checks: this kernel has IPv6 disabled"
 ipv6_check() { [ "$HAVE_IPV6" = 1 ] || return 0; check "$@"; }
 
+# --- The clock the module reads -------------------------------------------------
+mount -o bind $T/uptime /proc/uptime || { echo "  FAIL  cannot bind a file over /proc/uptime"; exit 1; }
+(
+	while :; do
+		uptime_line 1<>$T/uptime
+		sleep 1
+	done
+) </dev/null >/dev/null 2>&1 &
+up_now() {
+	read -r _un _ </proc/uptime
+	echo "${_un%%.*}"
+}
+u1=$(up_now)
+clock_jump 100
+u2=$(up_now)
+check "clock: the test moves the module's clock on ($u1 s, then $u2 s)" test "$((u2 - u1))" -ge 100
+check "clock: ... by what it says" test "$((u2 - u1))" -le 105
+
 # --- 1. Installation (Android running) ---------------------------------------
 touch $T/framework-up
 /system/bin/setprop sys.boot_completed 1
+if [ "$SCEN" = offline ]; then
+	# An update over a version installed before the cell radio work: its
+	# record lacks the three keys added since, and holds the values from
+	# before that first installation (private_dns_mode was "hostname").
+	mkdir -p $MD
+	printf '%s\n' captive_portal_mode=null captive_portal_detection_enabled=null ntp_server=time.android.com \
+		assisted_gps_enabled=null wifi_scan_always_enabled=null ble_scan_always_enabled=null \
+		private_dns_mode=hostname network_recommendations_enabled=null tether_offload_disabled=null \
+		non_persistent_mac_randomization_force_enabled=null restricted_networking_mode=null mobile_data=null \
+		>$MD/settings.orig
+fi
 (umask 000 && /system/bin/sh $T/stage/lib/emu-install.sh $T/stage >$T/install.log 2>&1)
 check "install: customize.sh accepted this device" grep -q 'Installed in' $T/install.log
 check "install: /data/adb/modules is 0755 (umask 0 in the installer's shell)" test "$(owner_mode /data/adb/modules)" = "0:0 755"
@@ -134,7 +271,19 @@ check "install: early arm script in post-fs-data.d, 0755" test "$(owner_mode /da
 check "install: tor kept for this CPU" test -x $MD/bin/tor
 check "install: the other CPU's programs removed" test ! -e $MD/bin/x86_64 -a ! -e $MD/bin/arm64-v8a
 check "install: settings recorded for uninstall" grep -q '^ntp_server=time.android.com$' $MD/settings.orig
+check "install: airplane mode's radio list recorded" grep -q '^airplane_mode_radios=cell,bluetooth,uwb,wifi,wimax$' $MD/settings.orig
+check "install: enable_cellular_on_boot recorded as unset" grep -q '^enable_cellular_on_boot=null$' $MD/settings.orig
+check "install: the cell radio stored off for the first start" grep -q '^put enable_cellular_on_boot 0$' $T/settings.log
+check "install: each key recorded once" test "$(grep -c . $MD/settings.orig)" = 15 -a \
+	"$(cut -d= -f1 $MD/settings.orig | sort -u | grep -c .)" = 15
+if [ "$SCEN" = offline ]; then
+	check "update: the installed version's record kept" grep -q '^private_dns_mode=hostname$' $MD/settings.orig
+	check "update: the keys it lacked added: mobile_data_always_on" grep -q '^mobile_data_always_on=null$' $MD/settings.orig
+else
+	check "install: private_dns_mode recorded" grep -q '^private_dns_mode=opportunistic$' $MD/settings.orig
+fi
 check "install: customize.sh removed, as Magisk does" test ! -e $MD/customize.sh
+: >$T/settings.log
 
 # --- 2. Reboot: post-fs-data -----------------------------------------------------
 rm -f $T/framework-up
@@ -220,13 +369,18 @@ check "service: tor keeps DisableNetwork=1 before Start ($r)" test "$r" = "250 D
 # --- 4. The framework comes up ---------------------------------------------------------------
 touch $T/framework-up
 /system/bin/setprop sys.boot_completed 1
-check "settings: fail-safe values set" wait_until 20 grep -q '^put captive_portal_mode 0$' $T/settings.log
-for kv in 'captive_portal_detection_enabled 0' 'ntp_server 127.0.0.1' 'assisted_gps_enabled 0' \
+# The module logs this once settings_apply and mobile data off are done;
+# only then is every key in settings.log.
+check "settings: fail-safe values set" wait_until 30 grep -q 'settings: fail-safe values set' $A/log/module.log
+for kv in 'captive_portal_mode 0' 'captive_portal_detection_enabled 0' 'ntp_server 127.0.0.1' 'assisted_gps_enabled 0' \
 	'wifi_scan_always_enabled 0' 'ble_scan_always_enabled 0' 'private_dns_mode off' \
 	'network_recommendations_enabled 0' 'tether_offload_disabled 1' \
-	'non_persistent_mac_randomization_force_enabled 1'; do
+	'non_persistent_mac_randomization_force_enabled 1' 'mobile_data 0' 'mobile_data_always_on 0' \
+	'enable_cellular_on_boot 0'; do
 	check "settings: $kv" grep -q "^put $kv\$" $T/settings.log
 done
+check "settings: airplane mode's radio list not narrowed at once" test -z "$(grep airplane_mode_radios $T/settings.log)"
+check "cell: the module looks at the call state and the radio" wait_until 10 grep -q '^telephony.registry$' $T/dumpsys.log
 if [ -n "$(prop ro.lineage.version)" ]; then
 	check "settings: restricted_networking_mode 1 on LineageOS" grep -q '^put restricted_networking_mode 1$' $T/settings.log
 else
@@ -288,7 +442,10 @@ bridges)
 	check "firewall tampered: logged" grep -q 'no longer live' $A/log/module.log
 
 	# Android shuts down: the fail-safe Settings go back, MAC randomization
-	# on again after the "keep" session.
+	# on again after the "keep" session. (The cell radio's watch ends at
+	# shutdown: first its list, 30 s after the framework came up.)
+	check "cell: airplane mode's list narrowed before the shutdown" \
+		wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
 	/system/bin/setprop sys.shutdown.requested 0userrequested
 	check "shutdown: MAC randomization put back to 1" wait_until 10 eval \
 		'test "$(last_setting non_persistent_mac_randomization_force_enabled)" = "put non_persistent_mac_randomization_force_enabled 1"'
@@ -342,7 +499,7 @@ offline)
 250 closing connection"
 	check "start: status shows the network off" status_has '"network":"disabled"'
 	check "start: offline recorded" session_has tor_mode=offline
-	check "emulator: mobile data left alone" test -z "$(grep mobile_data $T/settings.log)"
+	check "emulator: mobile data stored off too" grep -q '^put mobile_data 0$' $T/settings.log
 
 	# An app takes the filter's port while the filter restarts. service.sh
 	# is paused meanwhile, so that the app gets there first.
@@ -368,18 +525,35 @@ offline)
 	r=$(as_app dns "$blocked")
 	check "filter's port free: blocking again ($r)" test "$r" = NXDOMAIN
 
-	# Removal: during a boot (post-fs-data) the restore waits for boot.
+	# Removal. During a boot (post-fs-data) the restore waits for boot.
+	check "list narrowed before the removal" wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
+	svc=$(cat $A/state/module/service.lock/pid)
 	/system/bin/setprop sys.boot_completed ''
 	run_module_script $MD/uninstall.sh
 	check "uninstall in boot: restore script left in service.d" test -x /data/adb/service.d/antumbra-restore.sh
+	check "uninstall in boot: nothing put back yet" test -z "$(grep '^delete ' $T/settings.log)"
+	# While Android runs (Magisk itself uninstalled): the module's
+	# service.sh, still running, is stopped, and the values are put back
+	# at once; nothing writes them again afterwards. The record is the one
+	# from the update above: the first installation's, completed.
 	/system/bin/setprop sys.boot_completed 1
-	: >$T/settings.log
-	/magisk-bin/busybox sh /data/adb/service.d/antumbra-restore.sh
-	check "uninstall: ntp_server put back" grep -q '^put ntp_server time.android.com$' $T/settings.log
-	check "uninstall: unset keys deleted" grep -q '^delete captive_portal_mode$' $T/settings.log
-	check "uninstall: private_dns_mode put back" grep -q '^put private_dns_mode opportunistic$' $T/settings.log
+	mark
+	run_module_script $MD/uninstall.sh
+	check "uninstall while Android runs: service.sh stopped" wait_until 5 eval \
+		'case $(proc_field "$svc" State) in "" | Z*) true ;; *) false ;; esac'
+	check "uninstall: ntp_server put back" new_setting 'put ntp_server time.android.com'
+	check "uninstall: unset keys deleted" new_setting 'delete captive_portal_mode'
+	check "uninstall: private_dns_mode put back (the first installation's value)" new_setting 'put private_dns_mode hostname'
+	check "uninstall: airplane mode's radio list put back" \
+		new_setting 'put airplane_mode_radios cell,bluetooth,uwb,wifi,wimax'
+	check "uninstall: enable_cellular_on_boot deleted (the radio on again from the next start)" \
+		new_setting 'delete enable_cellular_on_boot'
+	check "uninstall: mobile_data_always_on deleted" new_setting 'delete mobile_data_always_on'
 	check "uninstall: the restore script removed itself" test ! -e /data/adb/service.d/antumbra-restore.sh
 	check "uninstall: the early arm script removed" test ! -e /data/adb/post-fs-data.d/antumbra-arm.sh
+	n=$(wc -l <$T/settings.log)
+	sleep 12
+	check "uninstall: nothing writes the values again afterwards" test "$(wc -l <$T/settings.log)" = "$n"
 	;;
 pt)
 	welcome bridges new $SID1 "obfs4 1.2.3.4:443 $FP cert=AAAA iat-mode=0"
@@ -388,9 +562,18 @@ pt)
 	check "start: tor's network stays off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"
 
-	# iptables stops working: neither the full rule set nor the arm set can
-	# be loaded or checked. The module reports the firewall open and
-	# switches airplane mode on and Wi-Fi off.
+	# A call on the cell radio (switched on by something else) when
+	# iptables stops working: neither the full rule set nor the arm set
+	# can be loaded or checked. The module reports the firewall open and
+	# switches Wi-Fi and mobile data off at once; the cell radio (airplane
+	# mode) and Bluetooth wait for the call and 5 minutes after it.
+	check "list narrowed before the call" wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
+	telecom_set 1 ACTIVE
+	phone_state '2 0 1 0 0 0'
+	radio_power 1
+	clock_jump 61
+	check "a call on the cell radio: held (call)" wait_until 20 grep -q 'held: call' $A/log/module.log
+	mark
 	for t in iptables ip6tables iptables-restore ip6tables-restore iptables-save ip6tables-save; do
 		mv /system/bin/$t /system/bin/$t.real
 		printf '#!/system/bin/sh\nexit 1\n' >/system/bin/$t
@@ -398,13 +581,35 @@ pt)
 	done
 	check "firewall broken: status says open" wait_until 45 status_has '"firewall":{"state":"open"'
 	check "firewall broken: the property is removed" test -z "$(prop antumbra.fw.armed)"
-	check "firewall broken: airplane mode on" wait_until 10 grep -q '^connectivity airplane-mode enable$' $T/cmd.log
-	check "firewall broken: Wi-Fi off" grep -q '^wifi set-wifi-enabled disabled$' $T/cmd.log
-	check "firewall broken: status says why" status_has 'airplane mode on'
+	check "firewall broken during a call: Wi-Fi off at once" wait_until 10 new_cmd 'wifi set-wifi-enabled disabled'
+	check "firewall broken during a call: mobile data off at once" wait_until 5 new_cmd 'phone data disable'
+	check "firewall broken during a call: status says the cell radio follows" \
+		wait_until 10 status_has 'cellular radio and Bluetooth off shortly'
+	check "firewall broken during a call: status says nothing of the call" test -z "$(status_json | grep -i call)"
+	check "firewall broken during a call: no airplane mode, no Bluetooth off" no_switch_off_for 8
+	mark
+	telecom_set 1
+	phone_state "$IDLE"
+	check "the call ended: held 5 minutes more (recent)" wait_until 20 new_log 'held: recent'
+	clock_jump 270
+	check "the call ended 270 s ago: still no airplane mode, no Bluetooth off" no_switch_off_for 8
+	clock_jump 30
+	check "5 minutes after the call: the cell radio off (airplane mode)" wait_until 15 switched_off
+	check "5 minutes after the call: Bluetooth off" wait_until 5 new_cmd 'bluetooth_manager disable'
+	check "5 minutes after the call: status says so" wait_until 10 eval \
+		'status_has "cellular radio and Bluetooth off" && ! status_has shortly'
 	for t in iptables ip6tables iptables-restore ip6tables-restore iptables-save ip6tables-save; do
 		mv -f /system/bin/$t.real /system/bin/$t
 	done
 	check "firewall repaired: live again" wait_until 45 prop_is_live
+	# Shutdown with airplane mode on and no call: airplane mode and cell_on
+	# stored for the next start, without a broadcast.
+	mark
+	/system/bin/setprop sys.shutdown.requested 0userrequested
+	check "shutdown: cell_on 1 stored" wait_until 20 new_setting 'put cell_on 1'
+	check "shutdown: airplane mode stored off" wait_until 5 new_setting 'put airplane_mode_on 0'
+	check "shutdown: no airplane-mode command" eval \
+		'! new_cmd "connectivity airplane-mode enable" && ! new_cmd "connectivity airplane-mode disable"'
 	;;
 badbridges)
 	# Another app answers for Welcome's provider while Welcome is not the
@@ -420,7 +625,170 @@ badbridges)
 	check "start: tor's network stays off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"
 	;;
+cell)
+	# The cell radio on a LineageOS hotdog (two SIM slots), in a session
+	# that keeps it off. Something switches it on; the module switches it
+	# off again with airplane mode only when no hold applies. Each hold is
+	# shown, then its release.
+	welcome offline new $SID1
+	check "start: the session is read" wait_until 30 status_has '"started":true'
+	check "start: the session keeps the cell radio off (cell=off)" session_has cell=off
+	check "start: airplane mode's list narrowed once airplane mode has been off 30 s" \
+		wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
+	check "start: nothing switched: the radio has been off since power-on" test -z "$(grep airplane-mode $T/cmd.log)"
+
+	# 1. The radio on with airplane mode off and no call (as an emergency
+	# text, or the emergency-call path, switches it on).
+	mark
+	radio_power 1
+	clock_jump 61
+	check "radio on by something else: held 5 minutes (recent)" wait_until 20 new_log 'held: recent'
+	check "radio on by something else: mobile data off again" new_cmd 'phone data disable'
+	check "radio on by something else: enable_cellular_on_boot 1 while held" wait_until 5 stored_boot 1
+	clock_jump 270
+	check "radio on by something else, 270 s later: still on" no_switch_off_for 8
+	check "radio on by something else, 270 s later: enable_cellular_on_boot still 1" stored_boot 1
+	clock_jump 30
+	check "radio on by something else, 5 minutes later: off (airplane mode)" wait_until 15 switched_off
+	check "radio on by something else: it is off" wait_until 5 eval 'test "$(cat $T/radio)" = 0'
+	check "radio on by something else: enable_cellular_on_boot 0 again before the switch-off" \
+		new_log_before 'enable_cellular_on_boot 0 again' 'the cell radio off (airplane mode'
+
+	# 2. The person switches airplane mode off; a call rings, is answered,
+	# is put on hold, ends.
+	mark
+	person_airplane disable
+	check "airplane mode off by the person: held (recent)" wait_until 20 new_log 'held: recent'
+	check "airplane mode off by the person: mobile data off again for each SIM" new_setting 'put mobile_data1 0'
+	check "airplane mode off by the person: enable_cellular_on_boot left at 1 while held" eval \
+		'stored_boot 1 && ! new_setting "put enable_cellular_on_boot 0"'
+	mark
+	telecom_set 1 RINGING
+	phone_state '1 5 0 0 0 0'
+	check "ringing call: held (call)" wait_until 20 new_log 'held: call'
+	clock_jump 400
+	check "ringing call, 400 s later: still on" no_switch_off_for 8
+	telecom_set 1 ACTIVE
+	phone_state '2 0 1 0 0 0'
+	check "active call: looked at" wait_look
+	clock_jump 400
+	check "active call, 400 s later: still on" no_switch_off_for 8
+	telecom_set 1 ON_HOLD
+	phone_state '2 0 0 2 0 0'
+	check "call on hold: looked at" wait_look
+	clock_jump 400
+	check "call on hold, 400 s later: still on" no_switch_off_for 8
+	mark
+	telecom_set 1
+	phone_state "$IDLE"
+	check "call ended: held 5 minutes more (recent)" wait_until 20 new_log 'held: recent'
+	clock_jump 270
+	check "call ended 270 s ago: still on" no_switch_off_for 8
+	clock_jump 30
+	check "call ended 5 minutes ago: off" wait_until 15 switched_off
+	check "call ended 5 minutes ago: enable_cellular_on_boot 0 again before the switch-off" \
+		new_log_before 'enable_cellular_on_boot 0 again' 'the cell radio off (airplane mode'
+
+	# 3. Emergency callback mode, from the property (both of Android's
+	# paths set it).
+	mark
+	person_airplane disable
+	check "radio on again: held (recent)" wait_until 20 new_log 'held: recent'
+	/system/bin/setprop ril.cdma.inecmmode true
+	check "callback mode (property): held (callback)" wait_until 15 new_log 'held: callback'
+	check "callback mode: enable_cellular_on_boot 1 (a restart of the phone process keeps the radio on)" \
+		stored_boot 1
+	clock_jump 400
+	check "callback mode, 400 s later: still on" no_switch_off_for 8
+	mark
+	/system/bin/setprop ril.cdma.inecmmode false
+	check "callback mode over: held 5 minutes more (recent)" wait_until 15 new_log 'held: recent'
+	clock_jump 270
+	check "callback mode over 270 s ago: still on" no_switch_off_for 8
+	clock_jump 30
+	check "callback mode over 5 minutes ago: off" wait_until 15 switched_off
+
+	# 4. Emergency callback mode in the registry: for calls, then for texts.
+	mark
+	person_airplane disable
+	check "radio on again: held" wait_until 20 new_log 'held: recent'
+	phone_state '0 0 0 0 300000 0'
+	check "callback mode for calls (registry): held (callback)" wait_until 20 new_log 'held: callback'
+	clock_jump 400
+	check "callback mode for calls, 400 s later: still on" no_switch_off_for 8
+	phone_state '0 0 0 0 0 300000'
+	check "callback mode for texts (registry): looked at" wait_look
+	clock_jump 400
+	check "callback mode for texts, 400 s later: still on" no_switch_off_for 8
+	mark
+	phone_state "$IDLE"
+	check "callback mode over: held 5 minutes more (recent)" wait_until 20 new_log 'held: recent'
+	clock_jump 270
+	check "callback mode over 270 s ago: still on" no_switch_off_for 8
+	clock_jump 30
+	check "callback mode over 5 minutes ago: off" wait_until 15 switched_off
+
+	# 5. The state cannot be read: held as if in a call.
+	mark
+	person_airplane disable
+	check "radio on again: held" wait_until 20 new_log 'held: recent'
+	touch $T/dumpsys-broken
+	check "state unreadable: held (unknown)" wait_until 20 new_log 'held: unknown'
+	clock_jump 400
+	check "state unreadable, 400 s later: still on" no_switch_off_for 8
+	mark
+	rm -f $T/dumpsys-broken
+	check "readable again: held 5 minutes more (recent)" wait_until 40 new_log 'held: recent'
+	clock_jump 270
+	check "readable again 270 s ago: still on" no_switch_off_for 8
+	clock_jump 30
+	check "readable again 5 minutes ago: off" wait_until 15 switched_off
+
+	# 6. A call that began and ended between two looks: only Telecom's call
+	# counter shows it.
+	mark
+	person_airplane disable
+	check "radio on again: held" wait_until 20 new_log 'held: recent'
+	clock_jump 270
+	telecom_set 9
+	check "a short call between two looks: looked at" wait_look
+	clock_jump 30
+	check "5 minutes after the switch-on but not after the short call: still on" no_switch_off_for 8
+	clock_jump 270
+	check "5 minutes after the short call: off" wait_until 15 switched_off
+
+	# 7. Shutdown during a call (a VoIP call over Wi-Fi, airplane mode on):
+	# the fail-safe Settings go back, airplane mode stays as it is.
+	mark
+	telecom_set 10 ACTIVE:voip
+	clock_jump 61
+	check "VoIP call with airplane mode on: looked at" wait_look
+	/system/bin/setprop sys.shutdown.requested 0userrequested
+	check "shutdown during a call: logged" wait_until 20 new_log 'shutdown: airplane mode left as it is, held: call'
+	check "shutdown during a call: enable_cellular_on_boot 0 stored" new_setting 'put enable_cellular_on_boot 0'
+	check "shutdown during a call: mobile data off stored" new_setting 'put mobile_data 0'
+	check "shutdown during a call: airplane mode not stored off" eval \
+		'! new_setting "put airplane_mode_on 0" && ! new_setting "put cell_on 1"'
+	check "shutdown during a call: no airplane-mode command" eval \
+		'! new_cmd "connectivity airplane-mode enable" && ! new_cmd "connectivity airplane-mode disable"'
+	;;
 esac
+
+# Every scenario: the cell radio's watch.
+check "cell: airplane mode's list narrowed to the cell radio" \
+	wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
+case $SCEN in
+pt | cell) ;;
+*)
+	check "cell: the radio stayed off: no airplane-mode command" test -z "$(grep airplane-mode $T/cmd.log)"
+	check "cell: no Bluetooth command" test -z "$(grep bluetooth $T/cmd.log)"
+	;;
+esac
+check "cell: the module never switched the radio on" test -z "$(grep -x 'connectivity airplane-mode disable' $T/cmd.log)"
+if [ -s $A/state/module/session ]; then
+	check "cell: the session record says cell=off" session_has cell=off
+fi
+check "cell: no number and no dump in the module's log" test -z "$(grep -E 'mCall|TC@|Phone Id|tel:' $A/log/module.log)"
 
 check "module log has no shell errors" test -z "$(grep -i -E 'not found|syntax error|bad substitution|unexpected' $A/log/module.log)"
 echo "-- module.log --"

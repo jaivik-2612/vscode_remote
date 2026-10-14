@@ -4,8 +4,10 @@ The Magisk module `antumbra` is the part of Antumbra that runs as root on
 the phone (stage 1 of the design: official LineageOS 23.2 plus Magisk). It
 starts the firewall before Android, starts tor and the DNS filter as their
 own unprivileged users, keeps Wi-Fi's saved networks and the DHCP lease
-memory in RAM, sets fail-safe Android settings, and switches tor's network
-on only after the Welcome screen's Start, the way the person chose there.
+memory in RAM, sets fail-safe Android settings, keeps the cellular radio
+off unless the session chose Phone mode (and never switches it off during
+a call), and switches tor's network on only after the Welcome screen's
+Start, the way the person chose there.
 It follows the shared contract (`antumbra/android/docs`); the module ID is
 `antumbra`, installed at `/data/adb/modules/antumbra`.
 
@@ -17,7 +19,7 @@ folder). It has not been run under KernelSU.
 | `module.prop` | Magisk's metadata. No `updateJson`: updates are installed by hand (or later by Welcome after a signature check), never fetched by Magisk. |
 | `customize.sh` | Install-time checks and set-up. |
 | `post-fs-data.sh` | Boot, before zygote: arm the firewall, RAM directories, sysctls. |
-| `service.sh` | Boot, late: the filter, tor, the full firewall, Settings, Welcome's Start, and supervision until shutdown. |
+| `service.sh` | Boot, late: the filter, tor, the full firewall, Settings, the cell radio, Welcome's Start, and supervision until shutdown. |
 | `uninstall.sh` | Puts the Settings back. |
 | `lib/antumbra.sh` | Functions shared by the three boot scripts. |
 | `lib/torctl.sh` | Talks to tor's control socket, as uid 2950. |
@@ -48,7 +50,12 @@ directory and sources `customize.sh`, which:
 6. sets owner root and modes 0644/0755 (programs 0755), label `system_file`;
 7. records the current values of the keys in `lib/settings.conf` in
    `settings.orig` (0600), or carries over the record of the installed
-   version on an update;
+   version on an update and adds the keys that version did not have (an
+   earlier version never set them, so their current values are the ones
+   from before; from recovery, `null` and Android's default radio list);
+   then, while Android runs, stores `enable_cellular_on_boot=0`, so that
+   the first start with the module already has the cellular radio off
+   (below);
 8. writes `/data/adb/post-fs-data.d/antumbra-arm.sh` (root, 0755), which
    only arms the firewall (below);
 9. warns when other modules or `post-fs-data.d` scripts share Magisk's
@@ -133,7 +140,7 @@ the person may set by hand for tor.
 
 0. **The firewall's state** from `antumbra-fw status`: `armed` after
    post-fs-data, or `open` if arming failed there (then step 3 tries
-   again, and switches the radios off if that fails too).
+   again, and switches the radios off if that fails too: step 3).
 1. **The DNS filter** as uid/gid 2951, first, so that it holds
    `127.0.0.1:5335` before an app can bind that port. (It was 5353 until
    the emulator showed Android's mDNS holding `0.0.0.0:5353` at boot.)
@@ -144,19 +151,33 @@ the person may set by hand for tor.
    printed and no other uid holds a service port does the module run
    `resetprop -n antumbra.fw.armed <first 16 hex digits>`. On failure the
    firewall is back in the armed state and the property is removed. If
-   even that leaves it `open` (not even the arm set loads), airplane mode
-   goes on and Wi-Fi off as soon as the framework answers (`cmd
-   connectivity airplane-mode enable`, `cmd wifi set-wifi-enabled
-   disabled`), and `status.json` says so.
+   even that leaves it `open` (not even the arm set loads), Wi-Fi and
+   mobile data go off as soon as the framework answers (`cmd wifi
+   set-wifi-enabled disabled`, mobile data off as below), and the cellular
+   radio (airplane mode) and Bluetooth (`cmd bluetooth_manager disable`)
+   as soon as no call holds them (below, "The cell radio: off from
+   power-on", holds); `status.json` says so, never why it waits.
 4. **`run/status.json`** (below).
 5. **IPv6 guard**: NetworkStack switches IPv6 back on for every network it
    brings up. A background loop switches it off again on every interface
    whenever `ip monitor` reports a link or address change, and every 10
    seconds in any case.
 6. Once boot has completed and the settings provider answers: **the
-   Settings.Global values in `lib/settings.conf`**, **mobile data off**
-   for every SIM Android knows (not on the emulator; below), and
-   `cmd wifi set-scan-always-available disabled`.
+   Settings.Global values in `lib/settings.conf`** (among them
+   `enable_cellular_on_boot=0` and `mobile_data_always_on=0`), **mobile
+   data off** for every SIM Android knows (below), and
+   `cmd wifi set-scan-always-available disabled`. Then, at every turn of
+   the loop, **the cell radio's watch** (below, "The cell radio: off from
+   power-on"): airplane mode's radio list is narrowed to the cell radio
+   once airplane mode has read off for 30 seconds; whenever something else
+   switched the radio on (the person with airplane mode, an emergency call
+   or text), it is switched off again with airplane mode, unless a call,
+   emergency callback mode, the 5 minutes after either, or a state it
+   cannot read holds it. Mobile data off is written again after every
+   switch-on and whenever a SIM's state changes; `enable_cellular_on_boot`
+   is kept at 1 while a hold lasts (so that a restart of the phone process
+   does not switch the radio off then) and written 0 again when it ends,
+   just before the switch-off.
 7. **Welcome's Start**: every 2 seconds for the first 3 minutes after the
    framework answers, then every 5,
    `content query --user 0 --uri content://org.antumbra.welcome.state/session
@@ -177,7 +198,14 @@ the person may set by hand for tor.
      a pluggable transport also set `ClientTransportPlugin` to
      `bin/lyrebird`; without lyrebird in the module they are refused.
    - `mac=keep`: `non_persistent_mac_randomization_force_enabled=0` (the
-     boot default is 1: a new MAC address for every connection).
+     boot default is 1: a new MAC address for every connection);
+   - the cell radio: `session_cell` in `service.sh` gives the session's
+     choice, `off` or `phone` (calls and texts). Welcome's row has no such
+     column yet; WEL8 adds `cell` to the shared contract and changes only
+     that function. Until then every session is `off`. With `phone`, the
+     radio is switched on at Start and never before (decision D12): mobile
+     data off for every SIM first, then Android's airplane-mode path
+     (`enable` and `disable`, or only `disable` when airplane mode is on).
 
    The network is switched on only while the firewall is live and no
    other uid holds a service port; otherwise it is tried again at every
@@ -185,9 +213,10 @@ the person may set by hand for tor.
    for good, except `553 … Failed to bind one of the listener ports`,
    which is tried again once the port is free.
 8. **Supervision**, every 2 seconds while something changes, else every 5:
-   - **who holds the service ports**, at every turn (below): while another
-     uid does, the property is removed and the firewall goes back to armed,
-     and the full rule set is loaded again as soon as the port is free;
+   - **who holds the service ports**, at every turn, and again right after
+     a turn's look at the cell radio (below): while another uid does, the
+     property is removed and the firewall goes back to armed, and the full
+     rule set is loaded again as soon as the port is free;
    - the filter and tor are restarted if they stop (pause doubling from 2
      to 64 s), and a restarted tor gets the session's choice again;
    - the firewall is checked every 30 seconds with `status`, and if it is
@@ -199,7 +228,12 @@ the person may set by hand for tor.
      ShutdownThread sets first), the fail-safe Settings are put back and
      mobile data is switched off again, so that a start without the module
      does not inherit a session's MAC "keep" or mobile data (best effort:
-     a crash or a forced power-off skips it).
+     a crash or a forced power-off skips it). If airplane mode is on (the
+     module's run-time switch-off), `cell_on=1` and `airplane_mode_on=0`
+     are written directly, without the airplane-mode broadcast, unless a
+     call holds it: nothing switches now, and the next start has the radio
+     off (`enable_cellular_on_boot=0`) and Wi-Fi under Welcome's control.
+     The cell radio's watch stops there.
 
    A call to tor's control socket is bounded (5 s of silence, 10 s in
    all), and nothing in the loop waits for tor, so a hung tor cannot hold
@@ -213,11 +247,18 @@ does not exist yet), or at once when Magisk itself is uninstalled. It
 copies `settings.orig` to `/data/adb/antumbra-restore.conf` and writes the
 one-time script `/data/adb/service.d/antumbra-restore.sh`, which waits
 for boot to complete, puts each value back (`null` = delete the key), and
-deletes itself and its data. While Android runs, the script is run at
-once. It also deletes the early arm script. Saved Wi-Fi networks are not
+deletes itself and its data. While Android runs, the module's `service.sh`
+is stopped first (its cell radio watch would write the radio's values
+again; it checks that the recorded process ID is that script), and the
+script is run at once; tor, the filter and the firewall stay until the
+restart. It also deletes the early arm script. Saved Wi-Fi networks are not
 restored: there are none on flash. Mobile data stays off for each SIM
 Android knew (the per-SIM values are not recorded); switch it on in
-Settings.
+Settings. `enable_cellular_on_boot`, `mobile_data_always_on` and
+`airplane_mode_radios` are put back like the other keys (without a record:
+deleted, and Android's default list `cell,bluetooth,uwb,wifi,wimax`), so
+the cellular radio comes back at the next start, or when airplane mode is
+switched on and off. Airplane mode itself is not touched.
 
 ## Files on the phone
 
@@ -230,7 +271,7 @@ power-off.
 | `run/` | 2950:2950, 0751 | tor's control socket and cookie; `status.json` (0644) |
 | `state/` | root, 0711 | `fw-exempt.conf`, `fw-relays.conf` (not written in v0) |
 | `state/tor/` | 2950:2950, 0700 | tor's DataDirectory |
-| `state/module/` | root, 0700 | process IDs, the session (`session`, 0600: session ID, tor mode, MAC) and its bridges, the firewall's lock and hash (`fw/`) |
+| `state/module/` | root, 0700 | process IDs, the session (`session`, 0600: session ID, tor mode, MAC, cell radio) and its bridges, the firewall's lock and hash (`fw/`) |
 | `lists/` | root, 0755 | updated block list and DoH list (none in v0: the module's copies in `MODDIR/lists` are used) |
 | `log/` | root, 0755 | `module.log`, `firewall.log`, `dnsfilter.log`, `tor.stderr`, `tor.log` (2950, 0600) |
 
@@ -258,8 +299,10 @@ say that bridges were refused.
 
 `firewall.state` is `armed` (before the first apply), `live`, `failed`
 (the full rule set is not live; the arm set is in place, so nothing
-leaves) or `open` (not even the arm set could be loaded; airplane mode
-and Wi-Fi are switched off); `tor.network` is `enabled` or `disabled`;
+leaves) or `open` (not even the arm set could be loaded; Wi-Fi and mobile
+data are switched off, then the cellular radio and Bluetooth; while a
+hold keeps those two on, the problem says "cellular radio and Bluetooth
+off shortly", never why); `tor.network` is `enabled` or `disabled`;
 `tor.error` says why the session's network could not be switched on;
 `module.problem` joins the boot's problems with the current ones, for
 example `service port taken: 9040/tcp held by uid 10187` or
@@ -379,15 +422,123 @@ Settings.Global (`mobile_data<subId>` in dual-SIM mode, which the hotdog's
 two slots use; `mobile_data` with one slot; `GlobalSettingsHelper` and
 `DataSettingsManager` in `frameworks/opt/telephony`, `android16-release`)
 and reads it when the SIM comes up, also in a boot without the module. At
-every boot the module sets `mobile_data=0` (`settings.conf`, `phone:`
-line) and `mobile_data<subId>=0` for every subscription it finds (the
+every boot the module sets `mobile_data=0` (`settings.conf`) and
+`mobile_data<subId>=0` for every subscription it finds (the
 keys already in Settings.Global and the IDs in
 `content://telephony/siminfo`), and runs `cmd phone data disable` for the
-default data SIM now; again at shutdown. The person may switch mobile data
-on after Start; it then goes through Tor like everything else. Not on the
-emulator, whose only network in CI is its simulated mobile data. A SIM
-Android has never seen has no stored value and starts with mobile data on
-(`ro.com.android.mobiledata`, default true): gaps.
+default data SIM now; again at shutdown, after every switch-on of the cell
+radio, whenever a SIM's state changes (`gsm.sim.state`), and before the
+module itself switches the radio on (Phone mode). The person may switch
+mobile data on after Start; it then goes through Tor like everything else.
+On the emulator too (until the cell radio work it was left alone there):
+CI switches its simulated mobile data off itself, and a start without the
+module must find it stored off. A SIM Android has never seen has no
+stored value and starts with mobile data on (`ro.com.android.mobiledata`,
+default true): gaps.
+
+### The cell radio: off from power-on
+
+The cellular radio stays off unless the session chose Phone mode (WEL8,
+not built yet; until then every session keeps it off), and in Phone mode
+it comes on at Start only (decision D12). Android 16 sources read for
+this (`android16-release`, and the same places on `android16-qpr2-release`,
+which LineageOS 23.2 is): `ServiceStateTracker`, `PhoneGlobals`,
+`RadioOnHelper`, `TelephonyConnectionService`, `EmergencyStateTracker`,
+`ConnectivityService`, Wi-Fi's `WifiSettingsStore` and `ActiveModeWarden`,
+Bluetooth's `RadioModeListener`, `TelephonyRegistry`, Telecom's
+`CallsManager` and `Analytics`.
+
+**Off from power-on: three stored values.** The phone process reads
+`enable_cellular_on_boot` once, when it starts, and with 0 keeps the radio
+off ("off by the user"); with airplane mode stored off and `cell_on=1`,
+`PhoneGlobals` does nothing at its start either (with `cell_on=2` it would
+switch the radio on). `settings.conf` sets the first at every boot and
+shutdown, `customize.sh` at installation, and the watch again after every
+switch-on (Android's airplane-mode path sets it back to 1) once no hold
+lasts (below). This holds on a start without the module too.
+
+**Why airplane mode is never left on across a restart.** Wi-Fi copies
+airplane mode once, when it starts (`WifiSettingsStore`), and updates that
+copy only on an airplane-mode change while the list of airplane-mode
+radios names Wi-Fi. While the copy says "on", Android lets only privileged
+callers switch Wi-Fi, and a device owner is not one: Welcome could not
+switch Wi-Fi on at Start, or off, for the whole boot. So the module stores
+airplane mode off at shutdown (above), and narrows the list only once
+airplane mode has read off for 30 seconds (Wi-Fi must have handled the
+last airplane-off first; otherwise its copy would stay "on").
+
+**Off at run time: airplane mode, for the cell radio only.** With
+`airplane_mode_radios=cell`, `cmd connectivity airplane-mode enable`
+switches the cell radio off and leaves Wi-Fi and Bluetooth as they are.
+It is Android's own path, and the only one used, because Android's
+emergency-call path undoes it by itself: `RadioOnHelper` switches the
+radio on and airplane mode off, `ServiceStateTracker` clears every reason
+the radio was off for (so `enable_cellular_on_boot=0` cannot block it
+either), and `PhoneGlobals` switches airplane mode back off if it is
+switched on during an emergency call.
+
+| Way to switch the cell radio | Verdict |
+|---|---|
+| Airplane mode with the list narrowed to `cell` | used at run time; undone by the emergency path |
+| `enable_cellular_on_boot=0` with airplane mode off and `cell_on=1` | used for "off from power-on"; undone by the emergency path |
+| `cmd phone` | has no radio-power command in Android 16 |
+| `service call phone <n>` | never: transaction numbers change between releases, and a wrong one calls another method |
+| Switching a modem or a SIM slot off, SIM power, the multi-SIM setting, stopping the RIL or the phone process, modem restarts, `remoteproc` or `sysfs`, thermal mitigation, carrier-config overrides, `DISALLOW_AIRPLANE_MODE` | never: the emergency dialer cannot undo them, or they could hide a call |
+
+**Holds.** No airplane step and no radio-off step (the run-time
+switch-off, Phone mode's whole switch-on, `enable` and `disable` alike,
+the fail-safe's cell radio and Bluetooth, the shutdown reset) while:
+
+- Telecom lists a call in any state (`dumpsys telecom`, `mCalls`: ringing,
+  dialing, connecting, active, on hold, disconnecting; VoIP calls too), or
+  the telephony registry shows a phone that is not idle (`dumpsys
+  telephony.registry`: `mCallState`, and the precise ringing, foreground
+  and background states);
+- emergency callback mode, for calls or texts, is on (the property
+  `ril.cdma.inecmmode`, which both of Android 16's paths set, or the
+  registry's callback-mode durations);
+- less than 5 minutes have passed since a look that saw either, since the
+  look that saw it end, since Telecom's call counter moved (`TC@<n>` in
+  its Analytics: a call that began and ended between two looks), or since
+  the radio came on or airplane mode went off without the module doing it
+  (an emergency text switches the radio on and starts no call);
+- any of it cannot be read (a missing service, a timeout, a layout the
+  parsers do not know, `/proc/uptime` unreadable): a hold as if in a
+  call, and 5 more minutes once it can be read again.
+
+Wi-Fi off and mobile data off never wait. While a hold lasts and the
+radio is not off, the watch keeps `enable_cellular_on_boot=1`: the phone
+process reads it whenever it starts, and if it restarted then (a crash,
+or a restart of system_server), 0 would switch the radio off during a
+call, callback mode or the 5 minutes after, and no callback could reach
+the phone. It writes 0 again once the hold ends, just before the
+switch-off.
+
+The watch looks (two dumps, each bounded at 3 s by `dumpsys -t` and at 4 s
+in all, so a look takes at most 8 s) every 10 seconds while the radio is
+on or a hold lasts, every 60 otherwise, 30 seconds after a look that could
+not read the state, and at once when airplane mode, the callback-mode
+property or a SIM's state changes, or when something else sets
+`enable_cellular_on_boot` (a switch-on). A step that nothing holds is
+taken only on a look from the same turn of the loop, never on one from an
+earlier turn, and is tried at most once in 10 seconds. After its own
+airplane step the watch takes the airplane mode it asked for as read, so
+that airplane mode switched off again before its next turn (the
+emergency path, the person) still counts as switched off by something
+else. The dumps go through pipes only: the registry prints the incoming
+number. The module's log names the hold (`held: call`, `callback`,
+`recent`, `unknown`); `status.json` never does.
+
+**Phone mode** (`session_cell`, the one place WEL8 changes): before Start
+the radio is off whatever the choice; at Start, mobile data off for every
+SIM, then the switch-on above; afterwards airplane mode switched on by the
+person is left alone, and if the phone process restarts outside a hold
+(it then reads `enable_cellular_on_boot=0` and the radio goes off) the
+module switches it on again, with the same holds (during a hold it reads
+1 and the radio stays on). With mobile data off, Android still allows
+the IMS and emergency bearers and SUPL during an emergency call or
+callback mode (`DataNetworkController`); whether the carrier's IMS
+registers so is PH3's.
 
 ### `restricted_networking_mode`: on LineageOS only
 
@@ -508,10 +659,34 @@ shellcheck -s sh -x *.sh lib/*.sh tests/*.sh tests/fakes/* META-INF/com/google/a
 
 **`tests/unit.sh`** (no root): bridge-line checks (27 cases), IPv4
 addresses, provider-row parsing, control-reply parsing, JSON helpers, the
-Settings list on the emulator and on the phone, and `ports_bad()` against
+Settings list on the emulator and on the phone (13 and 14 values;
+`airplane_mode_radios` never set at boot), `ports_bad()` against
 `/proc/net` fixtures (owners, other uids, wildcard and IPv6 addresses,
-TIME_WAIT, connected sockets, an unreadable file), under `sh`, dash,
-busybox and mksh (`MKSH=` names Android's).
+TIME_WAIT, connected sockets, an unreadable file), and the cell radio:
+the parsers against dumps in Android 16's layout (every call state, VoIP
+calls, a call line in another section, missing sections, empty input, a
+missing service; idle, ringing, off-hook, active, held, dialing,
+incoming, disconnecting, disconnected and not-valid states on either
+phone, callback mode for calls and texts, the radio states, a field
+missing, the incoming number never printed), `cell_hold` (each reason,
+their order, 299 s held and 300 s released, no clock), `cell_note` (the
+call counter up and down, the radio switched on by something else or by
+the module, a call's end, an unreadable state), `cell_decide` in each
+state (a step only on a look from the same turn), and the watch turn by
+turn against stand-ins for Settings, airplane mode and a restart of the
+phone process (with `PhoneGlobals`' and `ServiceStateTracker`'s parts)
+and the dumps: every hold and its release, a call that begins to ring
+between two turns, `enable_cellular_on_boot` kept at 1 through a call,
+callback mode and the 5 minutes after (a restart of the phone process
+then keeps the radio on, after an emergency call over the module's
+switch-off and from power-on alike) and 0 again before the switch-off,
+the fail-safe during a call (Wi-Fi and mobile data at once, the cell radio
+and Bluetooth after it), Phone mode's switch-on (only after Start, mobile
+data off first, enable then disable, both held during a call, again after
+a phone-process restart, airplane mode left to the person), nothing
+written once the module's files are gone, and the shutdown reset (its
+order, held during a call or an unreadable state). Under `sh`, dash, busybox and mksh (`MKSH=` names
+Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
 real firewall, tor, DNS filter and `antumbra-run`, without Android. Each
@@ -519,8 +694,14 @@ scenario gets mount, network and PID namespaces and a chroot into an
 overlay of the host whose upper layer holds `/system/bin` (Android 16's
 toybox and mksh built for the host, the host's `iptables-legacy` and `ip`,
 and the stand-ins in `tests/fakes` for `getprop`, `setprop`, `resetprop`,
-`settings`, `cmd` and `content`), a Wi-Fi store and a lease database "on
-flash", and the staged module. The module's scripts run with umask 0. It
+`settings`, `cmd`, `content` and `dumpsys`), a Wi-Fi store and a lease
+database "on flash", and the staged module. The stand-ins for `dumpsys`
+and `cmd` play Telecom, the telephony registry and airplane mode (with the
+phone process's part: `cell_on`, `enable_cellular_on_boot`, the radio)
+from files the test writes, and a file bound over `/proc/uptime` (rewritten
+every second: the real time since boot plus a skew) lets the test move the
+module's clock past the 5-minute holds; production code has no test hook.
+The module's scripts run with umask 0. It
 installs the module through `emu-install.sh` (so `customize.sh` runs),
 then runs the early arm script, `post-fs-data.sh` and `service.sh` and
 checks, among other things: modes despite umask 0; the arm set and that
@@ -532,15 +713,20 @@ group 3003; `status.json` (without session ID or tor mode) and the
 filter's status page as an app sees them; an app's DNS for a tracker
 answered NXDOMAIN through the firewall's redirect, and other DNS failing
 closed while tor is offline; other UDP refused; no Settings before the
-framework is up, all of them after; and per scenario:
+framework is up, all of them after (the cell radio's among them, and
+`enable_cellular_on_boot=0` already at installation; each key recorded
+once); in every scenario
+the list narrowed to the cell radio, `cell=off` in the session record, and
+no switch-on by the module; and per scenario:
 
 | Scenario | Shell | Checks |
 |---|---|---|
 | `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
 | `direct` | mksh, LineageOS hotdog properties | mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
-| `offline` | mksh | network stays off; mobile data left alone (emulator); an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script, which puts the Settings back and deletes itself, and deletes the early arm script |
-| `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; iptables broken → firewall `open`, property removed, airplane mode on and Wi-Fi off; repaired → live |
+| `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script is deleted |
+| `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; during an active call on the cell radio, iptables broken → firewall `open`, property removed, Wi-Fi and mobile data off at once, status says the rest follows (not why); no airplane mode and no Bluetooth off during the call or 270 s after it; 5 minutes after it both, status says so; repaired → live; shutdown → `cell_on 1` and `airplane_mode_on 0` stored, no airplane-mode command |
 | `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
+| `cell` | busybox, LineageOS hotdog properties | the cell radio switched on by something else and off again by the module, after each hold, each shown held after the clock is moved on and released 5 minutes after it ends: a switch-on with airplane mode off (an emergency text, or the emergency path); airplane mode switched off by the person (mobile data off again at once); a ringing, an active and a held call; callback mode from the property, and for calls and texts from the registry; an unreadable state; a call seen only by Telecom's call counter; `enable_cellular_on_boot` stored 1 while a hold lasts and written 0 before the switch-off; shutdown during a call leaves airplane mode as it is |
 
 ```sh
 sudo tests/e2e-host.sh --tor-bin WORK/x86_64/tor-hostcheck \
@@ -621,22 +807,29 @@ phone the rest.
 **Network**
 - Without the module (Magisk Safe Mode, an update without the Magisk
   step) there is no firewall. What remains is the RAM-only Wi-Fi store
-  (nothing shared to join), the stored Settings (mobile data off for the
-  SIMs Android knew), and Welcome's check of `antumbra.fw.armed`. A network
-  joined by hand, a SIM Android has never seen (mobile data on by
-  default), or one whose mobile data was switched on in a session that
+  (nothing shared to join), the stored Settings (the cellular radio off
+  from power-on, mobile data off for the SIMs Android knew), and Welcome's
+  check of `antumbra.fw.armed`. A network joined by hand, or a SIM once
+  its radio is switched on (airplane mode switched on and off, or an
+  emergency call) when it is one Android has never seen (mobile data on
+  by default) or one whose mobile data was switched on in a session that
   ended without a clean shutdown, then connects in the clear. With the
   module only disabled (`disable` flag), the early arm script keeps the
   network closed.
-- The port check runs at every turn of the loop (2 to 5 s); in between, a
+- The port check runs at every turn of the loop (2 to 5 s), and again
+  right after a look at the cell radio, which can take up to 8 s (two
+  dumps of a slow service); in between, a
   squatter on 5335 can receive DNS queries (it cannot answer them, and
   nothing leaves) and one on 9040 SYNs. On the phone, Android's mDNS
   (system_server, uid 1000) on 5335 before the filter would count as a
   squatter too: the firewall then stays armed, with the reason in the
   status (closed, not open).
-- If the firewall cannot even be armed, airplane mode and Wi-Fi go off;
-  they stay off after the firewall comes back, until the person switches
-  them on.
+- If the firewall cannot even be armed, Wi-Fi and mobile data go off at
+  once, the cellular radio and Bluetooth only when no call holds them (up
+  to 5 minutes after a call, and never while the call state cannot be
+  read); they stay off after the firewall comes back, until the person
+  switches them on (the cellular radio then goes off again after the
+  holds, unless the session is in Phone mode).
 - Apps with their own tor (Tor Browser, Briar, OnionShare) cannot
   connect in v0: the module writes no exemptions (`fw-exempt.conf`,
   `fw-relays.conf`), so their tor is redirected into the system tor, and
@@ -667,6 +860,51 @@ phone the rest.
   phone. EDL stays reachable.
 - Every app can read `antumbra.fw.armed` (that is how Welcome reads it),
   so an app can tell that Antumbra runs.
+
+**The cell radio**
+- After anything else switches the radio on (the person with airplane
+  mode, an emergency call or text), it stays on for at least 5 minutes,
+  and while a call or callback mode lasts; the person can switch it on
+  with airplane mode in any session (it goes off again after the holds).
+- The holds read `dumpsys` layouts (Telecom's `mCalls` and Analytics, the
+  telephony registry). If Android changes them, the module holds as if in
+  a call and stops switching the radio off at run time, and keeps
+  `enable_cellular_on_boot=1` for the session, so a restart of the phone
+  process switches the radio on; it is still off from power-on after a
+  clean shutdown. The layouts were read in Android 16's source; no device
+  or emulator has run the parsers yet.
+- `enable_cellular_on_boot=1` while a hold lasts: a crash or a forced
+  power-off then (during a call, callback mode or the 5 minutes after,
+  also in Phone mode after any call) skips the shutdown's 0, and the next
+  start has the radio on before Start (against D12 in that case), until
+  the watch switches it off after the 5-minute rule; on a start without
+  the module, for that whole boot. A clean shutdown or restart during a
+  hold stores 0 like any other: the next start has the radio off, and a
+  callback reaches the phone only once it is on again (Phone mode's
+  Start); an emergency call still switches it on. Welcome's Quick power
+  off waits during a call, callback mode and the 5 minutes after; the
+  system's power menu does not.
+- A crash or forced power-off while airplane mode is on (the module's
+  run-time switch-off) skips the shutdown reset: the next start has
+  airplane mode on and Wi-Fi's copy with it, so Welcome cannot switch
+  Wi-Fi; switch it on in Quick Settings for that boot. The same follows a
+  shutdown during a call with airplane mode on.
+- A SIM Android has never seen starts with mobile data on until the
+  module writes its key (at the SIM's state change, at most a few seconds;
+  before Phone mode's switch-on in any case). If the radio comes on before
+  that without the module (the emergency path, or airplane mode switched
+  by the person), that SIM's data can come up meanwhile, through the
+  firewall. `resetprop -n ro.com.android.mobiledata false` at post-fs-data
+  would make "off" the default for such a SIM; not done (a decision for
+  the lead).
+- With the radio off since power-on, the emergency numbers beyond the ones
+  Android always knows depend on the network country, which the radio has
+  not seen (PH4).
+- Installed from recovery, the first start has the radio on (no
+  `enable_cellular_on_boot=0` yet) until the watch switches it off, after
+  the 5-minute rule.
+- Uninstalling leaves the radio off until the next start (or airplane mode
+  switched on and off).
 
 **Operations**
 - Logs are in RAM: a failed boot's log is gone after the next start.

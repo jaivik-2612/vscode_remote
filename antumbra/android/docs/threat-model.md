@@ -153,16 +153,20 @@ the filter is absent, never counts.
 
 What does not:
 
-- **A SIM.** With a SIM whose mobile data is on, the phone goes online over
-  the mobile network as it starts, in the clear, with no saved network and
-  before Welcome runs; system traffic such as the LineageOS Updater leaves
-  outside Tor. Welcome cannot stop it: it locks Wi-Fi only, and a device
-  owner cannot switch airplane mode. The module stores mobile data as off
-  for every SIM Android knows, at every boot and at shutdown, so this
-  happens with a SIM Android has never seen (LineageOS switches mobile data
-  on for a new SIM), and with one switched on in a session that ended in a
-  crash or power loss instead of a clean shutdown. Hence no SIM by default
-  (D3), and none at LineageOS's first boot (`install.md`).
+- **A SIM.** With a SIM whose mobile data is on, the phone would go
+  online over the mobile network in the clear, with no saved network and
+  before Welcome runs; system traffic such as the LineageOS Updater would
+  leave outside Tor. Welcome cannot stop it: it locks Wi-Fi only, and a
+  device owner cannot switch airplane mode. The module stores the cellular
+  radio as off from power-on (`enable_cellular_on_boot=0`, MOD6), so the
+  radio stays off as the phone starts, and stores mobile data as off for
+  every SIM Android knows, at every boot and at shutdown. This happens only
+  once the radio is switched on (airplane mode switched on and off, or an
+  emergency call, which Android always allows), and then with a SIM
+  Android has never seen (LineageOS switches mobile data on for a new
+  SIM), or with one switched on in a session that ended in a crash or
+  power loss instead of a clean shutdown. Hence no SIM by default (D3),
+  and none at LineageOS's first boot (`install.md`).
 - **Networks joined by hand.** A network joined by hand in such a boot
   connects in the clear, and system services (the LineageOS Updater,
   location assistance) may then send traffic outside Tor. Welcome removes

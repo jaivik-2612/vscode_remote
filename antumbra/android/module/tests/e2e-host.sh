@@ -20,7 +20,7 @@
 #   --busybox        busybox with FEATURE_SH_STANDALONE, standing in for
 #                    Magisk's
 #   --scenarios      default: "bridges:busybox direct:mksh offline:mksh
-#                    pt:busybox badbridges:mksh"
+#                    pt:busybox badbridges:mksh cell:busybox"
 #
 # tests/build-test-tools.sh builds --toybox, --mksh and --busybox from
 # pinned sources.
@@ -29,7 +29,11 @@
 # a chroot into an overlay of the host's root file system whose upper layer
 # holds /system/bin (Android's toybox and mksh, the host's iptables-legacy
 # and ip, and the stand-ins in tests/fakes), /data (a Wi-Fi store and a
-# NetworkStack database to be forgotten) and the staged module. Nothing in
+# NetworkStack database to be forgotten) and the staged module; the
+# stand-ins for dumpsys and cmd play Telecom, the telephony registry and
+# airplane mode (the phone process's part included) from files the test
+# writes, and a file bound over /proc/uptime lets the test move the
+# module's clock on (the cell radio's 5-minute holds). Nothing in
 # it reaches the host: the overlay's upper layer is in a temporary
 # directory, and the network namespace has only loopback and one end of a
 # veth pair (with a default route through the other end). The scripts run
@@ -43,13 +47,30 @@
 #               127.0.0.1:9040 before Start (firewall back to armed, tor's
 #               network held off until the port is free); mobile data off
 #               for every SIM; no bridges
-#   offline     tor stays off; an app takes the filter's 5335 while the
-#               filter restarts; then uninstall.sh puts the Settings back
-#   pt          obfs4 bridges without lyrebird: refused, network off; then
-#               iptables broken: the firewall reports open, and airplane
-#               mode goes on and Wi-Fi off
+#   offline     an update over a record made before the cell radio work
+#               (the keys it lacks added); tor stays off; an app takes the
+#               filter's 5335 while the filter restarts; then uninstall.sh,
+#               during a boot and while Android runs (service.sh stopped
+#               first), puts the Settings back and nothing writes them again
+#   pt          obfs4 bridges without lyrebird: refused, network off; then,
+#               during a call on the cell radio, iptables broken: the
+#               firewall reports open, Wi-Fi and mobile data go off at once,
+#               the cell radio (airplane mode) and Bluetooth only 5 minutes
+#               after the call; shutdown stores airplane mode off
 #   badbridges  Start from a Welcome that is not the device owner: ignored;
 #               then a bridge line with a quote: refused, network off
+#   cell        on a LineageOS hotdog: the cell radio switched on by
+#               something else and switched off again, after each hold:
+#               5 minutes after a switch-on, a ringing, active and held
+#               call, emergency callback mode (property, calls, texts), an
+#               unreadable state, a call between two looks, with
+#               enable_cellular_on_boot kept at 1 while each hold lasts and
+#               0 again before the switch-off; shutdown during a call leaves
+#               airplane mode as it is
+#
+# Every scenario also checks the cell radio's stored values, the narrowed
+# airplane-mode list, cell=off in the session record and that the module
+# never switches the radio on.
 #
 # What it cannot show: Android itself (SELinux, netd, Magisk's timing,
 # Welcome, the framework restart). The emulator job does that.
@@ -58,7 +79,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 MODULE=$(cd "$HERE/.." && pwd)
 
 TOR_BIN='' DNS_BIN='' BLOCKLIST='' TOYBOX='' MKSH='' BUSYBOX='' KEEP=0
-SCENARIOS='bridges:busybox direct:mksh offline:mksh pt:busybox badbridges:mksh'
+SCENARIOS='bridges:busybox direct:mksh offline:mksh pt:busybox badbridges:mksh cell:busybox'
 while [ $# -gt 0 ]; do
 	case $1 in
 	--tor-bin) TOR_BIN=$2; shift 2 ;;
@@ -136,7 +157,7 @@ populate() {
 		ln -s "/usr/sbin/$t-$b-restore" "$U/system/bin/$t-restore"
 		ln -s "/usr/sbin/$t-$b-save" "$U/system/bin/$t-save"
 	done
-	for f in getprop setprop settings cmd content; do
+	for f in getprop setprop settings cmd content dumpsys; do
 		cp "$HERE/fakes/$f" "$U/system/bin/$f"
 	done
 	cp "$HERE/fakes/resetprop" "$U/magisk-bin/resetprop"
@@ -144,18 +165,32 @@ populate() {
 	chmod 0755 "$U"/system/bin/* "$U"/magisk-bin/* 2>/dev/null
 	cp -a "$W/stage" "$U/antumbra-test/stage"
 	cp "$HERE/probe.py" "$HERE/e2e-inner.sh" "$U/antumbra-test/"
-	if [ "$2" = direct ]; then
+	# The phone (two SIM slots) or the emulator (one).
+	case $2 in
+	direct | cell)
 		printf 'ro.product.device=hotdog\nro.lineage.device=hotdog\nro.lineage.version=23.2-20261009-NIGHTLY-hotdog\nro.hardware=qcom\n' >"$U/antumbra-test/props"
-	else
+		echo 2 >"$U/antumbra-test/phones"
+		;;
+	*)
 		printf 'ro.boot.qemu=1\nro.hardware=ranchu\nro.product.device=emu64x\n' >"$U/antumbra-test/props"
-	fi
-	printf 'ro.build.version.sdk=36\nro.product.cpu.abi=x86_64\n' >>"$U/antumbra-test/props"
+		echo 1 >"$U/antumbra-test/phones"
+		;;
+	esac
+	printf 'ro.build.version.sdk=36\nro.product.cpu.abi=x86_64\ngsm.sim.state=LOADED,ABSENT\n' >>"$U/antumbra-test/props"
+	# Android's defaults for airplane mode's radios and cell_on; no
+	# enable_cellular_on_boot yet (Android's default: on).
 	printf 'airplane_mode_on=0\nntp_server=time.android.com\nprivate_dns_mode=opportunistic\nmobile_data2=1\n' >"$U/antumbra-test/settings"
+	printf 'airplane_mode_radios=cell,bluetooth,uwb,wifi,wimax\ncell_on=1\n' >>"$U/antumbra-test/settings"
+	# The cell radio off since power-on; no call in this boot yet.
+	echo 0 >"$U/antumbra-test/radio"
+	printf '%s\n' 'CallsManager: ' '  mCalls: ' '  mCallAudioManager: ' 'PhoneAccountRegistrar: ' 'Analytics:' \
+		'  Hardware Version: ' '  Past analytics dumps: ' 'Flag Configurations: ' >"$U/antumbra-test/telecom"
 	# Welcome is the device owner; two SIMs known to Android.
 	printf 'User  0: admin=org.antumbra.welcome/.AdminReceiver,DeviceOwner\n' >"$U/antumbra-test/owners"
 	printf '1\n3\n' >"$U/antumbra-test/siminfo"
 	: >"$U/antumbra-test/settings.log"
 	: >"$U/antumbra-test/cmd.log"
+	: >"$U/antumbra-test/dumpsys.log"
 	: >"$U/antumbra-test/resetprop.log"
 	# What Android left on flash: a saved network and a lease memory.
 	echo '<WifiConfigStoreData><NetworkList><Network>home</Network></NetworkList></WifiConfigStoreData>' \

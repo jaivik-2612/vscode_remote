@@ -94,17 +94,42 @@ for f in tor antumbra-dnsfilter antumbra-run antumbra-fw lyrebird; do
 done
 
 # 8. What uninstall.sh puts back: the Settings values from before the
-# first installation. An update keeps the record of the installed version.
+# first installation. An update keeps the record of the installed version,
+# and adds the keys this version's settings.conf has and the record lacks
+# (an earlier version never set them, so their value now is the one from
+# before; without Android running, "null" and Android's default radio
+# list, as uninstall.sh does without a record). Then, while Android runs,
+# the cell radio is stored as off from power-on (enable_cellular_on_boot=0),
+# so that the first start with the module already has it off; service.sh
+# sets the rest at that start.
 ANTUMBRA_OLD=/data/adb/modules/antumbra/settings.orig
-if [ -f "$ANTUMBRA_OLD" ]; then
-	cp -f "$ANTUMBRA_OLD" "$MODPATH/settings.orig"
-elif [ "$BOOTMODE" = true ] && /system/bin/settings get global airplane_mode_on >/dev/null 2>&1; then
-	sed -n -e 's/^lineage://' -e 's/^phone://' -e 's/^\([a-z0-9_]*\)=.*/\1/p' "$MODPATH/lib/settings.conf" |
+ANTUMBRA_LIVE=0
+if [ "$BOOTMODE" = true ] && /system/bin/settings get global airplane_mode_on >/dev/null 2>&1; then
+	ANTUMBRA_LIVE=1
+fi
+[ -f "$ANTUMBRA_OLD" ] && cp -f "$ANTUMBRA_OLD" "$MODPATH/settings.orig"
+if [ -f "$MODPATH/settings.orig" ] || [ "$ANTUMBRA_LIVE" = 1 ]; then
+	touch "$MODPATH/settings.orig"
+	sed -n -e 's/^lineage://' -e 's/^phone://' -e 's/^cell://' -e 's/^\([a-z0-9_]*\)=.*/\1/p' \
+		"$MODPATH/lib/settings.conf" |
 		while IFS= read -r k; do
-			printf '%s=%s\n' "$k" "$(/system/bin/settings get global "$k" 2>/dev/null)"
-		done >"$MODPATH/settings.orig"
+			grep -q "^$k=" "$MODPATH/settings.orig" && continue
+			if [ "$ANTUMBRA_LIVE" = 1 ]; then
+				v=$(/system/bin/settings get global "$k" 2>/dev/null)
+			elif [ "$k" = airplane_mode_radios ]; then
+				v=cell,bluetooth,uwb,wifi,wimax
+			else
+				v=null
+			fi
+			printf '%s=%s\n' "$k" "${v:-null}"
+		done >"$MODPATH/settings.add"
+	cat "$MODPATH/settings.add" >>"$MODPATH/settings.orig"
+	rm -f "$MODPATH/settings.add"
 fi
 [ -f "$MODPATH/settings.orig" ] && set_perm "$MODPATH/settings.orig" 0 0 0600
+if [ "$BOOTMODE" = true ] && /system/bin/settings put global enable_cellular_on_boot 0 >/dev/null 2>&1; then
+	ui_print "- The cellular radio stays off from the next start on"
+fi
 
 # 9. Arm early, and also when the module is disabled. Magisk runs the
 # scripts in /data/adb/post-fs-data.d before any module's post-fs-data.sh

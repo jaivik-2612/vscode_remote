@@ -566,15 +566,16 @@ SETTINGS_CONF=$MODDIR/lib/settings.conf
 settings_put() { /system/bin/settings put global "$1" "$2" >/dev/null 2>&1; }
 
 # settings_apply: set every value in settings.conf; "lineage:" lines only on
-# LineageOS, "phone:" lines everywhere but the emulator. Prints the keys
-# that could not be set.
+# LineageOS, "phone:" lines everywhere but the emulator, "cell:" lines
+# never (the cell radio's code sets them when the time is right). Prints the
+# keys that could not be set.
 settings_apply() {
 	_sa_lineage=0
 	is_lineage && _sa_lineage=1
 	_sa_phone=1
 	is_emulator && _sa_phone=0
 	while IFS= read -r _sa_line || [ -n "$_sa_line" ]; do
-		case $_sa_line in '' | '#'*) continue ;; esac
+		case $_sa_line in '' | '#'* | cell:*) continue ;; esac
 		case $_sa_line in
 		lineage:*)
 			[ "$_sa_lineage" = 1 ] || continue
@@ -589,6 +590,14 @@ settings_apply() {
 	done <"$SETTINGS_CONF"
 }
 
+# setting_get KEY: print a Settings.Global value (empty when unset).
+# Returns 1 if the settings provider does not answer.
+setting_get() {
+	_sg=$(/system/bin/settings get global "$1" 2>/dev/null) || return 1
+	[ "$_sg" = null ] && _sg=
+	printf '%s\n' "$_sg"
+}
+
 # mobile_data_off: mobile data off for every SIM Android knows, now and at
 # the next start. Android stores the choice per subscription
 # (Settings.Global mobile_data<subId> in dual-SIM mode; the hotdog has two
@@ -596,11 +605,13 @@ settings_apply() {
 # and reads it when the SIM comes up, so it holds on a start without the
 # module too. A SIM Android has never seen has no value yet and starts
 # with mobile data on (ro.com.android.mobiledata, default true): that gap
-# is in README, "Known gaps". 'cmd phone data disable' switches it off now
-# on the default data SIM. Not on the emulator, whose only network in CI
-# is its simulated mobile data.
+# is in README, "Known gaps"; the cell radio's watch runs this again as
+# soon as a SIM's state changes, and before the module switches the radio
+# on. 'cmd phone data disable' switches it off now on the default data
+# SIM. On the emulator too: CI switches its simulated mobile data off
+# itself, and a start without the module must find it stored off there as
+# well.
 mobile_data_off() {
-	is_emulator && return 0
 	_md_ids=$({
 		/system/bin/settings list global 2>/dev/null | sed -n 's/^mobile_data\([0-9][0-9]*\)=.*/\1/p'
 		/system/bin/content query --uri content://telephony/siminfo --projection _id 2>/dev/null |
@@ -613,11 +624,18 @@ mobile_data_off() {
 	return 0
 }
 
-# radios_off: airplane mode on and Wi-Fi off. Used only when the firewall
-# cannot be put in place and the network may be open.
-radios_off() {
-	/system/bin/cmd connectivity airplane-mode enable >/dev/null 2>&1
-	/system/bin/cmd wifi set-wifi-enabled disabled >/dev/null 2>&1
+# wifi_off, bluetooth_off: switch them off now (root may do so in any
+# state, airplane mode included).
+wifi_off() { /system/bin/cmd wifi set-wifi-enabled disabled >/dev/null 2>&1; }
+bluetooth_off() { /system/bin/cmd bluetooth_manager disable >/dev/null 2>&1; }
+
+# radios_off_now: the part of the fail-safe that never waits: Wi-Fi off and
+# mobile data off. Used only when the firewall cannot be put in place and
+# the network may be open. The cell radio and Bluetooth follow in
+# cell_step, once no call holds them.
+radios_off_now() {
+	wifi_off
+	mobile_data_off
 }
 
 # framework_ready: true once boot has completed and the settings provider
@@ -625,6 +643,687 @@ radios_off() {
 framework_ready() {
 	[ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] &&
 		/system/bin/settings get global airplane_mode_on >/dev/null 2>&1
+}
+
+# --- The cell radio ------------------------------------------------------------------
+#
+# The cell radio stays off unless the session chose Phone mode (WEL8; until
+# then every session keeps it off). It is off from power-on because of
+# three stored values: enable_cellular_on_boot=0 (settings.conf), airplane
+# mode off and cell_on=1. The phone process reads enable_cellular_on_boot
+# once, when it starts, and keeps the radio off ("off by the user"); this
+# holds on a start without the module too. Airplane mode is never left on
+# across a restart: Wi-Fi copies airplane mode once, when it starts, and
+# while that copy says "on", a device owner (Welcome) cannot switch Wi-Fi
+# on or off for the whole boot.
+#
+# At run time the module switches the cell radio off with Android's own
+# airplane mode ('cmd connectivity airplane-mode enable'), after narrowing
+# airplane_mode_radios to "cell", so that Wi-Fi and Bluetooth stay as they
+# are. That is the one way used, because Android's emergency-call path
+# undoes it by itself: it switches airplane mode off and the radio on, and
+# clears every reason the radio was off for (RadioOnHelper and
+# ServiceStateTracker in Android 16). Never used: switching a modem or a
+# SIM slot off, SIM power, the multi-SIM setting, stopping the RIL or the
+# phone process, modem restarts, 'service call' transaction numbers, or
+# anything else the emergency dialer cannot undo.
+#
+# Holds. No airplane step and no radio-off step (airplane mode on or off,
+# the fail-safe's cell radio and Bluetooth, the shutdown reset) while:
+#   - Telecom lists a call in any state, or a phone in the telephony
+#     registry is not idle (ringing, dialing, active, on hold, ...);
+#   - emergency callback mode, for calls or for texts, is on;
+#   - less than 5 minutes have passed since the last look that saw either,
+#     since Telecom's call counter moved (a call that began and ended
+#     between two looks), or since the radio came on or airplane mode went
+#     off without the module doing it (an emergency text starts no call);
+#   - any of this cannot be read: a hold as if in a call, and 5 more minutes
+#     once it can be read again.
+# Wi-Fi off and mobile data off never wait. While a hold lasts and the
+# radio is not off, enable_cellular_on_boot is kept at 1, not 0: the phone
+# process reads it whenever it starts, and if it restarted during a call,
+# callback mode or the 5 minutes after (a crash, or a restart of
+# system_server), 0 would leave the radio off and no callback could reach
+# the phone. It is written 0 again once the hold ends, just before the
+# switch-off, and at every boot and shutdown (settings.conf).
+#
+# What a root shell can read: 'dumpsys telecom' (CallsManager's mCalls, one
+# line per call; Analytics, one "Call TC@<n>" line per recent call, n
+# counting up within a boot), 'dumpsys telephony.registry' (per phone the
+# call states and the callback-mode durations, and the radio power) and the
+# property ril.cdma.inecmmode (emergency callback mode, set on both of
+# Android 16's paths). The registry also prints the incoming number: the
+# dumps go through pipes only, never to a file or the log.
+
+# Seconds the radio stays as it is after a call (Android's callback mode
+# lasts 300000 ms; Welcome's CallWatch waits as long).
+CELL_AFTER=300
+# Seconds airplane mode must read off before the list is narrowed: Wi-Fi
+# updates its copy of airplane mode only while the list names Wi-Fi, so it
+# must have handled the last airplane-off broadcast first.
+CELL_STEADY=30
+# Seconds between looks: while the radio is on (or not known to be off), a
+# hold lasts or the fail-safe waits; otherwise; and after a look that could
+# not read the state.
+CELL_LOOK_BUSY=10
+CELL_LOOK_IDLE=60
+CELL_LOOK_FAILED=30
+# The narrowed list (settings.conf's "cell:" line records the old one).
+CELL_RADIOS=cell
+
+# What the cell radio's watch keeps (service.sh's loop; cell_step).
+CELL_AIR=          # airplane_mode_on as last read: 1, 0, or empty (unread)
+CELL_AIR_OFF_AT=0  # uptime since which airplane mode reads off
+CELL_NARROW=0      # 1 once airplane_mode_radios reads "cell"
+CELL_ECM=          # ril.cdma.inecmmode as last read
+CELL_SIM=          # gsm.sim.state as last read
+CELL_BOOT=unread   # enable_cellular_on_boot as last read or written (empty: unset)
+CELL_LOOKED=       # uptime of the last look (empty: none yet)
+CELL_LOOK_NEXT=0   # uptime of the next look
+CELL_LAST=         # uptime of the last call-like event (empty: none)
+CELL_BUSY=0        # 1 if the last look saw a call, callback mode or nothing readable
+CELL_ID=           # Telecom's highest call number at the last look
+CELL_RADIO=        # radio power at the last look: on, off, wait, unknown
+CELL_MINE_AT=      # uptime of the module's own switch-on (Phone mode)
+CELL_ON_DONE=0     # 1 once Phone mode's switch-on is done
+CELL_TRY_AT=       # uptime of the last step taken (one try per 10 s)
+CELL_HELD=         # the hold last logged
+# The last look: CL_CALL and CL_CBM are 0, 1 or unknown; CL_ID is a number
+# or empty; CL_RADIO is on, off, wait or unknown.
+CL_CALL=unknown
+CL_CBM=unknown
+CL_ID=
+CL_RADIO=unknown
+# The session's choice ("off" or "phone"; service.sh's session_cell) and
+# the fail-safe's state (service.sh's RADIOS) are read from service.sh.
+SES_CELL=${SES_CELL:-off}
+RADIOS=${RADIOS:-}
+# The cell radio's current problem, for status.json (service.sh).
+# shellcheck disable=SC2034 # read by service.sh
+P_CELL=
+CELL_READ=         # 1 or 0: whether the last look could read the call state
+CELL_CLOCKLESS=0   # 1 while the time since boot cannot be read
+
+# telecom_state: read 'dumpsys telecom' on standard input and print
+# "CALLS LASTID": the calls Telecom lists now, in any state (VoIP calls
+# too), and the highest call number seen (0 if none). Returns 1 when the
+# dump lacks CallsManager, its mCalls list or Analytics (Telecom not
+# ready, a timeout, a format this does not know).
+telecom_state() {
+	# The call lines first: the substitutions below change the line that
+	# starts their range.
+	sed -n -e '/^  mCalls: *$/,/^ \{0,2\}[^ ]/{/^    \[Call id=/p;}' \
+		-e 's/^\(CallsManager:\) *$/\1/p' -e 's/^\(Analytics:\) *$/\1/p' \
+		-e 's/^  \(mCalls:\) *$/\1/p' \
+		-e 's/^ *\(Call TC@[0-9][0-9]*\): .*/\1/p' |
+		{
+			_ts_have=
+			_ts_n=0
+			_ts_last=0
+			while IFS= read -r _ts_line; do
+				_ts_id=
+				case $_ts_line in
+				CallsManager: | mCalls: | Analytics:) _ts_have="$_ts_have${_ts_line%:}," ;;
+				'    [Call id='*)
+					_ts_n=$((_ts_n + 1))
+					case $_ts_line in *'[Call id=TC@'[0-9]*)
+						_ts_id=${_ts_line#*id=TC@}
+						_ts_id=${_ts_id%%[!0-9]*}
+						;;
+					esac
+					;;
+				'Call TC@'*) _ts_id=${_ts_line#Call TC@} ;;
+				esac
+				[ -n "$_ts_id" ] || continue
+				# Shell arithmetic may be 32 bits (mksh).
+				[ "${#_ts_id}" -le 9 ] || exit 1
+				[ "$_ts_id" -le "$_ts_last" ] || _ts_last=$_ts_id
+			done
+			case $_ts_have in *CallsManager,*) ;; *) exit 1 ;; esac
+			case $_ts_have in *mCalls,*) ;; *) exit 1 ;; esac
+			case $_ts_have in *Analytics,*) ;; *) exit 1 ;; esac
+			echo "$_ts_n $_ts_last"
+		}
+}
+
+# registry_state: read 'dumpsys telephony.registry' on standard input and
+# print "BUSY CBM RADIO": BUSY 1 if any phone is not idle (mCallState not
+# 0, or a precise state other than idle (0), disconnected (7) or not valid
+# (-1): ringing, dialing, alerting, active, on hold, incoming, waiting,
+# disconnecting); CBM 1 if emergency callback mode for calls or texts lasts
+# (a duration other than 0); RADIO on, off or wait (unavailable). Returns 1
+# unless there is at least one phone and every phone has the six numbers,
+# and mRadioPowerState is 0, 1 or 2. Only the "last known state" part is
+# read; mCallIncomingNumber is read past and never printed.
+registry_state() {
+	_rs_in=0
+	_rs_phones=0
+	_rs_n=0
+	_rs_busy=0
+	_rs_cbm=0
+	_rs_radio=
+	while IFS= read -r _rs_l; do
+		case $_rs_l in
+		'last known state:')
+			_rs_in=1
+			continue
+			;;
+		'local logs:') break ;;
+		esac
+		[ "$_rs_in" = 1 ] || continue
+		_rs_l=${_rs_l#"${_rs_l%%[! ]*}"}
+		case $_rs_l in
+		'Phone Id='*)
+			[ "$_rs_phones" = 0 ] || [ "$_rs_n" = 6 ] || return 1
+			_rs_phones=$((_rs_phones + 1))
+			_rs_n=0
+			;;
+		mCallState=* | mRingingCallState=* | mForegroundCallState=* | mBackgroundCallState=* | \
+			mECBMDuration=* | mSCBMDuration=*)
+			[ "$_rs_phones" -gt 0 ] || return 1
+			_rs_k=${_rs_l%%=*}
+			_rs_v=${_rs_l#*=}
+			case ${_rs_v#-} in '' | *[!0-9]*) return 1 ;; esac
+			case $_rs_k in
+			mCallState) [ "$_rs_v" = 0 ] || _rs_busy=1 ;;
+			*CallState) case $_rs_v in 0 | 7 | -1) ;; *) _rs_busy=1 ;; esac ;;
+			*) [ "$_rs_v" = 0 ] || _rs_cbm=1 ;;
+			esac
+			_rs_n=$((_rs_n + 1))
+			;;
+		mRadioPowerState=*)
+			case ${_rs_l#*=} in
+			0) _rs_radio=off ;;
+			1) _rs_radio=on ;;
+			2) _rs_radio='wait' ;;
+			*) return 1 ;;
+			esac
+			;;
+		esac
+	done
+	[ "$_rs_phones" -gt 0 ] && [ "$_rs_n" = 6 ] && [ -n "$_rs_radio" ] || return 1
+	echo "$_rs_busy $_rs_cbm $_rs_radio"
+}
+
+# ecbm_value VALUE: 1 if ril.cdma.inecmmode says emergency callback mode
+# ("true"), 0 for false, 0 or unset; anything else counts as on.
+ecbm_value() {
+	case $1 in '' | false | 0) echo 0 ;; *) echo 1 ;; esac
+}
+
+# cell_dump SERVICE: Android's dumpsys of SERVICE, bounded: dumpsys gives
+# the service 3 seconds, and the whole call ends after 4 (a look, two
+# dumps, takes at most 8). A dump cut short reads as unknown: a hold.
+cell_dump() { $TB timeout 4 /system/bin/dumpsys -t 3 "$1" 2>/dev/null; }
+
+# airplane_get: print airplane mode, 1 or 0; returns 1 if it cannot be read.
+airplane_get() {
+	_ag=$(setting_get airplane_mode_on) || return 1
+	case $_ag in
+	1) echo 1 ;;
+	0 | '') echo 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# airplane_set enable|disable: Android's own airplane-mode switch (setting
+# and broadcast, as Quick Settings does it).
+airplane_set() { /system/bin/cmd connectivity airplane-mode "$1" >/dev/null 2>&1; }
+
+# cell_look: one look at the call state and the radio (sets CL_*).
+cell_look() {
+	CL_CALL=unknown
+	CL_CBM=unknown
+	CL_ID=
+	CL_RADIO=unknown
+	_cl_t=$(cell_dump telecom | telecom_state) || _cl_t=
+	_cl_r=$(cell_dump telephony.registry | registry_state) || _cl_r=
+	if _cl_e=$(getprop ril.cdma.inecmmode 2>/dev/null); then
+		_cl_e=$(ecbm_value "$_cl_e")
+	else
+		_cl_e=unknown
+	fi
+	if [ -n "$_cl_r" ]; then
+		set -f
+		# shellcheck disable=SC2086 # three words on purpose
+		set -- $_cl_r
+		set +f
+		CL_CBM=$2
+		case $_cl_e in 0) ;; 1) CL_CBM=1 ;; *) CL_CBM=unknown ;; esac
+		CL_RADIO=$3
+		if [ -n "$_cl_t" ]; then
+			CL_ID=${_cl_t#* }
+			CL_CALL=$1
+			[ "${_cl_t%% *}" = 0 ] || CL_CALL=1
+		fi
+	fi
+}
+
+# cell_mine NOW: true if the module itself switched the radio on in the
+# last 60 seconds (Phone mode).
+cell_mine() {
+	[ -n "$CELL_MINE_AT" ] && [ "$1" -ge "$CELL_MINE_AT" ] && [ $(($1 - CELL_MINE_AT)) -le 60 ]
+}
+
+# cell_note NOW: take the last look into the watch: CELL_LAST becomes NOW
+# when the look sees a call, callback mode or nothing readable, when the
+# one before did (so the 5 minutes count from when the end was seen, not
+# from the last look that still saw the call), when Telecom's call counter
+# moved (up, or down after Telecom restarted; on the first look, when any
+# call has happened in this boot), and when the radio came on without the
+# module doing it.
+cell_note() {
+	_cn_busy=0
+	[ "$CL_CALL" = 0 ] || _cn_busy=1
+	[ "$CL_CBM" = 0 ] || _cn_busy=1
+	_cn_event=$_cn_busy
+	[ "$CELL_BUSY" = 0 ] || _cn_event=1
+	if [ -n "$CL_ID" ]; then
+		if [ -z "$CELL_ID" ]; then
+			[ "$CL_ID" = 0 ] || _cn_event=1
+		elif [ "$CL_ID" != "$CELL_ID" ]; then
+			_cn_event=1
+		fi
+		CELL_ID=$CL_ID
+	fi
+	if [ "$CL_RADIO" = on ] && [ "$CELL_RADIO" != on ] && ! cell_mine "$1"; then
+		_cn_event=1
+	fi
+	CELL_BUSY=$_cn_busy
+	CELL_RADIO=$CL_RADIO
+	[ "$_cn_event" = 0 ] || CELL_LAST=$1
+}
+
+# cell_hold NOW: print why a radio-off or airplane step must wait, and
+# return 0; return 1 when nothing holds it. In this order: unknown (the
+# state cannot be read, or the time since boot cannot: NOW 0), call,
+# callback, recent (less than CELL_AFTER seconds since CELL_LAST).
+cell_hold() {
+	case $CL_CALL:$CL_CBM in [01]:[01]) ;; *)
+		echo unknown
+		return 0
+		;;
+	esac
+	if [ "$1" -le 0 ]; then
+		echo unknown
+		return 0
+	fi
+	if [ "$CL_CALL" = 1 ]; then
+		echo call
+		return 0
+	fi
+	if [ "$CL_CBM" = 1 ]; then
+		echo callback
+		return 0
+	fi
+	if [ -n "$CELL_LAST" ] && { [ "$1" -lt "$CELL_LAST" ] || [ $(($1 - CELL_LAST)) -lt "$CELL_AFTER" ]; }; then
+		echo recent
+		return 0
+	fi
+	return 1
+}
+
+# cell_hold_text REASON: the hold in words, for the module's log (never in
+# status.json, which every app can read: a call is nobody's business).
+cell_hold_text() {
+	case $1 in
+	unknown) echo "the call state cannot be read" ;;
+	call) echo "a call is ringing, being set up, active or on hold" ;;
+	callback) echo "emergency callback mode" ;;
+	recent) echo "less than 5 minutes after a call, callback mode or a switch-on by something else" ;;
+	esac
+}
+
+# cell_boot_value NOW: the enable_cellular_on_boot the watch keeps: 1 while
+# cell_hold holds and the last look did not read the radio off (a restart
+# of the phone process then keeps the radio on), 0 otherwise.
+cell_boot_value() {
+	if [ "$CL_RADIO" != off ] && cell_hold "$1" >/dev/null; then echo 1; else echo 0; fi
+}
+
+# cell_want: what the cell radio should be: "failsafe" while the fail-safe
+# waits to switch it off; "on" in a Phone-mode session (after Start only,
+# decision D12), "leave" there once the fail-safe has switched the radios
+# off (the person decides from then on); "off" otherwise.
+cell_want() {
+	case $RADIOS in wanted | waiting)
+		echo failsafe
+		return 0
+		;;
+	esac
+	if [ "${S_STARTED:-0}" = 1 ] && [ "$SES_CELL" = phone ]; then
+		if [ -z "$RADIOS" ]; then echo on; else echo leave; fi
+		return 0
+	fi
+	echo off
+}
+
+# cell_decide NOW: print the cell radio's next step: none; look (a step
+# that nothing holds by the last look needs a look taken in this turn,
+# whose NOW is the look's time, before it is taken); narrow (the
+# list to the cell radio, once airplane mode has read off for CELL_STEADY
+# seconds; before that, "wait narrow" for steps that need it); keys (Phone
+# mode, the radio already on); off, power (Phone mode's switch-on) or
+# failsafe, or "held REASON" while cell_hold holds them.
+cell_decide() {
+	_cd_now=$1
+	case $CELL_AIR in 0 | 1) ;; *)
+		echo none
+		return 0
+		;;
+	esac
+	if [ -z "$CELL_LOOKED" ]; then
+		echo look
+		return 0
+	fi
+	_cd_step=none
+	case $(cell_want) in
+	failsafe) _cd_step=failsafe ;;
+	off)
+		if [ "$CELL_AIR" = 0 ]; then
+			case $CL_RADIO in off | wait) ;; *) _cd_step=off ;; esac
+		fi
+		;;
+	on)
+		if [ "$CELL_ON_DONE" = 0 ]; then
+			if [ "$CL_RADIO" = on ]; then _cd_step=keys; else _cd_step=power; fi
+		elif [ "$CELL_AIR" = 0 ] && [ "$CL_RADIO" = off ]; then
+			# The phone process restarted and read enable_cellular_on_boot=0.
+			_cd_step=power
+		fi
+		;;
+	esac
+	if [ "$CELL_NARROW" != 1 ] && [ "$CELL_AIR" = 0 ]; then
+		if [ "$_cd_now" -ge "$CELL_AIR_OFF_AT" ] && [ $((_cd_now - CELL_AIR_OFF_AT)) -ge "$CELL_STEADY" ]; then
+			echo narrow
+			return 0
+		fi
+		case $_cd_step in off | power)
+			echo "wait narrow"
+			return 0
+			;;
+		esac
+	fi
+	case $_cd_step in none | keys)
+		echo "$_cd_step"
+		return 0
+		;;
+	esac
+	# Held by the last look: only a later look (at its time) or the clock
+	# can end it. Free by the last look: one try per 10 seconds, and a
+	# look taken in this turn decides. A look from an earlier turn is never
+	# used: NOW is read once, at the start of a turn, so even one that reads
+	# a second or two old can be several seconds old, and a call could have
+	# begun to ring since.
+	if _cd_why=$(cell_hold "$_cd_now"); then
+		echo "held $_cd_why"
+		return 0
+	fi
+	if [ -n "$CELL_TRY_AT" ] && [ "$_cd_now" -ge "$CELL_TRY_AT" ] && [ $((_cd_now - CELL_TRY_AT)) -lt 10 ]; then
+		echo none
+		return 0
+	fi
+	if [ "$CELL_LOOKED" != "$_cd_now" ]; then
+		echo look
+		return 0
+	fi
+	echo "$_cd_step"
+}
+
+# cell_keys: mobile data off again after a switch-on, for every SIM Android
+# knows (a SIM it had not seen gets its key), and mobile_data_always_on 0.
+# No radio is switched: allowed during a hold. (enable_cellular_on_boot is
+# cell_step's, which keeps it by cell_boot_value.)
+cell_keys() {
+	settings_put mobile_data_always_on 0
+	mobile_data_off
+}
+
+# cell_narrow: airplane mode switches the cell radio only.
+cell_narrow() { settings_put airplane_mode_radios "$CELL_RADIOS"; }
+
+# cell_off: the cell radio off, through airplane mode. Callers check the
+# hold first, and that the list is narrowed (or, for the fail-safe, that
+# Wi-Fi going off too is wanted).
+cell_off() { airplane_set enable; }
+
+# cell_power: Phone mode's switch-on (after Start only). Mobile data off
+# first, for every SIM Android knows; then Android's airplane-mode path:
+# with airplane mode on, 'disable' (the phone process switches the radio
+# on); with it off, 'enable' then 'disable' (the radio has been off since
+# power-on, which the phone process only undoes on an airplane-mode
+# change). enable_cellular_on_boot, which that path sets to 1, is put back
+# to 0 by cell_step at its next turn (unless a hold has begun meanwhile).
+cell_power() {
+	settings_put mobile_data_always_on 0
+	mobile_data_off
+	if [ "$CELL_AIR" = 0 ]; then
+		airplane_set enable || return 1
+	fi
+	airplane_set disable
+}
+
+# cell_reset: at shutdown only: airplane mode stored off, so that Wi-Fi
+# starts with its copy off at the next start, and cell_on stored as "on"
+# (1), so that the phone process, which reads it with airplane mode at its
+# start, does not switch the radio on (it would with 2, "off for airplane
+# mode"). No broadcast: nothing switches now; with
+# enable_cellular_on_boot=0 the next start has the radio off.
+cell_reset() {
+	settings_put cell_on 1
+	settings_put airplane_mode_on 0
+}
+
+# cell_update NOW: a look, taken into the watch.
+cell_update() {
+	_cu_was=$CELL_RADIO
+	cell_look
+	cell_note "$1"
+	CELL_LOOKED=$1
+	if _cu_v=$(setting_get airplane_mode_radios); then
+		if [ "$_cu_v" = "$CELL_RADIOS" ]; then CELL_NARROW=1; else CELL_NARROW=0; fi
+	fi
+	_cu_v=1
+	[ "$CL_CALL" != unknown ] || _cu_v=0
+	if [ "$_cu_v" != "$CELL_READ" ]; then
+		if [ "$_cu_v" = 0 ]; then
+			log "cell: the call state cannot be read; nothing switches the radio off until it can, and for 5 minutes after"
+		elif [ -n "$CELL_READ" ]; then
+			log "cell: the call state can be read again"
+		fi
+		CELL_READ=$_cu_v
+	fi
+	if [ "$CL_RADIO" != "$_cu_was" ]; then
+		case $CL_RADIO in
+		on)
+			log "cell: the cell radio is on; mobile data off again"
+			cell_keys
+			;;
+		off) log "cell: the cell radio is off" ;;
+		esac
+	fi
+	if [ "$CL_CALL" = unknown ]; then
+		CELL_LOOK_NEXT=$(($1 + CELL_LOOK_FAILED))
+	elif [ "$CL_RADIO" = off ] && [ "$RADIOS" != waiting ] && ! cell_hold "$1" >/dev/null; then
+		CELL_LOOK_NEXT=$(($1 + CELL_LOOK_IDLE))
+	else
+		CELL_LOOK_NEXT=$(($1 + CELL_LOOK_BUSY))
+	fi
+}
+
+# cell_step NOW: one turn of the cell radio's watch (service.sh, at every
+# turn once the framework has answered).
+cell_step() {
+	_cs_now=$1
+	# The module's files are gone (Magisk itself uninstalled while this
+	# loop still runs): the stored values are uninstall.sh's from now on.
+	[ -f "$SETTINGS_CONF" ] || return 0
+	# Without the time since boot every step is held (cell_hold); once it
+	# can be read again, the 5 minutes start from then.
+	if [ "$_cs_now" -le 0 ]; then
+		CELL_CLOCKLESS=1
+	elif [ "$CELL_CLOCKLESS" = 1 ]; then
+		CELL_CLOCKLESS=0
+		CELL_LAST=$_cs_now
+	fi
+	# Cheap reads at every turn; a change brings the next look forward.
+	_cs_v=$(airplane_get) || _cs_v=
+	if [ "$_cs_v" != "$CELL_AIR" ]; then
+		if [ "$CELL_AIR" = 1 ] && [ "$_cs_v" = 0 ] && ! cell_mine "$_cs_now"; then
+			CELL_LAST=$_cs_now
+			log "cell: airplane mode switched off by something else; the radio stays on for at least 5 minutes"
+		fi
+		[ "$_cs_v" = 0 ] && CELL_AIR_OFF_AT=$_cs_now
+		CELL_AIR=$_cs_v
+		CELL_LOOK_NEXT=0
+	fi
+	# enable_cellular_on_boot set to something else than the watch left
+	# (Android's airplane-mode path writes 1 whenever it switches the radio
+	# on): mobile data off again, and a look. What the watch keeps there is
+	# decided below, once the look is in.
+	if _cs_boot=$(setting_get enable_cellular_on_boot); then
+		if [ "$CELL_BOOT" != unread ] && [ "$_cs_boot" != "$CELL_BOOT" ] && [ "$_cs_boot" != 0 ]; then
+			cell_keys
+			CELL_LOOK_NEXT=0
+			log "cell: enable_cellular_on_boot changed to ${_cs_boot:-unset} by something else (a switch-on); mobile data off again"
+		fi
+		CELL_BOOT=$_cs_boot
+	else
+		_cs_boot=unread
+	fi
+	_cs_v=$(getprop ril.cdma.inecmmode 2>/dev/null)
+	if [ "$_cs_v" != "$CELL_ECM" ]; then
+		CELL_ECM=$_cs_v
+		CELL_LOOK_NEXT=0
+	fi
+	_cs_v=$(getprop gsm.sim.state 2>/dev/null)
+	if [ "$_cs_v" != "$CELL_SIM" ]; then
+		# A SIM came, went or was unlocked: mobile data off for it before
+		# its radio may come on. (The first reading follows apply_settings,
+		# which has just done it.)
+		if [ -n "$CELL_SIM" ]; then
+			log "cell: a SIM's state changed; mobile data off for every SIM"
+			mobile_data_off
+		fi
+		CELL_SIM=$_cs_v
+		CELL_LOOK_NEXT=0
+	fi
+	[ "$_cs_now" -lt "$CELL_LOOK_NEXT" ] || cell_update "$_cs_now"
+
+	# The fail-safe: Wi-Fi and mobile data off at once (as soon as the
+	# framework answers); the cell radio and Bluetooth when nothing holds
+	# them.
+	if [ "$RADIOS" = wanted ] && framework_ready; then
+		radios_off_now
+		RADIOS=waiting
+		S_PROBLEM="${S_PROBLEM:+$S_PROBLEM; }the firewall could not be loaded: Wi-Fi off"
+		log "radios: Wi-Fi and mobile data off; the cell radio and Bluetooth follow when no call holds them"
+	fi
+
+	_cs_looked=0
+	while :; do
+		_cs_do=$(cell_decide "$_cs_now")
+		[ "$_cs_do" = look ] || break
+		[ "$_cs_looked" = 0 ] || break
+		cell_update "$_cs_now"
+		_cs_looked=1
+	done
+	case $_cs_do in
+	'held '*)
+		_cs_v=${_cs_do#held }
+		if [ "$_cs_v" != "$CELL_HELD" ]; then
+			CELL_HELD=$_cs_v
+			log "cell: switching the radio waits, held: $_cs_v ($(cell_hold_text "$_cs_v"))"
+		fi
+		;;
+	*) CELL_HELD= ;;
+	esac
+	# enable_cellular_on_boot, by the look just taken: 1 while a hold lasts
+	# and the radio is not off, so that a restart of the phone process does
+	# not switch it off then; 0 otherwise, so before any switch-off below.
+	if [ "$_cs_boot" != unread ]; then
+		_cs_v=$(cell_boot_value "$_cs_now")
+		if [ "$_cs_boot" != "$_cs_v" ] && settings_put enable_cellular_on_boot "$_cs_v"; then
+			CELL_BOOT=$_cs_v
+			if [ "$_cs_v" = 1 ]; then
+				log "cell: enable_cellular_on_boot 1 while the hold lasts (a restart of the phone process keeps the radio on)"
+			else
+				log "cell: enable_cellular_on_boot 0 again (the radio off from the next start)"
+			fi
+		fi
+	fi
+	# After an airplane step, the watch takes the airplane mode it asked for
+	# as the last reading: if airplane mode then reads otherwise, something
+	# else changed it (the emergency path right after the step, the person),
+	# and that counts as an event even when it happens before the next turn.
+	# The radio takes a few seconds to power down: the next look waits.
+	case $_cs_do in
+	narrow)
+		cell_narrow
+		CELL_NARROW=1
+		log "cell: airplane mode's radio list narrowed to the cell radio"
+		;;
+	keys)
+		cell_keys
+		CELL_ON_DONE=1
+		log "cell: Phone mode: the radio is already on; mobile data off"
+		;;
+	off)
+		CELL_TRY_AT=$_cs_now
+		cell_off
+		CELL_AIR=1
+		CELL_LOOK_NEXT=$((_cs_now + CELL_LOOK_BUSY))
+		log "cell: the cell radio off (airplane mode, for the cell radio only)"
+		;;
+	power)
+		CELL_TRY_AT=$_cs_now
+		CELL_MINE_AT=$_cs_now
+		cell_power
+		[ "$CELL_AIR" = 0 ] || CELL_AIR_OFF_AT=$_cs_now
+		CELL_AIR=0
+		CELL_RADIO=on
+		CELL_ON_DONE=1
+		CELL_LOOK_NEXT=0
+		log "cell: Phone mode: the cell radio on, mobile data off"
+		;;
+	failsafe)
+		CELL_TRY_AT=$_cs_now
+		if [ "$CELL_AIR" != 1 ]; then
+			cell_off
+			CELL_AIR=1
+			CELL_LOOK_NEXT=$((_cs_now + CELL_LOOK_BUSY))
+		fi
+		bluetooth_off
+		RADIOS=switched
+		S_PROBLEM="${S_PROBLEM:+$S_PROBLEM; }the firewall could not be loaded: cellular radio and Bluetooth off"
+		log "radios: the cell radio (airplane mode) and Bluetooth off"
+		;;
+	esac
+	# shellcheck disable=SC2034 # read by service.sh
+	if [ "$RADIOS" = waiting ]; then
+		P_CELL="cellular radio and Bluetooth off shortly"
+	else
+		P_CELL=
+	fi
+}
+
+# cell_shutdown NOW: once Android has begun to shut down, store airplane
+# mode off and cell_on=1 for the next start (cell_reset), unless a call,
+# callback mode or a recent call holds it, or the state cannot be read
+# (then the next start keeps airplane mode on, and Wi-Fi's copy with it).
+cell_shutdown() {
+	_cx_air=$(airplane_get) || return 0
+	_cx_on=$(setting_get cell_on) || return 0
+	if [ "$_cx_air" = 0 ] && { [ -z "$_cx_on" ] || [ "$_cx_on" = 1 ]; }; then
+		return 0
+	fi
+	cell_update "$1"
+	if _cx_why=$(cell_hold "$1"); then
+		log "shutdown: airplane mode left as it is, held: $_cx_why ($(cell_hold_text "$_cx_why"))"
+		return 0
+	fi
+	cell_reset
+	log "shutdown: airplane mode stored off and cell_on 1, without a broadcast; the radio stays off at the next start"
 }
 
 # --- IPv6 off, per interface ----------------------------------------------------------

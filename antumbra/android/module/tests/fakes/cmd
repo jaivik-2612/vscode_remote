@@ -1,16 +1,66 @@
 #!/system/bin/sh
-# Test stand-in for Android's cmd: logs to /antumbra-test/cmd.log.
+# Test stand-in for Android's cmd: logs to /antumbra-test/cmd.log, or to
+# $FAKE_CMD_LOG (the tests' own calls, as the person would make them).
 # 'cmd device_policy list-owners' prints /antumbra-test/owners, in the
 # format of Android 16's DevicePolicyManagerServiceShellCommand.
-[ -f /antumbra-test/framework-up ] || { echo "cmd: Can't find service: $1" >&2; exit 20; }
-echo "$*" >>/antumbra-test/cmd.log
+# 'cmd connectivity airplane-mode [enable|disable]' does what
+# ConnectivityService and the phone process (PhoneGlobals) do in Android 16:
+# it sets airplane_mode_on; then "enable", with cell_on 1 (or unset) and the
+# cell radio in airplane_mode_radios (or the list unset), switches the radio
+# off (cell_on 2, enable_cellular_on_boot 0, /antumbra-test/radio 0), and
+# "disable", with cell_on 2, switches it on (cell_on 1,
+# enable_cellular_on_boot 1, radio 1). Without an argument it prints
+# enabled or disabled.
+T=/antumbra-test
+[ -f $T/framework-up ] || { echo "cmd: Can't find service: $1" >&2; exit 20; }
+echo "$*" >>"${FAKE_CMD_LOG:-$T/cmd.log}"
+get() { grep -F "$1=" $T/settings | sed -n "s/^$1=//p" | tail -n 1; }
+# put KEY VALUE: as Android writes it (not in settings.log, which records
+# the module's own writes), under the fake settings' lock.
+put() {
+	i=0
+	while ! mkdir $T/settings.lock 2>/dev/null; do
+		i=$((i + 1))
+		[ "$i" -gt 100 ] && break
+		sleep 0.1
+	done
+	{
+		grep -v -F "$1=" $T/settings
+		printf '%s=%s\n' "$1" "$2"
+	} >$T/settings.cmd
+	mv -f $T/settings.cmd $T/settings
+	rmdir $T/settings.lock 2>/dev/null
+}
 case "$*" in
 'device_policy list-owners')
-	if [ -s /antumbra-test/owners ]; then
+	if [ -s $T/owners ]; then
 		echo "1 owner:"
-		cat /antumbra-test/owners
+		cat $T/owners
 	else
 		echo "no owners"
+	fi
+	;;
+'connectivity airplane-mode')
+	if [ "$(get airplane_mode_on)" = 1 ]; then echo enabled; else echo disabled; fi
+	;;
+'connectivity airplane-mode enable')
+	put airplane_mode_on 1
+	cell=$(get cell_on)
+	case $(get airplane_mode_radios) in '' | *cell*)
+		if [ "${cell:-1}" = 1 ]; then
+			put cell_on 2
+			put enable_cellular_on_boot 0
+			echo 0 >$T/radio
+		fi
+		;;
+	esac
+	;;
+'connectivity airplane-mode disable')
+	put airplane_mode_on 0
+	if [ "$(get cell_on)" = 2 ]; then
+		put cell_on 1
+		put enable_cellular_on_boot 1
+		echo 1 >$T/radio
 	fi
 	;;
 esac

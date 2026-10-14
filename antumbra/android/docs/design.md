@@ -273,11 +273,11 @@ not prove that an app does not track.
 |---|---|---|
 | Bootloader, kernel, init | LineageOS starts; Magisk's init patches its own policy in | none (no interface up) |
 | `post-fs-data` (Magisk, blocking, before zygote and netd) | 0. The module's early arm script in `/data/adb/post-fs-data.d` runs `antumbra-fw arm` before any module, also when the module is switched off in the Magisk app (not in Magisk's Safe Mode). 1. `antumbra-fw arm`: only loopback moves, IPv4 and IPv6, for every UID. 2. The runtime tmpfs. 3. A tmpfs over `/data/misc/apexdata/com.android.wifi` (Wi-Fi's shared store), with its owner, mode and SELinux label; the flash copy deleted. User 0's credential-encrypted store is still locked here and is not covered. 4. NetworkStack's IpMemoryStore database deleted and its directory on a tmpfs. 5. `accept_ra=0`, `disable_ipv6=1` on every interface; Qualcomm crash dumps off. | closed |
-| `service` (Magisk, not waited for) | 1. The filter (uid 2951), first, so it holds its ports before any app can. 2. tor (uid 2950), `DisableNetwork 1`: it opens no TransPort or DNSPort at all. 3. `antumbra-fw apply`, `status`, and the service-port owner check; only if live, the hash matches and no other uid holds 9040, 9053, 5353 or 5380, `resetprop -n antumbra.fw.armed`. 4. `status.json`. 5. The IPv6 guard: NetworkStack re-enables IPv6 on each interface it brings up, so a loop switches it off again on every link or address change. 6. Fail-safe Settings, and mobile data stored as off for every SIM Android knows, once the framework answers. | closed: TCP redirected into a tor that is not listening, DNS failing in the filter |
+| `service` (Magisk, not waited for) | 1. The filter (uid 2951), first, so it holds its ports before any app can. 2. tor (uid 2950), `DisableNetwork 1`: it opens no TransPort or DNSPort at all. 3. `antumbra-fw apply`, `status`, and the service-port owner check; only if live, the hash matches and no other uid holds 9040, 9053, 5353 or 5380, `resetprop -n antumbra.fw.armed`. 4. `status.json`. 5. The IPv6 guard: NetworkStack re-enables IPv6 on each interface it brings up, so a loop switches it off again on every link or address change. 6. Fail-safe Settings, and mobile data stored as off for every SIM Android knows, once the framework answers; then the cell radio's watch: the radio has been off since power-on (`enable_cellular_on_boot=0`, airplane mode off, `cell_on=1`), airplane mode's radio list is narrowed to the cell radio once airplane mode has read off for 30 s, and if anything switches the radio on it is switched off again with airplane mode, unless a call, emergency callback mode or the 5 minutes after either holds it; while that hold lasts `enable_cellular_on_boot` is kept at 1, so that a restart of the phone process does not switch the radio off (`module/README.md`, "The cell radio"). | closed: TCP redirected into a tor that is not listening, DNS failing in the filter; the cell radio off |
 | Welcome (device owner, home screen, locked task) | Applies the baseline policies (USB debugging off, no DHCP host name among them); Wi-Fi off and locked until Start; saved networks removed (a boot without the module). Checks the add-on: `antumbra.fw.armed`, nothing else. At Start: the session's policies, then `started=1`. | closed until Start |
-| Start | The module latches the first `started=1` of the boot, only while Welcome is the device owner, and switches tor's network on only while the firewall is live and no other uid holds a service port. `offline`: tor stays off. `direct`: `SETCONF DisableNetwork=0`. `bridges`: the lines are checked again and sent with `UseBridges=1` in one `SETCONF`. `mac=keep` clears the per-connection MAC setting. | Tor only |
-| During the session | Supervision: the service-port owners at every turn (2 to 5 s); the filter and tor are restarted if they stop (a restarted tor gets the session's choice again); `antumbra-fw status` every 30 s, and if it is not live the property is removed and `apply` runs again. | Tor only |
-| Shutdown | Welcome makes itself home again, applies the baseline policies again (Administration's loosening ends), turns Wi-Fi off and locks it, removes saved networks. The module puts the fail-safe Settings back and stores mobile data as off again (best effort: a crash or power loss skips both). tmpfs contents disappear at power-off. | closed |
+| Start | The module latches the first `started=1` of the boot, only while Welcome is the device owner, and switches tor's network on only while the firewall is live and no other uid holds a service port. `offline`: tor stays off. `direct`: `SETCONF DisableNetwork=0`. `bridges`: the lines are checked again and sent with `UseBridges=1` in one `SETCONF`. `mac=keep` clears the per-connection MAC setting. A Phone-mode session (WEL8; none yet: every session keeps the cell radio off) has the cell radio switched on here and never before (D12), mobile data off first. | Tor only (calls and texts over the cell radio in Phone mode) |
+| During the session | Supervision: the service-port owners at every turn (2 to 5 s), and again right after a look at the cell radio; the filter and tor are restarted if they stop (a restarted tor gets the session's choice again); `antumbra-fw status` every 30 s, and if it is not live the property is removed and `apply` runs again. | Tor only |
+| Shutdown | Welcome makes itself home again, applies the baseline policies again (Administration's loosening ends), turns Wi-Fi off and locks it, removes saved networks. The module puts the fail-safe Settings back (`enable_cellular_on_boot=0` among them) and stores mobile data as off again; if airplane mode is on, it stores airplane mode off and `cell_on=1` without a broadcast, unless a call holds it, so the next start has the radio off and Wi-Fi under Welcome's control (best effort: a crash or power loss skips all of it). tmpfs contents disappear at power-off. | closed |
 
 ### 7.2 What happens when something fails
 
@@ -290,6 +290,8 @@ not prove that an app does not track.
 | A firewall rule is deleted or reordered | `status` reports `partial` or `open`; the property is removed at once and `apply` runs again. The mangle egress gate still drops anything the filter table did not mark. |
 | `apply` fails | `antumbra-fw` goes back to the armed set; no property; tor's network is never switched on. |
 | Welcome's process dies after Start | A new process answers `started=0` with a new `session_id`; the module keeps the latched choice, and Welcome refuses a second Start while the module reports a started session, asking for a restart instead. |
+| The firewall cannot even be armed (`open`) | Wi-Fi and mobile data go off at once; the cell radio (airplane mode) and Bluetooth when no call holds them (below). Until then the cell radio carries calls and texts, and the IMS and emergency bearers, but no mobile data. |
+| The cell radio would go off during a call, in emergency callback mode, within 5 minutes after either, or when the call state cannot be read | Held: no airplane step and no radio-off step, the fail-safe's included, until 5 minutes after the last of these; an unreadable state counts as a call. Meanwhile `enable_cellular_on_boot` is kept at 1, so that a restart of the phone process does not leave the radio off. Wi-Fi off and mobile data off do not wait. The only switch-off used is airplane mode, which Android's emergency-call path undoes by itself. |
 | The module does not run at all | Section 7.3. |
 
 ### 7.3 When the module does not run
@@ -321,10 +323,21 @@ safeguards therefore do not depend on noticing in time:
    addresses, and on LineageOS `restricted_networking_mode=1` (enforced by
    netd's BPF program, so it holds without the module, but it only blocks
    apps whose "Network access" switch is off).
-4. **Mobile data stored as off.** Android keeps the mobile-data choice per
-   SIM in Settings (`mobile_data<subId>`, and `mobile_data`) and reads it
-   when the SIM comes up, before any app runs. The module sets it to 0 for
-   every SIM Android knows at every boot and again at shutdown.
+4. **The cell radio off from power-on, and mobile data stored as off.**
+   The phone process reads `enable_cellular_on_boot` once, when it
+   starts; the module stores 0 (at installation, every boot and shutdown,
+   and after every switch-on once no call, callback mode or 5-minute hold
+   keeps the radio on; during one it keeps 1, so that a restart of the
+   phone process does not switch the radio off then), and with airplane
+   mode stored off and `cell_on=1` the radio stays off from power-on,
+   before any app runs. A crash during such a hold skips the shutdown's 0:
+   that next start has the radio on until the module switches it off.
+   Only airplane mode switched on and off, or an emergency call (which
+   Android always lets switch the radio on), brings it up. Android keeps
+   the mobile-data choice per SIM in Settings (`mobile_data<subId>`, and
+   `mobile_data`) and reads it when the SIM comes up; the module sets it to
+   0 for every SIM Android knows at every boot and again at shutdown, and
+   `mobile_data_always_on=0`.
 5. **Welcome's add-on check:** without `antumbra.fw.armed`, Wi-Fi stays off
    and locked for the session, whatever the Tor choice. Welcome decides from
    the property alone, which only root can set; the filter's status page,
@@ -335,17 +348,17 @@ safeguards therefore do not depend on noticing in time:
 
 What remains:
 
-- **A SIM.** These safeguards are about Wi-Fi, except point 4. A SIM with
-  mobile data on connects over the mobile network as the phone starts,
-  with no saved network and before Welcome runs, and system traffic such
-  as the Updater leaves in the clear. Welcome locks Wi-Fi only, and a
-  device owner cannot switch airplane mode. Point 4 covers the SIMs
-  Android knows; it does not cover a SIM Android has never seen (LineageOS
-  switches mobile data on for it), nor one whose mobile data a session
-  switched on and that ended in a crash instead of a shutdown. Hence no
-  SIM by default (decision D3), none at LineageOS's first boot
-  (`install.md`), and radios off at shutdown is still to be decided
-  (section 12, MOD6).
+- **A SIM.** These safeguards are about Wi-Fi, except point 4. With point
+  4 a SIM does not connect as the phone starts: its radio stays off. If
+  someone switches airplane mode on and off, or an emergency call switches
+  the radio on, a SIM with mobile data on connects over the mobile
+  network, and system traffic such as the Updater leaves in the clear.
+  Welcome locks Wi-Fi only, and a device owner cannot switch airplane
+  mode. Point 4's mobile-data part covers the SIMs Android knows; it does
+  not cover a SIM Android has never seen (LineageOS switches mobile data
+  on for it), nor one whose mobile data a session switched on and that
+  ended in a crash instead of a shutdown. Hence no SIM by default
+  (decision D3), and none at LineageOS's first boot (`install.md`).
 - **A network joined by hand** in a boot without the module connects in the
   clear (system traffic such as the Updater could then leave). Welcome
   removes it again at shutdown; if that boot ends in a crash or power loss
@@ -525,11 +538,11 @@ a public repository must never run on pull-request triggers.
 | Requirement | Where | v0 |
 |---|---|---|
 | Firewall derived for Android from scratch, not from Tails' rules | `firewall/` | done |
-| Fail closed when the module is absent | `module/` (Wi-Fi tmpfs, Settings, mobile data stored off, early arm script for a switched-off module), `welcome/` (Wi-Fi off, property check alone) | done for Wi-Fi and for SIMs Android knew; not for a SIM Android has never seen (no SIM by default, D3); CI scenarios W12 |
+| Fail closed when the module is absent | `module/` (Wi-Fi tmpfs, Settings, mobile data stored off, the cell radio stored off from power-on, early arm script for a switched-off module), `welcome/` (Wi-Fi off, property check alone) | done for Wi-Fi and for SIMs Android knew; not for a SIM Android has never seen (no SIM by default, D3); CI scenarios W12 |
 | No saved Wi-Fi network on flash | `module/post-fs-data.sh` | done for the shared store (user 0's credential-encrypted store not covered; the first boot after installing writes that boot's lease memory to flash) |
-| Mobile data off when the module is absent | `module/` (`mobile_data`, `mobile_data<subId>` at boot and shutdown) | done for SIMs Android knew; a new SIM starts with mobile data on |
-| Radios off at shutdown (airplane mode), so a boot without the module starts with no radio | `module/` (a device owner cannot set airplane mode) | todo (MOD6): weighed against every Start then asking for Wi-Fi |
-| Service ports held only by their owners (9040, 9053 tor; 5335, 5380 the filter) | `firewall/` (answers from other sockets dropped), `module/` (owner check, armed while held), `dnsfilter/` (9053 owner check) | done, with a window of up to 5 s per check; tor holding its ports from boot is decision D11 (a contract change) |
+| Mobile data off when the module is absent | `module/` (`mobile_data`, `mobile_data<subId>`, `mobile_data_always_on` at boot and shutdown, and after every switch-on of the cell radio) | done for SIMs Android knew; a new SIM starts with mobile data on |
+| Cell radio off from power-on, and at run time outside Phone mode; never switched off during a call, in emergency callback mode or within 5 minutes after either | `module/` (`enable_cellular_on_boot=0` with airplane mode stored off; airplane mode narrowed to the cell radio at run time; holds read from Telecom and the telephony registry) | built in the module (MOD6), with unit and sandbox tests; not run on the emulator or the phone yet (CI11, PH3); Phone mode's choice comes with WEL8. Airplane mode is not kept on across a restart: Wi-Fi would then refuse Welcome for the whole boot |
+| Service ports held only by their owners (9040, 9053 tor; 5335, 5380 the filter) | `firewall/` (answers from other sockets dropped), `module/` (owner check, armed while held), `dnsfilter/` (9053 owner check) | done, with a window of up to 5 s per check (up to 8 s while a look at the cell radio runs; the check is repeated right after it); tor holding its ports from boot is decision D11 (a contract change) |
 | No DHCP host name (option 12, Android 15 and later) | `welcome/` (`setSendDhcpHostnameRestriction`); the leak analyser fails on it (`dhcp-hostname`) | done **[likely]**; no capture has checked it yet (CI, the phone capture) |
 | ControlSocket, not ControlPort; cookie authentication | `tor/torrc.in` | done |
 | IPv6 off per interface, not only globally | `module/` (sysctls at boot, guard loop), firewall drops IPv6, filter answers no AAAA | done; RA test in CI pending |
