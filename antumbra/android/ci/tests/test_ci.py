@@ -393,6 +393,12 @@ class InputsTest(TempDir):
             row(3, v4("127.0.0.1", 9040), v4("0.0.0.0", 0), "0A", 2950),
             row(4, v6("::ffff:10.0.2.15", 1), v6("::ffff:198.51.100.8", 443), "01", 2950),
             row(5, v6("2001:db8::1", 1), v6("2001:db8::7", 9001), "01", 2950),
+            # An app's connection redirected to the TransPort, as in run 13:
+            # tor accepted it, so it is not one of tor's own.
+            row(6, v4("127.0.0.1", 9040), v4("10.0.2.16", 33320), "01", 2950),
+            # Accepted on a listening port bound to a non-loopback address.
+            row(7, v4("0.0.0.0", 9050), v4("0.0.0.0", 0), "0A", 2950),
+            row(8, v4(GUEST, 9050), v4("10.0.2.16", 40000), "01", 2950),
         ])
         self.assertEqual(la.parse_proc_net_tcp(text), [("198.51.100.7", 9001), ("198.51.100.8", 443), ("2001:db8::7", 9001)])
         p = self.write("tcp", text)

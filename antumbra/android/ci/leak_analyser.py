@@ -498,21 +498,35 @@ def _hex_addr(h):
 
 def parse_proc_net_tcp(text, uid=TOR_UID):
     """Remote (address, port) of every ESTABLISHED socket of uid in the
-    text of /proc/net/tcp or tcp6, leaving out loopback peers."""
-    out = []
+    text of /proc/net/tcp or tcp6 that uid opened itself: leaving out
+    loopback peers, and the connections it accepted on its own listening
+    ports. An app's connection redirected to the TransPort is one of
+    those: local 127.0.0.1:9040, peer the app's own source address, such
+    as wlan0's (run 13: counted as a missing tor connection, so the app
+    lab's leak test could not judge)."""
+    rows, listening = [], set()
     for line in text.splitlines():
         f = line.split()
-        if len(f) < 8 or not f[0].endswith(":") or f[3] != "01":
+        if len(f) < 8 or not f[0].endswith(":") or f[3] not in ("01", "0A"):
             continue
         try:
             if int(f[7]) != uid:
                 continue
+            laddr, lport = f[1].split(":")
             raddr, rport = f[2].split(":")
-            addr = _hex_addr(raddr)
-            port = int(rport, 16)
+            local = (_hex_addr(laddr), int(lport, 16))
+            remote = (_hex_addr(raddr), int(rport, 16))
         except ValueError:
             continue
-        if ipaddress.ip_address(addr).is_loopback:
+        if f[3] == "0A":
+            listening.add(local[1])
+        else:
+            rows.append((local, remote))
+    out = []
+    for (laddr, lport), (addr, port) in rows:
+        if ipaddress.ip_address(addr).is_loopback or ipaddress.ip_address(laddr).is_loopback:
+            continue
+        if lport in listening:
             continue
         out.append((addr, port))
     return sorted(set(out))
