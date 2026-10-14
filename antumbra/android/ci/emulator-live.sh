@@ -184,8 +184,26 @@ boot_id() {
 	ASH_TIMEOUT=20 ash 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null | head -n 1
 }
 
+# consensus_snapshot: tor's consensus copied off the phone now, so that the
+# leak analysis can tell Tor relays from other servers even when the
+# session ends without a root shell (a restart: Live run 3 flagged its
+# three guard relays as "neither a Tor relay nor a bridge" for want of
+# it). collect_evidence replaces it with the newest at a normal end.
+consensus_snapshot() {
+	local f tmp="$SDIR/consensus.part"
+	[ "$(ash 'id -u' 2>/dev/null)" = 0 ] || return 0
+	for f in cached-microdesc-consensus cached-consensus; do
+		as_tor_cat "$RT/state/tor/$f" >"$tmp"
+		if [ -s "$tmp" ]; then
+			mv -f "$tmp" "$SDIR/consensus"
+			return 0
+		fi
+	done
+	rm -f "$tmp"
+}
+
 session_loop() {
-	local started=0 row now next_row=0 next_health=0 gone=0 id
+	local started=0 row now next_row=0 next_health=0 next_snap=0 gone=0 id
 	while :; do
 		now=$(date +%s)
 		if [ "$now" -ge "$END_AT" ]; then
@@ -226,8 +244,14 @@ session_loop() {
 				started=1
 				printf '%s\n' "$row" >"$SDIR/provider-row.txt"
 				after_start "$row"
+				next_snap=$(($(date +%s) + 60))
 				;;
 			esac
+		fi
+		# After Start: tor's consensus, a minute in, then every 5 minutes.
+		if [ "$started" = 1 ] && [ "$now" -ge "$next_snap" ] && [ "$gone" = 0 ]; then
+			next_snap=$((now + 300))
+			consensus_snapshot
 		fi
 		sleep 5
 	done
