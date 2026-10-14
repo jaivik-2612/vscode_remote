@@ -270,12 +270,8 @@ run_item() {
 	dev=$(ash 'date +%s' | tr -dc 0-9)
 	event "item_start" "$kind $name"
 
-	out=$(timeout 180 adb -s "$ANTUMBRA_SERIAL" install -r "$apk" 2>&1 </dev/null)
-	printf '%s\n' "$out" >"$ALOGS/$stem-install.txt"
-	idetail=$(printf '%s\n' "$out" | grep -v '^Performing' | grep . | tail -n 1 | sed 's/^adb: failed to install [^ ]*: //')
-	if printf '%s' "$out" | grep -q '^Success' && [ -n "$(ash "pm path $pkg" 2>/dev/null)" ]; then
-		install=ok
-	fi
+	apk_install "$pkg" "$apk" "$ALOGS/$stem-install.txt" && install=ok
+	idetail=$APK_INSTALL_DETAIL
 
 	if [ "$install" = ok ]; then
 		comp=$(ash "cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER $pkg" |
@@ -401,28 +397,13 @@ fi
 [ -f "$APK" ] || abort inputs "no Welcome APK at $APK"
 downloads
 
-event boot_completed
-wait_system_ready 300 || abort system_ready "the system did not answer within 5 minutes of boot"
-timeout 60 adb -s "$ANTUMBRA_SERIAL" root >/dev/null 2>&1
-sleep 3
-wait_device 60
-[ "$(ash 'id -u')" = 0 ] || abort adb_root "adb root did not give a root shell"
-check adb_root ok
-device_info
+# adb as root; the device's facts; then, in common.sh's session_prepare, room
+# in logcat for a chatty app's 45 seconds, a screen that stays on for the
+# screenshots, the capture inside the guest, the clock marker, the module,
+# tor's STREAM events, the network and Welcome.
+session_root
 device_facts
-# Room in logcat for a chatty app's 45 seconds, and a screen that stays on
-# for the screenshots.
-ash 'logcat -G 16M' >/dev/null 2>&1
-ash 'svc power stayon true; settings put system screen_off_timeout 1800000' >/dev/null 2>&1
-WLAN_MAC_BEFORE=$(ash 'cat /sys/class/net/wlan0/address' 2>/dev/null)
-guest_capture_start fail
-clock_marker
-
-quiet_network
-install_module
-start_stream_recorder
-network_on
-install_welcome
+session_prepare
 session_start
 wifi_join
 welcome_checks --admin

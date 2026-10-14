@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Antumbra CI: functions shared by emulator-baseline.sh,
-# emulator-antumbra.sh and emulator-apps.sh (the app lab). Sourced, never
-# run on its own.
+# emulator-antumbra.sh, emulator-apps.sh (the app lab) and emulator-live.sh
+# (Antumbra Live). Sourced, never run on its own.
 #
 # Environment:
 #   ANTUMBRA_CI_OUT   the report directory (the artifact's root); required
@@ -456,14 +456,17 @@ json_obj() {
 print(json.dumps(dict(a.split("=", 1) for a in sys.argv[1:]), sort_keys=True))' "$@"
 }
 
-# --- The Antumbra session (ANTUMBRA and the app lab) -------------------------
+# --- The Antumbra session (ANTUMBRA, the app lab and Antumbra Live) ----------
 #
-# Shared by emulator-antumbra.sh and emulator-apps.sh: the module installed
-# the way build-module.sh --emulator does it, Welcome as device owner and
-# home app, Wi-Fi, tor's bootstrap, tor's STREAM events, and the evidence
-# and checks at the end. The scenario sets ZIP (the module zip) or TREE (the
-# unpacked module), APK (Welcome's APK) and BOOTSTRAP_TIMEOUT, and reads
-# WLAN_MAC_BEFORE (Wi-Fi's hardware address) before the module goes in.
+# Shared by emulator-antumbra.sh, emulator-apps.sh and emulator-live.sh: the
+# module installed the way build-module.sh --emulator does it, Welcome as
+# device owner and home app, Wi-Fi, tor's bootstrap, tor's STREAM events,
+# and the evidence and checks at the end. The scenario sets ZIP (the module
+# zip) or TREE (the unpacked module), APK (Welcome's APK) and
+# BOOTSTRAP_TIMEOUT, and reads WLAN_MAC_BEFORE (Wi-Fi's hardware address)
+# before the module goes in (session_prepare does). QUIET_TOR_CONNS=1
+# (Antumbra Live) prints how many connections tor had at the end, not
+# their addresses.
 
 BUILD_MODULE=${ANTUMBRA_CI_BUILD_MODULE:-$ANDROID_DIR/module/build-module.sh}
 WELCOME_ADB=${ANTUMBRA_CI_WELCOME_ADB:-$ANDROID_DIR/welcome/ci/welcome-adb.sh}
@@ -665,6 +668,53 @@ install_welcome() {
 	event welcome_installed
 }
 
+# session_root: after boot, the system answering and adb as root, and the
+# device's facts (the app lab and Antumbra Live).
+session_root() {
+	event boot_completed
+	wait_system_ready 300 || abort system_ready "the system did not answer within 5 minutes of boot"
+	timeout 60 adb -s "$ANTUMBRA_SERIAL" root >/dev/null 2>&1
+	sleep 3
+	wait_device 60
+	[ "$(ash 'id -u')" = 0 ] || abort adb_root "adb root did not give a root shell"
+	check adb_root ok
+	device_info
+}
+
+# session_prepare: everything up to Welcome's first screen, as the app lab
+# does it: room in logcat, a screen that stays on, Wi-Fi's hardware address,
+# the capture inside the guest, a clock marker, airplane mode, the module
+# installed and live, tor's STREAM events, the network on (mobile data off),
+# then Welcome as device owner. PREPARE_HOOK, the name of a function, runs
+# just before Welcome is installed when it is set (Antumbra Live installs
+# the stores there).
+session_prepare() {
+	# Room in logcat for a chatty app, and a screen that stays on.
+	ash 'logcat -G 16M' >/dev/null 2>&1
+	ash 'svc power stayon true; settings put system screen_off_timeout 1800000' >/dev/null 2>&1
+	WLAN_MAC_BEFORE=$(ash 'cat /sys/class/net/wlan0/address' 2>/dev/null)
+	guest_capture_start fail
+	clock_marker
+	quiet_network
+	install_module
+	start_stream_recorder
+	network_on
+	if [ -n "${PREPARE_HOOK:-}" ]; then "$PREPARE_HOOK"; fi
+	install_welcome
+}
+
+# apk_install PACKAGE APK LOG: 'adb install -r' (three minutes at most), its
+# output kept in LOG. True when adb said Success and the package is there.
+# APK_INSTALL_DETAIL: adb's last line (after a failure, the reason).
+APK_INSTALL_DETAIL=
+apk_install() {
+	local out
+	out=$(timeout 180 adb -s "$ANTUMBRA_SERIAL" install -r "$2" 2>&1 </dev/null)
+	printf '%s\n' "$out" >"$3"
+	APK_INSTALL_DETAIL=$(printf '%s\n' "$out" | grep -v '^Performing' | grep . | tail -n 1 | sed 's/^adb: failed to install [^ ]*: //')
+	printf '%s' "$out" | grep -q '^Success' && [ -n "$(ash "pm path $1" 2>/dev/null)" ]
+}
+
 # wifi_join: join the emulator's Wi-Fi network the way a person would, once
 # Welcome has switched Wi-Fi on, and require Wi-Fi as the default network.
 wifi_join() {
@@ -763,7 +813,12 @@ collect_evidence() {
 	stop_stream_recorder
 	proc_net_snapshot
 	"${PY[@]}" "$CI_DIR/leak_analyser.py" tor-conns "$SDIR/proc-net-tcp.txt" >"$SDIR/tor-connections.txt" 2>/dev/null
-	say "tor's connections: $(tr '\n' ' ' <"$SDIR/tor-connections.txt")"
+	if [ "${QUIET_TOR_CONNS:-0}" = 1 ]; then
+		# Antumbra Live: they may be the owner's bridges, and the log is public.
+		say "tor's connections: $(grep -c . "$SDIR/tor-connections.txt") (addresses not printed)"
+	else
+		say "tor's connections: $(tr '\n' ' ' <"$SDIR/tor-connections.txt")"
+	fi
 	# tor's DataDirectory belongs to uid 2950: read as that uid.
 	for f in cached-microdesc-consensus cached-consensus; do
 		as_tor_cat "$RT/state/tor/$f" >"$SDIR/consensus"

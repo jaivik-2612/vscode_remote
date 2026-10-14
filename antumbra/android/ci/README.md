@@ -21,6 +21,10 @@ going. Every job has a time limit.
 needs `dnsfilter` and `tor`; `emulator` needs the first five; `app-lab`
 needs `module` and `welcome`.
 
+Antumbra Live (`.github/workflows/antumbra-live.yml`) is a workflow of its
+own, started by hand: the virtual phone in a web page, for the owner to use
+(see "Antumbra Live: a virtual phone you can use").
+
 `sdk-install.sh` installs the pinned NDK, platform 36 and build tools
 36.0.0 when the runner lacks them, and checks each afterwards. It answers
 sdkmanager's licence prompts with `yes`, whose SIGPIPE when sdkmanager exits
@@ -460,9 +464,9 @@ artifact is uploaded and fails the job afterwards with `summary.py --check`.
 
 `app-lab` answers two questions with real apps: can a person install and
 use apps on Antumbra, through Tor, and does anything get past the firewall
-while they run? It is how the owner test-runs apps: there is no live
-emulator to hold, so the CI's virtual phone runs them and the artifact
-shows what happened, screen by screen. It never blocks the workflow
+while they run? The CI's virtual phone runs them on every build, and the
+artifact shows what happened, screen by screen (to use the phone by hand,
+see Antumbra Live below). It never blocks the workflow
 (`continue-on-error`), and nothing it finds fails a run.
 
 **The phone.** The emulator job's image (Android 16, `android-36;default`,
@@ -585,6 +589,261 @@ its age is not. ARM-only apps need the image's ARM translation (the
 phone's `ro.product.cpu.abilist` is in `apps.json`). The emulator is not
 the phone: no modem, no GPU drivers, and swiftshader draws the screen.
 
+## Antumbra Live: a virtual phone you can use
+
+Antumbra Live (`.github/workflows/antumbra-live.yml`) starts the CI's
+virtual phone with Antumbra on it and shows its screen in a web page, for
+as long as you ask (60 minutes by default, 180 at most). You open the page
+in Safari on an iPhone or iPad, tap and type on the phone, press Start in
+Welcome, and install and try apps from F-Droid and Aptoide through Tor. It
+runs on GitHub's computer, only when started by hand, and ends by itself.
+At the end, the phone's network traffic is checked for leaks, as in the app
+lab, and the result goes into the run's summary.
+
+It is a virtual phone on GitHub's computer, and GitHub's machine and
+Cloudflare carry its screen: never sign in to real accounts on it, and never
+type real passwords or personal details in it.
+
+### For the owner, from an iPhone
+
+**Once: the password.** The page asks for a password, which you keep in a
+repository secret. Let your password manager make one (20 characters or
+more; a generated one is best), or use six or more random words, and use it
+nowhere else.
+
+1. In Safari, open github.com, sign in, and open the repository.
+2. Ask for the desktop site: tap the page menu button at the left of the
+   address bar (**aA** on older iPhones), tap **⋯** if it is there, then
+   **Request Desktop Website**. (Pressing and holding the reload arrow
+   offers it too.)
+3. Tap **Settings** (the repository's, at the top), then on the left
+   **Secrets and variables**, then **Actions**.
+4. Tap **New repository secret**. Name: `ANTUMBRA_LIVE_PASSWORD`. Secret:
+   your password. Tap **Add secret**.
+
+To change it later, open the same page and tap the pencil next to the
+secret. Without the secret, or with a shorter one, Antumbra Live does not
+start, and its summary says why.
+
+**Each time: start, open, use, end.**
+
+1. Start it with a label. In the GitHub app: the repository, **Pull
+   requests**, the open pull request #8 (from the Antumbra branch), then
+   **Labels** (or the gear next to Labels on the website), and tick
+   **antumbra-live** for 60 minutes with the phone, or
+   **antumbra-live-30**, **antumbra-live-120** or **antumbra-live-180**.
+   The session starts within a minute. For another session later, remove
+   the label and add it again. (Run workflow in the Actions tab is not
+   offered: GitHub shows it only for workflows on the default branch,
+   `main`, which is not changed. Claude can also start a session for you.)
+2. Open the run: **Actions**, **Antumbra Live**, the newest run. After 5 to 10 minutes the link is there
+   (`https://<four words>.trycloudflare.com`), with the time the session
+   ends (UTC). Look for it in the run's **Summary** (or its annotation).
+   If the Summary is still empty, tap the job **Antumbra Live (a virtual
+   phone in the browser)**, then the step **The link (Cloudflare quick
+   tunnel), checked, in the summary**: its last line reads
+   `the link: https://….trycloudflare.com`. Tap the link: it opens in
+   Safari. If the summary says the build has expired, a new Antumbra
+   Android build is needed first: ask Claude for one, and start Antumbra
+   Live again when it has passed.
+3. On the page, type the password and tap **Open the phone**. *Remember on
+   this device* keeps it in this browser for this session's page. A wrong
+   password gets no connection at all. The page says when the phone is
+   ready: about 10 minutes after the link appears. Until then it says that
+   the phone is starting. The phone's page has **Page** (back to the first
+   page) and **Keyboard** at the top.
+4. On the phone you see Welcome. To install apps, turn **Administration**
+   on; then tap **Start Antumbra**. The virtual Wi-Fi is joined for you.
+   Wait until the status screen says Tor is connected.
+5. Swipe up on the home screen for the app drawer: **F-Droid** and
+   **Aptoide** should be there. If one is missing, the first page says why
+   (under the phone's state). When a store installs its first app, Android
+   asks you to allow installs from that store: allow it. Everything goes
+   through Tor, so the stores are slower than usual.
+6. Tap to tap and drag to swipe. To press and hold (an app's menu,
+   selecting text, Power's menu), keep your finger still for about two
+   seconds. To type, tap **Keyboard** at the top of the phone's page (the
+   keys go to the phone as from a keyboard), or tap the keys of Android's
+   own keyboard on the phone's screen.
+7. To end early, open the link again and tap **End the session now** (type
+   the password first if the page asks), or open the run in the GitHub app
+   and cancel it. Otherwise it ends by itself at the time in the summary.
+   A few minutes later the summary has a second part, **privacy check of
+   the session**.
+
+The buttons beside the phone (the emulator's toolbar, from the top):
+
+| Button | What it does |
+|---|---|
+| Power | Tap: screen off or on. Hold (about two seconds): Android's power menu. Powering off or restarting the phone ends the session (the virtual phone has no Magisk, so Antumbra's module would not start again). |
+| Volume up, volume down | The volume. |
+| Camera, magnifier | A screenshot (kept on GitHub's machine, not on your device) and a zoom. |
+| Rotate left, rotate right | Turns the phone. |
+| Back, Home, Overview | Android's three buttons: back, the home screen, recent apps. |
+| … (More) | Does nothing here: the emulator's own settings are kept closed on purpose. |
+
+The toolbar's top row, × and –, is left out of the picture on purpose: ×
+switches the virtual phone off at once, without asking, which ends the
+session and loses the phone's own recording of the network.
+
+**Limits.**
+
+- It is an x86_64 virtual phone: apps built only for phone (ARM)
+  processors do not install.
+- There are no Google Play services (as on LineageOS without microG): apps
+  that need them complain or stop.
+- It is slower than a real phone, and its screen comes over the Internet.
+- No sound and no camera: the virtual phone has neither, and the page
+  carries only the screen.
+- One session at a time: a second run waits until the first has ended.
+- GitHub's rules allow Actions for building and testing the project, and
+  this is testing Antumbra. Use it for that.
+- The phone is wiped at the end; nothing is kept but the report.
+
+### How it works
+
+One job, on a runner with KVM:
+
+1. **The password.** The secret must be set and 20 characters or more, or
+   the run stops before any tunnel exists.
+2. **The build.** The Welcome APK, tor, the DNS filter and the module zip
+   of the newest *successful* run of `antumbra-android.yml` on the Antumbra
+   branch (the Actions API with the job's own token, then
+   `actions/download-artifact` with `run-id`; the job may only read Actions
+   and the code). Only this repository's own runs count, started by a push
+   or by hand, of a commit that is on the branch (the compare API): a pull
+   request's run can come from a stranger's fork, with a branch of the same
+   name and a workflow file of its own, and its files would go into the
+   phone as device owner and as root. Those artifacts are kept 5 days: when they have expired,
+   the summary says so and the run stops; nothing is rebuilt. The module's
+   x86_64 tor and filter must be the build's.
+3. **The stores**, on the runner: `applab.py fetch --stores fdroid,aptoide`
+   with no catalogue, the app lab's own download and checks (F-Droid's
+   client against F-Droid's index and its pinned certificate, Aptoide's
+   against Aptoide's metadata; apksigner and aapt2 for both).
+4. **The screen** (`live-stream.sh start`): Xvfb on `:99` (1440 by 1440),
+   x11vnc on 127.0.0.1:5900 only, websockify on 127.0.0.1:6080 only, which
+   serves the landing page (`live/index.html`), the phone's page
+   (`live/phone.html`) and noVNC's `core/` (Ubuntu's `novnc` package) and
+   passes a WebSocket on only with a token from its token file (TokenFile
+   plugin), and an End listener on 127.0.0.1:5998. The step fails if any of
+   them listens on another address. noVNC's own pages (`vnc.html` and the
+   like) are not served: they take the server's host, port and path from
+   their address, so a crafted link could have sent the token to another
+   server. `phone.html` connects to its own host only, with the token the
+   landing page left in the tab's sessionStorage, and turns a finger held
+   still into a held left button (noVNC makes it a right click, which
+   Android ignores). A fitter (once a second) moves the emulator's window
+   to 0,24 and its toolbar 24 pixels higher, and shows only them from 24
+   down (`x11vnc -R clip:`), so that the toolbar's × and – are never on
+   the screen; it hides the emulator's Extended Controls (the toolbar's
+   More opens them at 0,0, over everything, and with no window manager
+   they could not be closed). After a rotation the emulator puts the
+   toolbar back beside the phone, and the fitter moves it up again within
+   about two seconds.
+5. **The link** (`live-stream.sh tunnel`): `cloudflared tunnel --url
+   http://127.0.0.1:6080`, version 2026.9.3, its SHA-256 checked, no
+   account. Then the token file: the screen's token and the End token are
+   PBKDF2-HMAC-SHA-256 of the password (NFC, without spaces at either end),
+   600,000 rounds, with the salt `antumbra-live` or `antumbra-live-end`, a
+   line break and the tunnel's host name. The page computes the same in the
+   browser, so the password itself never leaves it, the tokens are good for
+   this session's host name only, and a token seen on the way (Cloudflare
+   carries it) is slow to guess the password from. Then the check, through
+   the tunnel (at the address Cloudflare's resolver gave): a file with a
+   random word, put in the web root for the check, must come back (else a
+   refusal would prove nothing: a tunnel that is not up refuses everything
+   too); a WebSocket without a token and one with a wrong token must be
+   refused, with no new client in x11vnc's log; the right one must get the
+   VNC greeting. Each try is repeated while it gets no answer. A stranger
+   getting through, or a check that could not be made, closes the link and
+   stops the run. Then the summary: the link, the start and the end time
+   (link up + 20 minutes for the phone to start + the minutes). GitHub may
+   show a job's summary only when the job ends, so the link is also an
+   annotation and the last line of the step's log.
+6. **The phone** (`emulator-live.sh`, inside the pinned
+   `android-emulator-runner`, as the app lab's: `android-36;default`, 6 GB,
+   12 GB, emulator 16428233, `-tcpdump`), with a window on `:99` (no
+   `-no-window`). As the app lab, up to just before Start (`session_root`
+   and `session_prepare` in `lib/common.sh`): `adb root`, tcpdump inside the
+   guest on every interface, the clock marker, airplane mode, the module
+   installed and its firewall live, tor's STREAM events, mobile data off;
+   then the two stores installed with `adb install` (only verified APKs),
+   before Welcome becomes the device owner, since from then on Welcome
+   refuses apps from outside until a session with Administration on; then
+   Welcome as device owner (the debug build's test hook keeps adb). As in
+   the app lab, tcpdump inside the phone has a 16 MB buffer, so that a busy
+   session drops nothing. The phone has a hardware keyboard
+   (`enable-hw-keyboard`: without one the emulator drops the keys typed in
+   the browser), and Android's own keyboard stays on as well. The page
+   then says the phone is ready, and which store is or is not on it.
+   Nothing is pressed or typed. Once the owner has pressed Start, the
+   virtual Wi-Fi is joined as in the app lab (`wifi_join`, for a session
+   with the network), and a store that could not be installed before is
+   installed then, if Administration is on.
+7. **The end.** At the end time, on End session (the End listener writes
+   `end-requested`), when the phone restarts, or when it stops answering for
+   2 minutes: the link is closed first, then the evidence
+   (`collect_evidence`), both captures stopped and pulled. If the run is
+   cancelled, or the step times out, the next step (`emulator-live.sh
+   finish`) asks a session script that still runs to end and waits for it,
+   or collects the evidence itself while the emulator still runs.
+8. **The privacy check.** `analyse.sh` judges the scenario `live` by the app
+   lab's rules (after the arm cutoff, anything not to the Tor network and not
+   link-level is a LEAK, in either capture; names and destinations through
+   Tor in learning mode), whatever the owner did. Its log stays on the
+   runner: the analyser's reasons name tor's connections. `live.py report`
+   writes the summary's second part and the artifact
+   `antumbra-live-<run number>` (14 days): `report.md`, `report.json`
+   (packets after arm, to Tor, leak flows, the session's times and checks)
+   and `checks.tsv`, with every address outside the phone's own networks
+   left out of the reasons and the checks, and a "leak" to one of tor's own
+   connections or bridges shown without its address. No capture goes in,
+   not even a small one: a leaked lookup in it would name what the owner
+   did.
+
+**Public and private.** The repository, the logs, the summaries and the
+artifacts are public. The tunnel's host name is in the summary; it opens
+nothing without the password. The password is a secret (GitHub masks it),
+present only in the steps that check it and write the token file, and in
+no background process; the tokens are masked too (`::add-mask::`). The
+token file, websockify's log (which holds the WebSocket paths),
+cloudflared's and x11vnc's logs are in a private directory on the runner,
+never printed, never uploaded; tor's connections at the end are counted
+in the log, not listed (`QUIET_TOR_CONNS`). The artifact holds counts and leaks only
+(a leak's kind, destination and reason, not the names looked up for it):
+no capture (the one inside the phone holds, on its loopback, what apps
+sent to Tor), not the names and destinations reached through Tor, not the
+session's bridges, no screenshots. The checkout keeps no credentials.
+
+**How it starts.** GitHub runs Run workflow (`workflow_dispatch`) only
+for a workflow on the default branch, `main`, which is not changed. A
+pull request's `labeled` event, though, runs the workflow files of the
+pull request itself. So a label whose name starts with `antumbra-live` on
+the open pull request of the Antumbra branch starts a session
+(`antumbra-live` is 60 minutes, `antumbra-live-<n>` is n, from 10 to 180).
+The job runs only for a pull request from this repository's Antumbra
+branch, never for a fork's, and only people with write access can add
+labels. It checks out the Antumbra branch itself for the scripts, and
+takes the build only from push or by-hand runs of Antumbra Android (never
+from a pull request's run). If the file is ever on `main` too, Run
+workflow (with its minutes) works as well.
+
+**Time.** The job's limit is the minutes plus about 80, and the phone's
+step the minutes plus about 45 (tiers of 30, 60, 90, 120 and 180 minutes),
+so that a session that overruns still leaves time for the check and the
+artifact. `concurrency: antumbra-live` keeps to one session; the Android
+workflow's own group is untouched.
+
+**Not tested before the first run.** The setup on the phone (Android 16
+under KVM) and the quick tunnel from GitHub's runner were not run before
+the first session. The emulator's window and toolbar were, with the pinned
+emulator on Xvfb (an older, small Android image without KVM): the fitter,
+the hidden × and – and Extended Controls. The screen chain (Xvfb, x11vnc,
+websockify with the token file, the two pages and noVNC's core) was run
+with a stand-in window in Chromium at an iPhone's size with touch, and
+`test_live.py` runs a real websockify against a fake VNC server.
+
 ## The daily page
 
 `daily.py` turns one emulator run's artifact (unpacked `antumbra-android-<n>`),
@@ -632,8 +891,9 @@ bar left out. Tests: `tests/test_daily.py`.
 
 ```sh
 # Unit tests of the CI tools (synthetic captures and recorded fixtures, no
-# emulator). In CI the emulator job runs test_ci and test_daily, and the
-# app-lab job test_applab, so that the app lab never stops the leak test.
+# emulator). In CI the emulator job runs test_ci and test_daily, the
+# app-lab job test_applab, so that the app lab never stops the leak test,
+# and Antumbra Live test_live.
 python3 -B -m unittest discover -s antumbra/android/ci/tests -v
 
 # The leak analysis of a capture made on a real network (for example on the
