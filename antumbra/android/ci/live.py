@@ -36,7 +36,7 @@ Commands:
   live.py minutes VALUE
       The session's length in minutes: VALUE as a whole number from 10 to
       180 (60 when it is not a number).
-  live.py token --host HOST --tokens FILE [--vnc 127.0.0.1:5900]
+  live.py token --host HOST --tokens FILE [--vnc 127.0.0.1:5917]
                 [--end 127.0.0.1:5998] [--mask]
       Writes websockify's token file (mode 0600): the screen's token to the
       VNC server, the End token to the end listener. --mask prints GitHub's
@@ -710,7 +710,7 @@ def main(argv=None):
     t = sub.add_parser("token")
     t.add_argument("--host", required=True)
     t.add_argument("--tokens", required=True)
-    t.add_argument("--vnc", default="127.0.0.1:5900")
+    t.add_argument("--vnc", default="127.0.0.1:5917")
     t.add_argument("--end", default="127.0.0.1:5998")
     t.add_argument("--mask", action="store_true")
     p = sub.add_parser("probe")

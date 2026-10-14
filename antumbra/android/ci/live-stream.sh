@@ -53,7 +53,9 @@ WEB=${ANTUMBRA_LIVE_WEB:?set ANTUMBRA_LIVE_WEB}
 DISP=${ANTUMBRA_LIVE_DISPLAY:-:99}
 SCREEN=${ANTUMBRA_LIVE_SCREEN:-1440x1440x24}
 PORT=${ANTUMBRA_LIVE_PORT:-6080}
-VNC_PORT=5900
+# Not 5900, the usual VNC port, in case something else on the runner
+# holds it.
+VNC_PORT=5917
 END_PORT=5998
 METRICS=127.0.0.1:20241
 WINDOW=${ANTUMBRA_LIVE_WINDOW:-^Android Emulator}
@@ -119,10 +121,20 @@ wait_port() {
 
 # loopback_only PORT: every socket listening on PORT is bound to 127.0.0.1.
 loopback_only() {
-	local socks
+	local socks bad
 	socks=$(ss -Hltn "sport = :$1" 2>/dev/null | awk '{ print $4 }')
 	[ -n "$socks" ] || return 1
-	! printf '%s\n' "$socks" | grep -v -q -x "127.0.0.1:$1"
+	# Loopback only: 127.x.x.x, or IPv6's ::1 (also as ::ffff:127.x.x.x),
+	# with or without an interface name (127.0.0.1%lo:5917). Anything
+	# else, 0.0.0.0 or a runner address, is refused and named in the log
+	# with the program that holds it (run 2 of Live stopped here without
+	# saying what it saw).
+	bad=$(printf '%s\n' "$socks" | sed 's/%[^:]*:/:/' |
+		grep -v -x -E "(127\.[0-9]+\.[0-9]+\.[0-9]+|\[::1\]|\[::ffff:127\.[0-9]+\.[0-9]+\.[0-9]+\]):$1" || true)
+	[ -z "$bad" ] && return 0
+	say "port $1 listens on: $(printf '%s ' "$bad" | tr '\n' ' ')(held by: $(ss -Hltnp "sport = :$1" 2>/dev/null |
+		grep -o 'users:(("[^"]*"' | sed 's/.*"//' | sort -u | tr '\n' ' '))"
+	return 1
 }
 
 cmd_start() {
@@ -289,7 +301,7 @@ cmd_link() {
 	minutes=$("${LIVEPY[@]}" minutes "${ANTUMBRA_LIVE_MINUTES:-60}")
 	setup=${ANTUMBRA_LIVE_SETUP:-20}
 	# The token file; on the runner the tokens are masked in every log.
-	"${LIVEPY[@]}" token --host "$host" --tokens "$LIVE/tokens" ${GITHUB_ACTIONS:+--mask} ||
+	"${LIVEPY[@]}" token --host "$host" --tokens "$LIVE/tokens" --vnc "127.0.0.1:$VNC_PORT" --end "127.0.0.1:$END_PORT" ${GITHUB_ACTIONS:+--mask} ||
 		die "no token file: the password secret is missing or too short"
 	# Nothing after this needs the password itself.
 	unset ANTUMBRA_LIVE_PASSWORD

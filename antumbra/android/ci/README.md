@@ -722,7 +722,7 @@ One job, on a runner with KVM:
    client against F-Droid's index and its pinned certificate, Aptoide's
    against Aptoide's metadata; apksigner and aapt2 for both).
 4. **The screen** (`live-stream.sh start`): Xvfb on `:99` (1440 by 1440),
-   x11vnc on 127.0.0.1:5900 only, websockify on 127.0.0.1:6080 only, which
+   x11vnc on 127.0.0.1:5917 only, websockify on 127.0.0.1:6080 only, which
    serves the landing page (`live/index.html`), the phone's page
    (`live/phone.html`) and noVNC's `core/` (Ubuntu's `novnc` package) and
    passes a WebSocket on only with a token from its token file (TokenFile
