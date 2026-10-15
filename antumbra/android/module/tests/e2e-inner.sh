@@ -439,7 +439,7 @@ bridges)
 	check "firewall tampered: status is no longer live" test "$(fw status >/dev/null 2>&1; echo $?)" != 0
 	check "firewall tampered: reloaded within 70 s" wait_until 70 fw status
 	check "firewall tampered: the property is the live hash again" wait_until 10 prop_is_live
-	check "firewall tampered: logged" grep -q 'no longer live' $A/log/module.log
+	check "firewall tampered: logged" wait_until 10 grep -q 'no longer live' $A/log/module.log
 
 	# Android shuts down: the fail-safe Settings go back, MAC randomization
 	# on again after the "keep" session. (The cell radio's watch ends at
@@ -449,7 +449,9 @@ bridges)
 	/system/bin/setprop sys.shutdown.requested 0userrequested
 	check "shutdown: MAC randomization put back to 1" wait_until 10 eval \
 		'test "$(last_setting non_persistent_mac_randomization_force_enabled)" = "put non_persistent_mac_randomization_force_enabled 1"'
-	check "shutdown: logged" grep -q 'shutdown: fail-safe Settings put back' $A/log/module.log
+	# The log line follows the Settings writes: wait for it too (run 16
+	# looked a moment before it was written).
+	check "shutdown: logged" wait_until 10 grep -q 'shutdown: fail-safe Settings put back' $A/log/module.log
 	;;
 direct)
 	# On the phone (not the emulator): mobile data off for every SIM
@@ -481,7 +483,7 @@ direct)
 	kill "$sq"
 	wait "$sq" 2>/dev/null
 	check "squat: the firewall is live again once the port is free" wait_until 15 prop_is_live
-	check "squat: logged" grep -q 'ports: free again' $A/log/module.log
+	check "squat: logged" wait_until 10 grep -q 'ports: free again' $A/log/module.log
 
 	check "start: tor's network on" wait_until 30 status_has '"network":"enabled"'
 	check "start: tor holds 127.0.0.1:9040" listening 2950 2350
