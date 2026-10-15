@@ -118,6 +118,22 @@ check. Phone tests (PH3 to PH6) wait for the install.
 | PH7 | Read-only record of the phone's satellite support: `pm has-feature android.hardware.telephony.satellite`, `cmd phone cc get-value -p <subId>` for the satellite keys, `dumpsys carrier_config`; no `cmd phone ... satellite` subcommand (they are all test overrides that change state); nothing enabled, nothing transmitted | S | blocked: the install (W16) | install.md records the answers |
 | PH5 | A GNSS audit on a lab build: is `persist.sys.xtra-daemon.enabled` honoured, which hosts xtra-daemon and the Qualcomm Wi-Fi location clients contact, which gps.conf is in force, the SUPL host and NFW proxy apps (`dumpsys location`), network-initiated requests and the HAL's answers; cold and warm time to first fix with assistance off, the constellations and signals used. No change to emergency SUPL settings, ever | M | blocked: the install (W16) | design.md section 6 records each answer with the build and date |
 
+## Base and look · from 15 Oct
+
+LineageOS moved this phone to version 24.0 (Android 17) on 12 Oct 2026:
+the download service lists lineage-24.0-20261012 after the last 23.2
+build of 9 Oct, so 23.2 gets no more updates. The owner tried the real
+Antumbra in Antumbra Live and found the look dated; that look is Google's
+bare Android 16 test image (AOSP Launcher3 with its old search widget,
+3-button navigation, no Material 3 Expressive), not what LineageOS shows
+on the phone.
+
+| ID | What | Size | Status | Done when |
+|---|---|---|---|---|
+| OS1 | The base for the January install: LineageOS 24.0 (Android 17), where the updates now are. Re-check against 24.0: design.md and install.md (they say 23.2), the module's version-specific parts (netd chains, NetworkStack, settings keys, the cell radio's dump formats from MOD6, the connectivity overlay), Welcome's target SDK and device-owner APIs, and the CI emulator image (Google's Android 17 images: which exist without Google services) | M | todo | The base is recorded with the reasons; the docs name it; CI runs on the matching Android version where an image exists, and says plainly where it does not |
+| UI1 | The look, after D14: A, LineageOS's own (comes with the system; small polish: Welcome's navigation-bar scrim and font, an optional seed colour), or B, an OxygenOS-style look-alike from open parts (overlays for colour, font and icon shape in a separate optional module, an open launcher; its quick settings, lock-screen clocks and motion only with Stage 2). Look settings are per user, so Welcome applies them again for each session's throwaway user | S (A) / L (B) | blocked: D14 | The chosen look on the emulator, with screenshots on the test phone page |
+| LIVE2 | Antumbra Live's virtual phone closer to the real phone, privacy-neutral, set by adb before Welcome becomes device owner: QuickSearchBox off (no old search widget), dark theme, gesture navigation, animations on, LineageOS's own wallpaper (Apache-2.0), a sharper stream (noVNC quality 8). Its system UI stays Android 16 QPR0: Google publishes no newer image without Google services | S | todo | A Live session shows the changes; no new network traffic in its privacy check |
+
 ## W2 · 19 to 25 Oct · Freeze the Debian track, the emulator job passes
 
 The emulator job passing is CI1 (v0 batch).
@@ -278,5 +294,6 @@ A settled decision is recorded here as `decided: <choice>` with the date.
 | D11 | W5 | tor holding 9040 and 9053 from boot (`DisableNetwork 0`, the firewall keeping uid 2950 off the Internet until Start), so that no app can take them; changes the contract of tor and the firewall (FW4). v0 guards the ports instead (`design.md`, section 7.2) | decide with D7: both change the rules for uid 2950 | open |
 | D12 | before MOD6 | In Phone mode, may the radio come on as soon as `antumbra.fw.armed` is set and the SIM PIN is typed (calls and texts reach the phone before Start), or only at Start? | as soon as armed and unlocked, mobile data off; recorded as a modem-only exception to "nothing goes out until Start" | decided: only at Start (13 Oct 2026); no calls or texts reach the phone before Start |
 | D13 | with WEL9 | Messaging with no network at all: a session-only "Mesh" switch that grants Bluetooth and nearby-device permission to Briar alone (later perhaps a LoRa companion app over USB, only once the local radio rules are confirmed in writing), or Bluetooth stays off outside Administration as today? | the owner's answer | open |
+| D14 | before UI1 | The look: A, LineageOS's own modern Android look, or B, an OxygenOS-style look-alike from open parts (OnePlus's own fonts, icons, wallpapers and apps cannot be used); compared side by side on the test phone page | A (comes with the system; B's most recognisable parts need Stage 2) | open |
 | G1 | install, first sitting | Does `fastboot oem unlock` work? If not: the OxygenOS 11 detour (`install.md`, section 2) and a further day | — | open |
 | G2 | before W16 | A computer for the install, preferably Windows for the recovery tool; without one, W16 to W18 move back | — | open |
