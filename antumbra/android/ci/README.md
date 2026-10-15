@@ -208,15 +208,17 @@ that the captures must show traffic from the phone.
    from the one before the module (a warning). Welcome's own checks through
    `welcome/ci/welcome-adb.sh`: `check-policies --keep-adb` (the
    device-owner restrictions of a default session) and `check-addon` (the
-   status screen shows the firewall live). Then MOD11, two warnings until
-   they have passed on CI once: `welcome_module_word` (`welcome-adb.sh
+   status screen shows the firewall live). Then MOD11: `welcome_module_word`
+   (a failure since it passed in run 20; `welcome-adb.sh
    check-module-word`: the module's word given as the shell user, uid 2000
    through `su`, is refused with a `SecurityException`, a malformed one
    from root refused, a `none` from root taken; nothing that could let
-   Quick power off skip a wait is sent) and `module_parsers` (the module's
-   `telecom_state`, `registry_state` and `ims_state`, run as root on the
-   device against the emulator's own dumps; only their output, numbers and
-   words, is kept in `module-parsers.txt`).
+   Quick power off skip a wait is sent) and `module_parsers`, a warning
+   until it has passed on CI once (the module's `telecom_state`,
+   `registry_state` and `ims_state`, run as root on the device against the
+   emulator's own dumps, taken with the module's `cell_dump` and
+   `ims_dump`; only their output, numbers and words, is kept in
+   `module-parsers.txt`; run 20 read "0 0 - - 0", "0 0 on" and "none").
 8. Wait (15 minutes at most) for `module.tor.bootstrap` = 100 in the
    filter's `/status` (through `adb forward`), or "Bootstrapped 100%" in
    `tor.log`. Screenshot of the status screen.

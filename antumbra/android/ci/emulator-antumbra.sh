@@ -198,18 +198,21 @@ welcome_power_menu() {
 # root on the device against the emulator's real dumps (Telecom, the
 # telephony registry, the phone process's IMS registration); only their
 # output, numbers and words, leaves the device (expected: "0 0 - - 0",
-# "0 0 off" or "0 0 on", "none"). WARN, not fail, until both have passed on
-# CI once (then make them fail).
+# "0 0 off" or "0 0 on", "none"). The dumps are taken with the module's own
+# cell_dump and ims_dump, which drop dumpsys's stderr ("Broken pipe" when a
+# parser stops reading early, as in run 20). welcome_module_word fails since
+# it passed in run 20; module_parsers stays a WARN until it has passed on CI
+# once (then make it fail).
 module_word() {
 	local log=$LOGS/$SCEN-welcome-module-word.txt out
 	if timeout 120 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-module-word >"$log" 2>&1; then
 		check welcome_module_word ok "$(tail -n 1 "$log")"
 	else
-		check welcome_module_word warn "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+		check welcome_module_word fail "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
 	fi
 	out=$(ASH_TIMEOUT=60 ash "MODDIR=$MODDIR; . \$MODDIR/lib/antumbra.sh; \
-		t=\$(/system/bin/dumpsys -t 3 telecom | telecom_state) || t=unreadable; \
-		r=\$(/system/bin/dumpsys -t 3 telephony.registry | registry_state) || r=unreadable; \
+		t=\$(cell_dump telecom | telecom_state) || t=unreadable; \
+		r=\$(cell_dump telephony.registry | registry_state) || r=unreadable; \
 		i=\$(ims_dump | ims_state) || i=unreadable; \
 		echo \"telecom=\$t; registry=\$r; ims=\$i\"")
 	printf '%s\n' "$out" >"$SDIR/module-parsers.txt"

@@ -1055,8 +1055,10 @@ phone the rest.
   only up to the end of Analytics (`Hardware Version:`) and never once
   `dumpsys` says it gave up (3 s), so a phone whose Telecom dump always
   takes longer would hold for the whole boot. The layouts were read in
-  Android 16's source; no device or emulator has run the parsers yet (the emulator job now records their
-  output, `module_parsers`, as a warning until it has passed). **Android 17
+  Android 16's source; the CI emulator (Android 16) read its own dumps
+  with them in run 20 (no call: "0 0 - - 0", the registry "0 0 on", IMS
+  "none"); the job's `module_parsers` stays a warning until it has passed,
+  and no call has been parsed on a device yet. **Android 17
   (LineageOS 24.0, OS1) prints no Analytics** (`TelecomServiceImpl.dump`
   on `android17-release`; `Analytics.java` is gone): there every look
   reads unknown, every radio-off and airplane step (the fail-safe's

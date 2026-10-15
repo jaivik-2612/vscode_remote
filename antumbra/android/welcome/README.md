@@ -922,8 +922,8 @@ here):
   refused before its extras are read, and the provider's `call` hands
   `Binder.getCallingUid()` straight to that one check (a JVM test reads
   the provider's source for it; that the binder gives the caller's uid
-  there is checked on the emulator only, `welcome_module_word`, a warning
-  until it has passed on CI once)).
+  there is checked on the emulator only, `welcome_module_word`, which
+  passed in run 20: the shell's word refused, root's taken)).
 - `ci/welcome-adb.sh` and `ci/test-welcome-adb.sh` pass shellcheck, and the
   fake-adb test passes: bridge lines with `[`, `]`, `+`, `/`, `=` are
   typed, `;`, quotes and `\` refused; the test-hook rule; check-policies
@@ -1016,7 +1016,7 @@ DHCP host name and NFC), adb going away at provisioning without the hook,
 Welcome reading `antumbra.fw.armed`, the Wi-Fi state check and airplane
 mode, the provider answering root and shell and refusing others, the
 module's word taken from root and refused from the shell (the emulator
-job's `welcome_module_word`, a warning until it has passed on CI once), the status
+job's `welcome_module_word`, passed in run 20), the status
 page through the real firewall, the tile and the restart, the shutdown
 receiver, `FLAG_SECURE`, the emergency dialer opening from the lock task
 (the emulator job's `welcome_emergency_dialer` check), the power menu's
