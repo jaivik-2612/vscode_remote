@@ -91,6 +91,7 @@ CI in `.github/workflows/antumbra-android.yml`.
 | Firewall published | `resetprop -n antumbra.fw.armed <sha256 prefix>`, by the module, only after `apply` succeeded and was verified, and while no other uid holds a service port (9040 and 9053 tor's, 5335 and 5380 the filter's); removed at once otherwise |
 | Welcome | package `org.antumbra.welcome`, a device-admin receiver, device owner |
 | Session state | `content://org.antumbra.welcome.state/session`, one row: `started` (0/1), `tor_mode` (`direct`, `bridges`, `offline`), `bridges` (one bridge line per line), `mac` (`new`, `keep`), `admin` (0/1), `unsafe_browser` (0/1), `persistent` (0/1), `session_id`. Readable only by uid 0 and 2000 (`Binder.getCallingUid()`); the module polls it with `content query` |
+| The module's word on the last calls (MOD11) | `content call --user 0 --uri content://org.antumbra.welcome.state --method module_word` with the extras `v` (int 1), `calls` (`emergency`, `ordinary`, `unknown`, `none`), `at` (long: the module's look, seconds since boot), `until` (long: an emergency word's end, at most `at + 300`; else 0), `ims` (`cell`, `wifi`, `registered`, `none`, `unknown`, `off`), `ims_at` (long; 0 with `off`). Taken from uid 0 only (`Binder.getCallingUid()`), sent by the module only while Welcome is the device owner; Welcome answers `Result: Bundle[{v=1}]`, keeps it in memory and has no way to read it back. Never in `status.json`, a property, a file or a log |
 
 **Boot sequence** (section 7 has the detail):
 
@@ -566,6 +567,7 @@ a public repository must never run on pull-request triggers.
 | Magisk app hidden outside updates | `welcome/` | todo |
 | Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the switch shown but disabled; the app W11 |
 | Quick power off powers off, not restarts; never bound to the power button | `welcome/`, `module/` | the name and the rule done (WEL12); powering off todo (v0 restarts) |
+| Quick power off never cuts an emergency call short or switches off in a callback window; it waits during any call, in callback mode and 5 minutes after a call, unless the module, as root, knows that call was ordinary | `welcome/` (`CallWatch`), `module/` (the word, private to Welcome) | built (WEL7, MOD11) with unit and sandbox tests; Android 16 only (Android 17 keeps no record the module can read, so it waits after every call); the emulator check `welcome_module_word` warns until it has passed |
 | System records moved to RAM (section 9) | `module/` | W8 |
 | Hidden networks refused; passphrase field without learning, `FLAG_SECURE` | `welcome/` | W10 |
 | Exempt apps: relays and bridges only, fail closed when stale | `firewall/`, helper | chain exists, empty (W9) |

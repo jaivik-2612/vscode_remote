@@ -4,8 +4,8 @@
 # Drives the Antumbra Welcome app over adb, by hand or from a test script
 # (the CI emulator job has its own driver, antumbra/android/ci/
 # emulator-antumbra.sh, with the same test tags, and calls this script only
-# for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb' and
-# 'check-addon'). It
+# for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb',
+# 'check-addon' and 'check-module-word'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -71,6 +71,13 @@
 #   clear-power-menu-test     Undo what check-power-menu may leave: the power menu closed
 #                             (Back, then the screen off and on), power_button_long_press as
 #                             it was. Checks both.
+#   check-module-word         MOD11, with adb as root ('adb root'): Welcome's provider
+#                             takes the module's word from root only. Sent as the shell
+#                             user (uid 2000, through su) a word is refused with a
+#                             SecurityException; as root a malformed word is refused and
+#                             a "none" word taken ("Result: Bundle[{v=1}]"). Only
+#                             "none" and malformed words are sent: neither lets Quick
+#                             power off skip a wait.
 #   screenshot FILE.png       Save the screen.
 #   power-off-tile            Add the Quick power off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
@@ -88,6 +95,10 @@ WELCOME=$PKG/.WelcomeActivity
 # Intent.ACTION_DIAL_EMERGENCY: the system's emergency dial pad.
 DIAL_EMERGENCY=android.intent.action.DIAL_EMERGENCY
 URI=content://org.antumbra.welcome.state/session
+# The provider's method for the module's word (MOD11), and a word that
+# changes nothing: "none" (Quick power off waits as without a word).
+WORD_URI=content://org.antumbra.welcome.state
+WORD_NONE=(--extra v:i:1 --extra calls:s:none --extra at:l:0 --extra until:l:0 --extra ims:s:off --extra ims_at:l:0)
 UI_DUMP=/data/local/tmp/antumbra-welcome-ui.xml
 HOOK=debug.antumbra.keep_adb
 # Where check-power-menu keeps power_button_long_press's earlier value
@@ -696,6 +707,38 @@ cmd_check_power_menu() {
     say "the power menu shows its Emergency item in Welcome's lock task before Start (with the emergency affordance off, the item that opens the emergency dial pad); it was not pressed, nothing was dialled, and the menu and the long-press setting are back as they were"
 }
 
+# word_call [PREFIX...] -- EXTRA...: 'content call' with the module_word
+# method and these extras, run after PREFIX on the device (su 2000 for the
+# shell user); prints what the tool prints, standard error included.
+word_call() {
+    local prefix=()
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do prefix+=("$1"); shift; done
+    shift
+    sh_ "${prefix[@]}" content call --user 0 --uri "$WORD_URI" --method module_word "$@" 2>&1 || true
+}
+
+cmd_check_module_word() {
+    local out
+    [ "$(sh_ id -u)" = 0 ] || die "check-module-word needs adb as root ('adb root')"
+    sh_ dpm list-owners | grep -q "$PKG" || die "Welcome is not the device owner"
+    out=$(word_call su 2000 -- "${WORD_NONE[@]}")
+    case $out in
+        *'Result:'*) die "the shell user (uid 2000) gave Welcome a word: $out" ;;
+        *SecurityException*) say "the shell user's word refused (SecurityException)" ;;
+        *) die "the shell user's word was not refused as expected: $out" ;;
+    esac
+    out=$(word_call -- --extra v:i:2 --extra calls:s:none --extra at:l:0 --extra until:l:0 \
+        --extra ims:s:off --extra ims_at:l:0)
+    case $out in
+        *'Result:'*) die "root's malformed word was taken: $out" ;;
+        *IllegalArgumentException*) say "root's malformed word refused" ;;
+        *) die "root's malformed word was not refused as expected: $out" ;;
+    esac
+    out=$(word_call -- "${WORD_NONE[@]}")
+    [ "$out" = 'Result: Bundle[{v=1}]' ] || die "root's word was not taken: $out"
+    say "root's word taken: $out"
+}
+
 cmd_power_off_tile() {
     local before after end
     before=$(sh_ cat /proc/sys/kernel/random/boot_id)
@@ -746,6 +789,7 @@ case "$command" in
     check-addon) cmd_check_addon "$@" ;;
     check-emergency) cmd_check_emergency "$@" ;;
     check-power-menu) cmd_check_power_menu "$@" ;;
+    check-module-word) cmd_check_module_word ;;
     clear-power-menu-test) clear_power_menu_test || die "the power menu is not closed or power_button_long_press is not as it was" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"

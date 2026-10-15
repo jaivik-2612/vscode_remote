@@ -18,7 +18,7 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 |---|---|
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
-| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits, and the texts |
+| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), and the texts |
 | `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` and `check-addon`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
@@ -326,6 +326,37 @@ Rules for the module:
   reports `started = 1` otherwise, but another app could answer for a
   missing Welcome.
 
+### The module's word on the last calls (MOD11)
+
+The same provider takes one call, write-only, from uid 0 alone: the
+module's word on what the calls of the last 5 minutes were (see "Emergency
+calls" and the module's README, "The module's word to Welcome"). Every
+other caller, the shell (uid 2000) included, gets a `SecurityException`
+before anything is read, and the word Welcome holds stays as it was.
+
+```sh
+content call --user 0 --uri content://org.antumbra.welcome.state --method module_word \
+    --extra v:i:1 --extra calls:s:ordinary --extra at:l:1234 --extra until:l:0 \
+    --extra ims:s:off --extra ims_at:l:0
+# Result: Bundle[{v=1}]
+```
+
+| Extra | Type | Values |
+|---|---|---|
+| `v` | int | `1` |
+| `calls` | string | `emergency`, `ordinary`, `unknown` or `none` |
+| `at` | long | the module's look, in seconds since boot (`/proc/uptime`; Welcome's `elapsedRealtime` is the same clock) |
+| `until` | long | for `emergency`, the end of its wait, between `at` and `at + 300`; else `0` |
+| `ims` | string | the IMS registration: `cell`, `wifi`, `registered`, `none`, `unknown`, or `off` outside Phone mode |
+| `ims_at` | long | the time of that reading; `0` with `off` |
+
+Exactly these six, with these types; anything else is malformed: Welcome
+throws `IllegalArgumentException` and forgets the word it held. Welcome
+answers only `Result: Bundle[{v=1}]`, keeps the word in memory, never logs
+or shows it, and has no way to read it back. The module sends it only
+while Welcome is the device owner, and treats any other output as not
+taken.
+
 ## What Welcome reads from the status page
 
 `GET http://127.0.0.1:5380/status` (the DNS filter;
@@ -594,11 +625,12 @@ call back. It refuses, and says why: during a call; while Android reports
 emergency callback mode; and for 5 minutes after any call ends (the length
 of Android's own default emergency callback mode,
 `EmergencyStateTracker`). Welcome cannot tell an emergency call from any
-other call: `TelecomManager.isInEmergencyCall` needs `MODIFY_PHONE_STATE`
+other call by itself: `TelecomManager.isInEmergencyCall` needs `MODIFY_PHONE_STATE`
 and `TelephonyManager.getEmergencyCallbackMode` needs
 `READ_PRIVILEGED_PHONE_STATE`; both are system APIs behind permissions only
 the platform and privileged apps hold, which a device owner cannot grant
-itself. So every call counts. What Welcome reads, with no permission:
+itself. So every call counts, unless the module says otherwise (below).
+What Welcome reads, with no permission:
 
 - the audio mode (`AudioManager.getMode`, and a mode listener for the life
   of the process, from `WelcomeApp`): `MODE_IN_CALL` or `MODE_CALL_REDIRECT`
@@ -610,10 +642,30 @@ itself. So every call counts. What Welcome reads, with no permission:
   `ACTION_EMERGENCY_CALLBACK_MODE_CHANGED` broadcast, which the phone
   process sends without a permission, on networks that use the mode.
 
-The end of the last call is kept in memory only, like the session. Not
-covered: a call that is still connecting (the radio being switched on for
-an emergency call, a few seconds, before the audio mode changes), and a
-call that ended before Welcome's process started. The power menu's Power
+**The module's word (MOD11).** The module, as root, reads Telecom's own
+record of each call (`isEmergency`, set from Android's emergency-number
+list, and the network's emergency flag) and tells Welcome after each of
+its looks, through the provider (above), what the calls of the last 5
+minutes were. It changes one thing only:
+
+| The module's word | Quick power off after a call it saw end |
+|---|---|
+| `ordinary`, at most 30 s old, from a look after that call ended | goes ahead: the module knows every call of the last 5 minutes, that one included, was not an emergency call |
+| `emergency` | waits as before, and at least until the word's end (at most 5 minutes after the module's look), even if Welcome saw no call (its process restarted, or an emergency text with callback mode) |
+| `unknown`, `none`, an `ordinary` word that is older or from a look before the end, a malformed or refused word, no word at all (the module not running, Android 17, which no longer keeps that record) | waits exactly as before |
+
+During a call and in callback mode it waits whatever the word says, and a
+later word never shortens an emergency word's wait. The texts are the same.
+Wi-Fi calling is a carrier call (`MODE_IN_CALL`, an entry in Telecom like
+any SIM call) and counts like one; VoIP apps use `MODE_IN_COMMUNICATION`,
+so Quick power off has never waited for them.
+
+The end of the last call and the module's last word are kept in memory
+only, like the session. Not covered: a call that is still connecting (the
+radio being switched on for an emergency call, a few seconds, before the
+audio mode changes; after an ordinary call the module's next look, about
+10 s later, sees it), and a call that ended before Welcome's process started
+(unless the module calls it an emergency call). The power menu's Power
 off is never held: the message says how to switch off on purpose.
 Android's own restart (`DevicePolicyManager.reboot()`) also refuses during
 any call.
@@ -846,7 +898,7 @@ here):
 - `./gradlew assembleDebug assembleRelease lintDebug testDebugUnitTest`
   passes with dependency verification on (checksums and signatures, key
   servers off; a build without the keyring fails verification): no lint
-  issues, 36 unit tests
+  issues, 49 unit tests
   (bridge rules, including transports refused while lyrebird is missing,
   and the built-in asset; the provider's columns, values, caller rule and
   projection; the status-page parser, the property-only add-on rule, the
@@ -856,7 +908,22 @@ here):
   which audio modes count as a call, when Quick power off waits, and the
   call in progress that shows "Return to call"; its permission and text;
   no "Emergency off", no "panic" and no number in the texts, and the tile
-  and the notification action under the label "Quick power off").
+  and the notification action under the label "Quick power off"; MOD11
+  (2026-10-15): only uid 0 may give the module's word, a forged word (an
+  app, the shell, the system) refused with the held word unchanged, every
+  malformed word refused, and the three states: a fresh `ordinary` word
+  from after the call lets Quick power off go, a stale, early or future
+  one does not; `emergency` makes it wait until the word's end, with or
+  without a call it saw, and no later word shortens that; `unknown`,
+  `none`, missing, forged and malformed words, and no module, wait exactly
+  as before at every whole second of the 5 minutes and 999 ms after each;
+  during a call and in callback mode every word waits; the IMS reading
+  counts for 15 minutes; the word is never logged; a forged word is
+  refused before its extras are read, and the provider's `call` hands
+  `Binder.getCallingUid()` straight to that one check (a JVM test reads
+  the provider's source for it; that the binder gives the caller's uid
+  there is checked on the emulator only, `welcome_module_word`, a warning
+  until it has passed on CI once)).
 - `ci/welcome-adb.sh` and `ci/test-welcome-adb.sh` pass shellcheck, and the
   fake-adb test passes: bridge lines with `[`, `]`, `+`, `/`, `=` are
   typed, `;`, quotes and `\` refused; the test-hook rule; check-policies
@@ -880,7 +947,9 @@ here):
   changed when the affordance is forced, needed or unreadable, with no
   lock task or a call in progress); clear-power-menu-test (an open menu
   closed and the saved value put back; a value it did not save left
-  alone); expect.
+  alone); check-module-word (only "none" and malformed words sent; fails
+  when the shell user's or a malformed word is taken, when root's is not,
+  and without adb as root); expect.
 - `tools/builtin-bridges.sh` and its `--check` against the pinned source.
 - Framework behaviour read in Android 16 sources (android16-release):
   `ACTION_SHUTDOWN` is sent registered-only and deferred for cached
@@ -945,7 +1014,9 @@ Only CI (the API 36 emulator) or the phone can verify: provisioning, the
 locked task and home switching, every policy taking effect (including the
 DHCP host name and NFC), adb going away at provisioning without the hook,
 Welcome reading `antumbra.fw.armed`, the Wi-Fi state check and airplane
-mode, the provider answering root and shell and refusing others, the status
+mode, the provider answering root and shell and refusing others, the
+module's word taken from root and refused from the shell (the emulator
+job's `welcome_module_word`, a warning until it has passed on CI once), the status
 page through the real firewall, the tile and the restart, the shutdown
 receiver, `FLAG_SECURE`, the emergency dialer opening from the lock task
 (the emulator job's `welcome_emergency_dialer` check), the power menu's
@@ -972,10 +1043,17 @@ during that call, and the keyguard before Start with a swipe lock or a PIN
 - **Wi-Fi switched on by hand in airplane mode** cannot be switched off by
   Welcome; it has nothing to join, and a network session without the
   add-on is refused (see "Wi-Fi in airplane mode").
-- **Quick power off waits after every call**, not only emergency calls: Welcome
-  cannot tell them apart without system permissions. A call that is still
-  connecting (a few seconds) is not seen, and the end of a call is known
-  only to the process that saw it. The power menu's Power off always works.
+- **Quick power off waits after every call** unless the module's fresh
+  word says it was an ordinary call (MOD11): Welcome cannot tell calls
+  apart without system permissions, and on Android 17 the module cannot
+  either. A call that is still connecting (a few seconds) is not seen
+  (after an ordinary call, until the module's next look), and the end of a
+  call is known only to the process that saw it. An emergency text without
+  callback mode is not seen at all. The power menu's Power off always
+  works.
+- **The module's word trusts uid 0.** Anything running as root could tell
+  Welcome a call was ordinary; root is the module's equal (it could
+  switch the firewall off), and no app gets root.
 - **The keyguard shows before Start** when a swipe lock or a PIN is set
   (`LOCK_TASK_FEATURE_KEYGUARD`, the price of emergency calls through the
   lock task).

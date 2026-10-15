@@ -51,7 +51,12 @@
 #      started=1 and tor_mode=direct.
 #   7. Wi-Fi joined as a person would ('cmd wifi connect-network AndroidWifi
 #      open'); Wi-Fi must become the default network. Welcome's policies and
-#      its status screen are checked with welcome/ci/welcome-adb.sh.
+#      its status screen are checked with welcome/ci/welcome-adb.sh. Then
+#      MOD11 (warnings until passed on CI once): Welcome's provider takes
+#      the module's word from root only (welcome-adb.sh check-module-word;
+#      only "none" and malformed words are sent), and the module's parsers
+#      read the emulator's real Telecom, registry and IMS dumps as root
+#      (their output only, numbers and words, leaves the device).
 #   8. Wait for tor to bootstrap (the DNS filter's /status, else tor.log).
 #   9. Tracker test: names on the block list asked of the filter directly
 #      (DNS over TCP to 127.0.0.1:5335 through adb forward) and through
@@ -183,6 +188,36 @@ welcome_power_menu() {
 			check welcome_power_menu_recover warn "Welcome did not come back after the power menu check"
 	fi
 	[ -s "$SHOTS/$SCEN-welcome-power-menu.png" ] || rm -f "$SHOTS/$SCEN-welcome-power-menu.png"
+}
+
+# module_word: MOD11 on the emulator. Welcome's provider takes the
+# module's word from root only: welcome-adb.sh check-module-word sends a
+# word as the shell user (uid 2000, refused), a malformed one as root
+# (refused) and a "none" as root (taken); nothing that could let Quick
+# power off skip a wait is sent. Then the module's own parsers, run as
+# root on the device against the emulator's real dumps (Telecom, the
+# telephony registry, the phone process's IMS registration); only their
+# output, numbers and words, leaves the device (expected: "0 0 - - 0",
+# "0 0 off" or "0 0 on", "none"). WARN, not fail, until both have passed on
+# CI once (then make them fail).
+module_word() {
+	local log=$LOGS/$SCEN-welcome-module-word.txt out
+	if timeout 120 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-module-word >"$log" 2>&1; then
+		check welcome_module_word ok "$(tail -n 1 "$log")"
+	else
+		check welcome_module_word warn "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	fi
+	out=$(ASH_TIMEOUT=60 ash "MODDIR=$MODDIR; . \$MODDIR/lib/antumbra.sh; \
+		t=\$(/system/bin/dumpsys -t 3 telecom | telecom_state) || t=unreadable; \
+		r=\$(/system/bin/dumpsys -t 3 telephony.registry | registry_state) || r=unreadable; \
+		i=\$(ims_dump | ims_state) || i=unreadable; \
+		echo \"telecom=\$t; registry=\$r; ims=\$i\"")
+	printf '%s\n' "$out" >"$SDIR/module-parsers.txt"
+	case $out in
+	*unreadable*) check module_parsers warn "$out" ;;
+	"telecom="*) check module_parsers ok "$out" ;;
+	*) check module_parsers warn "$out" ;;
+	esac
 }
 
 welcome_start() {
@@ -455,6 +490,7 @@ welcome_start
 wifi_join
 # shellcheck disable=SC2119 # a default session: check-policies without --admin
 welcome_checks
+module_word
 if wait_bootstrap; then
 	screenshot status-2-bootstrapped
 	tracker_test

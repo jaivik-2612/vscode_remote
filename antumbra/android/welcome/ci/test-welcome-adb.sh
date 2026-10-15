@@ -4,8 +4,8 @@
 #
 # Runs welcome-adb.sh against a fake adb: the screen logic (finding
 # controls, typing bridge lines), the test hook rule, the provider checks
-# and check-policies / check-addon / check-emergency / check-power-menu. No
-# device or emulator needed.
+# and check-policies / check-addon / check-emergency / check-power-menu /
+# check-module-word. No device or emulator needed.
 #
 #   ci/test-welcome-adb.sh        exit status 0 when every case passed
 
@@ -93,6 +93,26 @@ case "$*" in
     "shell input swipe "*) [ "$(cat "$d/screen" 2>/dev/null)" = status-top ] && echo status-checking >"$d/screen"; exit 0 ;;
     "shell dumpsys window") echo "  mCurrentFocus=Window{1f u0 com.android.launcher3/com.android.launcher3.uioverride.QuickstepLauncher}" ;;
     "shell getprop antumbra.fw.armed") echo 0123abcd4567ef89 ;;
+    # check-module-word: adb as root unless $d/uid says otherwise; Welcome's
+    # provider refuses the shell user's word unless $d/shelltakes, a
+    # malformed word unless $d/malformedtaken, and root's word with
+    # $d/rootrefused.
+    "shell id -u") cat "$d/uid" 2>/dev/null || echo 0 ;;
+    "shell dpm list-owners") echo "1 owner:"; echo "User  0: admin=org.antumbra.welcome/.AdminReceiver,DeviceOwner" ;;
+    "shell su 2000 content call --user 0 --uri content://org.antumbra.welcome.state --method module_word "*)
+        if [ -f "$d/shelltakes" ]; then echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.SecurityException: uid 2000 may not call module_word'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_word --extra v:i:2 "*)
+        if [ -f "$d/malformedtaken" ]; then echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.IllegalArgumentException: Malformed word'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_word --extra v:i:1 --extra calls:s:none "*)
+        if [ -f "$d/rootrefused" ]; then echo 'Error while accessing provider:org.antumbra.welcome.state'; else
+            echo 'Result: Bundle[{v=1}]'
+        fi ;;
     "shell wm size") echo "Physical size: 1080x2400" ;;
     # adb goes away once Start ran with the hook cleared.
     "shell true") if [ "$(cat "$d/hook" 2>/dev/null)" = 0 ] && grep -q '^shell input tap' "$d/log"; then exit 1; fi ;;
@@ -540,6 +560,24 @@ echo 5 >"$work/set/power_button_long_press"
     pass "clear-power-menu-test on a clean device (a long-press setting it did not save stays)" ||
     bad "clear-power-menu-test: $(cat "$work/err")"
 rm -f "$work/front"
+
+# 5c. check-module-word (MOD11): the shell user's word refused, root's
+#     malformed word refused, root's "none" word taken; nothing else is sent.
+: >"$work/log"
+if "$script" check-module-word 2>"$work/err"; then
+    [ "$(grep -c 'content call' "$work/log")" = 3 ] && ! grep 'content call' "$work/log" | grep -qv 'calls:s:none' &&
+        pass "check-module-word: only root's word is taken, and only 'none' words are sent" ||
+        bad "check-module-word sent other words: $(cat "$work/log")"
+else
+    bad "check-module-word: $(cat "$work/err")"
+fi
+for case_ in shelltakes malformedtaken rootrefused uid; do
+    if [ "$case_" = uid ]; then echo 2000 >"$work/uid"; else touch "$work/$case_"; fi
+    if "$script" check-module-word 2>"$work/err"; then bad "check-module-word passed with $case_"; else
+        pass "check-module-word fails with $case_ ($(tail -n 1 "$work/err"))"
+    fi
+    rm -f "$work/$case_"
+done
 
 # 6. expect counts bridge lines.
 "$script" expect started=1 bridges=2 unsafe_browser=0 2>"$work/err" && pass "expect" || bad "expect: $(cat "$work/err")"

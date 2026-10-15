@@ -125,9 +125,11 @@
 
         <!-- The session's choices for the Antumbra module, which reads
              content://org.antumbra.welcome.state/session with the 'content
-             query' command. Exported because that command runs outside this
-             app; the provider itself answers only uid 0 (root) and uid 2000
-             (shell). -->
+             query' command, and the module's word on the last calls, which
+             it gives with 'content call' (MOD11). Exported because that
+             command runs outside this app; the provider itself answers
+             queries from uid 0 (root) and uid 2000 (shell) only, and takes
+             the module's word from uid 0 only. -->
         <provider
             android:name=".StateProvider"
             android:authorities="org.antumbra.welcome.state"

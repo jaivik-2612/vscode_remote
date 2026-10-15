@@ -25,7 +25,10 @@
 #      mode has read off for 30 seconds, and the cell radio switched off
 #      (airplane mode) whenever something switched it on, unless a call,
 #      emergency callback mode or a call in the last 5 minutes holds it
-#      (enable_cellular_on_boot is kept at 1 while that hold lasts);
+#      (enable_cellular_on_boot is kept at 1 while that hold lasts); after
+#      each look, the module's word on the calls of the last 5 minutes
+#      (emergency, ordinary, unknown or none) to Welcome alone, through its
+#      provider as root, while Welcome is the device owner (MOD11);
 #   7. wait for the Welcome screen's Start (started=1 in its provider, and
 #      Welcome the device owner): offline keeps tor's network off; direct
 #      and bridges set the bridges, if any, and DisableNetwork 0 over tor's
@@ -512,10 +515,12 @@ while :; do
 	# switch-on follows it in the same turn. It ends when Android begins to
 	# shut down (shutdown_check has stored what the next start needs). A
 	# turn in which it looked (two dumps, up to 8 s) checks the ports again
-	# at once, so that the look's time is not added to the next turn's wait.
+	# at once, so that the look's time is not added to the next turn's wait,
+	# and then gives Welcome the module's word on the last calls (MOD11).
 	if [ "$SETTINGS_DONE" = 1 ] && [ "$SHUTDOWN_DONE" = 0 ]; then
 		cell_step "$NOW"
 		[ "$CELL_LOOKED" = "$NOW" ] && ports_check
+		cell_tell "$NOW"
 	fi
 
 	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64

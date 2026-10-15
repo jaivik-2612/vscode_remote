@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlin.math.ceil
+import kotlin.math.max
 
 /**
  * The "Emergency call" button on the Welcome and status screens.
@@ -153,26 +154,42 @@ class CallRecord {
         inCall = call
     }
 
-    /** Minutes Quick power off still waits after the last call, rounded up; 0 when it does not. */
+    /**
+     * Milliseconds Quick power off still waits after a call: the
+     * [CallWatch.CALLBACK_WINDOW_MS] after the last call this process saw
+     * end, unless the module's [words] cover that call and say it was an
+     * ordinary call (MOD11), and at least as long as an emergency word from
+     * the module asks. Without words (null), exactly as before MOD11.
+     */
     @Synchronized
-    fun minutesLeft(now: Long): Int {
-        val end = lastEnd ?: return 0
-        // elapsedRealtime only grows within a boot; anything else counts as just ended.
-        val left = (CallWatch.CALLBACK_WINDOW_MS - (now - end)).coerceIn(0L, CallWatch.CALLBACK_WINDOW_MS)
-        return ceil(left / 60_000.0).toInt()
+    fun waitLeftMs(now: Long, words: ModuleWords? = null): Long {
+        val own = lastEnd?.let { end ->
+            if (words?.relaxes(end, now) == true) {
+                0L
+            } else {
+                // elapsedRealtime only grows within a boot; anything else counts as just ended.
+                (CallWatch.CALLBACK_WINDOW_MS - (now - end)).coerceIn(0L, CallWatch.CALLBACK_WINDOW_MS)
+            }
+        } ?: 0L
+        return max(own, words?.emergencyLeftMs(now) ?: 0L)
     }
+
+    /** Minutes Quick power off still waits after a call ([waitLeftMs]), rounded up; 0 when it does not. */
+    @Synchronized
+    fun minutesLeft(now: Long, words: ModuleWords? = null): Int = ceil(waitLeftMs(now, words) / 60_000.0).toInt()
 
     /**
      * What holds Quick power off now: a call in progress (seen now,
-     * [callNow], or by the listener), emergency callback mode, or a call
-     * that ended less than [CallWatch.CALLBACK_WINDOW_MS] ago. Null when
-     * nothing does.
+     * [callNow], or by the listener), emergency callback mode, or the wait
+     * after a call ([waitLeftMs]). Null when nothing does. The module's
+     * [words] change only the last: during any call and in callback mode
+     * Quick power off waits whatever they say.
      */
     @Synchronized
-    fun hold(callNow: Boolean, callbackMode: Boolean, now: Long): PowerOffHold? = when {
+    fun hold(callNow: Boolean, callbackMode: Boolean, now: Long, words: ModuleWords? = null): PowerOffHold? = when {
         callNow || inCall -> PowerOffHold.CALL
         callbackMode -> PowerOffHold.CALLBACK_MODE
-        minutesLeft(now) > 0 -> PowerOffHold.AFTER_CALL
+        waitLeftMs(now, words) > 0 -> PowerOffHold.AFTER_CALL
         else -> null
     }
 
@@ -186,15 +203,24 @@ class CallRecord {
  * Keeps Quick power off from cutting an emergency call short, or from
  * switching the phone off while the emergency service may call back.
  *
- * Welcome cannot tell an emergency call from any other.
+ * Welcome cannot tell an emergency call from any other by itself.
  * TelecomManager.isInEmergencyCall needs MODIFY_PHONE_STATE and
  * TelephonyManager.getEmergencyCallbackMode needs
  * READ_PRIVILEGED_PHONE_STATE: system APIs behind permissions that only the
- * platform and privileged apps hold, not a device owner. So every call
- * counts. Quick power off waits during a call, while Android reports
- * emergency callback mode (on networks that use it), and for
- * [CALLBACK_WINDOW_MS] after any call ends. The record is in memory only,
- * like the session, and starts with the process.
+ * platform and privileged apps hold, not a device owner. So Quick power off
+ * waits during any call, while Android reports emergency callback mode (on
+ * networks that use it), and for [CALLBACK_WINDOW_MS] after any call ends.
+ *
+ * The module, as root, can read Telecom's own record of each call on
+ * Android 16 and tells Welcome after each of its looks (MOD11,
+ * [ModuleWord]). Only one thing changes with it: the wait after a call is
+ * skipped when a fresh word says every call of the last 5 minutes, that
+ * one included, was an ordinary call. An emergency word makes Quick power
+ * off wait at least until its end, even for a call this process did not
+ * see. An unknown, missing, stale, refused or malformed word, or none at
+ * all (the module not running, Android 17, which no longer keeps that
+ * record), changes nothing. The record and the words are in memory only,
+ * like the session, and start with the process.
  */
 object CallWatch {
     private const val TAG = "AntumbraCallWatch"
@@ -208,6 +234,7 @@ object CallWatch {
     private const val EXTRA_PHONE_IN_ECM_STATE = "android.telephony.extra.PHONE_IN_ECM_STATE"
 
     private val record = CallRecord()
+    private val words = ModuleWords()
 
     /**
      * A SIM call is in progress, as the listener last saw it; the Welcome
@@ -244,15 +271,21 @@ object CallWatch {
         false
     }
 
+    /** The module's word (StateProvider.call, from root only); null for a malformed one. */
+    fun take(word: ModuleWord?) = words.take(word, SystemClock.elapsedRealtime())
+
+    /** The IMS registration the module last read, for WEL8's VoLTE line; UNKNOWN when missing or old. */
+    fun ims(): ImsState = words.ims(SystemClock.elapsedRealtime())
+
     /** Why Quick power off must wait now, for the person; null when it may go ahead. */
     fun holdMessage(context: Context): String? {
         val now = SystemClock.elapsedRealtime()
         val mode = context.getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
-        return when (record.hold(CallRecord.isCallMode(mode), inCallbackMode(context), now)) {
+        return when (record.hold(CallRecord.isCallMode(mode), inCallbackMode(context), now, words)) {
             null -> null
             PowerOffHold.CALL -> context.getString(R.string.power_off_wait_call)
             PowerOffHold.CALLBACK_MODE -> context.getString(R.string.power_off_wait_callback_mode)
-            PowerOffHold.AFTER_CALL -> record.minutesLeft(now).let {
+            PowerOffHold.AFTER_CALL -> record.minutesLeft(now, words).let {
                 context.resources.getQuantityString(R.plurals.power_off_wait_after_call, it, it)
             }
         }

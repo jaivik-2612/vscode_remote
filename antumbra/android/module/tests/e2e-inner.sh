@@ -112,8 +112,11 @@ sysctl_is() { [ "$(cat "/proc/sys/net/ipv6/conf/$1/$2")" = "$3" ]; }
 # --- The cell radio's stand-ins ------------------------------------------------
 IDLE='0 0 0 0 0 0'
 # telecom_set HISTORY [STATE...]: what 'dumpsys telecom' shows: one live
-# call per STATE (STATE:voip for a VoIP call), and Analytics lines for calls
-# 1 to HISTORY (Telecom numbers its calls TC@1, TC@2, ... within a boot).
+# call per STATE (STATE:voip for a VoIP call), and Analytics entries for
+# calls 1 to HISTORY (Telecom numbers its calls TC@1, TC@2, ... within a
+# boot), as Android 16 prints them: ordinary calls ("isEmergency: false"),
+# but those in EM_CALLS, which are emergency calls.
+EM_CALLS=
 telecom_set() {
 	_tl_h=$1
 	shift
@@ -137,7 +140,13 @@ telecom_set() {
 		echo 'Analytics:'
 		_tl_i=1
 		while [ "$_tl_i" -le "$_tl_h" ]; do
-			printf '  Call TC@%s: {\n  }\n' "$_tl_i"
+			_tl_e=false
+			case " $EM_CALLS " in *" $_tl_i "*) _tl_e=true ;; esac
+			printf '  Call TC@%s: {\n' "$_tl_i"
+			printf '      %s\n' 'startTime: 0' 'endTime: 0' 'direction: OUTGOING' 'isAdditionalCall: false' \
+				'isInterrupted: false' "isEmergency: $_tl_e" 'callTechnologies: [IMS ]' 'missedReason: []' \
+				'inCallServices: [' ']' 'callProperties: [ HD]' 'callSource: CALL_SOURCE_UNSPECIFIED'
+			printf '  }\n  \n'
 			_tl_i=$((_tl_i + 1))
 		done
 		echo '  Hardware Version: '
@@ -179,12 +188,43 @@ clock_jump() {
 	uptime_line 1<>$T/uptime
 	sleep 2
 }
-# mark: from here on, new_cmd, new_log, new_setting and no_switch_off_for
-# look only at what follows.
+# mark: from here on, new_cmd, new_log, new_setting, new_word and
+# no_switch_off_for look only at what follows.
 mark() {
 	MARK_CMD=$(wc -l <$T/cmd.log)
 	MARK_LOG=$(wc -l <$A/log/module.log)
 	MARK_SET=$(wc -l <$T/settings.log)
+	MARK_WORD=$(words_n)
+}
+# The module's word to Welcome (MOD11), as the stand-in for 'content call'
+# recorded it: one line per word, "v:i:1 calls:s:KIND at:l:AT until:l:UNTIL
+# ims:s:IMS ims_at:l:IMS_AT".
+words_n() { if [ -s $T/welcome.words ]; then grep -c . $T/welcome.words; else echo 0; fi; }
+new_words() { tail -n +$((MARK_WORD + 1)) $T/welcome.words 2>/dev/null; }
+new_word() { new_words | grep -q -F -- "calls:s:$1 "; }
+new_words_has() { new_word "$1"; }
+# after_none: the words since the mark from the first "none" on.
+after_none() { new_words | sed -n '/ calls:s:none /,$p'; }
+# word_field LINE NAME: a value from a recorded word.
+word_field() { printf '%s\n' "$1" | sed -n "s/.* $2:[a-z]:\\([^ ]*\\).*/\\1/p"; }
+# word_since KIND T: since the mark, a word KIND from a look at T or later.
+word_since() {
+	new_words | grep -F -- "calls:s:$1 " | {
+		while IFS= read -r _ws; do
+			[ "$(word_field "$_ws" at)" -ge "$2" ] && exit 0
+		done
+		exit 1
+	}
+}
+# emergency_until_ok: every emergency word since the mark ends 5 minutes
+# after its look, or less.
+emergency_until_ok() {
+	new_words | grep -q -F 'calls:s:emergency ' || return 1
+	new_words | grep -F 'calls:s:emergency ' | while IFS= read -r _wu; do
+		_wu_at=$(word_field "$_wu" at)
+		_wu_un=$(word_field "$_wu" until)
+		[ "$_wu_un" -ge "$_wu_at" ] && [ "$_wu_un" -le $((_wu_at + 300)) ] || exit 1
+	done
 }
 new_cmd() { tail -n +$((MARK_CMD + 1)) $T/cmd.log | grep -q -x -F "$1"; }
 new_log() { tail -n +$((MARK_LOG + 1)) $A/log/module.log | grep -q -F "$1"; }
@@ -641,10 +681,12 @@ cell)
 
 	# 1. The radio on with airplane mode off and no call (as an emergency
 	# text, or the emergency-call path, switches it on).
+	check "word: the first turn told Welcome 'none'" test "$(head -n 1 $T/welcome.words | cut -d' ' -f2)" = calls:s:none
 	mark
 	radio_power 1
 	clock_jump 61
 	check "radio on by something else: held 5 minutes (recent)" wait_until 20 new_log 'held: recent'
+	check "word: the radio on by something else, no call: unknown" wait_until 10 new_word unknown
 	check "radio on by something else: mobile data off again" new_cmd 'phone data disable'
 	check "radio on by something else: enable_cellular_on_boot 1 while held" wait_until 5 stored_boot 1
 	clock_jump 270
@@ -680,16 +722,24 @@ cell)
 	check "call on hold: looked at" wait_look
 	clock_jump 400
 	check "call on hold, 400 s later: still on" no_switch_off_for 8
+	check "word: during the call: ordinary" new_words_has ordinary
 	mark
 	telecom_set 1
 	phone_state "$IDLE"
+	ended=$(up_now)
 	check "call ended: held 5 minutes more (recent)" wait_until 20 new_log 'held: recent'
+	check "word: the call ended: ordinary, from a look after the end" wait_until 20 word_since ordinary "$ended"
 	clock_jump 270
 	check "call ended 270 s ago: still on" no_switch_off_for 8
+	check "word: the call ended 270 s ago: still ordinary" wait_until 20 word_since ordinary $((ended + 270))
+	mark
 	clock_jump 30
 	check "call ended 5 minutes ago: off" wait_until 15 switched_off
 	check "call ended 5 minutes ago: enable_cellular_on_boot 0 again before the switch-off" \
 		new_log_before 'enable_cellular_on_boot 0 again' 'the cell radio off (airplane mode'
+	check "word: the call ended 5 minutes ago: none" wait_until 15 new_word none
+	sleep 12
+	check "word: then one 'none' and no other word" test "$(after_none | grep -c .)" = 1
 
 	# 3. Emergency callback mode, from the property (both of Android's
 	# paths set it).
@@ -698,6 +748,8 @@ cell)
 	check "radio on again: held (recent)" wait_until 20 new_log 'held: recent'
 	/system/bin/setprop ril.cdma.inecmmode true
 	check "callback mode (property): held (callback)" wait_until 15 new_log 'held: callback'
+	check "word: callback mode: emergency" wait_until 10 new_word emergency
+	check "word: callback mode: until at most 5 minutes after the look" emergency_until_ok
 	check "callback mode: enable_cellular_on_boot 1 (a restart of the phone process keeps the radio on)" \
 		stored_boot 1
 	clock_jump 400
@@ -711,11 +763,18 @@ cell)
 	check "callback mode over 5 minutes ago: off" wait_until 15 switched_off
 
 	# 4. Emergency callback mode in the registry: for calls, then for texts.
+	# Welcome refuses the word meanwhile (as a missing or replaced Welcome
+	# would).
 	mark
 	person_airplane disable
 	check "radio on again: held" wait_until 20 new_log 'held: recent'
+	touch $T/welcome-refuses
 	phone_state '0 0 0 0 300000 0'
 	check "callback mode for calls (registry): held (callback)" wait_until 20 new_log 'held: callback'
+	check "word: Welcome refuses it: logged" wait_until 20 new_log "Welcome did not take the module's word"
+	rm -f $T/welcome-refuses
+	check "word: callback mode for calls (registry): emergency" wait_until 20 new_word emergency
+	check "word: Welcome takes it again: logged" wait_until 5 new_log "Welcome takes the module's word again"
 	clock_jump 400
 	check "callback mode for calls, 400 s later: still on" no_switch_off_for 8
 	phone_state '0 0 0 0 0 300000'
@@ -736,33 +795,77 @@ cell)
 	check "radio on again: held" wait_until 20 new_log 'held: recent'
 	touch $T/dumpsys-broken
 	check "state unreadable: held (unknown)" wait_until 20 new_log 'held: unknown'
+	check "word: the state unreadable: unknown" wait_until 10 new_word unknown
 	clock_jump 400
 	check "state unreadable, 400 s later: still on" no_switch_off_for 8
 	mark
 	rm -f $T/dumpsys-broken
 	check "readable again: held 5 minutes more (recent)" wait_until 40 new_log 'held: recent'
+	check "word: readable again: still unknown (no other word)" test -z "$(new_words | grep -v -F 'calls:s:unknown ')"
 	clock_jump 270
 	check "readable again 270 s ago: still on" no_switch_off_for 8
 	clock_jump 30
 	check "readable again 5 minutes ago: off" wait_until 15 switched_off
 
 	# 6. A call that began and ended between two looks: only Telecom's call
-	# counter shows it.
+	# counter shows it, and its entry, an ordinary call.
 	mark
 	person_airplane disable
 	check "radio on again: held" wait_until 20 new_log 'held: recent'
 	clock_jump 270
 	telecom_set 9
 	check "a short call between two looks: looked at" wait_look
+	mark
 	clock_jump 30
 	check "5 minutes after the switch-on but not after the short call: still on" no_switch_off_for 8
+	check "word: the short call, once the switch-on's 5 minutes are over: ordinary" wait_until 20 new_word ordinary
 	clock_jump 270
 	check "5 minutes after the short call: off" wait_until 15 switched_off
+
+	# 6b. An emergency call that began and ended between two looks, with
+	# airplane mode switched off for it (as Android's emergency path does):
+	# its entry says so. Emergency for 5 minutes, then one "none"; the
+	# radio held exactly as for any call.
+	mark
+	EM_CALLS=10
+	telecom_set 10
+	person_airplane disable
+	check "emergency call between two looks: held (recent)" wait_until 20 new_log 'held: recent'
+	check "word: an emergency call between two looks: emergency" wait_until 20 new_word emergency
+	check "word: emergency: until at most 5 minutes after the look" emergency_until_ok
+	# The 5 minutes count from the look after the one that saw the call.
+	check "emergency call between two looks: looked at again" wait_look
+	clock_jump 270
+	check "emergency call 270 s ago: still on" no_switch_off_for 8
+	check "word: the emergency call 270 s ago: still emergency" wait_until 20 word_since emergency "$(($(up_now) - 5))"
+	mark
+	clock_jump 30
+	check "emergency call 5 minutes ago: off" wait_until 15 switched_off
+	check "word: the emergency call's 5 minutes over: none" wait_until 30 new_word none
+	sleep 12
+	check "word: then one 'none' and no other word" test "$(after_none | grep -c .)" = 1
+
+	# 6c. Telecom's dump cut short (dumpsys gave up, or Telecom was busy)
+	# right after an ordinary call: Analytics lists the newest call last,
+	# so the cut loses it (here an emergency call, 12). Unknown, never
+	# ordinary.
+	mark
+	telecom_set 11
+	clock_jump 61
+	check "an ordinary call between two looks: ordinary" wait_until 20 new_word ordinary
+	mark
+	EM_CALLS='10 12'
+	telecom_set 12
+	sed '/^  Call TC@12: {$/,$d' $T/telecom >$T/telecom.cut
+	mv -f $T/telecom.cut $T/telecom
+	clock_jump 11
+	check "Telecom's dump cut before the newest entry: unknown" wait_until 20 new_word unknown
+	check "Telecom's dump cut before the newest entry: no ordinary word" test -z "$(new_words | grep -F 'calls:s:ordinary ')"
 
 	# 7. Shutdown during a call (a VoIP call over Wi-Fi, airplane mode on):
 	# the fail-safe Settings go back, airplane mode stays as it is.
 	mark
-	telecom_set 10 ACTIVE:voip
+	telecom_set 11 ACTIVE:voip
 	clock_jump 61
 	check "VoIP call with airplane mode on: looked at" wait_look
 	/system/bin/setprop sys.shutdown.requested 0userrequested
@@ -791,6 +894,19 @@ if [ -s $A/state/module/session ]; then
 	check "cell: the session record says cell=off" session_has cell=off
 fi
 check "cell: no number and no dump in the module's log" test -z "$(grep -E 'mCall|TC@|Phone Id|tel:' $A/log/module.log)"
+# Every scenario: the module's word to Welcome (MOD11) went to Welcome's
+# provider alone, holds nothing but its six fields, and neither status.json
+# (which every app can read) nor the module's log names a word.
+check "word: Welcome was told (at least the first turn's 'none')" wait_until 70 grep -q 'calls:s:none ' $T/welcome.words
+check "word: nothing but the six fields" test -z "$(grep -v -E \
+	'^v:i:1 calls:s:(emergency|ordinary|unknown|none) at:l:[0-9]+ until:l:[0-9]+ ims:s:off ims_at:l:0$' $T/welcome.words)"
+check "word: status.json says nothing of calls or IMS" test -z "$(status_json | grep -i -E 'ordinary|emergency|"calls"|"ims"|until|callback')"
+check "word: the module's log names no word" test -z "$(grep -E 'ordinary|calls:|until:|ims:|ims=' $A/log/module.log)"
+check "word: no word in a file of the module" test -z "$(grep -r -l -F 'calls:s:' $A 2>/dev/null)"
+case $SCEN in
+pt | cell) ;;
+*) check "word: no call in this scenario: one word, 'none'" test "$(words_n)" = 1 ;;
+esac
 
 check "module log has no shell errors" test -z "$(grep -i -E 'not found|syntax error|bad substitution|unexpected' $A/log/module.log)"
 echo "-- module.log --"

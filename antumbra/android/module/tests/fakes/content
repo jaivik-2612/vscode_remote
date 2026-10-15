@@ -5,17 +5,39 @@
 # asked order. Values are NAME=VALUE lines in /antumbra-test/welcome;
 # bridges come from /antumbra-test/welcome.bridges (one per line). And
 #   content query --uri content://telephony/siminfo --projection _id
-# with one row per subscription ID in /antumbra-test/siminfo.
+# with one row per subscription ID in /antumbra-test/siminfo. And
+#   content call --user 0 --uri content://org.antumbra.welcome.state --method module_word --extra K:T:V...
+# like Welcome's StateProvider.call from root (MOD11): the extras are
+# appended as one line to /antumbra-test/welcome.words, and it prints
+# "Result: Bundle[{v=1}]"; with /antumbra-test/welcome-refuses it prints a
+# refusal on standard error and exits 0, as the real tool does.
 T=/antumbra-test
 [ -f $T/framework-up ] || { echo "Error while accessing provider" >&2; exit 1; }
-proj='' uri=''
+what=${1-}
+proj='' uri='' method='' extras=''
 while [ $# -gt 0 ]; do
 	case $1 in
 	--projection) proj=$2; shift 2 ;;
 	--uri) uri=$2; shift 2 ;;
+	--method) method=$2; shift 2 ;;
+	--extra) extras="$extras${extras:+ }$2"; shift 2 ;;
 	*) shift ;;
 	esac
 done
+if [ "$what" = call ]; then
+	if [ "$uri" != content://org.antumbra.welcome.state ] || [ "$method" != module_word ]; then
+		echo "Error while accessing provider:${uri#content://}" >&2
+		exit 0
+	fi
+	if [ -e $T/welcome-refuses ]; then
+		echo "Error while accessing provider:org.antumbra.welcome.state" >&2
+		echo "java.lang.SecurityException: uid 0 may not call module_word" >&2
+		exit 0
+	fi
+	echo "$extras" >>$T/welcome.words
+	echo 'Result: Bundle[{v=1}]'
+	exit 0
+fi
 case $uri in
 content://telephony/siminfo)
 	[ "$proj" = _id ] || exit 1

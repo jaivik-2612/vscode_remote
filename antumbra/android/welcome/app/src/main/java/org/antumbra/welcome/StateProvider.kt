@@ -7,6 +7,7 @@ import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
 import android.os.Binder
+import android.os.Bundle
 
 /**
  * content://org.antumbra.welcome.state/session: one row with the session's
@@ -14,6 +15,10 @@ import android.os.Binder
  * provider"). Read-only, and readable only by uid 0 (root) and uid 2000
  * (shell), checked with Binder.getCallingUid(). Every other caller,
  * including other apps, gets a SecurityException.
+ *
+ * The module's word (MOD11) comes in through [call], method "module_word",
+ * from uid 0 only: not even the shell may give it. It is kept in memory
+ * ([CallWatch]) and there is no way to read it back.
  */
 class StateProvider : ContentProvider() {
 
@@ -40,6 +45,26 @@ class StateProvider : ContentProvider() {
     }
 
     override fun getType(uri: Uri): String = "vnd.android.cursor.item/vnd.org.antumbra.welcome.session"
+
+    /**
+     * The module's word on the last calls (MOD11), given by root with
+     * 'content call --method module_word --extra ...'. The binder's uid
+     * goes straight to [ModuleWord.receive], the one check: any other
+     * caller gets a SecurityException before the extras are read; a
+     * malformed word an IllegalArgumentException. Answers only that the
+     * word was taken ({v=1}), never the word.
+     */
+    override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
+        ModuleWord.receive(Binder.getCallingUid(), method, arg, { extrasOf(extras) }) { CallWatch.take(it) }
+        return Bundle().apply { putInt("v", ModuleWord.VERSION) }
+    }
+
+    private fun extrasOf(extras: Bundle?): Map<String, Any?> = extras?.let { b ->
+        b.keySet().associateWith {
+            @Suppress("DEPRECATION")
+            b.get(it)
+        }
+    } ?: emptyMap()
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? =
         throw UnsupportedOperationException("The Antumbra session is read-only")
