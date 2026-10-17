@@ -1,0 +1,336 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  Antumbra Live: the page at the root of the session's link (served by
+  websockify next to phone.html and noVNC's core; see ci/live.py and
+  ci/live-stream.sh). The password never leaves this browser: the page
+  turns it into the session's token (PBKDF2-SHA-256 of the password, salt
+  "antumbra-live" LF host, 600,000 rounds), and only that token travels,
+  inside the HTTPS connection, in the WebSocket's query, to this page's own
+  host. phone.html finds it in this tab's sessionStorage. Nothing here is
+  secret: the page is in the public repository.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Antumbra Live</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --fg: #1b1c1e; --muted: #5c5f66; --card: #ffffff; --line: #dcdcd8;
+    --accent: #3a4a8c; --accent-fg: #ffffff; --warn-bg: #fff4d6; --warn-line: #e3c165;
+    --bad: #a3271c; --good: #1f6b3a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141518; --fg: #e9e9ec; --muted: #a2a5ad; --card: #1e2024; --line: #33363c;
+      --accent: #8796e0; --accent-fg: #101114; --warn-bg: #3a3118; --warn-line: #8a7230;
+      --bad: #ff8a7a; --good: #7fd49b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  main { max-width: 34rem; margin: 0 auto; padding: 20px 16px 48px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 28px 0 8px; }
+  p { margin: 8px 0; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .warn {
+    background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 12px;
+    padding: 12px 14px; margin: 12px 0 16px;
+  }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin: 12px 0; }
+  #state { font-weight: 600; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  input[type=password] {
+    width: 100%; font-size: 17px; padding: 12px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  }
+  .row { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  .row label { display: inline; font-weight: 400; margin: 0; }
+  input[type=checkbox] { width: 22px; height: 22px; }
+  button {
+    font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 16px;
+    background: var(--accent); color: var(--accent-fg); width: 100%; margin-top: 6px; min-height: 48px;
+  }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button.danger { background: transparent; color: var(--bad); border: 1px solid var(--bad); }
+  button:disabled { opacity: .55; }
+  #msg { min-height: 1.4em; margin-top: 10px; }
+  #msg.bad { color: var(--bad); }
+  #msg.good { color: var(--good); }
+  table { border-collapse: collapse; width: 100%; }
+  td { padding: 6px 4px; vertical-align: top; border-top: 1px solid var(--line); }
+  td:first-child { white-space: nowrap; font-weight: 600; padding-right: 10px; }
+  .hidden { display: none; }
+  ol, ul { padding-left: 1.3em; margin: 6px 0; }
+  li { margin: 4px 0; }
+  .small { font-size: .9rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Antumbra Live</h1>
+  <p class="sub">A virtual Antumbra phone you can use from this browser.</p>
+
+  <div class="warn" role="note">
+    <p><strong>This is a virtual phone on GitHub's computer, not your phone.</strong>
+      It ends by itself<span id="endsAt"></span>, and everything on it is wiped.</p>
+    <p>GitHub's machine and Cloudflare carry the screen. <strong>Never sign in to real accounts, and never
+      type real passwords or personal details in it.</strong></p>
+  </div>
+
+  <div class="card" aria-live="polite">
+    <div id="state">Reading the session's state…</div>
+    <div id="note"></div>
+    <div id="times" class="small"></div>
+  </div>
+
+  <form id="unlock" class="card" autocomplete="on">
+    <label for="pw">Password</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" autocapitalize="off"
+           autocorrect="off" spellcheck="false" required>
+    <div class="row">
+      <input id="remember" type="checkbox">
+      <label for="remember">Remember on this device</label>
+    </div>
+    <button id="open" type="submit">Open the phone</button>
+    <div id="msg" role="status"></div>
+    <p class="small">The password is the repository secret <code>ANTUMBRA_LIVE_PASSWORD</code>. It never
+      leaves this browser: the page turns it into a key that works for this session only.</p>
+  </form>
+
+  <div class="card">
+    <button id="again" class="hidden" type="button">Open the phone again</button>
+    <button id="end" class="danger" type="button">End the session now</button>
+    <button id="forget" class="secondary hidden" type="button">Forget the password on this device</button>
+    <div id="msg2" role="status"></div>
+  </div>
+
+  <h2>What to do</h2>
+  <ol>
+    <li>Wait until the box above says the phone is ready (about 10 minutes after the link appears).</li>
+    <li>Type the password and tap <em>Open the phone</em>.</li>
+    <li>Welcome is on the screen. To install apps, turn <em>Administration</em> on, then tap
+      <em>Start Antumbra</em>. The virtual Wi-Fi is joined for you after Start.</li>
+    <li>When Tor is connected, open F-Droid or Aptoide from the app drawer (swipe up on the home screen) and
+      install apps. Everything goes through Tor, so it is slower than usual. If a store is missing, the box
+      above says why.</li>
+    <li>Tap to tap; drag to swipe. To press and hold (an app's menu, selecting text), keep your finger still
+      for about two seconds.</li>
+    <li>To type, tap <em>Keyboard</em> at the top of the phone's page, or use Android's own keyboard on the
+      phone's screen.</li>
+  </ol>
+
+  <h2>The buttons beside the phone</h2>
+  <table>
+    <tr><td>⏻ Power</td><td>Tap: screen off or on. Hold (about two seconds): Android's power menu. Do not
+      choose Power off or Restart there: either ends the session.</td></tr>
+    <tr><td>Volume</td><td>Up and down.</td></tr>
+    <tr><td>Camera, zoom</td><td>A screenshot (kept on GitHub's machine, not here) and a magnifier.</td></tr>
+    <tr><td>Rotate</td><td>Turns the phone left or right.</td></tr>
+    <tr><td>◁ ○ □</td><td>Back, Home and Overview (recent apps).</td></tr>
+    <tr><td>⋯ More</td><td>Does nothing here: the emulator's own settings are kept closed on purpose.</td></tr>
+  </table>
+  <p class="small">The toolbar's top row (× and –) is left out of the picture on purpose: × would switch the
+    virtual phone off at once. Powering the phone off ends the session early, and its own recording of the
+    network is then lost. To stop, use <em>End the session now</em> above, or cancel the run in the GitHub
+    app.</p>
+
+  <h2>Limits</h2>
+  <ul>
+    <li>It is an x86_64 virtual phone: apps built only for phone (ARM) processors do not install.</li>
+    <li>No Google Play services: apps that need them complain or stop.</li>
+    <li>Slower than a real phone. One session at a time.</li>
+    <li>No sound and no camera: the virtual phone has neither, and this page carries only the screen.</li>
+    <li>At the end, the virtual phone's network traffic is checked for leaks; the run's summary on GitHub shows
+      the result.</li>
+  </ul>
+</main>
+<script>
+"use strict";
+(function () {
+  // Not in a frame of another site's page.
+  let framed = true;
+  try { framed = window.top !== window.self; } catch (e) { /* framed */ }
+  if (framed) { document.body.textContent = "Open this page on its own."; return; }
+  const $ = (id) => document.getElementById(id);
+  const host = location.host.toLowerCase();
+  const wsBase = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websockify?token=";
+  const KEY_PW = "antumbra-live-password";
+  const KEY_END = "antumbra-live-end";
+  const KEY_TOKEN = "antumbra-live-token";
+  // The same number of rounds as live.py's TOKEN_ROUNDS.
+  const ROUNDS = 600000;
+  let session = null;
+
+  function store(kind) {
+    try { return kind === "local" ? window.localStorage : window.sessionStorage; } catch (e) { return null; }
+  }
+  function get(kind, k) { const s = store(kind); try { return s ? s.getItem(k) : null; } catch (e) { return null; } }
+  function put(kind, k, v) { const s = store(kind); try { if (s) s.setItem(k, v); } catch (e) { /* private mode */ } }
+  function del(kind, k) { const s = store(kind); try { if (s) s.removeItem(k); } catch (e) { /* private mode */ } }
+
+  function say(el, text, cls) { el.textContent = text; el.className = cls || ""; }
+
+  // The same as live.py: NFC, no spaces, tabs or line breaks at either end.
+  function normalize(pw) { return pw.normalize("NFC").replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, ""); }
+  // The same as live.py's token(): PBKDF2-HMAC-SHA-256, salt LABEL LF HOST.
+  async function tokenFor(label, pw) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey("raw", enc.encode(normalize(pw)), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", hash: "SHA-256", salt: enc.encode(label + "\n" + host), iterations: ROUNDS }, key, 256);
+    return Array.from(new Uint8Array(bits)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // Opens the screen's WebSocket and waits for the VNC server's greeting
+  // ("RFB 003.008"): true when it came, false when the server refused.
+  function tryScreen(token) {
+    return new Promise((resolve) => {
+      let done = false;
+      const finish = (ok) => { if (!done) { done = true; try { ws.close(); } catch (e) { /* closed */ } resolve(ok); } };
+      const ws = new WebSocket(wsBase + token, ["binary"]);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        const b = new Uint8Array(ev.data instanceof ArrayBuffer ? ev.data : new ArrayBuffer(0));
+        finish(b.length >= 4 && String.fromCharCode(b[0], b[1], b[2], b[3]) === "RFB ");
+      };
+      ws.onerror = () => finish(false);
+      ws.onclose = () => finish(false);
+      setTimeout(() => finish(false), 15000);
+    });
+  }
+
+  function hm(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? "" : d.toISOString().slice(11, 16) + " UTC";
+  }
+  function minutesLeft(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? null : Math.max(0, Math.round((d - Date.now()) / 60000));
+  }
+  const STATE_WORDS = {
+    starting: "The phone is starting. This takes about 10 minutes; the page updates by itself.",
+    ready: "The phone is ready. Open it, then press Start in Welcome.",
+    started: "The session is running.",
+    ending: "The session is ending. The privacy check runs next.",
+    ended: "The session has ended. The privacy check is in the run's summary on GitHub.",
+    failed: "The phone could not be set up. The run's summary on GitHub says why.",
+  };
+
+  async function refresh() {
+    try {
+      const r = await fetch("session.json?t=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) throw new Error(String(r.status));
+      session = await r.json();
+    } catch (e) {
+      say($("state"), "The session does not answer. It may have ended.");
+      return;
+    }
+    say($("state"), STATE_WORDS[session.state] || "State: " + session.state);
+    say($("note"), typeof session.note === "string" ? session.note : "");
+    if (session.end) {
+      const left = minutesLeft(session.end);
+      $("endsAt").textContent = " at " + hm(session.end);
+      $("times").textContent = "Started " + hm(session.start) + ". Ends " + hm(session.end) +
+        (left !== null && session.state !== "ended" ? " (in " + left + " min)." : ".");
+    }
+  }
+
+  function showButtons() {
+    $("again").classList.toggle("hidden", !get("session", KEY_TOKEN));
+    $("forget").classList.toggle("hidden", !get("local", KEY_PW));
+  }
+
+  function openPhone() {
+    // phone.html takes the token from this tab's sessionStorage and connects
+    // to this host only: the token stays out of every address and of the
+    // history.
+    location.href = "phone.html";
+  }
+
+  $("unlock").addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    const msg = $("msg");
+    if (!window.crypto || !crypto.subtle) {
+      say(msg, "This browser cannot work out the key (it needs HTTPS). Open the link in Safari.", "bad");
+      return;
+    }
+    const pw = $("pw").value;
+    if (!normalize(pw)) { say(msg, "Type the password first.", "bad"); return; }
+    $("open").disabled = true;
+    say(msg, "Checking…");
+    try {
+      const screen = await tokenFor("antumbra-live", pw);
+      const end = await tokenFor("antumbra-live-end", pw);
+      if (await tryScreen(screen)) {
+        put("session", KEY_TOKEN, screen);
+        put("session", KEY_END, end);
+        if ($("remember").checked) put("local", KEY_PW, pw); else del("local", KEY_PW);
+        say(msg, "Opening the phone…", "good");
+        showButtons();
+        openPhone();
+      } else {
+        say(msg, "That did not open the screen. Check the password (the secret ANTUMBRA_LIVE_PASSWORD). " +
+          "If it is right, the session may have ended.", "bad");
+      }
+    } finally {
+      $("open").disabled = false;
+    }
+  });
+
+  $("again").addEventListener("click", openPhone);
+
+  $("end").addEventListener("click", async () => {
+    let end = get("session", KEY_END);
+    const pw = get("local", KEY_PW) || $("pw").value;
+    if (!end && normalize(pw || "") && window.crypto && crypto.subtle) {
+      say($("msg2"), "Checking…");
+      end = await tokenFor("antumbra-live-end", pw);
+    }
+    if (!end) { say($("msg2"), "Type the password above first, then tap End the session now.", "bad"); return; }
+    if (!window.confirm("End the session now? The virtual phone is switched off and wiped.")) return;
+    // websockify opens the WebSocket only for the right token, then tells
+    // the session to end; the server closes it.
+    const ws = new WebSocket(wsBase + end, ["binary"]);
+    let opened = false;
+    ws.onopen = () => {
+      opened = true;
+      say($("msg2"), "Asked to end. The link closes within a minute; the privacy check then runs.", "good");
+      setTimeout(() => { try { ws.close(); } catch (e) { /* closed */ } }, 5000);
+    };
+    ws.onclose = () => {
+      if (!opened) say($("msg2"), "The session did not take the request (wrong password, or it has ended).", "bad");
+    };
+  });
+
+  $("forget").addEventListener("click", () => {
+    del("local", KEY_PW);
+    del("session", KEY_END);
+    del("session", KEY_TOKEN);
+    $("pw").value = "";
+    $("remember").checked = false;
+    showButtons();
+    say($("msg2"), "");
+    say($("msg"), "Forgotten on this device.", "good");
+  });
+
+  // An older version of these pages kept the token in noVNC's "path"
+  // setting, which noVNC's own page could be told to send elsewhere.
+  del("local", "path");
+  const saved = get("local", KEY_PW);
+  if (saved) { $("pw").value = saved; $("remember").checked = true; }
+  showButtons();
+  refresh();
+  setInterval(refresh, 15000);
+})();
+</script>
+</body>
+</html>

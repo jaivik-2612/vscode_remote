@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<resources>
+    <!-- Keepalive offload slots per transport, "transport,count". AOSP's
+         default is "0,1" (cellular) and "1,3" (Wi-Fi); the hotdog device
+         tree does not change it. With 0 slots, every request to start an
+         offloaded keepalive fails with ERROR_UNSUPPORTED, for every app.
+         The resource is overlayable by product, system and vendor overlays
+         (ServiceConnectivityResourcesConfig), and KeepaliveResourceUtil
+         accepts a count of 0 (Android 16 source). -->
+    <string-array name="config_networkSupportedKeepaliveCount" translatable="false">
+        <item>0,0</item>
+        <item>1,0</item>
+    </string-array>
+</resources>

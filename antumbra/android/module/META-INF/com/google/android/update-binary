@@ -1,0 +1,17 @@
+#!/sbin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Antumbra module: recovery stub.
+#
+# The Antumbra module is installed from the Magisk app, with
+# 'magisk --install-module <zip>' from a root shell, or with KernelSU's
+# manager. Those use their own installer, which replaces this file. Flashing
+# the zip in a custom recovery is not supported: the module's install-time
+# checks need the running Android system.
+OUTFD=$2
+if [ -n "$OUTFD" ] && [ -e "/proc/self/fd/$OUTFD" ]; then
+	echo "ui_print Install the Antumbra module from the Magisk app, not from recovery." >"/proc/self/fd/$OUTFD"
+	echo "ui_print" >"/proc/self/fd/$OUTFD"
+fi
+echo "Install the Antumbra module from the Magisk app, not from recovery." >&2
+exit 1

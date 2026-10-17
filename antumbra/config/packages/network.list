@@ -1,0 +1,30 @@
+# Tor, firewall and radio policy.
+tor
+tor-geoipdb
+torsocks
+nftables
+network-manager
+wpasupplicant
+macchanger
+ethtool
+iw
+rfkill
+curl
+python3-stem
+usbguard
+
+# modem processor userspace (Wi-Fi needs it; the radio stays in low-power mode)
+rmtfs
+tqftpserv
+qrtr-tools
+libqmi-utils
+
+# Tails' htpdate (Perl) and onion-grater (Python) dependencies
+libdatetime-perl
+libdatetime-format-dateparse-perl
+libgetopt-long-descriptive-perl
+libipc-run-perl
+libipc-system-simple-perl
+libstring-errf-perl
+libtry-tiny-perl
+python3-psutil

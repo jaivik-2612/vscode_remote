@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Installing Antumbra on the OnePlus 7T Pro</title>
+<style>
+@font-face { font-family: "Roboto"; font-weight: 300; src: url("Roboto-300.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 400; src: url("Roboto-400.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 500; src: url("Roboto-500.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 700; src: url("Roboto-700.woff2") format("woff2"); }
+@font-face { font-family: "Roboto"; font-weight: 900; src: url("Roboto-900.woff2") format("woff2"); }
+@font-face { font-family: "Noto Sans Mono"; font-weight: 400; src: url("NotoSansMono-400.woff2") format("woff2"); }
+@font-face { font-family: "Noto Sans Mono"; font-weight: 700; src: url("NotoSansMono-700.woff2") format("woff2"); }
+
+:root {
+  --ink: #1d1a24;
+  --muted: #5d5869;
+  --line: #d9d3e6;
+  --violet: #4d2c9e;
+  --violet-deep: #35275d;
+  --violet-soft: #f1ecfc;
+  --code-bg: #f6f4fa;
+  --warn: #8a3b00;
+  --warn-bg: #fff3e8;
+  --warn-line: #f0c9a5;
+  --stop: #8c1d2e;
+  --stop-bg: #fdecef;
+  --stop-line: #efb8c2;
+  --ok: #1f5f3a;
+  --ok-bg: #ebf6ef;
+  --ok-line: #b6dcc3;
+}
+* { box-sizing: border-box; }
+html { font-size: 10pt; }
+body {
+  margin: 0; color: var(--ink); background: #fff;
+  font-family: "Roboto", "Liberation Sans", "DejaVu Sans", sans-serif;
+  font-weight: 400; line-height: 1.45;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+p { margin: 0 0 0.6em; }
+a { color: var(--violet); text-decoration: none; }
+strong { font-weight: 700; }
+em { font-style: normal; font-weight: 500; color: var(--violet-deep); }
+code, pre, .mono { font-family: "Noto Sans Mono", "DejaVu Sans Mono", monospace; }
+code { font-size: 0.88em; background: var(--code-bg); padding: 0.05em 0.3em; border-radius: 3px; overflow-wrap: anywhere; }
+pre {
+  margin: 0.4em 0 0.8em; padding: 0.6em 0.8em; background: var(--code-bg);
+  border-left: 3px solid var(--violet); border-radius: 0 4px 4px 0;
+  font-size: 8.6pt; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  break-inside: avoid;
+}
+pre .c { color: var(--muted); }
+h1, h2, h3 { font-weight: 700; color: var(--violet-deep); text-wrap: balance; break-after: avoid; }
+h2 {
+  font-size: 15pt; margin: 0 0 0.5em; padding-top: 0.2em;
+  display: flex; align-items: baseline; gap: 0.5em;
+}
+h2 .num {
+  font-weight: 900; color: #fff; background: var(--violet);
+  font-size: 11pt; min-width: 1.9em; height: 1.9em; line-height: 1.9em;
+  text-align: center; border-radius: 50%; flex: none;
+}
+h3 { font-size: 11pt; margin: 1em 0 0.35em; }
+section { break-before: page; }
+section.keep { break-before: auto; margin-top: 1.6em; }
+ol, ul { margin: 0 0 0.7em; padding-left: 1.4em; }
+li { margin: 0.18em 0; }
+ol.steps { counter-reset: s; list-style: none; padding-left: 0; }
+ol.steps > li {
+  counter-increment: s; position: relative; padding: 0.35em 0 0.35em 2.4em;
+  border-bottom: 1px solid #eee9f5; break-inside: avoid;
+}
+ol.steps > li:last-child { border-bottom: none; }
+ol.steps > li::before {
+  content: counter(s); position: absolute; left: 0; top: 0.35em;
+  width: 1.65em; height: 1.65em; line-height: 1.65em; text-align: center;
+  font-weight: 700; font-size: 9pt; color: var(--violet-deep);
+  background: var(--violet-soft); border-radius: 50%;
+}
+.box { border: 1px solid var(--line); border-radius: 6px; padding: 0.6em 0.9em; margin: 0.6em 0 0.9em; break-inside: avoid; }
+.box > :last-child { margin-bottom: 0; }
+.box .t { font-weight: 700; font-size: 8.5pt; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 0.3em; display: block; }
+.warn { background: var(--warn-bg); border-color: var(--warn-line); }
+.warn .t { color: var(--warn); }
+.stop { background: var(--stop-bg); border-color: var(--stop-line); }
+.stop .t { color: var(--stop); }
+.ok { background: var(--ok-bg); border-color: var(--ok-line); }
+.ok .t { color: var(--ok); }
+.note { background: var(--violet-soft); border-color: #ddd2f7; }
+.note .t { color: var(--violet); }
+table { width: 100%; border-collapse: collapse; margin: 0.4em 0 0.9em; font-size: 9pt; break-inside: avoid; }
+th, td { text-align: left; vertical-align: top; padding: 0.35em 0.5em; border-bottom: 1px solid var(--line); }
+th { font-weight: 700; color: var(--violet-deep); border-bottom: 1.5px solid var(--violet); font-size: 8.5pt; letter-spacing: 0.02em; }
+.os { display: grid; grid-template-columns: 1fr; gap: 0.5em; }
+.os > div { border: 1px solid var(--line); border-radius: 6px; padding: 0.55em 0.8em; break-inside: avoid; }
+.os h4 { margin: 0 0 0.3em; font-size: 10pt; color: var(--violet-deep); }
+.os > div > :last-child { margin-bottom: 0; }
+.kbd { font-weight: 700; border: 1px solid #bdb5cc; border-bottom-width: 2px; border-radius: 4px; padding: 0 0.35em; font-size: 0.9em; white-space: nowrap; background: #fff; }
+.muted { color: var(--muted); }
+.small { font-size: 8.6pt; }
+
+/* Cover */
+.cover { height: 257mm; display: flex; flex-direction: column; }
+.cover .band { background: var(--violet-deep); color: #fff; border-radius: 10px; padding: 26mm 14mm 14mm; position: relative; overflow: hidden; }
+.cover .band::after {
+  content: ""; position: absolute; right: -40mm; top: -40mm; width: 120mm; height: 120mm; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #6a4bc4 0%, #4d2c9e 45%, rgba(53,39,93,0) 72%);
+}
+.cover .eyebrow { position: relative; z-index: 1; font-size: 9pt; letter-spacing: 0.16em; text-transform: uppercase; color: #cebdfe; font-weight: 500; }
+.cover h1 { position: relative; z-index: 1; color: #fff; font-size: 30pt; line-height: 1.08; margin: 4mm 0 5mm; font-weight: 900; max-width: 140mm; }
+.cover .sub { position: relative; z-index: 1; font-size: 12pt; color: #e8ddff; font-weight: 300; max-width: 135mm; }
+.cover .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4mm; margin: 9mm 0 8mm; }
+.cover .facts div { border-top: 2px solid var(--violet); padding-top: 2mm; }
+.cover .facts b { display: block; font-size: 12pt; color: var(--violet-deep); }
+.cover .facts span { font-size: 8.5pt; color: var(--muted); }
+.cover .toc { columns: 2; column-gap: 10mm; font-size: 9.5pt; margin-top: auto; }
+.cover .toc div { break-inside: avoid; padding: 1.2mm 0; border-bottom: 1px solid #eee9f5; display: flex; gap: 3mm; }
+.cover .toc b { color: var(--violet); min-width: 6mm; }
+
+.flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2mm; margin: 0.4em 0 1em; }
+.flow div { background: var(--violet-soft); border-radius: 6px; padding: 2mm 2.4mm; font-size: 8.3pt; line-height: 1.3; }
+.flow b { display: block; color: var(--violet); font-size: 8pt; letter-spacing: 0.04em; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6em; }
+.slotpick { display: grid; grid-template-columns: 1fr; gap: 0.5em; margin: 0.4em 0 0.8em; }
+.slotpick > div { border: 1.5px solid var(--violet); border-radius: 6px; padding: 0.5em 0.7em; break-inside: avoid; }
+.slotpick h4 { margin: 0 0 0.3em; font-size: 9.5pt; color: var(--violet-deep); }
+.slotpick pre { margin: 0; font-size: 8pt; white-space: pre; }
+pre.one { white-space: pre; font-size: 8pt; }
+</style>
+</head>
+<body>
+
+<!-- ============================== COVER ============================== -->
+<div class="cover">
+  <div class="band">
+    <div class="eyebrow">Antumbra 0.1.0-alpha.2 &middot; Install guide &middot; October 2026</div>
+    <h1>Installing Antumbra on the OnePlus 7T&nbsp;Pro</h1>
+    <div class="sub">Step by step, from a phone running OxygenOS to Antumbra's Welcome screen, using a Windows, macOS or Linux computer.</div>
+  </div>
+
+  <div class="facts">
+    <div><b>About 2 hours</b><span>including downloads and two phone resets</span></div>
+    <div><b>Erases the phone</b><span>back up first: everything on it is deleted</span></div>
+    <div><b>HD1913 (Europe)</b><span>the model the underlying port was tested on</span></div>
+    <div><b>Alpha software</b><span>not yet booted on a phone by its authors</span></div>
+  </div>
+
+  <div class="box stop">
+    <span class="t">Read this before you start</span>
+    <p>Antumbra is <strong>alpha software that its authors have not yet started on a real phone</strong>. It is built on a Linux port for this phone that one developer has tested on hardware, and Antumbra itself has been tested only in a virtual machine. Expect problems: the phone may not start Antumbra at all, Wi-Fi, sound or graphics may not work, and you may have to reinstall Android.</p>
+    <p>Installing <strong>erases everything on the phone</strong>, twice: once when you unlock the bootloader, and again when Antumbra is written. Use a phone you can afford to be without, and follow the steps in order. If the phone is ever recognised by your computer as <span class="mono">QDLoader 9008</span>, <span class="mono">QHSUSB_BULK</span> or similar, stop and read section 10.</p>
+  </div>
+
+  <div class="toc">
+    <div><b>1</b>What you need</div>
+    <div><b>2</b>Check your phone's model</div>
+    <div><b>3</b>Set up your computer</div>
+    <div><b>4</b>Back up, unlock the bootloader</div>
+    <div><b>5</b>OxygenOS F.22 in both slots</div>
+    <div><b>6</b>Download and check Antumbra</div>
+    <div><b>7</b>Prepare the install</div>
+    <div><b>8</b>Install Antumbra</div>
+    <div><b>9</b>First start</div>
+    <div><b>10</b>If something goes wrong</div>
+    <div><b>11</b>Going back to Android</div>
+    <div><b>12</b>Last resort: the MSM Download Tool</div>
+    <div><b>A</b>Quick reference</div>
+  </div>
+</div>
+
+<!-- ============================== 1 ============================== -->
+<section>
+<h2><span class="num">1</span>What you need</h2>
+
+<div class="flow">
+  <div><b>STEPS 2&ndash;3</b>Check the model, install fastboot on the computer</div>
+  <div><b>STEP 4</b>Back up, unlock the bootloader (erases the phone)</div>
+  <div><b>STEP 5</b>Put OxygenOS F.22 in both slots</div>
+  <div><b>STEPS 6&ndash;7</b>Download, check, find the free slot</div>
+  <div><b>STEPS 8&ndash;9</b>Write Antumbra, start it</div>
+</div>
+
+<table>
+  <tr><th style="width:28%">Item</th><th>Details</th></tr>
+  <tr><td><strong>The phone</strong></td><td>A OnePlus 7T Pro, ideally model <strong>HD1913</strong> (section 2), charged to well over half. Not the OnePlus 7T, 7 Pro or the T-Mobile 7T Pro 5G McLaren.</td></tr>
+  <tr><td><strong>A USB cable</strong></td><td>A USB-C cable that carries data, not only charge (the one that came with the phone is best). If your computer has a USB-A port, a USB-A to USB-C cable in a USB 2.0 port is the most reliable.</td></tr>
+  <tr><td><strong>A computer</strong></td><td>Windows 10 or 11, macOS, or Linux, with about 8 GB of free space (the OxygenOS package is several GB; it can stay on a USB stick instead) and an internet connection. You will type a few commands into a terminal window; this guide gives every one of them.</td></tr>
+  <tr><td><strong>A GitHub account</strong></td><td>The Antumbra files are on the <em>draft</em> release of your GitHub repository, which only you can see while you are signed in (section 6).</td></tr>
+  <tr><td><strong>Time</strong></td><td>About two hours. Do not start shortly before you need the phone.</td></tr>
+</table>
+
+<h3>Words this guide uses</h3>
+<table>
+  <tr><td style="width:28%"><strong>Bootloader</strong></td><td>The small program that starts the phone. In its <em>fastboot</em> mode your computer can write to the phone's storage.</td></tr>
+  <tr><td><strong>fastboot</strong></td><td>The command-line tool on your computer that talks to the bootloader, part of Google's free <em>platform-tools</em>. <strong>fastbootd</strong> is a second fastboot mode, provided by the phone's recovery, which can write the large Antumbra file.</td></tr>
+  <tr><td><strong>Slot A / slot B</strong></td><td>The phone keeps two sets of its start-up files, called slots. Android runs from one of them; Antumbra goes into the other, so Android's own slot stays untouched and you can go back.</td></tr>
+  <tr><td><strong>Firmware</strong></td><td>Programs that run inside the phone's chips (Wi-Fi, modem, sound, graphics). They belong to Qualcomm and OnePlus and are already on your phone. Antumbra's files contain none of them: at every start Antumbra reads them, read-only, from the phone's own storage.</td></tr>
+</table>
+
+<div class="box note">
+  <span class="t">What Antumbra can and cannot do on this phone</span>
+  <p><strong>Expected to work</strong> (as on the Linux port it is built on): the screen at 60 Hz, touch, Wi-Fi, the speakers, USB-C, the cameras (basic photos), and Antumbra's own features: Tor for all connections, the Welcome screen, optional encrypted Persistent Storage, Tor Browser, and optional Android apps.</p>
+  <p class="small"><strong>Not working:</strong> phone calls, SMS and mobile data (the modem only runs for Wi-Fi), Bluetooth (off, with no way to switch it on yet), the fingerprint reader, automatic screen rotation, the earpiece and headsets, 90 Hz, fast charging. Charging from a computer's USB port is slow; use a wall charger.</p>
+</div>
+</section>
+
+<!-- ============================== 2 ============================== -->
+<section>
+<h2><span class="num">2</span>Check your phone's model</h2>
+<p>Look at the <strong>model number on the box or on the label</strong> (on the back of the phone or under the SIM tray area). You can also open <em>Settings &rarr; About phone</em> (on OxygenOS 12: <em>Settings &rarr; About device</em>), but if the phone has ever run LineageOS, Settings can show <em>HD1911</em> whatever the real model is.</p>
+<table>
+  <tr><th style="width:18%">Model</th><th style="width:28%">Where it was sold</th><th>Can you use this guide?</th></tr>
+  <tr><td><strong>HD1913</strong></td><td>Europe</td><td><strong>Yes.</strong> The Linux port Antumbra is built on was tested on this model.</td></tr>
+  <tr><td>HD1911</td><td>India</td><td>Same software line, but the full Linux port has never been started on one. You can try at your own risk.</td></tr>
+  <tr><td>HD1917</td><td>North American / global software line</td><td>As for HD1911: untested.</td></tr>
+  <tr><td>HD1910</td><td>China</td><td>As for HD1911: untested.</td></tr>
+  <tr><td>HD1925</td><td>T-Mobile (7T Pro 5G McLaren)</td><td><strong>No.</strong> A different phone, and its bootloader needs an unlock token from OnePlus.</td></tr>
+</table>
+<div class="box warn">
+  <span class="t">Why this matters</span>
+  <p>The commands in this guide write to fixed places on the phone's storage. On a different phone they could damage it. The Linux script mentioned in section 3 checks the size of every place it writes to and stops if one does not match; typing the commands by hand, as this guide does, has no such check.</p>
+</div>
+</section>
+
+<!-- ============================== 3 ============================== -->
+<section>
+<h2><span class="num">3</span>Set up your computer</h2>
+<p>You need Google's <strong>SDK Platform-Tools</strong>, which contain <span class="mono">adb</span> and <span class="mono">fastboot</span>. Download them only from Google's page: <a href="https://developer.android.com/tools/releases/platform-tools">developer.android.com/tools/releases/platform-tools</a>.</p>
+
+<div class="os">
+  <div>
+    <h4>Windows 10 or 11</h4>
+    <ol>
+      <li>Download <em>SDK Platform-Tools for Windows</em>. Right-click the zip, choose <em>Extract All</em>, and type <span class="mono">C:\</span> as the destination (not <span class="mono">C:\platform-tools</span>): the zip already contains a folder named <span class="mono">platform-tools</span>, so this creates <span class="mono">C:\platform-tools\fastboot.exe</span>.</li>
+      <li>Download Google's <strong>USB driver</strong> (<a href="https://developer.android.com/studio/run/win-usb">developer.android.com/studio/run/win-usb</a>, the zip file) and extract it the same way, to <span class="mono">C:\</span>; this creates <span class="mono">C:\usb_driver</span>. You will need it in section 4. (The driver is for ordinary 64-bit Intel or AMD PCs; on a Windows PC with an ARM processor it may not install.)</li>
+      <li>Open the <span class="mono">C:\platform-tools</span> folder (you should see <span class="mono">fastboot.exe</span> in it; if you see another <span class="mono">platform-tools</span> folder instead, open that one), right-click an empty area and choose <em>Open in Terminal</em> (Windows 11) or hold <span class="kbd">Shift</span> and right-click, then <em>Open PowerShell window here</em> (Windows 10).</li>
+      <li>Type <code>.\fastboot.exe --version</code> and press <span class="kbd">Enter</span>. A version number means it works.</li>
+    </ol>
+    <p class="small"><strong>Important on Windows:</strong> in PowerShell every command from the platform-tools folder starts with <code>.\</code>. Where this guide writes <code>fastboot devices</code>, you type <code>.\fastboot.exe devices</code>, and <code>adb</code> becomes <code>.\adb.exe</code>.</p>
+  </div>
+  <div>
+    <h4>macOS</h4>
+    <ol>
+      <li>Download <em>SDK Platform-Tools for Mac</em>; the zip unpacks to a <span class="mono">platform-tools</span> folder in <em>Downloads</em>.</li>
+      <li>Open <em>Terminal</em> (in <em>Applications &rarr; Utilities</em>) and type <code>cd ~/Downloads/platform-tools</code>.</li>
+      <li>Type <code>./fastboot --version</code>. If macOS refuses to open it, allow it in <em>System Settings &rarr; Privacy &amp; Security</em> and try again.</li>
+    </ol>
+    <p class="small">Where this guide writes <code>fastboot</code>, type <code>./fastboot</code> (and <code>./adb</code> for <code>adb</code>). <strong>With Homebrew</strong> (<code>brew install --cask android-platform-tools</code>) there is no platform-tools folder: make a folder for the Antumbra files (<code>mkdir ~/antumbra</code>), work in it (<code>cd ~/antumbra</code>), and type <code>fastboot</code> and <code>adb</code> without <code>./</code>.</p>
+  </div>
+  <div>
+    <h4>Linux</h4>
+    <ol>
+      <li>Download <em>SDK Platform-Tools for Linux</em> and unzip it into your home folder, which creates <span class="mono">~/platform-tools</span>.</li>
+      <li>Open a terminal, type <code>cd ~/platform-tools</code>, then <code>./fastboot --version</code>.</li>
+      <li>If later <code>fastboot devices</code> prints <em>no permissions</em>, install the <span class="mono">android-udev-rules</span> package, or run fastboot with <code>sudo</code>.</li>
+    </ol>
+    <p class="small">Where this guide writes <code>fastboot</code>, type <code>./fastboot</code> (and <code>./adb</code>). <strong>With your distribution's packages</strong> instead (on Debian or Ubuntu both <span class="mono">adb</span> and <span class="mono">fastboot</span>; elsewhere <span class="mono">android-tools</span>; version 28.0.2 or newer), make a folder for the Antumbra files (<code>mkdir ~/antumbra</code>), work in it (<code>cd ~/antumbra</code>), and type the commands without <code>./</code>.</p>
+    <p class="small">If you have the Antumbra repository, its guided script performs sections 7 and 8 with extra checks. On the first install, run <code style="white-space:nowrap">build/flash.sh --release FOLDER --first-install</code> rather than giving it a letter you remember. It takes the current slot as Android's, refuses one that has never started successfully, and prints the letter: write it down as in section 7. On every later install, give it the letter on your note: <code style="white-space:nowrap">--android-slot LETTER</code>.</p>
+  </div>
+</div>
+<div class="box note">
+  <span class="t">Keep everything in one folder</span>
+  <p>In section 6 you will put the Antumbra files into this same <span class="mono">platform-tools</span> folder (or the <span class="mono">antumbra</span> folder you made). Then every command in this guide works as written, without typing long paths. Tip: type the first letters of a file name and press <span class="kbd">Tab</span> to complete it.</p>
+</div>
+</section>
+
+<!-- ============================== 4 ============================== -->
+<section>
+<h2><span class="num">4</span>Back up, then unlock the bootloader</h2>
+<p><strong>Unlock before you install any OxygenOS update.</strong> OnePlus 7-series phones on OxygenOS 12 have been reported to refuse the unlock (see the box at the end of this section), so a phone still on OxygenOS 10 or 11 stays on it until it is unlocked; section 5 then brings it to F.22. If your phone already runs F.22, the order does not matter for it: the unlock comes first all the same, and its second F.22 install (section 5) may also be done before the unlock.</p>
+<div class="box stop">
+  <span class="t">This erases the phone</span>
+  <p>Unlocking deletes everything on the phone. After it, the phone shows a warning that the bootloader is unlocked every time it starts; that is normal and stays. OnePlus says an unlocked phone no longer receives official updates; section 5 therefore uses the full update package if none is offered. Never lock the bootloader again while Antumbra is installed.</p>
+</div>
+<ol class="steps">
+  <li><strong>Back up everything you want to keep</strong>: photos, messages, two-factor codes, contacts. Step 6 erases the phone completely.</li>
+  <li><strong>Turn on Developer options and OEM unlocking.</strong> On OxygenOS 12: <em>Settings &rarr; About device &rarr; Version</em>, tap <em>Build number</em> seven times (enter your PIN if asked); on older versions: <em>Settings &rarr; About phone</em>, tap <em>Build number</em> seven times. Then open <em>Developer options</em> (search Settings for it), switch on <em>OEM unlocking</em>, and switch off <em>Automatic system updates</em> if it is there, so that no update is installed before the unlock.</li>
+  <li><strong>Keep a copy of the F.22 full package off the phone.</strong> Download it with the free <em>Oxygen Updater</em> app (it fetches OnePlus's own files), but <strong>do not install it now</strong>. Copy the file (a <span class="mono">.zip</span>) to a USB stick with the Files app, or to your computer into the same folder as the other files (connect the phone and choose <em>File transfer</em> in its USB notification): the unlock erases it from the phone, and section 5 needs it.</li>
+  <li><strong>Start the bootloader:</strong> switch the phone off, then hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> until the bootloader screen appears. Connect the phone.</li>
+  <li><strong>Check the connection:</strong> type <code>fastboot devices</code>. It should print one line with a serial number and the word <span class="mono">fastboot</span>.
+    <div class="box warn" style="margin-top:0.5em">
+      <span class="t">Windows: nothing printed?</span>
+      <p>Windows does not know the bootloader's USB device yet. Open <em>Device Manager</em> (right-click Start). Find the phone, usually under <em>Other devices</em> with a yellow triangle (often called <em>Android</em>). Right-click it, <em>Update driver &rarr; Browse my computer for drivers &rarr; Let me pick from a list</em> (if asked for a device type: <em>Show All Devices &rarr; Next</em>) <em>&rarr; Have Disk&hellip;</em>, browse to <span class="mono">C:\usb_driver</span> and pick <span class="mono">android_winusb.inf</span>, then choose <strong>Android Bootloader Interface</strong> and accept the warning. Run <code>fastboot devices</code> again. Restart the computer if it still shows nothing.</p>
+    </div>
+  </li>
+  <li><strong>Unlock:</strong> type <code>fastboot oem unlock</code>. The phone asks whether to unlock. Use the <span class="kbd">Volume</span> keys to choose the unlock option and press <span class="kbd">Power</span> to confirm.</li>
+  <li>The phone erases itself and restarts into Android's first-time setup, where section 5 continues. The bootloader is now unlocked: you can check with <code>fastboot getvar unlocked</code> in the bootloader, which should say <span class="mono">unlocked: yes</span>.</li>
+</ol>
+<div class="box warn">
+  <span class="t">If the unlock is refused &ldquo;for technical reason&rdquo;</span>
+  <p>If step 6 answers <span class="mono">FAILED (remote: 'Device cannot be unlocked for technical reason.')</span>, the phone stays locked. This has been reported for the OnePlus 7 Pro (GM1913) on OxygenOS 12; whether the 7T Pro does the same is unknown. <strong>Stop here and keep the phone as it is</strong>: type <code>fastboot reboot</code> to start Android, and install no update and no other OxygenOS version. The reported way round is a detour: roll back to OxygenOS 11 with OnePlus's full rollback package (which erases the phone), unlock, then put F.22 in both slots. A later release of this guide describes the detour step by step.</p>
+</div>
+</section>
+
+<!-- ============================== 5 ============================== -->
+<section>
+<h2><span class="num">5</span>Put OxygenOS 12 F.22 in both slots</h2>
+<p>Antumbra runs on the start-up software and firmware of its own slot, and the Linux port it is built on was tested with OxygenOS 12 build <strong>F.22</strong>, the last one for this phone. A system update only writes the slot Android is <em>not</em> using and then switches to it, so each install moves Android to the other slot, and after one update the other slot still holds the previous version. Installing F.22 twice puts it in both.</p>
+<ol class="steps">
+  <li><strong>Set up Android</strong> quickly (no accounts are needed) and connect to Wi-Fi.</li>
+  <li><strong>Turn on Developer options and USB debugging again</strong>: the unlock reset them. Tap <em>Build number</em> seven times as in section 4, step 2, then switch on <em>USB debugging</em> in <em>Developer options</em>.</li>
+  <li><strong>Connect the phone</strong> and type <code>adb devices</code>. On the phone, allow USB debugging for this computer (tick <em>Always allow</em>). The command lists the phone with the word <span class="mono">device</span>. (Windows: if it lists nothing, look in <em>Device Manager</em> for a device with a yellow triangle and install Google's driver for it as in section 4, choosing <em>Android ADB Interface</em>.)</li>
+  <li><strong>Update over the air, if an update is offered.</strong> On OxygenOS 12: <em>Settings &rarr; About device</em>, tap the version card (<em>Up to date</em> or <em>Update available</em>). On OxygenOS 10 or 11: <em>Settings &rarr; System &rarr; System updates</em>. If neither is there, search Settings for "update". Install every update offered. The version then reads something like <span class="mono">HD1913_11_F.22</span>. Whether an unlocked phone is offered updates is not confirmed; if none is, go on to step 5.</li>
+  <li><strong>Look at the current slot:</strong> type <code>adb shell getprop ro.boot.slot_suffix</code>. It prints <span class="mono">_a</span> or <span class="mono">_b</span>. Remember it only to compare in step 7; this is not the note you keep (that comes in section 7).</li>
+  <li><strong>Install F.22 from the full package</strong> you saved in section 4. Copy it back into the top folder of the phone's storage, where <em>Local install</em> is reported to look for it: from a USB stick with the Files app, or from the computer with <code style="white-space:nowrap">adb push FILE /sdcard/</code> (FILE is the package's name). Wait a few minutes after the last restart (the phone first finishes the previous update), then use <em>Local install</em>, which on OxygenOS 12 is in the menu (top right) of <em>Settings &rarr; About device &rarr; Up to date</em> once Developer options are on (on OxygenOS 10 or 11 it is reported to be <em>Local upgrade</em>, under the icon at the top right of <em>System updates</em>). Let it finish and restart.</li>
+  <li><strong>Check that it worked:</strong> <code>adb shell getprop ro.boot.slot_suffix</code> now prints the <em>other</em> letter. If the phone did not already run F.22 before step 6, do steps 5 to 7 once more. Both slots then hold F.22.</li>
+  <li><strong>Restart the phone once more</strong> and wait a few minutes with the screen on: OxygenOS 12 finishes an update in the background after the first restart (it "merges" it), and the phone refuses to install Antumbra until it has (section 7 checks this). Only then read Android's slot in section 7: each install moved Android to the other slot.</li>
+</ol>
+<div class="box warn">
+  <span class="t">If the second install is refused</span>
+  <p>Nobody has confirmed that OxygenOS accepts installing the version it already runs. If it refuses, or the letter in step 7 did not change, you can continue: Antumbra will then run on the start-up software and firmware of the previous OxygenOS version, a combination nobody has tested. If Antumbra does not start, going back to Android (section 11) works either way.</p>
+</div>
+</section>
+
+<!-- ============================== 6 ============================== -->
+<section>
+<h2><span class="num">6</span>Download and check Antumbra</h2>
+<ol class="steps">
+  <li>Sign in to GitHub and open <a href="https://github.com/jaivik-2612/vscode_remote/releases">github.com/jaivik-2612/vscode_remote/releases</a>. The draft release <strong>"Antumbra 0.1.0-alpha.2 for the OnePlus 7T Pro"</strong> is visible only to you (and to anyone you give write access). You do not need to publish it.</li>
+  <li>Under <em>Assets</em>, download these files into your <span class="mono">platform-tools</span> folder:
+    <table>
+      <tr><th>File</th><th style="width:15%">Size</th><th style="width:30%">What it is</th></tr>
+      <tr><td class="mono small">antumbra-0.1.0-alpha.2-oneplus-hotdog-boot.img</td><td>96 MB</td><td>Antumbra's start-up image</td></tr>
+      <tr><td class="mono small">antumbra-0.1.0-alpha.2-oneplus-hotdog-userdata.simg</td><td>about 1.5 GB</td><td>the system itself</td></tr>
+      <tr><td class="mono small">antumbra-0.1.0-alpha.2-oneplus-hotdog-dtbo.img</td><td>24 MB</td><td>hardware description</td></tr>
+      <tr><td class="mono small">antumbra-0.1.0-alpha.2-oneplus-hotdog-vbmeta-disabled.img</td><td>64 KB</td><td>boot verification settings</td></tr>
+      <tr><td class="mono small">SHA256SUMS</td><td>1 KB</td><td>the files' checksums</td></tr>
+      <tr><td class="mono small">MANIFEST.md, INSTALL.md</td><td>small</td><td>what is inside; the technical version of this guide</td></tr>
+      <tr><td class="mono small">antumbra-install-guide.pdf</td><td>small</td><td>this guide</td></tr>
+    </table>
+    <span class="small muted">The kernel source is there too; you do not need it to install. Never mix files from different releases.</span>
+  </li>
+  <li><strong>Check that the downloads are complete and unchanged.</strong> In the terminal, in the <span class="mono">platform-tools</span> folder:
+    <div class="two">
+      <div>
+        <p class="small"><strong>macOS</strong></p>
+        <pre>shasum -a 256 -c SHA256SUMS</pre>
+      </div>
+      <div>
+        <p class="small"><strong>Linux</strong></p>
+        <pre>sha256sum -c SHA256SUMS</pre>
+      </div>
+    </div>
+    <p class="small">Every line must end in <span class="mono">OK</span>, for all the files above.</p>
+    <p class="small"><strong>Windows (PowerShell)</strong>: paste all six lines at once; it prints <span class="mono">OK</span> or <span class="mono">FAILED</span> for each file you downloaded.</p>
+<pre class="one">Get-Content SHA256SUMS | ForEach-Object {
+  $h, $f = $_ -split '\s+', 2
+  if (Test-Path $f) {
+    if ((Get-FileHash $f).Hash -eq $h) { "OK $f" } else { "FAILED $f" }
+  }
+}</pre>
+    If a file does not match, download it again. Never write a file that does not match.
+  </li>
+</ol>
+</section>
+
+<!-- ============================== 7 ============================== -->
+<section>
+<h2><span class="num">7</span>Prepare the install</h2>
+<p>These checks change nothing on the phone. They find out which slot Android uses, and make sure the phone can receive the large system file.</p>
+<ol class="steps">
+  <li><strong>Start the bootloader:</strong> switch the phone off, then hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> until the bootloader screen appears. Connect it and type <code>fastboot devices</code> (one line).</li>
+  <li><strong>Check the unlock:</strong> <code>fastboot getvar unlocked</code> must answer <span class="mono">unlocked: yes</span>.</li>
+  <li><strong>First install only &ndash; find Android's slot.</strong> (On a retry or an update, skip this step and use the letter already on your note.) Do this only after the last F.22 install of section 5 has finished merging (section 5, step 8): each install moves Android to the other slot, so a letter read earlier, or remembered, can be wrong. Type <code>fastboot getvar current-slot</code>. It answers <span class="mono">current-slot: a</span> or <span class="mono">current-slot: b</span>. <strong>Write the letter down and keep the note</strong>: it is Android's slot, and the only slot note you keep. Antumbra goes into the <em>other</em> slot, called X in this guide, now and for every later install:
+    <table style="width:auto">
+      <tr><th>Android's slot</th><th>Antumbra's slot X</th></tr>
+      <tr><td class="mono">a</td><td><strong>b</strong></td></tr>
+      <tr><td class="mono">b</td><td><strong>a</strong></td></tr>
+    </table>
+    <span class="small">After the install, <code>current-slot</code> shows Antumbra's slot, so it can no longer tell you which one is Android's. That is why you need the note.</span>
+  </li>
+  <li><strong>Start fastbootd</strong> (the recovery's fastboot mode): type <code>fastboot reboot fastboot</code>. The phone restarts into a screen titled <em>fastbootd</em> or similar. Then type <code>fastboot getvar is-userspace</code>: it must answer <span class="mono">is-userspace: yes</span>.
+    <p class="small" style="margin-top:0.4em"><strong>Windows:</strong> if the command waits forever (<em>waiting for any device</em>), Windows needs the driver for this mode too. Repeat the Device Manager steps of section 4 for the new device, again choosing <em>Android Bootloader Interface</em>.</p>
+  </li>
+  <li><strong>Check that no OxygenOS update is pending:</strong> type <code>fastboot getvar snapshot-update-status</code>. If it answers <span class="mono">snapshotted</span> or <span class="mono">merging</span>, <strong>stop</strong>: type <code>fastboot reboot</code>, let Android start, wait ten minutes, restart Android once more, and begin this section again. Any other answer (<span class="mono">none</span>, or an error saying the variable is unknown) is fine.</li>
+  <li><strong>Back to the bootloader:</strong> type <code>fastboot reboot bootloader</code>.</li>
+</ol>
+<div class="box ok">
+  <span class="t">You are ready if</span>
+  <p>the phone is unlocked, you have written down Android's slot, fastbootd answered <span class="mono">yes</span>, no update is pending, and the phone shows the bootloader screen again.</p>
+</div>
+</section>
+
+<!-- ============================== 8 ============================== -->
+<section>
+<h2><span class="num">8</span>Install Antumbra</h2>
+<p>Keep the cable connected and do not touch the phone while a command runs. Use the commands for <strong>your</strong> slot X from section 7. (On Windows, start each <code>fastboot</code> with <code>.\fastboot.exe</code>; on macOS and Linux with <code>./fastboot</code>.)</p>
+
+<h3>8.1 &nbsp;Write the three start-up files (in the bootloader)</h3>
+<div class="slotpick">
+  <div>
+    <h4>Android was on slot a &rarr; X = b</h4>
+<pre>fastboot flash vbmeta_b antumbra-0.1.0-alpha.2-oneplus-hotdog-vbmeta-disabled.img
+fastboot flash dtbo_b antumbra-0.1.0-alpha.2-oneplus-hotdog-dtbo.img
+fastboot flash boot_b antumbra-0.1.0-alpha.2-oneplus-hotdog-boot.img</pre>
+  </div>
+  <div>
+    <h4>Android was on slot b &rarr; X = a</h4>
+<pre>fastboot flash vbmeta_a antumbra-0.1.0-alpha.2-oneplus-hotdog-vbmeta-disabled.img
+fastboot flash dtbo_a antumbra-0.1.0-alpha.2-oneplus-hotdog-dtbo.img
+fastboot flash boot_a antumbra-0.1.0-alpha.2-oneplus-hotdog-boot.img</pre>
+  </div>
+</div>
+<p>Each command ends with <span class="mono">OKAY</span> and <span class="mono">Finished</span>. If one says <span class="mono">FAILED</span>, stop and see section 10.</p>
+
+<h3>8.2 &nbsp;Write the system (in fastbootd)</h3>
+<pre>fastboot reboot fastboot
+fastboot getvar is-userspace</pre>
+<p>The second command must answer <span class="mono">is-userspace: yes</span>. Then:</p>
+<pre class="one">fastboot -S 128M flash userdata antumbra-0.1.0-alpha.2-oneplus-hotdog-userdata.simg</pre>
+<p>This command sends the 1.5 GB file in pieces of 128 MB. It takes several minutes and prints a line for each piece. <strong>Wait until it prints <span class="mono">Finished</span>.</strong> Do not write this file from the bootloader (without <code>reboot fastboot</code>): on this phone that stalls.</p>
+
+<h3>8.3 &nbsp;Switch to Antumbra's slot and start it</h3>
+<div class="slotpick">
+  <div>
+    <h4>X = b</h4>
+<pre>fastboot reboot bootloader
+fastboot set_active b
+fastboot reboot</pre>
+  </div>
+  <div>
+    <h4>X = a</h4>
+<pre>fastboot reboot bootloader
+fastboot set_active a
+fastboot reboot</pre>
+  </div>
+</div>
+<div class="box note">
+  <span class="t">There is no backup step, on purpose</span>
+  <p>Other guides back up the start-up files first with <code>fastboot fetch</code>. This phone does not support that command, and you do not need it: Android's own slot was not touched, which is your way back (section 11).</p>
+</div>
+</section>
+
+<!-- ============================== 9 ============================== -->
+<section>
+<h2><span class="num">9</span>First start</h2>
+<ol class="steps">
+  <li>The phone first shows the <strong>unlocked-bootloader warning</strong>; it continues by itself after a few seconds (or when you press <span class="kbd">Power</span>).</li>
+  <li>The screen may stay dark for a while: <strong>the first start can take a few minutes</strong>. Leave the phone alone for up to ten minutes before deciding something is wrong.</li>
+  <li><strong>Antumbra's Welcome screen</strong> appears. Go through it from top to bottom:
+    <ul>
+      <li><em>Persistent Storage</em>: leave <em>Do not use</em>, or choose <em>Create</em> for encrypted storage of files you choose to keep (a passphrase of at least 12 characters, typed twice). Everything else is forgotten at every shutdown.</li>
+      <li><em>Network and Tor</em>: leave <em>MAC address anonymization</em> on and <em>Connect to Tor</em> on <em>Automatically</em>, unless you need bridges.</li>
+      <li><em>Security</em>: set a <em>screen-lock passphrase</em> (at least 6 characters; recommended, because without one anyone who picks up the phone can use it). Leave <em>Administration</em> off unless you need it.</li>
+      <li>Optionally switch on <em>Android apps (experimental)</em>.</li>
+    </ul>
+    Then press <strong>Start Antumbra</strong>.</li>
+  <li>Connect to Wi-Fi from the top bar. Antumbra then connects to <strong>Tor</strong> (if you chose <em>Automatically</em>); all your connections go through it. Tor Browser is in the app grid.</li>
+</ol>
+
+<h3>If there is no Wi-Fi</h3>
+<p>Wi-Fi needs the modem firmware that Antumbra reads from the phone at every start. To see what it found, open the <em>Console</em> app and type:</p>
+<pre>cat /run/antumbra/phone-firmware/status.json</pre>
+<p>It should show <span class="mono">"complete": true</span>, with <span class="mono">modem</span>, <span class="mono">bluetooth</span> and <span class="mono">vendor</span> each found; the <span class="mono">slot</span> field says where (usually Antumbra's slot for the first two and Android's slot for <span class="mono">vendor</span>, which is normal). If <span class="mono">modem</span> is missing, the phone's firmware partitions are empty or were replaced (for example by another custom system): there is then no Wi-Fi and no sound. If only <span class="mono">vendor</span> is missing, graphics are not accelerated (Antumbra should fall back to slower software drawing; this is not confirmed on the phone).</p>
+
+<div class="box ok">
+  <span class="t">Every start after this one</span>
+  <p>Antumbra starts by itself whenever you switch the phone on. Nothing you did in a session remains after a shutdown, except what you saved in Persistent Storage.</p>
+</div>
+</section>
+
+<section class="keep">
+<h3>Updating Antumbra later</h3>
+<p>An update writes a new release over Antumbra's slot X and erases Persistent Storage, so copy out what you need first. Repeat sections 6 to 8 with the new files and the <strong>same X</strong>, the letter that is not Android's on your note. Do not work out X from <code>current-slot</code> again: it now shows Antumbra's slot, and "the other one" would be Android's. (Linux script: <code>build/flash.sh --release FOLDER --android-slot LETTER</code>, with the letter on your note.)</p>
+</section>
+
+<!-- ============================== 10 ============================== -->
+<section>
+<h2><span class="num">10</span>If something goes wrong</h2>
+<p>Two key combinations solve most problems. <strong>Switch the phone off:</strong> hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> for about ten seconds. <strong>Start the bootloader:</strong> from off, hold <span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span>.</p>
+<table>
+  <tr><th style="width:36%">What you see</th><th>What to do</th></tr>
+  <tr><td><code>fastboot devices</code> prints nothing, or a command waits forever</td><td>Try another cable and another USB port (a USB 2.0 port works best). On Windows install the driver (sections 4 and 7). On Linux try <code>sudo</code>. Make sure the phone shows the bootloader or fastbootd screen.</td></tr>
+  <tr><td><span class="mono">FAILED</span> when writing a start-up file</td><td>Check that you typed the slot letter and file name exactly, and that <code>fastboot getvar unlocked</code> says <span class="mono">yes</span>. Nothing harmful happened to Android's slot; you can run the command again.</td></tr>
+  <tr><td>The large file stops with an error</td><td>Make sure you are in fastbootd (<code>fastboot getvar is-userspace</code> says <span class="mono">yes</span>) and that no update is pending (section 7, step 5). Then run the <code>-S 128M flash userdata</code> command again.</td></tr>
+  <tr><td>After installing, the phone returns to the bootloader, shows a red error screen, or stays dark for more than ten minutes</td><td>Switch it off, start the bootloader, and either try again with <code>fastboot set_active X</code> and <code>fastboot reboot</code> (this resets the phone's count of failed starts), install again into the same X (sections 7 and 8, using the letter on your note, not <code>current-slot</code>), or go back to Android (section 11). Do not wait for the phone to switch back to Android by itself: on this model it may not.</td></tr>
+  <tr><td>Android starts and asks to erase data, or the OnePlus recovery appears</td><td>The phone started Android's slot. Either install again (sections 7 and 8, with the letter on your note), or let Android erase its data and keep using Android (section 11).</td></tr>
+  <tr><td>No Wi-Fi, no sound or slow graphics in Antumbra</td><td>See "If there is no Wi-Fi" in section 9.</td></tr>
+  <tr><td>The computer shows <span class="mono">QDLoader 9008</span>, <span class="mono">QHSUSB_BULK</span>, <span class="mono">05c6:9008</span> or <span class="mono">05c6:900e</span></td><td>The phone is in its emergency download mode. Do not run any command. Disconnect it, switch it off with the key combination, and start the bootloader. If that never works again, see section 12.</td></tr>
+</table>
+</section>
+
+<!-- ============================== 11 ============================== -->
+<section>
+<h2><span class="num">11</span>Going back to Android</h2>
+<p>Android's slot was never written, so you can return to it. Its data, and everything in Antumbra, is erased in the process.</p>
+<ol class="steps">
+  <li>Switch the phone off and start the bootloader (<span class="kbd">Power</span> + <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span>).</li>
+  <li>Type <code>fastboot set_active</code> followed by <strong>Android's</strong> slot, the letter on your note from section 7 (for example <code>fastboot set_active a</code>).</li>
+  <li>With the <span class="kbd">Volume</span> keys choose <em>Recovery mode</em> on the bootloader screen and press <span class="kbd">Power</span>. In the recovery, choose the option that wipes or formats data (a factory reset) and confirm.</li>
+  <li>Restart. Android starts as it was before you installed Antumbra, without your data. Antumbra's files stay in the other slot, where they do no harm.</li>
+</ol>
+<div class="box warn">
+  <span class="t">Do not skip the factory reset</span>
+  <p>Without it, Android finds Antumbra's data in place of its own and erases it anyway, and the first start can take very long.</p>
+</div>
+</section>
+
+<!-- ============================== 12 ============================== -->
+<section class="keep">
+<h2><span class="num">12</span>Last resort: the MSM Download Tool</h2>
+<p>If the phone no longer reaches the bootloader at all, or neither slot starts, the <strong>OnePlus MSM Download Tool</strong> rewrites the entire phone with OxygenOS from its emergency download mode (EDL). It is OnePlus's own service tool; OnePlus has never published it officially, and copies circulate in the community (for this phone mainly through the XDA Developers forum thread "OP7TPRO Unbrick tool"). Be careful where you download it from.</p>
+<ul>
+  <li>It runs on <strong>Windows only</strong> and needs the Qualcomm USB driver; the phone must show up as <span class="mono">Qualcomm HS-USB QDLoader 9008</span> (not <span class="mono">QHSUSB_BULK</span>, which means the driver is missing).</li>
+  <li>You need the package for your exact model and region (HD1913 is the "EU" variant). The packages contain OxygenOS 10 or 11; to install Antumbra afterwards, unlock first (section 4), then put F.22 in both slots (section 5).</li>
+  <li>To enter EDL: switch the phone off, hold <span class="kbd">Volume Up</span> + <span class="kbd">Volume Down</span> and connect the cable.</li>
+  <li>It erases everything and is reported to lock the bootloader again. Never use its "SMT" mode: it can erase the phone's IMEI.</li>
+</ul>
+</section>
+
+<!-- ============================== A ============================== -->
+<section>
+<h2><span class="num">A</span>Quick reference</h2>
+<div class="two">
+  <div>
+    <h3 style="margin-top:0">Keys (from a switched-off phone)</h3>
+    <table>
+      <tr><td style="width:40%"><strong>Switch off</strong> (when on)</td><td><span class="kbd">Power</span> + <span class="kbd">Vol Up</span>, 10 s</td></tr>
+      <tr><td><strong>Bootloader</strong></td><td><span class="kbd">Power</span> + <span class="kbd">Vol Up</span> + <span class="kbd">Vol Down</span></td></tr>
+      <tr><td><strong>Recovery</strong></td><td><span class="kbd">Power</span> + <span class="kbd">Vol Down</span></td></tr>
+      <tr><td><strong>EDL</strong> (MSM tool only)</td><td><span class="kbd">Vol Up</span> + <span class="kbd">Vol Down</span>, then connect USB</td></tr>
+    </table>
+  </div>
+  <div>
+    <h3 style="margin-top:0">What the checks must answer</h3>
+    <table>
+      <tr><td style="width:45%"><span class="mono small">unlocked</span></td><td>yes</td></tr>
+      <tr><td><span class="mono small">current-slot</span></td><td>Android's slot, before the first install only</td></tr>
+      <tr><td><span class="mono small">is-userspace</span></td><td>yes, in fastbootd</td></tr>
+      <tr><td><span class="mono small">snapshot-update-status</span></td><td>not snapshotted or merging</td></tr>
+    </table>
+  </div>
+</div>
+<h3>The whole install (X = Antumbra's slot)</h3>
+<pre class="one">fastboot getvar unlocked
+fastboot getvar current-slot
+fastboot reboot fastboot
+fastboot getvar is-userspace
+fastboot getvar snapshot-update-status
+fastboot reboot bootloader
+fastboot flash vbmeta_X antumbra-0.1.0-alpha.2-oneplus-hotdog-vbmeta-disabled.img
+fastboot flash dtbo_X antumbra-0.1.0-alpha.2-oneplus-hotdog-dtbo.img
+fastboot flash boot_X antumbra-0.1.0-alpha.2-oneplus-hotdog-boot.img
+fastboot reboot fastboot
+fastboot getvar is-userspace
+fastboot -S 128M flash userdata antumbra-0.1.0-alpha.2-oneplus-hotdog-userdata.simg
+fastboot reboot bootloader
+fastboot set_active X
+fastboot reboot</pre>
+<p class="small muted">X is Antumbra's slot: the letter that is not Android's, from your note (on the very first install, the one <span class="mono">current-slot</span> did not name). On Windows type <span class="mono">.\fastboot.exe</span>, on macOS and Linux <span class="mono">./fastboot</span>.</p>
+<div class="box note small">
+  <span class="t">About this guide</span>
+  <p>Antumbra is free software (GPL-3.0-or-later), not affiliated with or endorsed by OnePlus, Google, the Tor Project or the Tails project. Its images contain no OnePlus or Qualcomm software; the phone's firmware is read from the phone itself. The steps follow the hardware-tested procedure of the hotdog-linux-bringup port, with changes for Antumbra described in its <span class="mono">docs/flashing.md</span>. Facts about this phone that could not be confirmed (such as the exact wording of its screens) are described in general terms. Nothing here is legal advice, and you use Antumbra at your own risk.</p>
+</div>
+</section>
+
+</body>
+</html>

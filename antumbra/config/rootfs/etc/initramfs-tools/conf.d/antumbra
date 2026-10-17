@@ -1,0 +1,5 @@
+# Antumbra: a small initramfs. Everything the boot path needs is built into
+# the kernel or added by /etc/initramfs-tools/hooks/antumbra.
+MODULES=list
+COMPRESS=zstd
+BUSYBOX=y

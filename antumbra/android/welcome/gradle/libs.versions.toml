@@ -1,0 +1,30 @@
+# Every version the build uses, pinned. gradle/verification-metadata.xml
+# holds the SHA-256 of every artifact they resolve to; Gradle refuses any
+# artifact whose checksum differs or is missing.
+#
+# Checked 2026-10-11: AGP 9.4.1 (18 Sep 2026; needs Gradle 9.6.0 or later),
+# Kotlin 2.4.21 (8 Oct 2026), Activity 1.13.0. The Compose BOM is
+# 2026.06.01 (Compose 1.11.4, Material 3 1.4.0), the newest whose libraries
+# still compile against API 36: from BOM 2026.08.00 (Compose 1.12) they
+# require compileSdk 37, and this app stays on compileSdk 36.
+
+[versions]
+agp = "9.4.1"
+kotlin = "2.4.21"
+composeBom = "2026.06.01"
+activityCompose = "1.13.0"
+junit = "4.13.2"
+orgJson = "20260814"
+
+[libraries]
+kotlin-gradle-plugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
+junit = { module = "junit:junit", version.ref = "junit" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

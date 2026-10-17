@@ -1,0 +1,12 @@
+#!/bin/sh
+# Runs inside the greeter's phoc: on-screen keyboard, then the Welcome screen.
+set -u
+# squeekboard shows itself whenever a text field has focus (it only needs
+# phoc's input-method and layer-shell protocols).
+gsettings set org.gnome.desktop.a11y.applications screen-keyboard-enabled true 2>/dev/null || true
+/usr/bin/squeekboard &
+OSK=$!
+/usr/bin/antumbra-welcome
+STATUS=$?
+kill "${OSK}" 2>/dev/null || true
+exit "${STATUS}"

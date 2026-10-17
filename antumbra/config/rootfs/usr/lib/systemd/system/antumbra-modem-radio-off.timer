@@ -1,0 +1,10 @@
+[Unit]
+Description=Re-assert low-power mode on the modem radio
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

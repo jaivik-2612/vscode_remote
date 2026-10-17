@@ -1,0 +1,179 @@
+#!/bin/sh
+# Antumbra privacy self-check. Writes one "<check> OK|FAIL[: detail]" line per
+# check to /run/antumbra/selfcheck.status and the journal. The early run
+# (default) covers the firewall and the amnesia properties before the
+# network is unblocked; --late re-checks after the modem and the session
+# are up. Exit status 1 if any check failed.
+set -u
+STATE_DIR=/run/antumbra
+STATUS="${STATE_DIR}/selfcheck.status"
+LATE=""
+[ "${1:-}" = "--late" ] && LATE=1
+mkdir -p "${STATE_DIR}"
+TMP="$(mktemp)"
+fail=0
+ok()   { printf '%s OK\n' "$1" >> "${TMP}"; }
+bad()  { printf '%s FAIL: %s\n' "$1" "$2" >> "${TMP}"; fail=1; logger -t antumbra-selfcheck -p daemon.err -- "FAIL $1: $2"; }
+
+# --- firewall ---------------------------------------------------------------------
+if nft list chain inet antumbra output 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain inet antumbra input 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain inet antumbra forward 2>/dev/null | grep -q 'policy drop' \
+   && nft list chain ip antumbra-nat output 2>/dev/null | grep -q 'redirect to :9040' \
+   && nft list chain ip antumbra-nat output 2>/dev/null | grep -q 'udp dport 53 redirect to :5353'; then
+    ok firewall
+else
+    bad firewall "Tor-enforcement ruleset is not loaded or incomplete"
+fi
+# Android apps (nftables.conf, "Android"): the container's DNS and TCP are
+# redirected to Tor's listeners for it, and nothing of it is forwarded.
+# The rules are in every image; the bridge only in images with Android.
+nat_android="$(nft list chain ip antumbra-nat android 2>/dev/null)"
+if nft list chain ip antumbra-nat prerouting 2>/dev/null | grep -qF 'iifname "waydroid-tor" jump android' \
+   && printf '%s\n' "${nat_android}" | grep -qE 'udp dport 53 .*redirect to :5354' \
+   && printf '%s\n' "${nat_android}" | grep -qE 'meta l4proto tcp .*redirect to :9041' \
+   && nft list chain inet antumbra forward 2>/dev/null | grep -qF 'iifname "waydroid-tor" jump android_reject' \
+   && nft list chain inet antumbra forward 2>/dev/null | grep -qF 'oifname "waydroid-tor" jump android_reject' \
+   && nft list chain inet antumbra input 2>/dev/null | grep -qF 'iifname "waydroid-tor" jump android_reject'; then
+    ok firewall-android
+else
+    bad firewall-android "the rules for the Android bridge are not loaded or incomplete"
+fi
+if [ -d /usr/share/antumbra/android ]; then
+    br=/proc/sys/net/ipv4/conf/waydroid-tor
+    if ip -4 -o addr show dev waydroid-tor 2>/dev/null | grep -q ' 10\.200\.2\.1/30 ' \
+       && [ "$(cat "${br}/forwarding" 2>/dev/null)" = "0" ] && [ "$(cat "${br}/route_localnet" 2>/dev/null)" = "0" ]; then
+        ok android-bridge
+    else
+        bad android-bridge "waydroid-tor is missing, has the wrong address, forwards or routes to loopback"
+    fi
+fi
+# lxc's own bridge (lxcbr0: NAT, DHCP and DNS) must never come up.
+if [ -e /sys/class/net/lxcbr0 ] || systemctl is-active -q lxc-net.service 2>/dev/null; then
+    bad lxc-net "lxc's default bridge is up"
+else
+    ok lxc-net
+fi
+# While Android is off for this session, the binder devices stay root-only
+# (Waydroid opens them to every user when its container starts) and the
+# container service does not run.
+if [ ! -e /run/antumbra/android-enabled ]; then
+    open_nodes=""
+    for n in /dev/binder /dev/hwbinder /dev/vndbinder; do
+        [ -e "${n}" ] || continue
+        [ "$(stat -c '%a %U' "${n}")" = "600 root" ] || open_nodes="${open_nodes} ${n}"
+    done
+    if [ -z "${open_nodes}" ]; then ok binder; else bad binder "binder devices not root-only:${open_nodes}"; fi
+    if systemctl is-active -q waydroid-container.service 2>/dev/null; then
+        bad android-off "the Android container service runs although Android apps are off"
+    else
+        ok android-off
+    fi
+fi
+if [ "$(grep -v '^#' /etc/resolv.conf | grep -c .)" -eq 1 ] && grep -qx 'nameserver 127.0.0.1' /etc/resolv.conf; then ok resolver; else bad resolver "/etc/resolv.conf does not point only at 127.0.0.1"; fi
+if [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6 2>/dev/null)" = "1" ] && [ "$(cat /proc/sys/net/ipv6/conf/default/disable_ipv6 2>/dev/null)" = "1" ]; then ok ipv6-disabled; else bad ipv6-disabled "IPv6 is not disabled by sysctl"; fi
+if journalctl -b -u systemd-sysctl --no-pager -q 2>/dev/null | grep -qiE "couldn't write|failed to"; then bad sysctl "systemd-sysctl reported errors (see journal)"; else ok sysctl; fi
+
+# --- amnesia -------------------------------------------------------------------------
+if [ "$(findmnt -n -o FSTYPE / 2>/dev/null)" = "overlay" ]; then ok overlay-root; else bad overlay-root "root is not an overlay"; fi
+if grep -q -E '^/dev/(sd|mmcblk|nvme|loop)' /proc/swaps 2>/dev/null; then bad swap "swap on flash storage"; else ok swap; fi
+if findmnt -rn -o SOURCE,OPTIONS 2>/dev/null | grep -E '^/dev/(sd|mmcblk|loop)' | grep -v -E '^/dev/mapper' | grep -q -w 'rw'; then
+    bad flash-writes "a flash partition is mounted read-write outside Persistent Storage"
+else
+    ok flash-writes
+fi
+if grep -q -w 'init_on_free=1' /proc/cmdline; then ok init-on-free; else bad init-on-free "init_on_free=1 missing from the kernel command line"; fi
+if [ -d /sys/fs/pstore ] && [ -n "$(ls -A /sys/fs/pstore 2>/dev/null)" ]; then bad pstore "persistent kernel log records present"; else ok pstore; fi
+
+# --- radios and peripherals ---------------------------------------------------------
+if lsmod | grep -q -E '^(bluetooth|hci_uart|btqca|nxp_nci|nxp_nci_i2c|nfc) '; then bad radios "Bluetooth or NFC driver loaded"; else ok radios; fi
+if lsmod | grep -q -E '^(usb_f_rndis|usb_f_ncm|usb_f_ecm|usb_f_acm|usb_f_fs|usb_f_mass_storage) '; then bad usb-gadget "USB gadget function loaded"; else ok usb-gadget; fi
+if command -v usbguard >/dev/null 2>&1; then
+    if systemctl is-active -q usbguard.service; then ok usbguard; else bad usbguard "usbguard is not running"; fi
+fi
+if pgrep -x ModemManager >/dev/null 2>&1; then bad modemmanager "ModemManager is running"; else ok modemmanager; fi
+# Unprivileged processes must not reach the modem's QMI channel (AF_QIPCRTR = 42).
+if runuser -u nobody -- python3 -c 'import socket; socket.socket(42, socket.SOCK_DGRAM)' >/dev/null 2>&1; then
+    bad qrtr-access "unprivileged processes can open QRTR sockets"
+else
+    ok qrtr-access
+fi
+
+# --- late checks: modem state, MAC addresses ----------------------------------------
+if [ -n "${LATE}" ]; then
+    if [ -r "${STATE_DIR}/modem-mode" ]; then
+        # antumbra-modem-radio-off writes either "mode: ...\nregistration: ..."
+        # or a single "absent: ..." / "unavailable: ..." line (no modem to
+        # switch off, e.g. without its firmware or in a virtual machine).
+        first="$(head -n1 "${STATE_DIR}/modem-mode")"
+        mode="$(sed -n 's/^mode: //p' "${STATE_DIR}/modem-mode")"
+        reg="$(sed -n 's/^registration: //p' "${STATE_DIR}/modem-mode")"
+        case "${first}" in
+            'absent: virtual machine')
+                systemd-detect-virt -q --vm && mode="${first}" ;;
+            'absent: no DMS service on QRTR')
+                # acceptable only when the modem processor is not running at all
+                mss_up=""
+                for r in /sys/class/remoteproc/remoteproc*; do
+                    [ -r "${r}/name" ] || continue
+                    if [ "$(cat "${r}/name")" = modem ] && [ "$(cat "${r}/state" 2>/dev/null)" = running ]; then mss_up=1; fi
+                done
+                [ -n "${mss_up}" ] || mode="${first}" ;;
+        esac
+        case "${mode}" in
+            persistent-low-power|low-power) ok modem-radio ;;
+            absent:*) ok modem-radio ;;
+            *) bad modem-radio "operating mode is '${mode:-${first}}'" ;;
+        esac
+        case "${reg}" in
+            registered*|roaming*) bad modem-registration "modem is registered on a network (${reg})" ;;
+            *) ok modem-registration ;;
+        esac
+    else
+        bad modem-radio "no modem state recorded"
+    fi
+    # Every Ethernet-type interface (Wi-Fi included) except the namespace
+    # veths and the Android bridge (host-only) must carry the address
+    # antumbra-spoof-mac gave it, unless the user turned MAC anonymization
+    # off on the Welcome screen.
+    spoof_off=""
+    # shellcheck source=../lib/tails-shell-library/tails-greeter.sh
+    . /usr/local/lib/tails-shell-library/tails-greeter.sh
+    mac_spoof_is_enabled || spoof_off=1
+    for nic in /sys/class/net/*; do
+        n="$(basename "${nic}")"
+        case "${n}" in lo|veth*|waydroid-tor) continue ;; esac
+        [ "$(cat "${nic}/type" 2>/dev/null)" = "1" ] || continue
+        if [ -n "${spoof_off}" ]; then ok "mac-${n} (anonymization off by choice)"; continue; fi
+        cur="$(cat "${nic}/address")"
+        rec="${STATE_DIR}/mac-spoof/$(cat "${nic}/ifindex")"
+        perm="$(ethtool -P "${n}" 2>/dev/null | sed -n 's/^Permanent address: //p')"
+        if [ -n "${perm}" ] && [ "${perm}" != "00:00:00:00:00:00" ] && [ "${perm}" = "${cur}" ]; then
+            bad "mac-${n}" "address equals the permanent address"
+        elif [ ! -r "${rec}" ]; then
+            bad "mac-${n}" "no record of spoofing this interface"
+        else
+            orig="$(cut -d' ' -f2 "${rec}")"; spoofed="$(cut -d' ' -f3 "${rec}")"
+            case "$(printf '%s' "${cur}" | cut -c2)" in 2|6|a|e|A|E) la=1 ;; *) la=0 ;; esac
+            nmstate="$(nmcli -g GENERAL.STATE device show "${n}" 2>/dev/null | cut -d' ' -f1)"
+            case "${nmstate}" in ''|*[!0-9]*) nmstate=0 ;; esac
+            if [ "${cur}" = "${orig}" ]; then
+                bad "mac-${n}" "address reverted to the pre-spoof address"
+            elif [ "${cur}" = "${spoofed}" ]; then
+                ok "mac-${n}"
+            elif [ "${nmstate}" -lt 40 ] && [ "${la}" -eq 1 ]; then
+                # not connecting or connected: NetworkManager's random scan
+                # address (wifi.scan-rand-mac-address) is on the interface
+                ok "mac-${n} (scan address)"
+            else
+                bad "mac-${n}" "address changed since it was spoofed"
+            fi
+        fi
+    done
+    if [ -e "${STATE_DIR}/mac-spoof-failed" ]; then bad mac-spoofing "$(head -n1 "${STATE_DIR}/mac-spoof-failed")"; fi
+fi
+
+cat "${TMP}" >> "${STATUS}"
+logger -t antumbra-selfcheck -p daemon.info -- "$(tr '\n' ';' < "${TMP}")"
+rm -f "${TMP}"
+exit "${fail}"

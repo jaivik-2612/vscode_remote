@@ -1,0 +1,8 @@
+[Unit]
+Description=Apply the Welcome screen settings (once per boot)
+After=antumbra-selfcheck.service antumbra-persistence-probe.service
+ConditionPathExists=!/run/antumbra/welcome-applied
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/antumbra-apply-welcome-settings

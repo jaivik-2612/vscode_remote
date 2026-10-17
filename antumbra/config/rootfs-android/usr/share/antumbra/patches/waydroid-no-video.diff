@@ -1,0 +1,36 @@
+Antumbra: keep camera (V4L2) devices out of the Waydroid container.
+
+Waydroid 1.6.3 bind-mounts every /dev/video* into the container and makes
+them mode 0777 on every start, opening the cameras to every local user and
+to every Android app (gated only by Android's own permission prompt).
+Applied to Debian's waydroid 1.6.3+ds-2~bpo13+1 by
+config/hooks/56-session-android.sh; the build fails if it does not apply.
+Android's camera could not use the phone's raw CAMSS sensors anyway (its
+external-camera HAL takes only MJPEG or depth streams), and config_3 also
+denies the V4L2 major number (81) in the container's device cgroup.
+
+--- a/usr/lib/waydroid/tools/actions/container_manager.py
++++ b/usr/lib/waydroid/tools/actions/container_manager.py
+@@ -96,8 +96,8 @@
+         perm_list.extend(glob.glob("/dev/dri/renderD*"))
+         # Framebuffers
+         perm_list.extend(glob.glob("/dev/fb*"))
+-        # Videos
+-        perm_list.extend(glob.glob("/dev/video*"))
++        # Antumbra: no camera (V4L2) devices: Waydroid would open them to
++        # every user (0777) and hand them to Android.
+         # DMA-BUF Heaps
+         perm_list.extend(glob.glob("/dev/dma_heap/*"))
+ 
+--- a/usr/lib/waydroid/tools/helpers/lxc.py
++++ b/usr/lib/waydroid/tools/helpers/lxc.py
+@@ -66,8 +66,7 @@
+         make_entry(n)
+     for n in glob.glob("/dev/graphics/fb*"):
+         make_entry(n)
+-    for n in glob.glob("/dev/video*"):
+-        make_entry(n)
++    # Antumbra: no camera (V4L2) devices in the container.
+     for n in glob.glob("/dev/dma_heap/*"):
+         make_entry(n)
+ 
