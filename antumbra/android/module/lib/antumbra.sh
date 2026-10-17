@@ -689,12 +689,14 @@ framework_ready() {
 #
 # What a root shell can read: 'dumpsys telecom' (CallsManager's mCalls, one
 # line per call; Analytics, one "Call TC@<n>" entry per recent call, n
-# counting up within a boot, with "isEmergency: true|false", which Telecom
-# sets from Android's own emergency-number list, and the call's properties),
+# counting up within a boot, with "endTime:" (0 until the call is
+# disconnected), "isEmergency: true|false", which Telecom sets from
+# Android's own emergency-number list, and the call's properties),
 # 'dumpsys telephony.registry' (per phone the call states and the
-# callback-mode durations, and the radio power) and the property
+# callback-mode durations, and the radio power), the property
 # ril.cdma.inecmmode (emergency callback mode, set on both of Android 16's
-# paths); in a Phone-mode session also the phone process's own dump
+# paths) and the phone process's pid and start time (/proc); in a
+# Phone-mode session also the phone process's own dump
 # (TelephonyDebugService: the IMS registration). The registry also prints
 # the incoming number: the dumps go through pipes only, never to a file or
 # the log. Android 17 no longer prints Telecom's Analytics.
@@ -703,17 +705,24 @@ framework_ready() {
 # call from any other, so its Quick power off waits for 5 minutes after any
 # call. After each look the module tells Welcome what the calls of the last
 # 5 minutes were: "emergency" (Telecom's entry says so, the network said
-# so, or callback mode is or was on), "ordinary" (every call in that time,
-# at every look, had an entry saying it was not an emergency call, and
-# nothing below applies), "unknown" (anything the module cannot read or
-# classify, the radio or airplane mode switched by something else, Android
-# 17) or "none" (nothing in the last 5 minutes). Welcome skips its wait only
-# for a fresh "ordinary" word that covers the call it saw end; everything
-# else waits as before, and "emergency" can only make it wait longer. The
-# word goes to Welcome alone: root calls Welcome's provider (only uid 0 may),
-# never status.json or a property, which every app can read. The module
-# keeps the times of the last emergency sign and of the last doubt for 5
-# minutes, then forgets them, and its log never names a word.
+# so, or callback mode is or was on), "ordinary" (in a Phone-mode session
+# only: every call in that time, at every look, had an entry saying it was
+# not an emergency call, each read again after it ended, and nothing below
+# applies), "unknown" (any call outside Phone mode, where the cell radio is
+# off, so a carrier call there is an emergency call, a Wi-Fi call (until
+# MOD7) or follows a switch-on by something else, which the module cannot
+# tell apart; anything the module cannot read or classify; the radio or
+# airplane mode switched by something else; the phone process restarted or
+# not running, when Telecom's own emergency check can fail; Android 17) or
+# "none" (nothing in the last 5 minutes). Welcome skips its wait only for
+# a fresh "ordinary" word that covers the call it saw end; everything else
+# waits as before, and "emergency" can only make it wait longer. Until
+# WEL8 every session is outside Phone mode, so the word is never
+# "ordinary". The word goes to Welcome alone: root calls Welcome's
+# provider (only uid 0 may), never status.json or a property, which every
+# app can read. The module keeps the times of the last emergency sign and
+# of the last doubt until 5 minutes after the last call that followed
+# them, then forgets them, and its log never names a word.
 
 # Seconds the radio stays as it is after a call (Android's callback mode
 # lasts 300000 ms; Welcome's CallWatch waits as long).
@@ -736,6 +745,9 @@ CELL_RADIOS=cell
 WORD_URI=content://org.antumbra.welcome.state
 WORD_METHOD=module_word
 CELL_IMS_EVERY=300
+# Seconds between tries while Welcome does not take the word (a Welcome
+# without module_word answers "Result: null" every time).
+WORD_RETRY=300
 
 # What the cell radio's watch keeps (service.sh's loop; cell_step).
 CELL_AIR=          # airplane_mode_on as last read: 1, 0, or empty (unread)
@@ -755,14 +767,18 @@ CELL_ON_DONE=0     # 1 once Phone mode's switch-on is done
 CELL_TRY_AT=       # uptime of the last step taken (one try per 10 s)
 CELL_HELD=         # the hold last logged
 # The module's word to Welcome (MOD11; cell_note, cell_forget, cell_tell).
-CELL_LIVE=         # Telecom's numbers of the calls listed at the last look ("3,4", "-")
+CELL_LIVE=         # Telecom's numbers of the calls not over at the last look: listed, or not ended ("3,4", "-")
+CELL_FROM=         # CELL_ID before the last look: the calls numbered since are read once more
 CELL_XN=           # Analytics entries without a TC@ number at the last look
-CELL_EM_AT=        # uptime of the last look that saw an emergency sign, or of the look after
+CELL_PHONE=        # the phone process at the last look, "PID:START" ("-": not running; empty: unread)
+CELL_EM_AT=        # uptime of the last look that saw an emergency sign, or of the look after (renewed by calls)
 CELL_UNK_AT=       # the same for a doubt (something the module could not read or classify)
 CELL_EM_SEEN=0     # 1 if the last look saw an emergency sign
 CELL_UNK_SEEN=0    # 1 if the last look saw a doubt
 CELL_WORD=         # the last word Welcome took, "KIND UNTIL IMS IMS_AT" (empty: none yet)
 CELL_WORD_BAD=0    # 1 while Welcome does not take the word (logged once)
+CELL_BAD_AT=0      # uptime of the last try Welcome did not take
+CELL_BAD_KIND=     # that try's kind
 CELL_TOLD_AT=      # uptime of the last word Welcome took
 CELL_IMS=off       # IMS registration for Welcome: cell, wifi, registered, none, unknown; off outside Phone mode
 CELL_IMS_AT=0      # uptime of that reading (0 with off)
@@ -770,7 +786,8 @@ CELL_IMS_NEXT=0    # uptime of the next reading
 # The last look: CL_CALL and CL_CBM are 0, 1 or unknown; CL_ID is a number
 # or empty; CL_RADIO is on, off, wait or unknown. CL_KIND is telecom_state's
 # KIND (e, u, o, -) or unknown; CL_LIVE and CL_XN are its LIVE and XN;
-# CL_ALONE is 1 when the registry shows a call that Telecom does not list.
+# CL_ALONE is 1 when the registry shows a call that Telecom does not list;
+# CL_PHONE is phone_proc's "PID:START", or "-".
 CL_CALL=unknown
 CL_CBM=unknown
 CL_ID=
@@ -779,6 +796,7 @@ CL_KIND=unknown
 CL_LIVE=
 CL_XN=
 CL_ALONE=0
+CL_PHONE=-
 # The session's choice ("off" or "phone"; service.sh's session_cell) and
 # the fail-safe's state (service.sh's RADIOS) are read from service.sh.
 SES_CELL=${SES_CELL:-off}
@@ -789,36 +807,56 @@ P_CELL=
 CELL_READ=         # 1 or 0: whether the last look could read the call state
 CELL_CLOCKLESS=0   # 1 while the time since boot cannot be read
 
-# telecom_state [SINCE [LIVE [XN]]]: read 'dumpsys telecom' on standard
-# input and print "CALLS LASTID KIND LIVE XN": the calls Telecom lists now,
-# in any state (VoIP calls too); the highest call number seen (0 if none);
-# what the calls in scope were (KIND, below); the numbers of the calls
-# listed now ("3,4", or "-"); and how many Analytics entries have an id
-# that is not TC@<number> (conference parts, calls from other devices,
-# some VoIP calls). Returns 1 when the dump lacks CallsManager, its mCalls
-# list or Analytics (Telecom not ready, a timeout, a format this does not
-# know: Android 17 prints no Analytics), when it lacks the end of Analytics
-# ("Hardware Version:", which Telecom prints after the last entry), and
-# when dumpsys says it gave up ("DUMP TIMEOUT"). Telecom prints the entries
-# oldest first, so a dump cut short (by dumpsys, by 'timeout', or a busy
-# Telecom) loses the newest calls first and would otherwise look complete.
+# telecom_state [SINCE [LIVE [XN [FROM]]]]: read 'dumpsys telecom' on
+# standard input and print "CALLS LASTID KIND LIVE XN": the calls Telecom
+# lists now, in any state (VoIP calls too); the highest call number seen (0
+# if none); what the calls in scope were (KIND, below); the numbers of the
+# calls not over, the next look's LIVE: those listed now and those whose
+# entry has not ended ("3,4", or "-"); and how many Analytics entries have
+# an id that is not TC@<number> (conference parts, calls from other
+# devices, some VoIP calls). Returns 1 when the dump lacks CallsManager,
+# its mCalls list or Analytics (Telecom not ready, a timeout, a format this
+# does not know: Android 17 prints no Analytics), when it lacks the end of
+# Analytics ("Hardware Version:", which Telecom prints after the last
+# entry), and when dumpsys says it gave up ("DUMP TIMEOUT"). Telecom prints
+# the entries oldest first, so a dump cut short (by dumpsys, by 'timeout',
+# or a busy Telecom) loses the newest calls first and would otherwise look
+# complete.
 #
-# In scope: the calls listed now, the calls listed at the last look (LIVE,
-# as printed then) and the calls numbered above SINCE (LASTID at the last
-# look; every call on the module's first look, SINCE empty). XN is the
-# last look's. KIND is
+# In scope: the calls listed now; the calls not over at the last look
+# (LIVE, as printed then); the calls numbered above SINCE (LASTID at the
+# last look; every call on the module's first look, SINCE empty); the
+# calls numbered above FROM up to SINCE, those first counted at the last
+# look (FROM is the LASTID of the look before it; empty: none); and every
+# call whose entry has not ended ("endTime: 0": Telecom writes the end
+# only when the call is disconnected). A call read again (not numbered
+# above SINCE) that is not listed now must have an entry that says it
+# ended; until it does, it reads u at every look, whatever its entry says
+# so far. So every call is read at the look that first counts it and at
+# the next, stays in scope while it is listed or its entry has not ended,
+# and leaves the scope only after a look that read it not listed and its
+# entry ended: its last reading is of its final entry. (Telecom prints
+# its call list before Analytics, without a lock, so a look can see an
+# entry whose call is not listed yet; the network's "ecall" and a new
+# handle's isEmergency can come later in the call; a call Telecom drops
+# before listing it, with no account to place it, never ends: u until its
+# entry leaves Telecom's last 100.) XN is the last look's. KIND is
 #   e  one of them was an emergency call: its entry says "isEmergency:
 #      true", or "ecall" (the network said so) or "ecbm" (made in callback
 #      mode) is among its callProperties or, for a call listed now, its
 #      prop=;
 #   u  else one cannot be told: a call listed with another id than
 #      TC@<number>, or without prop=; a call in scope without an entry, or
-#      whose entry lacks exactly one "isEmergency: true|false" and one
-#      "callProperties: [...]" line; not one entry for each number above
-#      SINCE (Telecom keeps the last 100 calls); SINCE above LASTID
-#      (Telecom restarted: the calls before it cannot be checked); XN
-#      changed, or above 0 on the first look or once Telecom keeps 100
-#      entries (an entry the numbers do not cover);
+#      whose entry lacks exactly one "endTime: <number>", one
+#      "isEmergency: true|false" and one "callProperties: [...]" line; a
+#      call read again that is not listed now and whose entry has not
+#      ended (still being set up, waiting for the person to confirm, or
+#      dropped before Telecom listed it: the module cannot tell which); not
+#      one entry for each number above FROM, or above SINCE without FROM
+#      (Telecom keeps the last 100 calls); SINCE above LASTID (Telecom
+#      restarted: the calls before it cannot be checked); FROM not a number
+#      or above SINCE; XN changed, or above 0 on the first look or once
+#      Telecom keeps 100 entries (an entry the numbers do not cover);
 #   o  else every call in scope was an ordinary call;
 #   -  no call in scope.
 # Only exact keys and whole words count: "missedReason: [emergency]" (a call
@@ -828,23 +866,28 @@ telecom_state() {
 	_ts_since=${1-}
 	_ts_prev=${2-}
 	_ts_xprev=${3-}
+	_ts_from=${4-}
 	# The call lines first: the substitutions below change the line that
 	# starts their range.
 	sed -n -e '/^  mCalls: *$/,/^ \{0,2\}[^ ]/{/^    \[Call id=/p;}' \
 		-e 's/^\(CallsManager:\) *$/\1/p' -e 's/^\(Analytics:\) *$/\1/p' \
 		-e 's/^  \(mCalls:\) *$/\1/p' -e 's/^\*\*\* .*DUMP TIMEOUT.*$/DUMP TIMEOUT/p' \
-		-e '/^Analytics: *$/,/^[^ ]/{s/^ *\(Call [^ ]*\): { *$/\1 {/p;s/^ *\(isEmergency:.*\)$/\1/p;s/^ *\(callProperties:.*\)$/\1/p;s/^ *} *$/}/p;s/^ *\(Hardware Version:\).*$/\1/p;}' |
+		-e '/^Analytics: *$/,/^[^ ]/{s/^ *\(Call [^ ]*\): { *$/\1 {/p;s/^ *\(endTime:.*\)$/\1/p;s/^ *\(isEmergency:.*\)$/\1/p;s/^ *\(callProperties:.*\)$/\1/p;s/^ *} *$/}/p;s/^ *\(Hardware Version:\).*$/\1/p;}' |
 		{
 			_ts_have=
 			_ts_n=0
 			_ts_last=0
 			_ts_live=
 			_ts_ents=,
+			_ts_open=,
 			_ts_tot=0
 			_ts_xn=0
 			_ts_e=0
 			_ts_u=0
 			_ts_cur=
+			_ts_cn=0
+			_ts_ce=0
+			_ts_cp=0
 			while IFS= read -r _ts_line; do
 				_ts_id=
 				case $_ts_line in
@@ -902,6 +945,14 @@ telecom_state() {
 					_ts_cev=
 					_ts_cp=0
 					_ts_cpv=
+					_ts_cn=0
+					_ts_cnv=
+					;;
+				endTime:*)
+					[ -n "$_ts_cur" ] || _ts_u=1
+					_ts_cn=$((_ts_cn + 1))
+					_ts_cnv=${_ts_line#endTime:}
+					_ts_cnv=${_ts_cnv# }
 					;;
 				isEmergency:*)
 					[ -n "$_ts_cur" ] || _ts_u=1
@@ -931,7 +982,22 @@ telecom_state() {
 							;;
 						*) _ts_k=u ;;
 						esac
+						# Ended: one endTime of digits, not 0 (milliseconds
+						# since the epoch, compared as text: 13 digits do not
+						# fit mksh's arithmetic). 0: not yet (open); anything
+						# else cannot be read: unknown, and open.
+						_ts_o=1
+						if [ "$_ts_cn" = 1 ]; then
+							case $_ts_cnv in
+							0) ;;
+							[1-9]*) case $_ts_cnv in *[!0-9]*) _ts_k=u ;; *) _ts_o=0 ;; esac ;;
+							*) _ts_k=u ;;
+							esac
+						else
+							_ts_k=u
+						fi
 						[ "$_ts_ct" = 0 ] || _ts_k=e
+						[ "$_ts_o" = 0 ] || _ts_open="$_ts_open$_ts_cur,"
 						_ts_ents="$_ts_ents$_ts_cur:$_ts_k,"
 						;;
 					esac
@@ -957,23 +1023,60 @@ telecom_state() {
 				_ts_u=1
 				;;
 			esac
+			# The calls first counted at the last look: above FROM, up to
+			# SINCE (FROM empty: none).
+			_ts_f=$_ts_from
+			case $_ts_f in
+			'') _ts_f=$_ts_s ;;
+			*[!0-9]* | ??????????*)
+				_ts_f=$_ts_s
+				_ts_u=1
+				;;
+			esac
+			if [ "$_ts_f" -gt "$_ts_s" ]; then
+				_ts_f=$_ts_s
+				_ts_u=1
+			fi
 			if [ "$_ts_s" -gt "$_ts_last" ]; then
 				_ts_s=0
+				_ts_f=0
 				_ts_u=1
 			fi
 			_ts_in=0
 			_ts_c=0
+			_ts_cf=0
+			_ts_keep=$_ts_live
 			_ts_r=${_ts_ents#,}
 			while [ -n "$_ts_r" ]; do
 				_ts_one=${_ts_r%%,*}
 				_ts_r=${_ts_r#*,}
-				[ "${_ts_one%:*}" -gt "$_ts_s" ] || continue
-				_ts_c=$((_ts_c + 1))
+				_ts_v=${_ts_one%:*}
+				_ts_k=${_ts_one#*:}
+				# Not listed now and not ended: read again at the next look.
+				case ,$_ts_live,:$_ts_open in
+				*",$_ts_v,"*:*) ;;
+				*:*",$_ts_v,"*) _ts_keep=${_ts_keep:+$_ts_keep,}$_ts_v ;;
+				esac
+				if [ "$_ts_v" -gt "$_ts_s" ]; then
+					_ts_c=$((_ts_c + 1))
+				else
+					[ "$_ts_v" -le "$_ts_f" ] || _ts_cf=$((_ts_cf + 1))
+					# Read again: a call not listed now must have ended,
+					# else unknown, whatever its entry says so far. Ended,
+					# it stays in scope only above FROM (or in LIVE, below).
+					case ,$_ts_live,:$_ts_open in
+					*",$_ts_v,"*:*) ;;
+					*:*",$_ts_v,"*) _ts_k=u ;;
+					*) [ "$_ts_v" -gt "$_ts_f" ] || continue ;;
+					esac
+				fi
 				_ts_in=1
-				case ${_ts_one#*:} in e) _ts_e=1 ;; u) _ts_u=1 ;; esac
+				case $_ts_k in e) _ts_e=1 ;; u) _ts_u=1 ;; esac
 			done
 			[ "$_ts_c" = $((_ts_last - _ts_s)) ] || _ts_u=1
-			# The calls listed now and at the last look, by their entries.
+			[ "$_ts_cf" = $((_ts_s - _ts_f)) ] || _ts_u=1
+			# The calls not over at the last look (LIVE) and those listed
+			# now, by their entries.
 			case $_ts_prev in '' | -) _ts_r= ;; *) _ts_r=$_ts_prev ;; esac
 			_ts_r=$_ts_r${_ts_live:+,$_ts_live}
 			_ts_r=${_ts_r#,}
@@ -989,7 +1092,13 @@ telecom_state() {
 				case $_ts_ents in
 				*",$_ts_one:"*)
 					_ts_k=${_ts_ents#*",$_ts_one:"}
-					case ${_ts_k%%,*} in e) _ts_e=1 ;; u) _ts_u=1 ;; esac
+					_ts_k=${_ts_k%%,*}
+					# Not listed now: it must have ended.
+					case ,$_ts_live,:$_ts_open in
+					*",$_ts_one,"*:*) ;;
+					*:*",$_ts_one,"*) _ts_k=u ;;
+					esac
+					case $_ts_k in e) _ts_e=1 ;; u) _ts_u=1 ;; esac
 					;;
 				*) _ts_u=1 ;;
 				esac
@@ -1011,7 +1120,7 @@ telecom_state() {
 			else
 				_ts_kind=-
 			fi
-			echo "$_ts_n $_ts_last $_ts_kind ${_ts_live:--} $_ts_xn"
+			echo "$_ts_n $_ts_last $_ts_kind ${_ts_keep:--} $_ts_xn"
 		}
 }
 
@@ -1101,9 +1210,48 @@ airplane_get() {
 # and broadcast, as Quick Settings does it).
 airplane_set() { /system/bin/cmd connectivity airplane-mode "$1" >/dev/null 2>&1; }
 
-# cell_look: one look at the call state and the radio (sets CL_*). The
-# calls in scope for CL_KIND follow the last readable look (CELL_ID,
-# CELL_LIVE, CELL_XN).
+# phone_proc: print the phone process (com.android.phone) as "PID:START":
+# its pid and its start time (clock ticks since boot, field 22 of
+# /proc/PID/stat, read after the name, so a new process that got the old
+# pid still differs). Returns 1 if it is not running, runs twice or cannot
+# be read. toybox pidof matches the name Android gives the process
+# (argv[0]); root sees every process. Telecom's own emergency-number check
+# asks this process, and records "not an emergency call" when it cannot
+# (the process missing, not ready yet, or dying), while Telephony checks
+# again and places the call as an emergency call: a new or missing
+# process is a doubt (cell_note).
+phone_proc() {
+	_pp=$($TB pidof com.android.phone 2>/dev/null) || return 1
+	case $_pp in '' | *[!0-9]*) return 1 ;; esac
+	read -r _pp_s 2>/dev/null <"/proc/$_pp/stat" || return 1
+	_pp_s=${_pp_s##*') '}
+	set -f
+	# shellcheck disable=SC2086 # the fields after the name, on purpose
+	set -- $_pp_s
+	set +f
+	[ "$#" -ge 20 ] || return 1
+	shift 19
+	case $1 in '' | *[!0-9]*) return 1 ;; esac
+	echo "$_pp:$1"
+}
+
+# cell_phone_mode: true in a Phone-mode session once the module's switch-on
+# is done and the fail-safe holds no radio: the only time the cell radio is
+# on on purpose. Otherwise it is off by design (before Start, outside Phone
+# mode, before the switch-on). Telephony refuses an ordinary call while the
+# phone's voice service reads powered off (TelephonyConnectionService:
+# POWER_OFF; an emergency number switches the radio on), but that state
+# counts IMS registered over Wi-Fi as in service (GsmCdmaPhone's
+# mergeVoiceServiceStates), so a carrier call there is an emergency call, a
+# Wi-Fi call (until MOD7 switches Wi-Fi calling off) or follows a switch-on
+# by something else: the module cannot tell which.
+cell_phone_mode() {
+	[ "${S_STARTED:-0}" = 1 ] && [ "$SES_CELL" = phone ] && [ -z "$RADIOS" ] && [ "$CELL_ON_DONE" = 1 ]
+}
+
+# cell_look: one look at the call state, the radio and the phone process
+# (sets CL_*). The calls in scope for CL_KIND follow the last readable look
+# (CELL_ID, CELL_LIVE, CELL_XN, CELL_FROM).
 cell_look() {
 	CL_CALL=unknown
 	CL_CBM=unknown
@@ -1113,7 +1261,8 @@ cell_look() {
 	CL_LIVE=
 	CL_XN=
 	CL_ALONE=0
-	_cl_t=$(cell_dump telecom | telecom_state "$CELL_ID" "$CELL_LIVE" "$CELL_XN") || _cl_t=
+	CL_PHONE=$(phone_proc) || CL_PHONE=-
+	_cl_t=$(cell_dump telecom | telecom_state "$CELL_ID" "$CELL_LIVE" "$CELL_XN" "$CELL_FROM") || _cl_t=
 	_cl_r=$(cell_dump telephony.registry | registry_state) || _cl_r=
 	if _cl_e=$(getprop ril.cdma.inecmmode 2>/dev/null); then
 		_cl_e=$(ecbm_value "$_cl_e")
@@ -1158,16 +1307,31 @@ cell_mine() {
 # one before did (so the 5 minutes count from when the end was seen, not
 # from the last look that still saw the call), when Telecom's call counter
 # moved (up, or down after Telecom restarted; on the first look, when any
-# call has happened in this boot), and when the radio came on without the
-# module doing it.
+# call has happened in this boot), when a call not over at the last look
+# (CELL_LIVE: listed, or its entry not ended) is over now (a call listed
+# only between two looks ends there), and when the radio came on without
+# the module doing it.
 #
 # For the module's word (MOD11): CELL_EM_AT becomes NOW when the look sees
 # an emergency sign (an emergency call in scope, callback mode) and at the
 # look after one; CELL_UNK_AT likewise for a doubt: a call in scope that
-# cannot be classified, a state that cannot be read, a call in the registry
-# that Telecom does not list, the radio on without the module (an emergency
-# text switches it on and starts no call).
+# cannot be classified; an ordinary call outside Phone mode (cell_phone_mode:
+# with the cell radio off a carrier call may be an emergency call, a Wi-Fi
+# call or follow a switch-on by something else, and the dump cannot tell a
+# carrier call from a VoIP call at every moment); a state that cannot be
+# read; a call in the registry that Telecom does not list; the radio on
+# without the module (an emergency text switches it on and starts no
+# call); the phone process not running, or another one than at the last
+# look (phone_proc). A sign or a doubt still kept is renewed by every
+# call-like event (those that set CELL_LAST, here and in cell_step: the
+# clock readable again, airplane mode switched off by something else), so
+# it lasts until 5 minutes after the look that saw the last call end,
+# however long the calls go on; records already past their 5 minutes are
+# forgotten first and not renewed. CELL_FROM becomes the last readable
+# look's CELL_ID (0 on the first, or when the counter went down):
+# telecom_state reads the calls it first counted once more.
 cell_note() {
+	cell_forget "$1"
 	_cn_busy=0
 	[ "$CL_CALL" = 0 ] || _cn_busy=1
 	[ "$CL_CBM" = 0 ] || _cn_busy=1
@@ -1175,15 +1339,37 @@ cell_note() {
 	[ "$CELL_BUSY" = 0 ] || _cn_event=1
 	_cn_em=0
 	_cn_unk=0
-	case $CL_KIND in e) _cn_em=1 ;; -) ;; o) ;; *) _cn_unk=1 ;; esac
+	case $CL_KIND in
+	e) _cn_em=1 ;;
+	-) ;;
+	o) cell_phone_mode || _cn_unk=1 ;;
+	*) _cn_unk=1 ;;
+	esac
 	case $CL_CBM in 0) ;; 1) _cn_em=1 ;; *) _cn_unk=1 ;; esac
 	[ "$CL_ALONE" = 0 ] || _cn_unk=1
+	if [ "$CL_PHONE" = - ] || { [ -n "$CELL_PHONE" ] && [ "$CL_PHONE" != "$CELL_PHONE" ]; }; then
+		_cn_unk=1
+	fi
+	CELL_PHONE=$CL_PHONE
 	if [ -n "$CL_ID" ]; then
 		if [ -z "$CELL_ID" ]; then
 			[ "$CL_ID" = 0 ] || _cn_event=1
 		elif [ "$CL_ID" != "$CELL_ID" ]; then
 			_cn_event=1
 		fi
+		if [ -z "$CELL_ID" ] || [ "$CL_ID" -lt "$CELL_ID" ]; then
+			CELL_FROM=0
+		else
+			CELL_FROM=$CELL_ID
+		fi
+		# A call not over at the last look (listed, or its entry not
+		# ended) that is over now: its end counts from this look.
+		case $CELL_LIVE in '' | -) _cn_r= ;; *) _cn_r=$CELL_LIVE ;; esac
+		while [ -n "$_cn_r" ]; do
+			_cn_one=${_cn_r%%,*}
+			case $_cn_r in *,*) _cn_r=${_cn_r#*,} ;; *) _cn_r= ;; esac
+			case ,$CL_LIVE, in *",$_cn_one,"*) ;; *) _cn_event=1 ;; esac
+		done
 		CELL_ID=$CL_ID
 		CELL_LIVE=$CL_LIVE
 		CELL_XN=$CL_XN
@@ -1197,15 +1383,21 @@ cell_note() {
 	[ "$_cn_event" = 0 ] || CELL_LAST=$1
 	[ "$_cn_em" = 0 ] && [ "$CELL_EM_SEEN" = 0 ] || CELL_EM_AT=$1
 	[ "$_cn_unk" = 0 ] && [ "$CELL_UNK_SEEN" = 0 ] || CELL_UNK_AT=$1
+	if [ "$_cn_event" = 1 ]; then
+		[ -z "$CELL_EM_AT" ] || CELL_EM_AT=$1
+		[ -z "$CELL_UNK_AT" ] || CELL_UNK_AT=$1
+	fi
 	CELL_EM_SEEN=$_cn_em
 	CELL_UNK_SEEN=$_cn_unk
 }
 
 # cell_forget NOW: 5 minutes after the last look that saw a call, a sign or
-# a doubt, the watch forgets it (CELL_LAST, CELL_EM_AT, CELL_UNK_AT): from
-# then on the module keeps nothing about those calls but Telecom's own
-# counter (CELL_ID). cell_hold answers the same with or without them. A
-# clock below a time, or none (NOW 0), clears nothing.
+# a doubt (cell_note renews a sign or a doubt at every call-like event),
+# the watch forgets it (CELL_LAST, CELL_EM_AT, CELL_UNK_AT): from then on
+# the module keeps nothing about those calls but Telecom's own counter
+# (CELL_ID, CELL_FROM) and the phone process's pid and start time
+# (CELL_PHONE). cell_hold answers the same with or without them. A clock
+# below a time, or none (NOW 0), clears nothing.
 cell_forget() {
 	if [ -n "$CELL_LAST" ] && [ "$1" -ge "$CELL_LAST" ] && [ $(($1 - CELL_LAST)) -ge "$CELL_AFTER" ]; then
 		CELL_LAST=
@@ -1220,11 +1412,12 @@ cell_forget() {
 
 # cell_word NOW: the module's word on the calls of the last 5 minutes,
 # "KIND UNTIL": "emergency END" (END: when Welcome may stop waiting for
-# it, 5 minutes after the look that saw the sign or its end); "unknown 0"
-# (no time since boot, the last look could not read the state, or a doubt in
-# the last 5 minutes); "ordinary 0" (a call-like event in the last 5
-# minutes, every one classified as an ordinary call); "none 0". In this
-# order: emergency, unknown, ordinary, none.
+# it, 5 minutes after the look that saw the sign or its end, or the last
+# call-like event since); "unknown 0" (no time since boot, the last look
+# could not read the state, or a doubt kept: cell_note); "ordinary 0" (a
+# call-like event in the last 5 minutes, every call classified as an
+# ordinary call in a Phone-mode session); "none 0". In this order:
+# emergency, unknown, ordinary, none.
 cell_word() {
 	if [ "$1" -le 0 ]; then
 		echo "unknown 0"
@@ -1482,6 +1675,7 @@ cell_step() {
 		if [ "$CELL_AIR" = 1 ] && [ "$_cs_v" = 0 ] && ! cell_mine "$_cs_now"; then
 			CELL_LAST=$_cs_now
 			CELL_UNK_AT=$_cs_now
+			[ -z "$CELL_EM_AT" ] || CELL_EM_AT=$_cs_now
 			log "cell: airplane mode switched off by something else; the radio stays on for at least 5 minutes"
 		fi
 		[ "$_cs_v" = 0 ] && CELL_AIR_OFF_AT=$_cs_now
@@ -1652,35 +1846,59 @@ welcome_tell() {
 
 # cell_tell NOW: in a turn that took a look, tell Welcome the word: when it
 # changed (the first turn included, which replaces a word an earlier run
-# left), after every look while it is "ordinary" or "emergency" (Welcome
-# uses an ordinary word for 30 s only, and its process may have restarted),
-# every CELL_IMS_EVERY seconds while there is an IMS reading, and after
-# every look while Welcome does not take it. Only while Welcome is the
-# device owner (the authority is then Welcome's). Logs that telling failed
-# and that it works again, never the word.
+# left); after every look while it is "emergency" (its end moves on);
+# after every look while it is "ordinary" outside a call (Welcome uses an
+# ordinary word for 30 s only, and its process may have restarted); every
+# CELL_IMS_EVERY seconds while there is an IMS reading. During a call an
+# unchanged "ordinary" is not told again: Welcome waits during a call
+# whatever the word says, and a word from a look before the call's end
+# covers nothing; the first look after the call tells it again. While
+# Welcome does not take the word (a Welcome without module_word answers
+# "Result: null"), once every WORD_RETRY seconds, and at once for an
+# emergency word or a word of another kind than the last try (Welcome may
+# still hold an earlier word: an ordinary one counts for 30 s). Each word
+# Welcome skips only makes it wait as it would without the module. Only
+# while Welcome is the device owner (the authority is then Welcome's).
+# Logs that telling failed and that it works again, never the word.
 cell_tell() {
 	_ct_now=$1
 	[ "$CELL_LOOKED" = "$_ct_now" ] || return 0
 	_ct_w=$(cell_word "$_ct_now")
+	_ct_k=${_ct_w%% *}
 	_ct_new="$_ct_w $CELL_IMS $CELL_IMS_AT"
-	_ct_go=$CELL_WORD_BAD
-	[ "$_ct_new" = "$CELL_WORD" ] || _ct_go=1
-	case $_ct_w in ordinary* | emergency*) _ct_go=1 ;; esac
-	if [ "$CELL_IMS" != off ] && { [ -z "$CELL_TOLD_AT" ] || [ $((_ct_now - CELL_TOLD_AT)) -ge "$CELL_IMS_EVERY" ]; }; then
-		_ct_go=1
+	_ct_go=0
+	if [ "$CELL_WORD_BAD" = 1 ]; then
+		[ "$_ct_k" != emergency ] || _ct_go=1
+		[ "$_ct_k" = "$CELL_BAD_KIND" ] || _ct_go=1
+		if [ "$_ct_now" -lt "$CELL_BAD_AT" ] || [ $((_ct_now - CELL_BAD_AT)) -ge "$WORD_RETRY" ]; then
+			_ct_go=1
+		fi
+	else
+		[ "$_ct_new" = "$CELL_WORD" ] || _ct_go=1
+		case $_ct_k in
+		emergency) _ct_go=1 ;;
+		ordinary) [ "$CL_CALL" = 1 ] || _ct_go=1 ;;
+		esac
+		if [ "$CELL_IMS" != off ] && { [ -z "$CELL_TOLD_AT" ] || [ $((_ct_now - CELL_TOLD_AT)) -ge "$CELL_IMS_EVERY" ]; }; then
+			_ct_go=1
+		fi
 	fi
 	[ "$_ct_go" = 1 ] || return 0
 	welcome_is_owner || return 0
-	if welcome_tell "${_ct_w%% *}" "$_ct_now" "${_ct_w#* }" "$CELL_IMS" "$CELL_IMS_AT"; then
+	if welcome_tell "$_ct_k" "$_ct_now" "${_ct_w#* }" "$CELL_IMS" "$CELL_IMS_AT"; then
 		CELL_WORD=$_ct_new
 		CELL_TOLD_AT=$_ct_now
 		if [ "$CELL_WORD_BAD" = 1 ]; then
 			CELL_WORD_BAD=0
 			log "cell: Welcome takes the module's word again"
 		fi
-	elif [ "$CELL_WORD_BAD" = 0 ]; then
-		CELL_WORD_BAD=1
-		log "cell: Welcome did not take the module's word; Quick power off waits as it would without it"
+	else
+		CELL_BAD_AT=$_ct_now
+		CELL_BAD_KIND=$_ct_k
+		if [ "$CELL_WORD_BAD" = 0 ]; then
+			CELL_WORD_BAD=1
+			log "cell: Welcome did not take the module's word; Quick power off waits as it would without it"
+		fi
 	fi
 }
 

@@ -513,14 +513,16 @@ while :; do
 	# 6 (continued). The cell radio's watch, and the radios if the firewall
 	# is open: after Start has been read, so that a Phone-mode session's
 	# switch-on follows it in the same turn. It ends when Android begins to
-	# shut down (shutdown_check has stored what the next start needs). A
-	# turn in which it looked (two dumps, up to 8 s) checks the ports again
-	# at once, so that the look's time is not added to the next turn's wait,
-	# and then gives Welcome the module's word on the last calls (MOD11).
+	# shut down (shutdown_check has stored what the next start needs). After
+	# a look the module gives Welcome its word on the last calls (MOD11). A
+	# turn in which it looked (two dumps, up to 8 s) and told Welcome the
+	# word (up to 10 s) checks the ports again at once, so that neither is
+	# added to the next turn's wait (cell_tell tells only in a turn that
+	# looked).
 	if [ "$SETTINGS_DONE" = 1 ] && [ "$SHUTDOWN_DONE" = 0 ]; then
 		cell_step "$NOW"
-		[ "$CELL_LOOKED" = "$NOW" ] && ports_check
 		cell_tell "$NOW"
+		[ "$CELL_LOOKED" = "$NOW" ] && ports_check
 	fi
 
 	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64

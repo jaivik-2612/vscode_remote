@@ -45,6 +45,14 @@ LOGDIR=$(mktemp -d)
 trap 'rm -rf "$LOGDIR"' EXIT
 
 fails=0
+# The phone process as phone_proc reports it, "PID:START" ("-": not
+# running); a stand-in for the watch's tests (the real phone_proc is tested
+# below, on this host's processes).
+FAKE_PROC=1234:5678
+phone_proc() {
+	[ "$FAKE_PROC" != - ] || return 1
+	echo "$FAKE_PROC"
+}
 ok() { printf '  ok    %s\n' "$1"; }
 bad() {
 	printf '  FAIL  %s\n' "$1"
@@ -327,18 +335,28 @@ expect "start_dnsfilter: the CI switch on the emulator" "-debug-log-queries -sta
 # STATE and one Analytics entry per call in HISTORY, laid out as Android 16
 # prints them (TelecomServiceImpl, CallsManager, Call.toString,
 # Analytics.CallInfoImpl.toString under an IndentingPrintWriter).
-# HISTORY is N (calls 1 to N, ordinary) or a list of words: N (call N,
-# ordinary), N:KIND, or id:ID (an entry whose id is not TC@<number>). KIND:
-# e (isEmergency: true), ecall or ecbm (in callProperties), missed
-# (missedReason: [emergency] on an ordinary call), - (no isEmergency line),
-# x (isEmergency: maybe), np (no callProperties line), 2 (two isEmergency
-# lines), gone (no entry). STATE is a call state, with :voip (a VoIP call),
-# :ecall or :ecbm (in its prop=) and @N (its number; else 1, 2, ... in
-# order).
+# HISTORY is N (calls 1 to N, ordinary, ended) or a list of words: N (call
+# N, ordinary, ended), N:KIND, or id:ID (an entry whose id is not
+# TC@<number>). KIND: e (isEmergency: true), ecall or ecbm (in
+# callProperties), missed (missedReason: [emergency] on an ordinary call),
+# - (no isEmergency line), x (isEmergency: maybe), np (no callProperties
+# line), 2 (two isEmergency lines), gone (no entry), noend (no endTime
+# line), badend (endTime: soon), open (an ordinary call not ended yet:
+# endTime: 0), or any of them with +open (not ended yet). An entry ends
+# (endTime, milliseconds since the epoch) unless it is open. STATE is a
+# call state, with :voip (a VoIP call), :ecall or :ecbm (in its prop=) and
+# @N (its number; else 1, 2, ... in order).
 tf_entry() { # ID KIND
 	printf '  Call %s: {\n' "$1"
-	printf '      %s\n' 'startTime: 0' 'endTime: 0' 'direction: OUTGOING' 'isAdditionalCall: false' 'isInterrupted: false'
+	echo '      startTime: 0'
 	case $2 in
+	*open) echo '      endTime: 0' ;;
+	noend) ;;
+	badend) echo '      endTime: soon' ;;
+	*) echo '      endTime: 1000000000000' ;;
+	esac
+	printf '      %s\n' 'direction: OUTGOING' 'isAdditionalCall: false' 'isInterrupted: false'
+	case ${2%+open} in
 	e) echo '      isEmergency: true' ;;
 	-) ;;
 	x) echo '      isEmergency: maybe' ;;
@@ -347,13 +365,13 @@ tf_entry() { # ID KIND
 	esac
 	echo '      callTechnologies: [IMS ]'
 	echo '      callTerminationReason: DisconnectCause [ Code: (LOCAL) Label: () Description: () Reason: (LOCAL) Tone: (-1) ]'
-	if [ "$2" = missed ]; then echo '      missedReason: [emergency]'; else echo '      missedReason: []'; fi
+	if [ "${2%+open}" = missed ]; then echo '      missedReason: [emergency]'; else echo '      missedReason: []'; fi
 	echo '      connectionService: com.android.phone/com.android.services.telephony.TelephonyConnectionService'
 	echo '      isVideoCall: false'
 	echo '      inCallServices: ['
 	echo '          name: ComponentInfo{com.android.dialer/com.android.incallui.InCallServiceImpl} type: 1 is crashed: false service last time in ms: 0'
 	echo '      ]'
-	case $2 in
+	case ${2%+open} in
 	ecall) echo '      callProperties: [ HD ecall]' ;;
 	ecbm) echo '      callProperties: [ ecbm]' ;;
 	np) ;;
@@ -531,6 +549,50 @@ expect "ecbm_value 0" 0 "$(ecbm_value 0)"
 expect "ecbm_value 1" 1 "$(ecbm_value 1)"
 expect "ecbm_value something else counts as on" 1 "$(ecbm_value maybe)"
 
+# --- phone_proc: the phone process (the real function, on this host's /proc) ---
+# A stand-in toybox whose pidof prints FAKE_PIDOF (exits 1 when it is
+# empty), and real processes: sleep, and a copy of it whose name holds ") ".
+# shellcheck disable=SC2016 # the stand-in's lines, expanded when it runs
+printf '%s\n' '#!/bin/sh' '[ "$1 $2" = "pidof com.android.phone" ] || exit 2' \
+	'[ -n "${FAKE_PIDOF-}" ] || exit 1' 'echo "$FAKE_PIDOF"' >"$LOGDIR/toybox"
+chmod +x "$LOGDIR/toybox"
+# pp PIDOF: the library's phone_proc (sourced again in a subshell, over the
+# stand-in above) with that answer from pidof; prints what it prints on
+# standard output and standard error, then "rc=N", on one line.
+pp() {
+	(
+		_pp_tb=$LOGDIR/toybox
+		# The library as sourced above (already checked there), so that
+		# this subshell has the real phone_proc and not the stand-in.
+		# shellcheck source=/dev/null
+		. "$MODULE/lib/antumbra.sh"
+		TB=$_pp_tb
+		FAKE_PIDOF=$1
+		export FAKE_PIDOF
+		phone_proc
+		echo "rc=$?"
+	) 2>&1 | tr '\n' ' ' | sed 's/ $//'
+}
+# start_of PID: field 22 of /proc/PID/stat (the start time), counted after
+# the name.
+start_of() { sed 's/.*) //' "/proc/$1/stat" | awk '{ print $20 }'; }
+cp /bin/sleep "$LOGDIR/x) 1 2"
+sleep 60 &
+pp1=$!
+"$LOGDIR/x) 1 2" 60 &
+pp2=$!
+expect "phone_proc: a running process: PID:START (field 22 of its stat)" "$pp1:$(start_of "$pp1") rc=0" "$(pp "$pp1")"
+expect "phone_proc: a name with ') ' in it: the fields after the name" "$pp2:$(start_of "$pp2") rc=0" "$(pp "$pp2")"
+r=$(pp "$pp1")
+case $r in "$pp1:"[1-9]*' rc=0') ok "phone_proc: the start time is a number above 0" ;; *) bad "phone_proc: the start time: [$r]" ;; esac
+expect "phone_proc: two processes of that name: not one (rc 1)" "rc=1" "$(pp "$pp1 $pp2")"
+expect "phone_proc: not running (pidof exits 1): rc 1" "rc=1" "$(pp '')"
+expect "phone_proc: pidof answers something else: rc 1" "rc=1" "$(pp x)"
+expect "phone_proc: pidof answers a name /proc has (self): rc 1, not the shell's own" "rc=1" "$(pp self)"
+kill "$pp1" "$pp2" 2>/dev/null
+wait "$pp1" "$pp2" 2>/dev/null
+expect "phone_proc: the process gone before its stat is read: rc 1, nothing on standard error" "rc=1" "$(pp "$pp1")"
+
 # --- The module's word (MOD11): what the calls were ------------------------------------
 # tsa SINCE LIVE XN HISTORY STATE...: telecom_state with the last look's
 # LASTID, LIVE and XN (empty: the module's first look).
@@ -560,6 +622,81 @@ expect "kind: a live ordinary call, numbered at the last look" "1 4 o 4 0" "$(ts
 expect "kind: a live emergency call, numbered at the last look" "1 4 e 4 0" "$(tsa 4 4 0 '1 2 3 4:e' 'ACTIVE@4')"
 expect "kind: call 2 listed at the last look, ended, its entry now flagged ecall" "0 3 e - 0" "$(tsa 3 2 0 '1 2:ecall 3')"
 expect "kind: call 2 listed at the last look, ended, ordinary" "0 3 o - 0" "$(tsa 3 2 0 3)"
+# safety-1: a call first counted at a look (FROM, SINCE] is read again at
+# the next; it stays in scope while it is listed or its entry has not
+# ended (LIVE carries both), and leaves the scope only once a look sees it
+# unlisted and ended. Telecom prints its call list before Analytics,
+# without a lock: an entry can be seen while its call is not listed yet.
+# tsf SINCE LIVE XN FROM HISTORY STATE...: tsa with the last look's FROM.
+tsf() {
+	_tf_s=$1 _tf_l=$2 _tf_x=$3 _tf_f=$4
+	shift 4
+	telecom_fixture "$@" | telecom_state "$_tf_s" "$_tf_l" "$_tf_x" "$_tf_f"
+}
+expect "scope: look k, call 4 in Analytics only (not listed yet), open: ordinary so far, kept in LIVE" "0 4 o 4 0" \
+	"$(tsf 3 - 0 2 '1 2 3 4:open')"
+expect "scope: look k+1, call 4 ended, its entry now flagged ecall: emergency" "0 4 e - 0" "$(tsf 4 - 0 3 '1 2 3 4:ecall')"
+expect "scope: look k+1, call 4 ended, its entry now isEmergency: true: emergency" "0 4 e - 0" "$(tsf 4 - 0 3 '1 2 3 4:e')"
+expect "scope: look k+1, call 4 ended (kept in LIVE), its entry now flagged ecall: emergency" "0 4 e - 0" \
+	"$(tsf 4 4 0 3 '1 2 3 4:ecall')"
+expect "scope: look k+1, call 4 not listed and still open: unknown, kept" "0 4 u 4 0" "$(tsf 4 4 0 3 '1 2 3 4:open')"
+expect "scope: look k+1, call 4 not listed, still open, ecall so far: unknown, kept (read once listed or ended)" \
+	"0 4 u 4 0" "$(tsf 4 4 0 3 '1 2 3 4:ecall+open')"
+expect "scope: look k+1, call 4 not listed, still open, isEmergency: true so far: unknown, kept" "0 4 u 4 0" \
+	"$(tsf 4 4 0 3 '1 2 3 4:e+open')"
+expect "scope: look k+1, call 4 ended, ordinary: ordinary" "0 4 o - 0" "$(tsf 4 4 0 3 '1 2 3 4')"
+expect "scope: look k+1, call 4 listed now (open): ordinary, in LIVE" "1 4 o 4 0" "$(tsf 4 4 0 3 '1 2 3 4:open' 'ACTIVE@4')"
+expect "scope: look k+1, call 4 listed now, isEmergency: true: emergency" "1 4 e 4 0" \
+	"$(tsf 4 4 0 3 '1 2 3 4:e+open' 'ACTIVE@4')"
+# The finding the scope rule was changed for: the entry open and not
+# listed at three looks and more; it must stay in scope until a look reads
+# it ended.
+expect "scope: look k+2, call 4 below FROM, kept in LIVE, still not listed and open: unknown, kept" "0 4 u 4 0" \
+	"$(tsf 4 4 0 4 '1 2 3 4:open')"
+expect "scope: look k+3, ... the same: unknown, kept" "0 4 u 4 0" "$(tsf 4 4 0 4 '1 2 3 4:open')"
+expect "scope: ... then ended between two looks, flagged ecall: emergency, out of LIVE" "0 4 e - 0" \
+	"$(tsf 4 4 0 4 '1 2 3 4:ecall')"
+expect "scope: ... or ended, ordinary: ordinary" "0 4 o - 0" "$(tsf 4 4 0 4 '1 2 3 4')"
+expect "scope: ... or listed at last: read by its entry, in LIVE" "1 4 e 4 0" "$(tsf 4 4 0 4 '1 2 3 4:ecall+open' 'ACTIVE@4')"
+expect "scope: ... a call new at this look beside it: unknown, both kept" "0 5 u 4,5 0" \
+	"$(tsf 4 4 0 4 '1 2 3 4:open 5:open')"
+expect "scope: a kept call whose entry is gone (Telecom keeps 100): unknown, then no longer kept" "0 5 u - 0" \
+	"$(tsf 5 4 0 5 '1 2 3 4:gone 5')"
+expect "scope: an open entry below FROM, not kept, not listed: unknown, kept from now on" "0 4 u 3 0" \
+	"$(tsf 4 - 0 4 '1 2 3:open 4')"
+expect "scope: look k+2, call 4 read after its end at k+1: out of scope" "0 4 - - 0" "$(tsf 4 - 0 4 '1 2 3 4:ecall')"
+expect "scope: listed at the last look, not now, still open: unknown, kept" "0 4 u 4 0" "$(tsf 4 4 0 4 '1 2 3 4:open')"
+expect "scope: listed at the last look, not now, ended: ordinary" "0 4 o - 0" "$(tsf 4 4 0 4 '1 2 3 4')"
+expect "scope: listed at the last look, not now, still open, no FROM given: unknown, kept" "0 4 u 4 0" \
+	"$(tsa 4 4 0 '1 2 3 4:open')"
+expect "scope: listed now and open: ordinary" "1 4 o 4 0" "$(tsf 4 4 0 4 '1 2 3 4:open' 'ACTIVE@4')"
+expect "scope: unknown: an entry in scope without endTime (kept: it may not have ended)" "0 4 u 4 0" \
+	"$(tsf 3 - 0 3 '1 2 3 4:noend')"
+expect "scope: unknown: an entry in scope with endTime: soon" "0 4 u 4 0" "$(tsf 3 - 0 3 '1 2 3 4:badend')"
+# tel_end4 TEXT: calls 1 to 4, call 4's endTime line replaced by TEXT (\n
+# for two lines), read with SINCE 3, LIVE -, XN 0, FROM 3.
+tel_end4() {
+	telecom_fixture '1 2 3 4' | sed "/^  Call TC@4: {\$/,/^  }\$/s/^      endTime: .*\$/      $1/" | telecom_state 3 - 0 3
+}
+expect "scope: unknown: an entry with two endTime lines" "0 4 u 4 0" "$(tel_end4 'endTime: 1\n      endTime: 1')"
+expect "scope: unknown: a negative endTime" "0 4 u 4 0" "$(tel_end4 'endTime: -5')"
+expect "scope: unknown: an endTime with a leading 0" "0 4 u 4 0" "$(tel_end4 'endTime: 01')"
+expect "scope: unknown: an endTime of digits and more ('1760000000000 (pending)')" "0 4 u 4 0" \
+	"$(tel_end4 'endTime: 1760000000000 (pending)')"
+expect "scope: unknown: an endTime with a unit ('5s')" "0 4 u 4 0" "$(tel_end4 'endTime: 5s')"
+expect "scope: an endTime of 13 digits: ended, ordinary" "0 4 o - 0" "$(tel_end4 'endTime: 1760000000000')"
+expect "scope: an old entry without endTime (it may not have ended): unknown, kept" "0 4 u 2 0" \
+	"$(tsf 3 - 0 3 '1 2:noend 3 4')"
+expect "scope: unknown: a call first counted at the last look, its entry gone" "0 5 u - 0" "$(tsf 5 - 0 3 '1 2 3 4:gone 5')"
+expect "scope: unknown: FROM above SINCE" "0 4 u - 0" "$(tsf 4 - 0 5 '1 2 3 4')"
+expect "scope: unknown: FROM not a number" "0 4 u - 0" "$(tsf 4 - 0 x '1 2 3 4')"
+expect "scope: unknown: FROM of ten digits" "0 4 u - 0" "$(tsf 4 - 0 1234567890 '1 2 3 4')"
+expect "scope: FROM 0 (after the first look): every call read again, ordinary" "0 4 o - 0" "$(tsf 4 - 0 0 '1 2 3 4')"
+expect "scope: FROM 0: an old call never ended (dropped before Telecom listed it): unknown, kept" "0 4 u 2 0" \
+	"$(tsf 4 - 0 0 '1 2:open 3 4')"
+expect "scope: Telecom restarted (SINCE above LASTID): every entry read, unknown" "0 2 u - 0" "$(tsf 9 - 0 7 2)"
+expect "scope: call 5 new, call 4 read again: both ordinary, 5 kept" "0 5 o 5 0" "$(tsf 4 - 0 3 '1 2 3 4 5:open')"
+expect "scope: call 5 new and emergency, call 4 read again" "0 5 e 5 0" "$(tsf 4 - 0 3 '1 2 3 4 5:e+open')"
 expect "kind: a missed call (missedReason: [emergency]) is ordinary" "0 4 o - 0" "$(tsa 3 - 0 '1 2 3 4:missed')"
 expect "kind: a VoIP call through Telecom is ordinary" "1 4 o 4 0" "$(tsa 3 - 0 4 'ACTIVE:voip@4')"
 expect "kind: unknown: the entry of call 3 is missing (SINCE 2)" "0 4 u - 0" "$(tsa 2 - 0 '1 2 3:gone 4')"
@@ -647,13 +784,14 @@ expect "cell_hold: callback before recent" callback "$(hold 1000 0 1 1000)"
 
 # note NOW CALL CBM ID RADIO: cell_note on a look, then print CELL_LAST.
 note() {
-	CL_CALL=$2 CL_CBM=$3 CL_ID=$4 CL_RADIO=$5 CL_KIND=- CL_ALONE=0 CL_LIVE=- CL_XN=0
+	CL_CALL=$2 CL_CBM=$3 CL_ID=$4 CL_RADIO=$5 CL_KIND=- CL_ALONE=0 CL_LIVE=- CL_XN=0 CL_PHONE=$FAKE_PROC
 	cell_note "$1"
 	echo "${CELL_LAST:-none}"
 }
 cell_fresh() {
 	CELL_LAST='' CELL_BUSY=0 CELL_ID='' CELL_RADIO='' CELL_MINE_AT=''
 	CELL_LIVE='' CELL_XN='' CELL_EM_AT='' CELL_UNK_AT='' CELL_EM_SEEN=0 CELL_UNK_SEEN=0
+	CELL_FROM='' CELL_PHONE='' FAKE_PROC=1234:5678
 }
 cell_fresh
 expect "cell_note: first look, no call ever" none "$(note 100 0 0 0 off)"
@@ -691,13 +829,38 @@ note 100 unknown unknown '' unknown >/dev/null
 expect "cell_note: nothing readable counts as a call" 100 "$CELL_LAST"
 note 140 0 0 0 off >/dev/null
 expect "cell_note: readable again: 5 minutes from then" 140 "$CELL_LAST"
+# FROM: the last readable look's counter, so that the calls it first
+# counted are read once more (safety-1).
+cell_fresh
+note 100 0 0 3 off >/dev/null
+expect "cell_note: FROM after the first look: 0 (every call read again)" 0 "$CELL_FROM"
+note 110 0 0 5 off >/dev/null
+expect "cell_note: FROM: the counter at the look before" 3 "$CELL_FROM"
+note 120 unknown unknown '' unknown >/dev/null
+expect "cell_note: FROM: an unreadable look changes nothing" "3/5" "$CELL_FROM/$CELL_ID"
+note 130 0 0 5 off >/dev/null
+expect "cell_note: FROM: the counter unchanged: nothing read again from then on" 5 "$CELL_FROM"
+note 140 0 0 2 off >/dev/null
+expect "cell_note: FROM: the counter went down (Telecom restarted): 0" 0 "$CELL_FROM"
+# LIVE: a call not over at the last look (listed, or its entry not ended)
+# that is over now ended between the two looks: an event (a call listed
+# only between two looks, its entry open and unlisted at the looks before).
+cell_fresh
+note 100 0 0 4 off >/dev/null
+CELL_LAST='' CELL_LIVE=4
+CL_CALL=0 CL_CBM=0 CL_ID=4 CL_RADIO=off CL_KIND=u CL_ALONE=0 CL_LIVE=4 CL_XN=0 CL_PHONE=$FAKE_PROC
+cell_note 110
+expect "cell_note: a call still not over (its entry open, not listed): no event" "" "$CELL_LAST"
+note 120 0 0 4 off >/dev/null
+expect "cell_note: ... over now (its entry read ended, or gone): the event is now" 120 "$CELL_LAST"
+expect "cell_note: ... and LIVE as this look printed it" - "$CELL_LIVE"
 
 # --- The module's word (MOD11): the last 5 minutes ----------------------------------
 # word NOW CALL CBM KIND ID [RADIO [ALONE]]: a look (CL_*, as cell_look sets
 # them) taken into the watch at NOW, the records past their 5 minutes
 # forgotten, and the word printed.
 word() {
-	CL_CALL=$2 CL_CBM=$3 CL_KIND=$4 CL_ID=$5 CL_RADIO=${6:-off} CL_ALONE=${7:-0} CL_LIVE=- CL_XN=0
+	CL_CALL=$2 CL_CBM=$3 CL_KIND=$4 CL_ID=$5 CL_RADIO=${6:-off} CL_ALONE=${7:-0} CL_LIVE=- CL_XN=0 CL_PHONE=$FAKE_PROC
 	cell_note "$1"
 	cell_forget "$1"
 	cell_word "$1"
@@ -711,6 +874,17 @@ wx() {
 	word "$@" >"$LOGDIR/word"
 	expect "$_wx_d" "$_wx_e" "$(cat "$LOGDIR/word")"
 }
+# phone_mode on|off: a Phone-mode session with the module's switch-on done
+# (the only place a call can read ordinary), or a session that keeps the
+# radio off (every session until WEL8).
+phone_mode() {
+	if [ "$1" = on ]; then
+		S_STARTED=1 SES_CELL=phone CELL_ON_DONE=1 RADIOS=''
+	else
+		S_STARTED=1 SES_CELL=off CELL_ON_DONE=0 RADIOS=''
+	fi
+}
+phone_mode on
 cell_fresh
 wx "word: no call in this boot: none" "none 0" 100 0 0 - 0
 cell_fresh
@@ -774,12 +948,116 @@ word 100 0 0 - 1 >/dev/null
 word 110 0 0 u 2 >/dev/null
 wx "word: unknown before ordinary" "unknown 0" 120 0 0 o 3
 wx "word: unknown before ordinary, a later ordinary call" "unknown 0" 300 0 0 o 4
-wx "word: unknown before ordinary, until the doubt is 5 minutes old" "unknown 0" 419 0 0 - 4
-wx "word: ... then ordinary for the rest of the later call's 5 minutes" "ordinary 0" 420 0 0 - 4
-wx "word: ... and none after them" "none 0" 600 0 0 - 4
+wx "word: unknown before ordinary, 5 minutes after the doubt: still unknown (the later call renewed it)" \
+	"unknown 0" 420 0 0 - 4
+wx "word: ... until 5 minutes after the later call" "unknown 0" 599 0 0 - 4
+wx "word: ... then none, never ordinary" "none 0" 600 0 0 - 4
 cell_fresh
 word 100 0 0 e 1 >/dev/null
 wx "word: an ordinary call during an emergency's 5 minutes: emergency" "emergency 420" 120 0 0 o 2
+# android-1 (b): a sign or a doubt still kept lasts until 5 minutes after
+# the look that saw the last call end, not 5 minutes after it was seen.
+cell_fresh
+word 100 0 0 - 0 >/dev/null
+wx "word (b): callback mode" "emergency 410" 110 0 1 - 0
+wx "word (b): ... over, an ordinary call begins" "emergency 420" 120 1 0 o 1
+t=130
+while [ "$t" -lt 400 ]; do
+	word "$t" 1 0 o 1 >/dev/null
+	t=$((t + 10))
+done
+wx "word (b): ... the call lasts past callback mode's 5 minutes: still emergency, its end moving on" \
+	"emergency 700" 400 1 0 o 1
+wx "word (b): ... the call ended (this look saw it)" "emergency 710" 410 0 0 o 1
+wx "word (b): ... 299 s after the look that saw the end" "emergency 710" 709 0 0 - 1
+wx "word (b): ... 300 s after it: none" "none 0" 710 0 0 - 1
+cell_fresh
+word 100 0 0 - 3 >/dev/null
+wx "word (b): a call that cannot be classified" "unknown 0" 110 0 0 u 4
+wx "word (b): ... a 6-minute ordinary call begins 200 s later" "unknown 0" 300 1 0 o 5
+t=310
+while [ "$t" -lt 660 ]; do
+	word "$t" 1 0 o 5 >/dev/null
+	t=$((t + 10))
+done
+wx "word (b): ... more than 5 minutes after the doubt, during the call: unknown" "unknown 0" 660 1 0 o 5
+wx "word (b): ... the call ended: unknown" "unknown 0" 670 0 0 o 5
+wx "word (b): ... 299 s after the look that saw the end: unknown" "unknown 0" 969 0 0 - 5
+wx "word (b): ... 300 s after it: none, never ordinary" "none 0" 970 0 0 - 5
+cell_fresh
+word 100 0 0 u 1 >/dev/null
+word 110 0 0 - 1 >/dev/null
+wx "word (b): a doubt with no call after it: none 5 minutes after the look after it" "none 0" 410 0 0 - 1
+wx "word (b): ... a later ordinary call is not covered by the old doubt: ordinary" "ordinary 0" 420 0 0 o 2
+# The same without a look in between: cell_note forgets a record past its 5
+# minutes before the event could renew it.
+cell_fresh
+word 100 0 0 u 1 >/dev/null
+word 110 0 0 - 1 >/dev/null
+wx "word (b): a doubt past its 5 minutes at the next look, which sees a new call: not renewed, ordinary" \
+	"ordinary 0" 420 0 0 o 2
+# android-1 (a): outside Phone mode the cell radio is off by design, so a
+# carrier call there is an emergency call, a Wi-Fi call (until MOD7) or
+# follows a switch-on by something else, which the module cannot tell
+# apart: every call reads unknown.
+for m in 'S_STARTED=0' 'SES_CELL=off' 'RADIOS=waiting' 'RADIOS=switched' 'CELL_ON_DONE=0'; do
+	cell_fresh
+	phone_mode on
+	eval "$m"
+	word 100 0 0 - 3 >/dev/null
+	wx "word (a): outside Phone mode ($m): a short ordinary call: unknown" "unknown 0" 110 0 0 o 4
+done
+phone_mode off
+cell_fresh
+word 100 0 0 - 0 >/dev/null
+wx "word (a): outside Phone mode: an ordinary call in progress: unknown" "unknown 0" 110 1 0 o 1
+wx "word (a): ... the call ended: unknown" "unknown 0" 120 0 0 o 1
+wx "word (a): ... the look after the end: unknown" "unknown 0" 130 0 0 - 1
+wx "word (a): ... 299 s after it: unknown" "unknown 0" 429 0 0 - 1
+wx "word (a): ... then none" "none 0" 430 0 0 - 1
+cell_fresh
+word 100 0 0 - 1 >/dev/null
+wx "word (a): outside Phone mode: an emergency call still reads emergency" "emergency 410" 110 0 0 e 2
+cell_fresh
+wx "word (a): outside Phone mode: no call: none" "none 0" 100 0 0 - 0
+phone_mode on
+# android-1 (c): the phone process not running, or another one than at the
+# last look: Telecom's emergency check can fail then.
+cell_fresh
+wx "word (c): the phone process at the first look of the boot: none" "none 0" 100 0 0 - 0
+FAKE_PROC=999:1
+wx "word (c): another phone process (restarted), no call: unknown" "unknown 0" 110 0 0 - 0
+expect "word (c): ... not a call-like event (nothing for MOD6 to hold)" "-/-/110" "$(records)"
+wx "word (c): ... the same one at the next look: still unknown (the look after)" "unknown 0" 120 0 0 - 0
+wx "word (c): ... 299 s after that look" "unknown 0" 419 0 0 - 0
+wx "word (c): ... 300 s after it: none" "none 0" 420 0 0 - 0
+expect "word (c): ... then nothing is kept" "-/-/-" "$(records)"
+cell_fresh
+word 100 0 0 - 0 >/dev/null
+FAKE_PROC=1234:9999
+wx "word (c): the same pid, another start time (a new process): unknown" "unknown 0" 110 0 0 - 0
+cell_fresh
+word 100 0 0 - 0 >/dev/null
+FAKE_PROC=-
+wx "word (c): the phone process not running: unknown" "unknown 0" 110 0 0 - 0
+cell_fresh
+FAKE_PROC=-
+wx "word (c): ... not running at the first look of the boot: unknown" "unknown 0" 100 0 0 - 0
+cell_fresh
+CELL_RADIO=on
+word 100 0 0 - 3 on >/dev/null
+FAKE_PROC=999:1
+word 110 0 0 - 3 on >/dev/null
+wx "word (c)+(b): a restart, then an ordinary call 200 s later: unknown" "unknown 0" 300 1 0 o 4 on
+t=310
+while [ "$t" -lt 670 ]; do
+	word "$t" 1 0 o 4 on >/dev/null
+	t=$((t + 10))
+done
+wx "word (c)+(b): ... the call ended 6 minutes later: unknown" "unknown 0" 670 0 0 o 4 on
+wx "word (c)+(b): ... 299 s after the look that saw the end: unknown" "unknown 0" 969 0 0 - 4 on
+wx "word (c)+(b): ... 300 s after it: none, never ordinary" "none 0" 970 0 0 - 4 on
+FAKE_PROC=1234:5678
 cell_fresh
 word 100 1 0 e 1 >/dev/null
 CELL_EM_AT=0 CELL_EM_SEEN=0
@@ -875,11 +1153,13 @@ airplane_set() {
 	esac
 }
 # phone_restart: the phone process starts again (a crash, or a restart of
-# system_server), as in Android 16: ServiceStateTracker reads
-# enable_cellular_on_boot (unset: on) and airplane mode once, and keeps the
-# radio off unless the first is not 0 and the second is off; PhoneGlobals,
-# with cell_on 2 and airplane mode off, switches it on (and stores 1).
+# system_server), as in Android 16: a new process (pid and start time);
+# ServiceStateTracker reads enable_cellular_on_boot (unset: on) and
+# airplane mode once, and keeps the radio off unless the first is not 0
+# and the second is off; PhoneGlobals, with cell_on 2 and airplane mode
+# off, switches it on (and stores 1).
 phone_restart() {
+	FAKE_PROC=$((${FAKE_PROC%%:*} + 1)):$((${FAKE_PROC#*:} + 100))
 	_pr_boot=$(setting_get enable_cellular_on_boot)
 	_pr_air=$(setting_get airplane_mode_on)
 	FAKE_RADIO=0
@@ -917,7 +1197,8 @@ watch_reset() {
 	CELL_LAST='' CELL_BUSY=0 CELL_ID='' CELL_RADIO='' CELL_MINE_AT='' CELL_ON_DONE=0 CELL_TRY_AT='' CELL_HELD=''
 	CELL_READ='' CELL_CLOCKLESS=0 CL_CALL=unknown CL_CBM=unknown CL_ID='' CL_RADIO=unknown
 	CELL_LIVE='' CELL_XN='' CELL_EM_AT='' CELL_UNK_AT='' CELL_EM_SEEN=0 CELL_UNK_SEEN=0
-	CELL_WORD='' CELL_WORD_BAD=0 CELL_TOLD_AT='' CELL_IMS=off CELL_IMS_AT=0 CELL_IMS_NEXT=0
+	CELL_FROM='' CELL_PHONE='' CL_PHONE=- FAKE_PROC=1234:5678
+	CELL_WORD='' CELL_WORD_BAD=0 CELL_BAD_AT=0 CELL_BAD_KIND='' CELL_TOLD_AT='' CELL_IMS=off CELL_IMS_AT=0 CELL_IMS_NEXT=0
 	CL_KIND=unknown CL_LIVE='' CL_XN='' CL_ALONE=0
 	RADIOS='' S_STARTED=0 SES_CELL=off S_PROBLEM='' P_CELL=''
 	: >"$STEPS"
@@ -991,6 +1272,19 @@ step_check "watch: off waits for the narrowed list" eval 'run_for 26; did_not "a
 run_for 320 10
 step_check "watch: 5 minutes after airplane mode went off, the radio is switched off" did "airplane enable"
 step_check "watch: ... after the list was narrowed" before "put airplane_mode_radios cell" "airplane enable"
+
+# android-1 (c): a restart of the phone process is a doubt for the word
+# only, not a call-like event: 200 s after the radio came on, it does not
+# hold the radio past the 5 minutes that the switch-on started.
+radio_up
+run_for 200 10
+FAKE_PROC=4321:9
+run_for 90 10
+run_for 8
+step_check "hold (c): the phone process restarted 200 s after the radio came on: still held at 298 s" did_not "airplane enable"
+turn 2
+step_check "hold (c): ... released at 300 s, as without the restart" did "airplane enable"
+FAKE_PROC=1234:5678
 
 # Held: the radio switched on by something else (an emergency text, or
 # the emergency-call path), with airplane mode already off.
@@ -1400,33 +1694,58 @@ done
 FAKE_ANSWER=$OK_ANSWER
 
 TELL=1
+# last_kind, last_at: the calls word and the look's time of the last word
+# told; words_since N: the words told after the first N.
+last_kind() { last_word | sed -n 's/.* calls:s:\([a-z]*\) .*/\1/p'; }
+last_at() { last_word | sed -n 's/.* at:l:\([0-9]*\) .*/\1/p'; }
+words_since() { tail -n +$(($1 + 1)) "$WORDS"; }
+# The phone process's IMS dump in a Phone-mode session: nothing here (read
+# as unknown); the IMS section below has its own.
+# shellcheck disable=SC2317 # called by ims_step
+ims_dump() { :; }
 watch_reset
 : >"$WORDS"
 turn 0
 expect "tell: the first turn tells Welcome 'none' (replacing an earlier run's word)" "$(told none 0)" "$(last_word)"
 run_for 400 10
 expect "tell: nothing more while nothing happens" 1 "$(words_n)"
-# An ordinary call, with the radio off (as a VoIP call through Telecom, or
-# a call on a radio the module did not switch on).
-FAKE_CALLS=ACTIVE FAKE_HISTORY=1 FAKE_PHONE0='2 0 1 0 0 0'
+# android-1 (a): an ordinary call outside Phone mode (every session until
+# WEL8; a VoIP call through Telecom, or a call on a radio the module did
+# not switch on): unknown while it lasts and for 5 minutes after it,
+# told once, never ordinary.
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open' FAKE_PHONE0='2 0 1 0 0 0'
+began=$NOW
 run_for 70 10
-expect "tell: during an ordinary call: the word is ordinary, at the look's time" "$(told ordinary 0)" "$(last_word)"
-n=$(words_n calls:s:ordinary)
-run_for 30 10
-expect "tell: during an ordinary call: a word after each look (every 10 s)" $((n + 3)) "$(words_n calls:s:ordinary)"
-FAKE_CALLS='' FAKE_PHONE0=$I
+expect "tell (a): outside Phone mode, during an ordinary call: unknown" unknown "$(last_kind)"
+step_check "tell (a): ... from a look during the call" test "$(last_at)" -gt "$began"
+n=$(words_n)
+run_for 100 10
+expect "tell (a): ... told once while it lasts" "$n" "$(words_n)"
+FAKE_CALLS='' FAKE_HISTORY=1 FAKE_PHONE0=$I
 run_for 10 10
 end=$CELL_LOOKED
-expect "tell: the call ended: ordinary, from a look after the end" "$(told ordinary 0)" "$(last_word)"
 run_for 280 10
-expect "tell: 280 s after the end: still ordinary" "$(told ordinary 0)" "$(last_word)"
-run_for 30 10
-expect "tell: 5 minutes after the end: none" "$(told none 0)" "$(last_word)"
+expect "tell (a): ... 280 s after the end: still unknown" unknown "$(last_kind)"
+# The doubt counts from the look after the end; the radio, released by
+# then, is looked at every 60 s.
+run_for 90 10
+expect "tell (a): ... 5 minutes after the look after the end: none" none "$(last_kind)"
 n=$(words_n)
 run_for 600 10
-expect "tell: then no word at all" "$n" "$(words_n)"
-expect "tell: then nothing is kept about the call" "-/-/-" "$(records)"
-step_check "tell: the end's 5 minutes counted from the look after it" test "$end" -gt 0
+expect "tell (a): then no word at all" "$n" "$(words_n)"
+expect "tell (a): then nothing is kept about the call" "-/-/-" "$(records)"
+expect "tell (a): never ordinary" 0 "$(words_n calls:s:ordinary)"
+step_check "tell (a): (the end was seen)" test "$end" -gt 0
+# A VoIP call (Telecom lists it, voip=true) outside Phone mode: the same.
+watch_reset
+: >"$WORDS"
+turn 0
+FAKE_CALLS=ACTIVE:voip FAKE_HISTORY='1:open'
+run_for 70 10
+FAKE_CALLS='' FAKE_HISTORY=1
+run_for 400 10
+expect "tell (a): a VoIP call outside Phone mode: unknown, then none, never ordinary" "unknown,none,0" \
+	"$(words_since 1 | sed -n 's/.* calls:s:\([a-z]*\) .*/\1/p' | tr '\n' ,)$(words_n calls:s:ordinary)"
 
 # Emergency callback mode (the registry): emergency, until 5 minutes after
 # the look; the radio stays as MOD6 holds it.
@@ -1472,51 +1791,246 @@ watch_reset
 : >"$WORDS"
 FAKE_OWNER=0
 turn 0
-FAKE_CALLS=ACTIVE FAKE_HISTORY=1
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open'
 run_for 100 10
 step_check "tell: nothing sent while Welcome is not the device owner" test ! -s "$WORDS"
 FAKE_OWNER=1
 run_for 10 10
-expect "tell: Welcome the device owner: the word is sent" "$(told ordinary 0)" "$(last_word)"
+expect "tell: Welcome the device owner: the word is sent" "$(told unknown 0)" "$(last_word)"
 
-# Welcome refuses (or is missing): logged once, tried again after each look,
-# and logged once when it takes the word again. The log never names a word.
+# Welcome refuses (one without module_word answers "Result: null"): logged
+# once; tried again every 300 s, not after each look, but at once for a
+# word of another kind or an emergency word; logged once when it takes
+# the word again. The log never names a word.
 watch_reset
 : >"$WORDS"
+FAKE_ANSWER='Result: null'
 turn 0
-FAKE_CALLS=ACTIVE FAKE_HISTORY=1
-FAKE_ANSWER=''
-run_for 100 10
 expect "tell: Welcome refuses: logged once" 1 "$(grep -c "did not take the module's word" "$LOGDIR/module.log")"
-step_check "tell: Welcome refuses: tried again after each look" test "$(words_n)" -ge 5
+run_for 600 10
+expect "tell (r-2): Welcome refuses: tried again every 300 s, not after each look (3 tries in 600 s)" 3 "$(words_n)"
+n=$(words_n)
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open' FAKE_PHONE0='2 0 1 0 0 0'
+run_for 60 10
+expect "tell (r-2): ... a word of another kind: tried at once (the next look)" "$((n + 1)) unknown" "$(words_n) $(last_kind)"
+run_for 60 10
+expect "tell (r-2): ... not again while it stays the same" "$((n + 1))" "$(words_n)"
+FAKE_CALLS='' FAKE_HISTORY=1 FAKE_PHONE0='0 0 0 0 300000 0'
+run_for 30 10
+expect "tell (r-2): ... an emergency word: tried after each look" "$((n + 4)) emergency" "$(words_n) $(last_kind)"
+FAKE_PHONE0=$I
 FAKE_ANSWER=$OK_ANSWER
-run_for 20 10
+run_for 10 10
 expect "tell: Welcome takes it again: logged once" 1 "$(grep -c "takes the module's word again" "$LOGDIR/module.log")"
+expect "tell: ... the refusal logged once in all" 1 "$(grep -c "did not take the module's word" "$LOGDIR/module.log")"
 step_check "tell: the log names no word" test -z "$(grep -E 'ordinary|calls:|until:|ims:|ims=' "$LOGDIR/module.log")"
+FAKE_CALLS='' FAKE_HISTORY=0
 
-# last_kind: the calls word of the last word told.
-last_kind() { last_word | sed -n 's/.* calls:s:\([a-z]*\) .*/\1/p'; }
-# words_since N: the words told after the first N.
-words_since() { tail -n +$(($1 + 1)) "$WORDS"; }
-
+# Phone mode (WEL8 supplies the choice; session_cell says "off" today):
+# the only place a call can read ordinary.
+# phone_on: a Phone-mode session after Start, the module's switch-on done,
+# nothing going on (the IMS reading, unknown here, is told every 300 s).
+phone_on() {
+	watch_reset
+	: >"$WORDS"
+	S_STARTED=1 SES_CELL=phone
+	turn 0
+	run_for 100 10
+	: >"$STEPS"
+	: >"$LOGDIR/module.log"
+}
+phone_on
+step_check "tell: Phone mode on (the switch-on done, the radio on)" test "$CELL_ON_DONE$FAKE_RADIO" = 11
+expect "tell: Phone mode on: none" none "$(last_kind)"
+n=$(words_n)
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open' FAKE_PHONE0='2 0 1 0 0 0'
+run_for 120 10
+expect "tell: Phone mode, during an ordinary call: ordinary" ordinary "$(last_kind)"
+expect "tell (r-2): ... one word during the call (it changed once), not one per look" 1 "$(words_since "$n" | grep -c .)"
+FAKE_CALLS='' FAKE_HISTORY=1 FAKE_PHONE0=$I
+run_for 10 10
+end=$CELL_LOOKED
+expect "tell: the call ended: ordinary, from the look that saw the end" "ordinary $end" "$(last_kind) $(last_at)"
+n=$(words_n)
+run_for 50 10
+expect "tell (r-2): after the call: a word after each look again" 5 "$(words_since "$n" | grep -c 'calls:s:ordinary ')"
+run_for 230 10
+expect "tell: 280 s after the end: still ordinary" ordinary "$(last_kind)"
+run_for 30 10
+expect "tell: 5 minutes after the end: none" none "$(last_kind)"
+n=$(words_n)
+run_for 600 10
+expect "tell: then nothing but none (the IMS reading every 300 s)" 0 "$(words_since "$n" | grep -c -v 'calls:s:none ')"
+expect "tell: then nothing is kept about the call" "-/-/-" "$(records)"
+# An emergency call in Phone mode: emergency after each look (its end moves on).
+phone_on
+n=$(words_n)
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:e+open' FAKE_PHONE0='2 0 1 0 0 0'
+run_for 60 10
+expect "tell (r-2): an emergency call: a word after each look, its end moving on" "6 $((CELL_LOOKED + 300))" \
+	"$(words_since "$n" | grep -c 'calls:s:emergency ') $(last_word | sed -n 's/.* until:l:\([0-9]*\) .*/\1/p')"
+FAKE_CALLS='' FAKE_HISTORY=0 FAKE_PHONE0=$I
+# safety-1 in the watch: call 1 seen in Analytics only (not listed yet,
+# open) at one look; flagged by the network and ended before the next.
+phone_on
+FAKE_HISTORY='1:open'
+run_for 10 10
+expect "tell (safety-1): a call in Analytics only, not listed, open: ordinary so far" ordinary "$(last_kind)"
+FAKE_HISTORY='1:ecall'
+run_for 10 10
+expect "tell (safety-1): ... flagged ecall and ended by the next look: emergency" emergency "$(last_kind)"
+phone_on
+FAKE_HISTORY='1:open'
+run_for 10 10
+run_for 10 10
+expect "tell (safety-1): ... still unlisted and open at the next look: unknown" unknown "$(last_kind)"
+FAKE_HISTORY=1
+run_for 400 10
+expect "tell (safety-1): ... never ordinary after the doubt" 1 "$(words_n calls:s:ordinary)"
+FAKE_HISTORY=0
+# The entry open and not listed at many looks (Telecom's timing; the third
+# review's case): the call stays in scope, unknown at every look, until a
+# look reads its entry ended. Here it is listed only between two looks,
+# flagged ecall by the network and ended there; an ordinary call follows
+# between two later looks. Emergency, never ordinary, from the look that
+# read the end until 5 minutes after the later call.
+phone_on
+FAKE_HISTORY='1:open'
+run_for 10 10
+expect "tell (safety-1): a call in Analytics only, not listed, open: ordinary so far" ordinary "$(last_kind)"
+n=$(words_n)
+run_for 150 10
+expect "tell (safety-1): ... open and not listed at 15 more looks: unknown" unknown "$(last_kind)"
+expect "tell (safety-1): ... still read at every look (kept in LIVE)" "1 1" "$CELL_LIVE $CELL_ID"
+FAKE_HISTORY='1:ecall'
+run_for 10 10
+end=$CELL_LOOKED
+expect "tell (safety-1): ... listed, flagged ecall and ended between two looks: emergency, 5 minutes from the look" \
+	"emergency $end $((end + 300))" "$(last_kind) $(last_at) $(last_word | sed -n 's/.* until:l:\([0-9]*\) .*/\1/p')"
+expect "tell (safety-1): ... the look that read the end is a call-like event" "$end" "$CELL_LAST"
+run_for 250 10
+FAKE_HISTORY='1:ecall 2'
+run_for 20 10
+expect "tell (safety-1): ... an ordinary call 260 s after: still emergency" emergency "$(last_kind)"
+run_for 600 10
+expect "tell (safety-1): ... then none, never ordinary after the first look" "none 0" \
+	"$(last_kind) $(words_since "$n" | grep -c 'calls:s:ordinary ')"
+FAKE_HISTORY=0
+# The same turn by turn, with the call in the registry while it is listed:
+# call 1's entry open and not listed from 1110 to 1260, the call listed
+# from 1262 to 1268 only (between two looks), flagged ecall by the network
+# at 1265 and ended at 1268; an ordinary call 2 listed from 1522 to 1528,
+# between two looks too (Welcome would see it end at 1528). Emergency from
+# the look at 1270 until 5 minutes after the look that saw call 2 end,
+# never ordinary.
+phone_on
+FAKE_HISTORY='1:open'
+run_for 10 10
+n=$(words_n)
+run_for 150 10
+FAKE_CALLS=DIALING@1 FAKE_PHONE0='2 0 1 0 0 0'
+turn 2
+FAKE_HISTORY='1:ecall+open' FAKE_CALLS=ACTIVE:ecall@1
+turn 3
+FAKE_HISTORY='1:ecall' FAKE_CALLS='' FAKE_PHONE0=$I
+turn 3
+expect "tell (safety-1, turn by turn): ... no look while call 1 was listed" 1260 "$CELL_LOOKED"
+turn 2
+expect "tell (safety-1, turn by turn): ... the look after call 1's end: emergency" "emergency 1270" "$(last_kind) $(last_at)"
+run_for 250 10
+FAKE_HISTORY='1:ecall 2:open' FAKE_CALLS=ACTIVE@2 FAKE_PHONE0='2 0 1 0 0 0'
+turn 2
+FAKE_HISTORY='1:ecall 2' FAKE_CALLS='' FAKE_PHONE0=$I
+turn 6
+turn 2
+expect "tell (safety-1, turn by turn): ... the look after call 2's end: emergency, 5 minutes from it" \
+	"emergency 1530 1830" "$(last_kind) $(last_at) $(last_word | sed -n 's/.* until:l:\([0-9]*\) .*/\1/p')"
+run_for 600 10
+expect "tell (safety-1, turn by turn): ... then none, never ordinary after the first look" "none 0" \
+	"$(last_kind) $(words_since "$n" | grep -c 'calls:s:ordinary ')"
+FAKE_HISTORY=0
+# A call Telecom dropped before listing it (no account to place it): its
+# entry never ends, so in Phone mode the word stays unknown while Telecom
+# keeps that entry, an ordinary call after it included.
+phone_on
+FAKE_HISTORY='1:open'
+run_for 10 10
+n=$(words_n)
+run_for 600 10
+expect "tell (safety-1): a call dropped before Telecom listed it: unknown, 10 minutes later too" unknown "$(last_kind)"
+FAKE_HISTORY='1:open 2'
+run_for 400 10
+expect "tell (safety-1): ... an ordinary call after it: unknown, never ordinary after the first look" "unknown 0" \
+	"$(last_kind) $(words_since "$n" | grep -c 'calls:s:ordinary ')"
+FAKE_HISTORY=0
 # Telecom's dump cut short (dumpsys gave up, or Telecom was busy) after an
 # ordinary call: Analytics lists the newest call last, so the cut loses
 # it, here an emergency call. Unknown, never ordinary; then emergency once
 # the whole dump is read.
-watch_reset
-: >"$WORDS"
-turn 0
+phone_on
 FAKE_HISTORY=1
-run_for 70 10
-expect "tell: an ordinary call between two looks: ordinary" "$(told ordinary 0)" "$(last_word)"
+run_for 10 10
+expect "tell: an ordinary call between two looks: ordinary" ordinary "$(last_kind)"
 n=$(words_n)
 FAKE_HISTORY='1 2:e' FAKE_CUT='/^  Call TC@2: {$/'
 run_for 10 10
 expect "tell: Telecom's dump cut before the newest entry: unknown" unknown "$(last_kind)"
 FAKE_CUT=''
 run_for 30 10
-expect "tell: the whole dump again: emergency" "$(told emergency $((CELL_EM_AT + 300)))" "$(last_word)"
+expect "tell: the whole dump again: emergency" emergency "$(last_kind)"
 step_check "tell: no ordinary word once the dump was cut" test -z "$(words_since "$n" | grep -F 'calls:s:ordinary ')"
+FAKE_HISTORY=0
+# android-1 (c): the phone process restarted (Telecom's emergency check
+# fails while it does): unknown for 5 minutes, no radio step and no hold
+# for it; then (b): a 6-minute call that follows keeps it unknown until 5
+# minutes after its end.
+phone_on
+FAKE_PROC=4321:9
+run_for 10 10
+expect "tell (c): the phone process restarted: unknown" unknown "$(last_kind)"
+step_check "tell (c): ... no radio step" steps_empty
+step_check "tell (c): ... nothing logged" test ! -s "$LOGDIR/module.log"
+run_for 100 10
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open' FAKE_PHONE0='2 0 1 0 0 0'
+run_for 360 10
+FAKE_CALLS='' FAKE_HISTORY=1 FAKE_PHONE0=$I
+n=$(words_n)
+run_for 10 10
+end=$CELL_LOOKED
+run_for 290 10
+expect "tell (c)+(b): ... 290 s after the end of a 6-minute call that followed: still unknown" unknown "$(last_kind)"
+run_for 300 10
+expect "tell (c)+(b): ... then none" none "$(last_kind)"
+expect "tell (c)+(b): ... never ordinary" 0 "$(words_since "$n" | grep -c 'calls:s:ordinary ')"
+phone_on
+FAKE_PROC=-
+run_for 10 10
+expect "tell (c): the phone process not running: unknown" unknown "$(last_kind)"
+phone_on
+phone_restart
+run_for 10 10
+expect "tell (c): MOD6's stand-in restart of the phone process: unknown" unknown "$(last_kind)"
+FAKE_CALLS='' FAKE_HISTORY=0 FAKE_PROC=1234:5678
+S_STARTED=0 SES_CELL=off
+
+# service.sh: a turn that looked tells Welcome the word, then checks the
+# ports again at once, so that neither the look nor the word (up to 10 s)
+# is added to the next turn's wait (regressions-3).
+# line_of PATTERN: the number of the one line of service.sh that is
+# exactly PATTERN (a fixed string, the indentation included).
+line_of() { grep -n -x -F "$1" "$MODULE/service.sh" | sed 's/:.*//'; }
+# shellcheck disable=SC2016 # lines of service.sh, not expanded here
+r="$(line_of '		cell_step "$NOW"') $(line_of '		cell_tell "$NOW"') $(line_of '		[ "$CELL_LOOKED" = "$NOW" ] && ports_check')"
+case $r in
+[0-9]*' '[0-9]*' '[0-9]*)
+	# shellcheck disable=SC2086 # three line numbers
+	set -- $r
+	step_check "service.sh: look, word, then the port check, one after the other ($r)" \
+		test "$2" = $(($1 + 1)) -a "$3" = $(($2 + 1))
+	;;
+*) bad "service.sh: look, word, then the port check: lines not found ($r)" ;;
+esac
+
 
 # A call in the registry that Telecom does not list (it began between the
 # two dumps, or Telecom missed it): unknown while it lasts and for the 5
@@ -1556,6 +2070,27 @@ run_for 30 10
 expect "tell: ... 5 minutes after it: none" "$(told none 0)" "$(last_word)"
 expect "tell: ... never ordinary" 0 "$(words_n calls:s:ordinary)"
 step_check "tell: ... (the radio stayed off)" test "$FAKE_RADIO" = 0
+# The same during an emergency sign's 5 minutes: airplane mode switched off
+# by something else is a call-like event, so it renews the sign.
+watch_reset
+: >"$WORDS"
+turn 0
+fake_set airplane_mode_on 1
+run_for 70 10
+FAKE_PHONE0='0 0 0 0 300000 0'
+run_for 70 10
+FAKE_PHONE0=$I
+run_for 20 10
+em_at=$CELL_EM_AT
+run_for 200 10
+fake_set airplane_mode_on 0
+turn 2
+off_at=$NOW
+expect "tell: callback mode, then airplane mode off by something else: emergency, 5 minutes from then" \
+	"$(told emergency $((off_at + 300)))" "$(last_word)"
+run_for 150 10
+expect "tell: ... past callback mode's 5 minutes: still emergency" "emergency 1" \
+	"$(last_kind) $(test "$NOW" -gt $((em_at + 300)) && echo 1)"
 
 # The time since boot unreadable, then readable again: unknown for the 5
 # minutes from then, never ordinary.

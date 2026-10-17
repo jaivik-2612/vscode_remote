@@ -52,11 +52,14 @@
 #   7. Wi-Fi joined as a person would ('cmd wifi connect-network AndroidWifi
 #      open'); Wi-Fi must become the default network. Welcome's policies and
 #      its status screen are checked with welcome/ci/welcome-adb.sh. Then
-#      MOD11 (warnings until passed on CI once): Welcome's provider takes
-#      the module's word from root only (welcome-adb.sh check-module-word;
-#      only "none" and malformed words are sent), and the module's parsers
-#      read the emulator's real Telecom, registry and IMS dumps as root
-#      (their output only, numbers and words, leaves the device).
+#      MOD11: Welcome's provider takes the module's word from root only
+#      (welcome-adb.sh check-module-word; only "none" and malformed words
+#      are sent; a failure since run 20), and the module's parsers read the
+#      emulator's real Telecom, registry and IMS dumps as root and find its
+#      phone process (their output only, numbers and words, leaves the
+#      device; compared with what the emulator should show: a failure for
+#      the parts that passed in run 21, a warning for the phone process
+#      until it has passed on CI once).
 #   8. Wait for tor to bootstrap (the DNS filter's /status, else tor.log).
 #   9. Tracker test: names on the block list asked of the filter directly
 #      (DNS over TCP to 127.0.0.1:5335 through adb forward) and through
@@ -196,13 +199,16 @@ welcome_power_menu() {
 # (refused) and a "none" as root (taken); nothing that could let Quick
 # power off skip a wait is sent. Then the module's own parsers, run as
 # root on the device against the emulator's real dumps (Telecom, the
-# telephony registry, the phone process's IMS registration); only their
-# output, numbers and words, leaves the device (expected: "0 0 - - 0",
-# "0 0 off" or "0 0 on", "none"). The dumps are taken with the module's own
-# cell_dump and ims_dump, which drop dumpsys's stderr ("Broken pipe" when a
-# parser stops reading early, as in run 20). welcome_module_word fails since
-# it passed in run 20; module_parsers stays a WARN until it has passed on CI
-# once (then make it fail).
+# telephony registry, the phone process's IMS registration), and its
+# phone_proc (the phone process found by name, its pid and start time
+# read); only their output, numbers and words, leaves the device, and
+# module_parsers_level compares it with what the emulator should show. The
+# dumps are taken with the module's own cell_dump and ims_dump, which drop
+# dumpsys's stderr ("Broken pipe" when a parser stops reading early, as in
+# run 20). welcome_module_word fails since it passed in run 20;
+# module_parsers fails since its telecom, registry and ims parts passed in
+# run 21 (af748d0), and warns while only the phone part, new since, is not
+# as expected (make that fail too once it has passed on CI).
 module_word() {
 	local log=$LOGS/$SCEN-welcome-module-word.txt out
 	if timeout 120 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-module-word >"$log" 2>&1; then
@@ -214,13 +220,31 @@ module_word() {
 		t=\$(cell_dump telecom | telecom_state) || t=unreadable; \
 		r=\$(cell_dump telephony.registry | registry_state) || r=unreadable; \
 		i=\$(ims_dump | ims_state) || i=unreadable; \
-		echo \"telecom=\$t; registry=\$r; ims=\$i\"")
+		p=no; phone_proc >/dev/null 2>&1 && p=yes; \
+		echo \"telecom=\$t; registry=\$r; ims=\$i; phone=\$p\"")
 	printf '%s\n' "$out" >"$SDIR/module-parsers.txt"
-	case $out in
-	*unreadable*) check module_parsers warn "$out" ;;
-	"telecom="*) check module_parsers ok "$out" ;;
-	*) check module_parsers warn "$out" ;;
-	esac
+	check module_parsers "$(module_parsers_level "$out")" "$out"
+}
+
+# module_parsers_level OUT: how the probe's output compares with what the
+# emulator should show, as a check level. fail unless it starts with
+# exactly the parts run 21 (af748d0) printed and nothing before them: no
+# call in this boot ("telecom=0 0 - - 0"), both phones idle with the radio
+# on or off ("registry=0 0 on" or "0 0 off"), an IMS word ("ims=cell",
+# "wifi", "registered" or "none"); anything else there (another line
+# before it, "unreadable", "u" for a call it could not classify, a
+# number, the IMS word running on) fails. warn when only what follows is
+# not "; phone=yes" (the phone process found, not yet printed on CI); ok
+# otherwise.
+module_parsers_level() {
+	local known='^telecom=0 0 - - 0; registry=0 0 (on|off); ims=(cell|wifi|registered|none)((;|'$'\n'').*)?$'
+	if ! [[ $1 =~ $known ]]; then
+		echo fail
+	elif [ "${BASH_REMATCH[3]}" = '; phone=yes' ]; then
+		echo ok
+	else
+		echo warn
+	fi
 }
 
 welcome_start() {

@@ -179,7 +179,8 @@ the person may set by hand for tor.
    does not switch the radio off then) and written 0 again when it ends,
    just before the switch-off. After each look the module tells Welcome,
    and Welcome alone, what the calls of the last 5 minutes were (below,
-   "The module's word to Welcome: the last calls").
+   "The module's word to Welcome: the last calls"; outside Phone mode
+   every call reads `unknown`), and then checks the ports again (step 8).
 7. **Welcome's Start**: every 2 seconds for the first 3 minutes after the
    framework answers, then every 5,
    `content query --user 0 --uri content://org.antumbra.welcome.state/session
@@ -216,7 +217,8 @@ the person may set by hand for tor.
    which is tried again once the port is free.
 8. **Supervision**, every 2 seconds while something changes, else every 5:
    - **who holds the service ports**, at every turn, and again right after
-     a turn's look at the cell radio (below): while another uid does, the
+     a turn's look at the cell radio and the word to Welcome (below): while
+     another uid does, the
      property is removed and the firewall goes back to armed, and the full
      rule set is loaded again as soon as the port is free;
    - the filter and tor are restarted if they stop (pause doubling from 2
@@ -556,37 +558,81 @@ after any call. Root can read Telecom's own record of each call, so after
 each look the module tells Welcome what the calls of the last 5 minutes
 were, and Quick power off skips its 5-minute wait only after a call the
 module positively knows was not an emergency call. Everything else waits
-as before.
+as before. That can only be known in a Phone-mode session (WEL8): outside
+it the cell radio is off by design, so a carrier call there is an
+emergency call, a Wi-Fi call (until MOD7 switches Wi-Fi calling off) or
+follows a switch-on by something else, which the module cannot tell apart,
+and every call reads `unknown`. Until WEL8 every session is outside Phone
+mode, so the word is never `ordinary` and Quick power off waits after every
+call, exactly as before MOD11.
 
 **Where the answer comes from.** Telecom's call analytics, in the
 `dumpsys telecom` the holds already read (sources: `Call.java`,
 `Analytics.java`, `TelecomServiceImpl.java` in Telecom and
 `Connection.propertiesToStringShort` in the framework, on
 `android16-qpr2-release`, which LineageOS 23.2 is): one entry per call,
-`Call TC@<n>: {` to `}`, with `isEmergency: true|false` and
+`Call TC@<n>: {` to `}`, with `endTime:`, `isEmergency: true|false` and
 `callProperties: [...]`. Telecom sets `isEmergency` when the call is
 created, from Android's own emergency-number list
 (`TelephonyManager.isEmergencyNumber`: the SIM's, the network's, the
 modem's and the database's numbers; nothing in Antumbra names a number),
+again when the call's number changes (it can turn true later in the call),
 and never back to false; `callProperties` collects every property the call
-had: `ecall` (the network identified it as an emergency call) and `ecbm`
-(made in callback mode) count as emergency signs, as they do in a listed
-call's `prop=[...]`. Only these exact keys and whole words are read
+had: `ecall` (the network identified it as an emergency call, at any time
+in the call) and `ecbm` (made in callback mode) count as emergency signs,
+as they do in a listed call's `prop=[...]`. `endTime` stays 0 until the
+call is disconnected (`Call.setState`); a call dropped before Telecom
+listed it keeps 0. Only these exact keys and whole words are read
 (`missedReason: [emergency]`, a call missed because of an emergency call,
 is not). Telecom keeps the last 100 entries.
 
+**When Telecom's own check fails.** Telecom asks the phone process
+(`com.android.phone`) whether the number is an emergency number. If that
+process is not running, not ready yet or dies meanwhile, Telecom records
+`isEmergency: false` and never asks again, while Telephony, in the phone
+process, checks the number again and places the call as an emergency call
+(Telecom's `Call.setHandle`, the framework's
+`TelephonyManager.isEmergencyNumber`, Telephony's
+`TelephonyConnectionService`); the only trace is a line in the system log.
+So at every look the module also reads the phone process's pid and start
+time (`toybox pidof com.android.phone`, then field 22 of `/proc/PID/stat`):
+not running, or another process than at the last look, is a doubt
+(`unknown`), which lasts until 5 minutes after the calls around it end. Not
+seen: a binder call from Telecom to a live phone process that fails without
+the process restarting (below, "Known gaps").
+
 **Which calls.** `telecom_state` classifies the calls in scope at each
-look: the calls listed now, those listed at the last look, and those
-numbered since it (Telecom's `TC@<n>` counts up within a boot; every
-call on the module's first look). Emergency signs win; then anything the
-module cannot tell; then ordinary.
+look: the calls listed now; those not over at the last look (listed then,
+or with an entry that had not ended); those numbered since it (Telecom's
+`TC@<n>` counts up within a boot; every call on the module's first look);
+and those first counted at the last look, which are read once more.
+Telecom prints its call list before Analytics, without a lock, so a look
+can see an entry whose call is not listed (not yet added, waiting for the
+person to confirm, still being filtered), and the network's `ecall` or a
+new number's `isEmergency` can come later in the call. So a call read
+again that is not listed now must have an entry that says it ended
+(`endTime` not 0); until it does, it stays in scope and reads `unknown` at
+every look, whatever its entry says so far, and once it is listed its
+entry decides. Every call is therefore read at the look that first counts
+it and at the next, and leaves the scope only after a look that read it
+not listed and its entry ended: the last reading is of its final entry,
+however many looks it took. A call Telecom drops before listing it (no
+account to place it) never ends: it reads `unknown` until its entry
+leaves Telecom's last 100. Emergency signs win; then anything the module
+cannot tell; then ordinary.
 
 | Word | The module says it | Welcome |
 |---|---|---|
-| `emergency` | an emergency call in scope, or callback mode (calls or texts, `ril.cdma.inecmmode` or the registry) now; until 5 minutes after the look that saw the sign, or the look after it | waits as before, and at least until the word's end (at most 5 minutes after the look), even for a call it did not see |
-| `unknown` | anything it cannot read or classify: the state unreadable, a dump cut short included (Telecom prints the newest entry last, so its dump counts only up to the end of Analytics, `Hardware Version:`, and never when `dumpsys` says it gave up); a call without its entry; an entry without exactly one `isEmergency: true` or `false` and one `callProperties` line; a listed call whose id is not `TC@<number>` or without `prop=`; not one entry per number since the last look; entries Telecom did not number appearing (a conference part, some VoIP calls); Telecom restarted; a call in the registry that Telecom does not list; the radio switched on, or airplane mode off, by something else (an emergency text switches the radio on and starts no call); the time since boot unreadable; for 5 minutes after the look after it. Always on Android 17 | exactly as before |
-| `ordinary` | a call in the last 5 minutes, every call at every look classified as an ordinary call, and none of the above | skips the 5-minute wait after the call it saw end, but only while the word is at most 30 s old and its look came after that end |
+| `emergency` | an emergency call in scope, or callback mode (calls or texts, `ril.cdma.inecmmode` or the registry) now; until 5 minutes after the look that saw the sign, or the look after it, or the last call-like event since (a call or its end, the call counter moving, the radio or airplane mode switched by something else) | waits as before, and at least until the word's end (at most 5 minutes after the look), even for a call it did not see |
+| `unknown` | any call outside a Phone-mode session (before Start, a session that keeps the radio off, before the module's switch-on, while the fail-safe holds the radios: the cell radio is off there, so a carrier call is an emergency call, a Wi-Fi call or follows a switch-on by something else, and the dump cannot tell a carrier call from a VoIP call at every moment); anything it cannot read or classify: the state unreadable, a dump cut short included (Telecom prints the newest entry last, so its dump counts only up to the end of Analytics, `Hardware Version:`, and never when `dumpsys` says it gave up); a call without its entry; an entry without exactly one `endTime: <number>`, one `isEmergency: true` or `false` and one `callProperties` line; a call read again that is not listed now and whose entry has not ended (at every look until it is listed or ended, or its entry is gone); a listed call whose id is not `TC@<number>` or without `prop=`; not one entry per number since the look before the last; entries Telecom did not number appearing (a conference part, some VoIP calls); Telecom restarted; a call in the registry that Telecom does not list; the radio switched on, or airplane mode off, by something else (an emergency text switches the radio on and starts no call); the phone process not running, or restarted; the time since boot unreadable; until 5 minutes after the look after it, or after the last call-like event since. Always on Android 17 | exactly as before |
+| `ordinary` | in a Phone-mode session only: a call in the last 5 minutes, every call at every look classified as an ordinary call (each read again after it ended), and none of the above | skips the 5-minute wait after the call it saw end, but only while the word is at most 30 s old and its look came after that end |
 | `none` | none of this in the last 5 minutes | exactly as before |
+
+A sign or a doubt is renewed by every call-like event while it is kept,
+so it lasts until 5 minutes after the look that saw the last call end,
+however long the calls go on: once a doubt is raised, the word goes
+`unknown` and then `none`, never `ordinary`, until a 5-minute window opens
+with no doubt in it.
 
 What does not change in Welcome: it waits during any call, ordinary or
 not (a word cannot be matched to the call in progress), and in callback
@@ -596,15 +642,22 @@ emergency word's wait. Welcome's texts are unchanged.
 
 **Wi-Fi calling and VoIP.** Wi-Fi calling is the carrier's IMS over Wi-Fi:
 Telecom's `TelephonyConnectionService`, an entry like any SIM call
-(`isEmergency: true` for an emergency call over Wi-Fi), `MODE_IN_CALL`;
-it is handled like any call (MOD7 switches Wi-Fi calling off). VoIP apps
-through Telecom are listed and have entries (`isEmergency: false`: Telecom
-never places emergency calls through them) and count as ordinary calls;
-those using Telecom's newer call API get ids without `TC@`, which read
-unknown. They use `MODE_IN_COMMUNICATION`, which any app may set, so
-Welcome has never waited for them. VoIP apps outside Telecom are invisible
-to both; an emergency number dialled in such an app is not an Android
-emergency call (no callback mode, no Android routing).
+(`isEmergency: true` for an emergency call over Wi-Fi), `MODE_IN_CALL`; it
+is handled like any call (MOD7 switches Wi-Fi calling off). Until then it
+also works with the cell radio off: Telephony refuses an ordinary call
+only while the phone's voice service reads powered off, and IMS registered
+over Wi-Fi counts as in service (`GsmCdmaPhone`'s
+`mergeVoiceServiceStates`), so outside Phone mode a carrier call is not
+always an emergency call; it reads `unknown` there like every call. VoIP
+apps through Telecom are listed and have entries (`isEmergency: false`:
+Telecom never places emergency calls through them) and count as ordinary
+calls in Phone mode (outside it every call reads unknown, these too: their
+entry cannot be told from a carrier call's at every moment); those using
+Telecom's newer call API get ids without `TC@`, which read unknown. They
+use `MODE_IN_COMMUNICATION`, which any app may set, so Welcome has never
+waited for them. VoIP apps outside Telecom are invisible to both; an
+emergency number dialled in such an app is not an Android emergency call
+(no callback mode, no Android routing).
 
 **The channel: Welcome's provider, from root.** After a look, while
 Welcome is the device owner (the authority is then Welcome's):
@@ -620,11 +673,17 @@ content call --user 0 --uri content://org.antumbra.welcome.state --method module
 Welcome's `elapsedRealtime`, both `CLOCK_BOOTTIME`), `until` the end of an
 emergency word's wait (0 otherwise), `ims` and `ims_at` the IMS reading
 (below). Told when the word changes (once at the first turn, replacing a
-word an earlier run left), after every look while it is `ordinary` or
-`emergency`, every 5 minutes while there is an IMS reading, and after
-every look while Welcome does not take it; `content`
-reports a refusal on standard error and exits 0, so only the exact
-`Result:` line counts.
+word an earlier run left), after every look while it is `emergency` (its
+end moves on), after every look while it is `ordinary` outside a call,
+and every 5 minutes while there is an IMS reading. During a call an
+unchanged `ordinary` is not told again: Welcome waits during a call
+whatever the word says, and a word from a look before the call's end
+covers nothing; the first look after the call tells it again. While
+Welcome does not take the word (a Welcome without `module_word` answers
+`Result: null`), it is tried again every 5 minutes, and at once when it is
+`emergency` or of another kind than the last try (Welcome may still hold
+an earlier word). `content` reports a refusal on standard error and exits
+0, so only the exact `Result:` line counts.
 
 - **No other app can read it.** It exists in root's `content` command
   line (`/proc` is mounted `hidepid=2`: an app sees only its own
@@ -665,14 +724,19 @@ needs a privileged permission. Outside Phone mode `off`. Until WEL8 every
 session is `off`, so this part runs in unit tests only.
 
 **Records.** In `service.sh`'s memory (RAM, root): the times of the last
-look that saw an emergency sign and of the last doubt, and MOD6's last
-call-like event, each forgotten once 5 minutes have passed; the numbers of
-the calls listed at the last look, a count of Telecom's unnumbered entries,
-and the last word told. `CELL_ID`, Telecom's own call counter, stays for
-the boot. After the 5 minutes the module sends one `none` and keeps
-nothing about those calls; Welcome keeps the last word and the end of the
-longest emergency wait in memory only. Android's own copies (Telecom's
-analytics and event log, the registry, the call log) are unchanged.
+look that saw an emergency sign and of the last doubt (renewed by each
+call-like event while kept), and MOD6's last call-like event, each
+forgotten once 5 minutes have passed; the numbers of the calls not over
+at the last look (listed, or with an entry that had not ended), a count
+of Telecom's unnumbered entries, the last word told
+and the time and kind of the last try Welcome refused. `CELL_ID`,
+Telecom's own call counter, its value at the look before (`CELL_FROM`),
+and the phone process's pid and start time (`CELL_PHONE`) stay for the
+boot; none of them says what a call was. After the 5 minutes the module
+sends one `none` and keeps nothing about those calls; Welcome keeps the
+last word and the end of the longest emergency wait in memory only.
+Android's own copies (Telecom's analytics and event log, the registry, the
+call log) are unchanged.
 
 **Android 17** (LineageOS 24.0, OS1) no longer prints Telecom's analytics,
 and nothing else root can read says a call was not an emergency call: there
@@ -802,65 +866,114 @@ addresses, provider-row parsing, control-reply parsing, JSON helpers, the
 Settings list on the emulator and on the phone (13 and 14 values;
 `airplane_mode_radios` never set at boot), `ports_bad()` against
 `/proc/net` fixtures (owners, other uids, wildcard and IPv6 addresses,
-TIME_WAIT, connected sockets, an unreadable file), and the cell radio:
-the parsers against dumps in Android 16's layout (every call state, VoIP
+TIME_WAIT, connected sockets, an unreadable file), and the cell radio: the
+parsers against dumps in Android 16's layout (every call state, VoIP
 calls, a call line in another section, missing sections, empty input, a
-missing service; idle, ringing, off-hook, active, held, dialing,
-incoming, disconnecting, disconnected and not-valid states on either
-phone, callback mode for calls and texts, the radio states, a field
-missing, the incoming number never printed), `cell_hold` (each reason,
-their order, 299 s held and 300 s released, no clock), `cell_note` (the
-call counter up and down, the radio switched on by something else or by
-the module, a call's end, an unreadable state), `cell_decide` in each
-state (a step only on a look from the same turn), and the watch turn by
-turn against stand-ins for Settings, airplane mode and a restart of the
-phone process (with `PhoneGlobals`' and `ServiceStateTracker`'s parts)
-and the dumps: every hold and its release, a call that begins to ring
-between two turns, `enable_cellular_on_boot` kept at 1 through a call,
-callback mode and the 5 minutes after (a restart of the phone process
-then keeps the radio on, after an emergency call over the module's
-switch-off and from power-on alike) and 0 again before the switch-off,
-the fail-safe during a call (Wi-Fi and mobile data at once, the cell radio
-and Bluetooth after it), Phone mode's switch-on (only after Start, mobile
-data off first, enable then disable, both held during a call, again after
-a phone-process restart, airplane mode left to the person), nothing
-written once the module's files are gone, and the shutdown reset (its
-order, held during a call or an unreadable state). And the module's word
-to Welcome (MOD11): `telecom_state`'s classes against Android 16-shaped
-Analytics entries (ordinary, emergency by `isEmergency`, by `ecall` and
-`ecbm` in the entry and in a listed call's `prop=`, a missed call with
-`missedReason: [emergency]` still ordinary, VoIP; unknown for a missing
-entry, a missing, doubled or odd `isEmergency`, a missing
+missing service; idle, ringing, off-hook, active, held, dialing, incoming,
+disconnecting, disconnected and not-valid states on either phone, callback
+mode for calls and texts, the radio states, a field missing, the incoming
+number never printed), `cell_hold` (each reason, their order, 299 s held
+and 300 s released, no clock), `cell_note` (the call counter up and down,
+the radio switched on by something else or by the module, a call's end, an
+unreadable state), `cell_decide` in each state (a step only on a look from
+the same turn), and the watch turn by turn against stand-ins for Settings,
+airplane mode and a restart of the phone process (with `PhoneGlobals`' and
+`ServiceStateTracker`'s parts) and the dumps: every hold and its release,
+a call that begins to ring between two turns, `enable_cellular_on_boot`
+kept at 1 through a call, callback mode and the 5 minutes after (a restart
+of the phone process then keeps the radio on, after an emergency call over
+the module's switch-off and from power-on alike) and 0 again before the
+switch-off, the fail-safe during a call (Wi-Fi and mobile data at once,
+the cell radio and Bluetooth after it), Phone mode's switch-on (only after
+Start, mobile data off first, enable then disable, both held during a
+call, again after a phone-process restart, airplane mode left to the
+person), nothing written once the module's files are gone, and the
+shutdown reset (its order, held during a call or an unreadable state). And
+the module's word to Welcome (MOD11): `telecom_state`'s classes against
+Android 16-shaped Analytics entries (ordinary, emergency by `isEmergency`,
+by `ecall` and `ecbm` in the entry and in a listed call's `prop=`, a
+missed call with `missedReason: [emergency]` still ordinary, VoIP; unknown
+for a missing entry, a missing, doubled or odd `isEmergency`, a missing
 `callProperties`, an odd id, a call without `prop=`, Telecom restarted or
 its analytics cleared, 101 calls with 100 entries, an unnumbered entry
-appearing or present at the first look or at 100 entries; emergency
-before unknown; an Android 17-shaped dump refused; a dump cut short
-refused: between two entries, inside one, right after the last one, in
-its end line or after the last `}` without a final newline, without the
-end of Analytics, with `dumpsys`'s `DUMP TIMEOUT` line before or after
-it, while a dump that ends after Analytics is still read); the words
-over time (ordinary, emergency and unknown each until 5 minutes after the
-look after the last sign, then `none`, and nothing kept afterwards;
-callback mode, the radio switched on by something else or by the module,
-a call in the registry only, no clock, callback mode unreadable and then
-readable again; emergency before unknown before ordinary);
-`welcome_tell` (the exact arguments, only Welcome's exact answer counts);
-`cell_tell` turn by turn (one `none` at the first turn, a word after each
-look during an ordinary call and from a look after its end, one `none` 5
-minutes later and nothing after it, emergency with its end, unknown told
-once, nothing sent while Welcome is not the device owner, a refusal and
+appearing or present at the first look or at 100 entries; emergency before
+unknown; an Android 17-shaped dump refused; a dump cut short refused:
+between two entries, inside one, right after the last one, in its end line
+or after the last `}` without a final newline, without the end of
+Analytics, with `dumpsys`'s `DUMP TIMEOUT` line before or after it, while
+a dump that ends after Analytics is still read); the scope (safety-1: a
+call seen in Analytics only at one look, open, then ended with `ecall` or
+`isEmergency: true` by the next: emergency, never out of scope; still
+unlisted and open at the next look, with or without an emergency sign so
+far: unknown, and kept; ended and ordinary: ordinary, then out of scope;
+listed now: in scope; open and unlisted at three looks and more: unknown
+at each, kept, then read by its entry once it is listed or ended; a kept
+entry gone: unknown, then no longer kept; an open entry below `FROM` that
+was not kept: unknown, kept from then on; a call listed at the last look,
+not now and still open: unknown; no, two, a negative, a leading-zero, a
+non-number, a digits-and-more (`1760000000000 (pending)`) or a unit (`5s`)
+`endTime`: unknown; one out of scope not read; a call first counted at the
+last look whose entry is gone, `FROM` above `SINCE`, not a number or of
+ten digits: unknown; `FROM` 0 reads every call again; `cell_note`'s
+`FROM`: 0 at the first look and after the counter went down, the last
+counter otherwise, unchanged by an unreadable look; `LIVE`: a kept call
+over now is a call-like event); `phone_proc` itself on this host's
+processes (through a stand-in `toybox pidof`: a running process's pid and
+start time, a name with `) ` in it, two processes, none, an odd answer,
+a name `/proc` has (`self`), and the process gone before its stat is
+read, with nothing on standard error); the words over time (ordinary in Phone mode, emergency and unknown
+each until 5 minutes after the look after the last sign, then `none`, and
+nothing kept afterwards; callback mode, the radio switched on by something
+else or by the module, a call in the registry only, no clock, callback
+mode unreadable and then readable again; emergency before unknown before
+ordinary; android-1 (a): a call outside Phone mode reads unknown under
+each of its conditions (not started, a session without Phone mode, the
+fail-safe waiting or done, the switch-on not done), during it and for 5
+minutes after it, while an emergency call there still reads emergency;
+(b): callback mode followed by a longer call stays emergency, and a doubt
+followed by a 6-minute call stays unknown, until 5 minutes after the look
+that saw the call end, then `none`, never `ordinary`, and an expired doubt
+is not renewed, also when no look came between (cell_note forgets first);
+(c): the phone process restarted (another pid, or the same pid with
+another start time) or not running reads unknown for 5 minutes, while its
+first reading of the boot does not; a restart is no call-like event (one
+200 s after the radio came on does not hold the radio past that
+switch-on's 5 minutes); and a restart followed by a 6-minute call stays
+unknown until 5 minutes after it); `welcome_tell` (the exact arguments,
+only Welcome's exact answer counts); `cell_tell` turn by turn (one `none`
+at the first turn; outside Phone mode an ordinary call and a VoIP call:
+unknown, told once, then `none`, never `ordinary`; in Phone mode an
+ordinary call: one word during it, a word after each look from the look
+that saw its end, `none` 5 minutes later and nothing but `none` after it;
+an emergency call: a word after each look, its end moving on; safety-1 in
+the watch: a call seen in Analytics only, then flagged and ended:
+emergency; still open and unlisted at the next look: unknown, and never
+ordinary afterwards; open and unlisted for 16 looks, then listed, flagged
+`ecall` and ended between two looks: emergency, 5 minutes from the look
+that read the end, an ordinary call 260 s later still emergency, never
+ordinary; the same turn by turn, with the call in the registry while
+listed and an ordinary call after it between two looks too; a call dropped
+before Telecom listed it: unknown 10 minutes later and after an ordinary
+call; (c) in the watch: a restarted phone process unknown with no radio
+step and nothing logged, a 6-minute call after it never ordinary, a
+missing process and MOD6's stand-in restart unknown; emergency with its
+end; unknown told once; nothing sent while Welcome is not the device
+owner; a refusing Welcome asked 3 times in 600 s, at once for a word of
+another kind and after each look for an emergency word, the refusal and
 the recovery logged once each, no word in the log; unknown, never
 ordinary, for Telecom's dump cut before its newest entry right after an
 ordinary call, and for 5 minutes, then `none`, after a call in the
 registry that Telecom does not list, airplane mode switched off by
-something else with the radio still off, and the time since boot
-readable again); `ims_state` (WWAN,
-WLAN, no or another last log line, 0 and 1, two phones, Android 17's
-emergency line; refused: no state line, two, an odd state, no `ImsPhone`
-block, the service missing, empty input) and `ims_step` (only in Phone
-mode after Start and the switch-on, never during a hold, at most every
-300 s, unknown when unreadable), and the IMS reading going with the word.
-Under `sh`, dash, busybox and mksh (`MKSH=` names Android's).
+something else with the radio still off, and the time since boot readable
+again; callback mode, then airplane mode switched off by something else:
+emergency until 5 minutes after that); that `service.sh` looks, tells
+Welcome and then checks the ports, one line after the other; `ims_state`
+(WWAN, WLAN, no or another last log line, 0 and 1, two phones, Android
+17's emergency line; refused: no state line, two, an odd state, no
+`ImsPhone` block, the service missing, empty input) and `ims_step` (only
+in Phone mode after Start and the switch-on, never during a hold, at most
+every 300 s, unknown when unreadable), and the IMS reading going with the
+word. Under `sh`, dash, busybox and mksh (`MKSH=` names Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
 real firewall, tor, DNS filter and `antumbra-run`, without Android. Each
@@ -874,7 +987,9 @@ and `cmd` play Telecom (with Analytics entries in Android 16's layout), the
 telephony registry and airplane mode (with the phone process's part:
 `cell_on`, `enable_cellular_on_boot`, the radio) from files the test
 writes; the stand-in for `content` also plays Welcome's provider taking
-the module's word (`content call`, recorded), or refusing it; and a file
+the module's word (`content call`, recorded), or refusing it (counted); a
+copy of `sleep` named `com.android.phone` stands in for the phone process
+(toybox `pidof` finds it by name; the test restarts it); and a file
 bound over `/proc/uptime` (rewritten
 every second: the real time since boot plus a skew) lets the test move the
 module's clock past the 5-minute holds; production code has no test hook.
@@ -895,9 +1010,10 @@ framework is up, all of them after (the cell radio's among them, and
 once); in every scenario
 the list narrowed to the cell radio, `cell=off` in the session record, and
 no switch-on by the module; the module's word to Welcome (MOD11) told
-through the provider only, with its six fields and nothing else, and never
-in `status.json`, a file or the module's log (one `none` in scenarios
-without a call); and per scenario:
+through the provider only, with its six fields and nothing else, never
+`ordinary` (no scenario is in Phone mode, so every call reads `unknown`),
+and never in `status.json`, a file or the module's log (one `none` in
+scenarios without a call); and per scenario:
 
 | Scenario | Shell | Checks |
 |---|---|---|
@@ -906,7 +1022,7 @@ without a call); and per scenario:
 | `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script is deleted |
 | `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; during an active call on the cell radio, iptables broken → firewall `open`, property removed, Wi-Fi and mobile data off at once, status says the rest follows (not why); no airplane mode and no Bluetooth off during the call or 270 s after it; 5 minutes after it both, status says so; repaired → live; shutdown → `cell_on 1` and `airplane_mode_on 0` stored, no airplane-mode command |
 | `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
-| `cell` | busybox, LineageOS hotdog properties | the cell radio switched on by something else and off again by the module, after each hold, each shown held after the clock is moved on and released 5 minutes after it ends: a switch-on with airplane mode off (an emergency text, or the emergency path); airplane mode switched off by the person (mobile data off again at once); a ringing, an active and a held call; callback mode from the property, and for calls and texts from the registry; an unreadable state; a call seen only by Telecom's call counter; an emergency call seen only by its entry; `enable_cellular_on_boot` stored 1 while a hold lasts and written 0 before the switch-off; the module's word at each step: `none` at the first turn, `unknown` for a switch-on by something else, an unreadable state and Telecom's dump cut before its newest entry right after an ordinary call (never `ordinary`), `ordinary` during a call and from a look after its end, `emergency` with its end for callback mode and the emergency call, then exactly one `none` 5 minutes later; Welcome refusing the word logged, and its taking it again; shutdown during a call leaves airplane mode as it is |
+| `cell` | busybox, LineageOS hotdog properties | the cell radio switched on by something else and off again by the module, after each hold, each shown held after the clock is moved on and released 5 minutes after it ends: a switch-on with airplane mode off (an emergency text, or the emergency path); airplane mode switched off by the person (mobile data off again at once); a ringing, an active and a held call; callback mode from the property, and for calls and texts from the registry; an unreadable state; a call seen only by Telecom's call counter; an emergency call seen only by its entry; `enable_cellular_on_boot` stored 1 while a hold lasts and written 0 before the switch-off; the module's word at each step: `none` at the first turn, `unknown` for a switch-on by something else, an unreadable state, Telecom's dump cut before its newest entry right after an ordinary call, and every call (a ringing, active and held call, a call seen only by the counter, a VoIP call with no earlier doubt: outside Phone mode, never `ordinary`), `emergency` with its end for callback mode and the emergency calls (read again at the next look), then exactly one `none` 5 minutes after the look after the end; the cut dump refused (logged as unreadable, then readable again with the whole dump); the stand-in phone process restarted: `unknown`, one `none` 5 minutes later, and with the radio on, a restart 200 s after the switch-on holds nothing (off 5 minutes after the switch-on); Welcome refusing an emergency word: logged, tried again at the next looks, and taken again; Welcome refusing another word: tried once, not again after each look, taken again at the first try 300 s later; shutdown during a call leaves airplane mode as it is |
 
 ```sh
 sudo tests/e2e-host.sh --tor-bin WORK/x86_64/tor-hostcheck \
@@ -932,6 +1048,13 @@ test need the workflow's steps (the CI part's file): `shellcheck -s sh -x`
 as above, `tests/build-test-tools.sh` (cached by its pins), and
 `sudo tests/e2e-host.sh` with tor's `tor-hostcheck` and the filter's
 x86_64 binary from the earlier jobs.
+
+The sandbox cannot enter Phone mode (`session_cell` says `off`, and
+production code has no test hook), and outside it every call reads
+`unknown` anyway: an `ordinary` word, the second reading of each call
+(Telecom's call list printed before its entry), a call kept in scope
+while its entry is open and it is not listed, and a later call renewing
+an earlier sign or doubt are shown by the unit tests only.
 
 What these tests cannot show is Android: SELinux, netd, Magisk's timing,
 Welcome, Wi-Fi and the overlay. The emulator job covers part of that; the
@@ -997,8 +1120,10 @@ phone the rest.
   module only disabled (`disable` flag), the early arm script keeps the
   network closed.
 - The port check runs at every turn of the loop (2 to 5 s), and again
-  right after a look at the cell radio, which can take up to 8 s (two
-  dumps of a slow service); in between, a
+  right after a turn's look at the cell radio and the word to Welcome
+  (MOD11), which together can take up to 8 s (two dumps of a slow
+  service) and 10 s more (`content call`, plus `cmd device_policy`, which
+  has no bound of its own); in between, a
   squatter on 5335 can receive DNS queries (it cannot answer them, and
   nothing leaves) and one on 9040 SYNs. On the phone, Android's mDNS
   (system_server, uid 1000) on 5335 before the filter would count as a
@@ -1056,41 +1181,69 @@ phone the rest.
   `dumpsys` says it gave up (3 s), so a phone whose Telecom dump always
   takes longer would hold for the whole boot. The layouts were read in
   Android 16's source; the CI emulator (Android 16) read its own dumps
-  with them in run 20 (no call: "0 0 - - 0", the registry "0 0 on", IMS
-  "none"); the job's `module_parsers` stays a warning until it has passed,
-  and no call has been parsed on a device yet. **Android 17
-  (LineageOS 24.0, OS1) prints no Analytics** (`TelecomServiceImpl.dump`
-  on `android17-release`; `Analytics.java` is gone): there every look
-  reads unknown, every radio-off and airplane step (the fail-safe's
-  included) is held for the whole boot, and once anything switches the
-  radio on it stays on until the next start. OS1 needs another call
-  counter there, such as the event log's `CallTC@<n>` descriptions under
-  `Historical Events:` plus the listed calls.
+  with them in runs 20 and 21 (no call: "0 0 - - 0", the registry "0 0
+  on", IMS "none"); the job's `module_parsers` fails since run 21 unless
+  those parts are exactly what the emulator should show, and warns while
+  only the phone process part, new since, is not `phone=yes` (until it has
+  passed on CI once). No call has been parsed on a device yet. **Android
+  17 (LineageOS 24.0, OS1) prints no Analytics**
+  (`TelecomServiceImpl.dump` on `android17-release`; `Analytics.java` is
+  gone): there every look reads unknown, every radio-off and airplane step
+  (the fail-safe's included) is held for the whole boot, and once anything
+  switches the radio on it stays on until the next start. OS1 needs
+  another call counter there, such as the event log's `CallTC@<n>`
+  descriptions under `Historical Events:` plus the listed calls.
 
 **The module's word to Welcome (MOD11)**
+- Nothing relaxes until WEL8's Phone mode: outside it every call reads
+  `unknown` (the cell radio is off there, so a carrier call is an
+  emergency call, a Wi-Fi call or follows a switch-on by something else,
+  and the dump cannot tell a carrier call from a VoIP call at every
+  moment), and Quick power off waits after every call, as before MOD11.
+  Before Phone mode ships, WEL8 (or PH3) must check on the phone that the
+  phone process is found (`phone=yes`; the emulator job checks it from its
+  next run on, and has not printed it yet), and that a real call's entry
+  (`endTime`, `isEmergency`) and the IMS word read as expected.
+- A call Telecom drops before listing it (no account to place it) keeps
+  `endTime: 0`: in Phone mode the word then stays `unknown` while Telecom
+  keeps that entry (its last 100 calls), so Quick power off waits after
+  every call until then (the safe side).
 - On Android 17 no root-readable dump says a call was not an emergency
   call: the word is always `unknown` and Quick power off waits after every
   call, as before.
 - An emergency text without callback mode is not seen as such (outside
   Phone mode it reads unknown, because the radio comes on; in Phone mode
-  the radio is on already). After an ordinary call, a fresh `ordinary`
-  word then lets Quick power off go although such a text was sent since;
+  the radio is on already). In Phone mode, after an ordinary call, a
+  fresh `ordinary` word then lets Quick power off go although such a text
+  was sent since;
   without any call before, it goes today too. The registry's
   `mOutgoingSmsEmergencyNumber` could show it, at the price of a boot-long
   copy.
-- Telecom decides `isEmergency` once, when the call is created, from
-  `TelephonyManager.isEmergencyNumber`. If Telephony cannot answer at that
-  instant (its process restarting), Telecom records false while Telephony
-  may still place the call as an emergency call; such a call reads
-  ordinary unless callback mode or the network's `ecall` shows it. A
-  number that the network treats as an emergency number without telling
-  the phone, and that is not on Android's list, is no Android emergency
-  call either (no callback mode).
+- In Phone mode, what the module cannot see of Telecom's own emergency
+  check (`TelephonyManager.isEmergencyNumber`, asked of the phone
+  process): a binder call from Telecom to a live phone process that fails
+  without the process restarting (the phone process out of binder buffer
+  space, which an app flooding it could cause): Telecom records false,
+  Telephony places an emergency call, and such a call reads ordinary
+  unless callback mode or the network's `ecall` shows it; a candidate
+  detector is the binder driver's failed-transaction log (PH3). Also
+  Android's emergency-number list changing in the second between
+  Telecom's check and Telephony's (a network list arriving then), and a
+  restart of the phone process before the module's first look of the boot
+  (Phone mode starts only after Start, many looks later). A number that
+  the network treats as an emergency number without telling the phone,
+  and that is not on Android's list, is no Android emergency call either
+  (no callback mode).
+- Telecom writes an entry's fields without the lock its dump takes: a
+  dump racing a call's disconnect could, for microseconds, show the end
+  before the call's last property (`ecall`). One more reading of every
+  newly ended call would close it.
 - A call still connecting (the radio being switched on for an emergency
   call) before the audio mode changes is not seen by Welcome, as before.
-  Within 5 minutes after an ordinary call Welcome used to wait anyway; now
-  it waits for such a call once the module's next look has seen it (about
-  10 s; if the module stopped, once the last word is 30 s old).
+  Within 5 minutes after an ordinary call Welcome used to wait anyway; in
+  Phone mode it now waits for such a call once the module's next look has
+  seen it (about 10 s; if the module stopped, once the last word is 30 s
+  old).
 - Sessions in throwaway users (AM1): the module tells user 0's Welcome;
   Quick power off in another user gets no word and waits as before.
 - Welcome's own record of a call is lost when its process restarts, as
@@ -1142,6 +1295,18 @@ phone the rest.
   answers, then every 5 until Start (so a late Start takes up to about 6
   seconds to reach tor). A signal from Welcome that root can wait for
   would remove the polling.
+- Each word to Welcome (MOD11) is one `cmd device_policy list-owners` and
+  one `content call`, each a Java start (the call took about 0.12 s on the
+  CI emulator in run 20; several times that on a phone). It is told once
+  at the first turn and once per change of the word; outside Phone mode a
+  call costs two or three (`unknown`, then `none`); in Phone mode, after
+  each look (every 10 s) while the word is `ordinary` outside a call or
+  `emergency`, about 30 in the 5 minutes after a call, and during a call
+  only when it changes (an emergency word after each look); every 5
+  minutes with an IMS reading; while Welcome does not take the word, one
+  try every 5 minutes (12 an hour), and at once for an emergency word or a
+  word of another kind. Each look also starts one `toybox pidof` and reads
+  one `/proc` file (the phone process).
 - `uninstall.sh` restores the values recorded at installation, even if
   the person changed one of those keys since.
 - API 36 only: LineageOS 24 (Android 17) needs a new release (or

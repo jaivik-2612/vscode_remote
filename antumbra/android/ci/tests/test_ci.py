@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Unit tests for the Antumbra CI tools: the pcap reader, the leak
-analyser, citool and summary. Every capture is generated here, frame by
-frame, so the tests need nothing but the standard library.
+analyser, citool, summary and the emulator job's module_parsers levels.
+Every capture is generated here, frame by frame, so the tests need nothing
+but the standard library (and bash).
 
 Run: python3 -B -m unittest discover -s antumbra/android/ci/tests -v
 """
@@ -13,6 +14,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import tempfile
 import threading
@@ -1177,6 +1179,78 @@ class SummaryTest(TempDir):
         self.assertIn("`antumbra-guest.pcap` (inside the guest, every interface)", text)
         self.assertIn("| Seen on |", text)
         self.assertIn("| 3 | wlan0 |", text)
+
+
+class ModuleParsersTest(unittest.TestCase):
+    """emulator-antumbra.sh's module_parsers_level, cut out of the script and
+    run in bash: the parts run 21 printed fail unless exactly as expected;
+    the phone part, new since, only warns."""
+
+    def level(self, out):
+        text = read(os.path.join(CI, "emulator-antumbra.sh"))
+        start = text.index("module_parsers_level() {")
+        fn = text[start:text.index("\n}\n", start) + 3]
+        r = subprocess.run(["bash", "-c", fn + 'module_parsers_level "$1"', "probe", out],
+                           capture_output=True, text=True, check=True)
+        return r.stdout.strip()
+
+    GOOD = "telecom=0 0 - - 0; registry=0 0 on; ims=none; phone=yes"
+
+    def test_the_expected_line(self):
+        for radio in ("on", "off"):
+            for ims in ("cell", "wifi", "registered", "none"):
+                line = "telecom=0 0 - - 0; registry=0 0 %s; ims=%s; phone=yes" % (radio, ims)
+                self.assertEqual(self.level(line), "ok", line)
+
+    def test_run_21_line_without_the_phone_part(self):
+        # Run 21 (af748d0) printed this, before phone= existed: its parts pass.
+        self.assertEqual(self.level("telecom=0 0 - - 0; registry=0 0 on; ims=none"), "warn")
+
+    def test_the_phone_part_only_warns(self):
+        good = self.GOOD
+        for out in (
+            good.replace("phone=yes", "phone=no"),
+            good.replace("phone=yes", "phone="),
+            good.replace("; phone=yes", ""),
+            good.replace("; phone=yes", "; phone=yes; more=1"),
+            good + "\n",
+            good + "\nmksh: something on standard error",
+            good.replace("; phone=yes", "\nmksh: something; phone=yes"),
+        ):
+            self.assertEqual(self.level(out), "warn", out)
+
+    def test_the_known_parts_fail(self):
+        good = self.GOOD
+        for out in (
+            # Run 20 (5cff44d): dumpsys's stderr before the line.
+            "Failed to write while dumping service telephony.registry: Broken pipe\n"
+            "telecom=0 0 - - 0; registry=0 0 on; ims=none",
+            "Failed to write while dumping service telephony.registry: Broken pipe\n" + good,
+            " " + good,
+            good.replace("0 0 - - 0", "0 0 u - 0"),
+            good.replace("0 0 - - 0", "1 1 o 1 0"),
+            good.replace("0 0 - - 0", "0 3 - - 0"),
+            good.replace("0 0 - - 0", "0 0 - - 1"),
+            good.replace("telecom=0 0 - - 0", "telecom=unreadable"),
+            good.replace("registry=0 0 on", "registry=unreadable"),
+            good.replace("registry=0 0 on", "registry=0 0 wait"),
+            good.replace("registry=0 0 on", "registry=1 0 on"),
+            good.replace("registry=0 0 on", "registry=0 1 on"),
+            good.replace("ims=none", "ims=unreadable"),
+            good.replace("ims=none", "ims=off"),
+            good.replace("ims=none", "ims=unknown"),
+            good.replace("ims=none", "ims=nonesuch"),
+            good.replace("ims=none", "ims=none2"),
+            "telecom=0 0 - - 0; registry=0 0 on",
+            "",
+        ):
+            self.assertEqual(self.level(out), "fail", out)
+
+    def test_the_job_uses_it(self):
+        text = read(os.path.join(CI, "emulator-antumbra.sh"))
+        self.assertIn('check module_parsers "$(module_parsers_level "$out")" "$out"', text)
+        # phone_proc's own stderr cannot add a line before the known parts.
+        self.assertIn("phone_proc >/dev/null 2>&1 && p=yes", text)
 
 
 if __name__ == "__main__":

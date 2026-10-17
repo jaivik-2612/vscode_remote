@@ -213,12 +213,19 @@ that the captures must show traffic from the phone.
    check-module-word`: the module's word given as the shell user, uid 2000
    through `su`, is refused with a `SecurityException`, a malformed one
    from root refused, a `none` from root taken; nothing that could let
-   Quick power off skip a wait is sent) and `module_parsers`, a warning
-   until it has passed on CI once (the module's `telecom_state`,
-   `registry_state` and `ims_state`, run as root on the device against the
-   emulator's own dumps, taken with the module's `cell_dump` and
-   `ims_dump`; only their output, numbers and words, is kept in
-   `module-parsers.txt`; run 20 read "0 0 - - 0", "0 0 on" and "none").
+   Quick power off skip a wait is sent) and `module_parsers` (the module's
+   `telecom_state`, `registry_state` and `ims_state`, run as root on the
+   device against the emulator's own dumps, taken with the module's
+   `cell_dump` and `ims_dump`, and its `phone_proc`, which finds the phone
+   process by name; only their output, numbers and words, is kept in
+   `module-parsers.txt`). `module_parsers_level` compares that output with
+   what the emulator should show, and `tests/test_ci.py` checks it: a
+   failure unless it begins with exactly `telecom=0 0 - - 0; registry=0 0
+   on|off; ims=cell|wifi|registered|none`, with nothing before it (run 20
+   had dumpsys's "Broken pipe" line there; run 21, af748d0, printed exactly
+   `telecom=0 0 - - 0; registry=0 0 on; ims=none`); then a warning unless
+   the rest is exactly `; phone=yes`, until the phone part has passed on CI
+   once (then that fails too).
 8. Wait (15 minutes at most) for `module.tor.bootstrap` = 100 in the
    filter's `/status` (through `adb forward`), or "Bootstrapped 100%" in
    `tor.log`. Screenshot of the status screen.

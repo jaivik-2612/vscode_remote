@@ -650,12 +650,15 @@ minutes were. It changes one thing only:
 
 | The module's word | Quick power off after a call it saw end |
 |---|---|
-| `ordinary`, at most 30 s old, from a look after that call ended | goes ahead: the module knows every call of the last 5 minutes, that one included, was not an emergency call |
+| `ordinary`, at most 30 s old, from a look after that call ended | goes ahead: the module knows every call of the last 5 minutes, that one included, was not an emergency call. The module says it only in a Phone-mode session (WEL8); outside it the cell radio is off, so a carrier call there is an emergency call, a Wi-Fi call (until MOD7) or follows a switch-on by something else, which the module cannot tell apart, and it says `unknown` after every call |
 | `emergency` | waits as before, and at least until the word's end (at most 5 minutes after the module's look), even if Welcome saw no call (its process restarted, or an emergency text with callback mode) |
 | `unknown`, `none`, an `ordinary` word that is older or from a look before the end, a malformed or refused word, no word at all (the module not running, Android 17, which no longer keeps that record) | waits exactly as before |
 
 During a call and in callback mode it waits whatever the word says, and a
 later word never shortens an emergency word's wait. The texts are the same.
+Until WEL8 every session is outside Phone mode, so the module never says
+`ordinary` and Quick power off waits after every call, exactly as before
+MOD11.
 Wi-Fi calling is a carrier call (`MODE_IN_CALL`, an entry in Telecom like
 any SIM call) and counts like one; VoIP apps use `MODE_IN_COMMUNICATION`,
 so Quick power off has never waited for them.
@@ -1044,9 +1047,10 @@ during that call, and the keyguard before Start with a swipe lock or a PIN
   Welcome; it has nothing to join, and a network session without the
   add-on is refused (see "Wi-Fi in airplane mode").
 - **Quick power off waits after every call** unless the module's fresh
-  word says it was an ordinary call (MOD11): Welcome cannot tell calls
-  apart without system permissions, and on Android 17 the module cannot
-  either. A call that is still connecting (a few seconds) is not seen
+  word says it was an ordinary call (MOD11), which it says only in a
+  Phone-mode session (WEL8; until then it waits after every call):
+  Welcome cannot tell calls apart without system permissions, and on
+  Android 17 the module cannot either. A call that is still connecting (a few seconds) is not seen
   (after an ordinary call, until the module's next look), and the end of a
   call is known only to the process that saw it. An emergency text without
   callback mode is not seen at all. The power menu's Power off always

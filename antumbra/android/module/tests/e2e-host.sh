@@ -66,15 +66,21 @@
 #               unreadable state, a call between two looks, an emergency
 #               call between two looks, with enable_cellular_on_boot kept at
 #               1 while each hold lasts and 0 again before the switch-off;
-#               the module's word to Welcome at each step (unknown,
-#               ordinary, emergency, then one "none" after 5 minutes), and
-#               Welcome refusing it; shutdown during a call leaves airplane
-#               mode as it is
+#               the module's word to Welcome at each step (unknown for every
+#               call outside Phone mode, a VoIP call too; emergency; then
+#               one "none" after 5 minutes); a cut Telecom dump refused
+#               (logged as unreadable); the phone process restarted
+#               (unknown; with the radio on it holds nothing); Welcome
+#               refusing an emergency word (tried after each look) and
+#               another word (tried once, then 300 s later); shutdown
+#               during a call leaves airplane mode as it is
 #
 # Every scenario also checks the cell radio's stored values, the narrowed
 # airplane-mode list, cell=off in the session record, that the module
 # never switches the radio on, and that the module's word went to
-# Welcome's provider only (never into status.json, a file or the log).
+# Welcome's provider only (never into status.json, a file or the log) and
+# was never "ordinary" (no scenario is in Phone mode). A copy of sleep
+# named com.android.phone stands in for the phone process.
 #
 # What it cannot show: Android itself (SELinux, netd, Magisk's timing,
 # Welcome, the framework restart). The emulator job does that.
