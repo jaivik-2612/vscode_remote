@@ -1,0 +1,99 @@
+[[!meta title="Flatpak apps"]]
+
+[[!toc levels=2]]
+
+# System-wide or per-user mode
+
+Flatpak can operate in system-wide or per-user mode.
+
+We set it up for the user in per-user mode for these reasons:
+
+- In system-wide mode, many operations (install, add overrides, repository
+  configuration) needs privileges (not necessarily setting an administration
+  password).
+- We install the [[Tor Browser pseudo-Flatpak|contribute/design#tor-browser]] as
+  a system Flatpak, and we prefer to not give the `amnesia` user too much
+  latitude to mis-configure it.
+
+# Routing all Flatpak apps' network traffic over Tor
+
+Our [[!tails_ticket 21554 desc="research"]] has shown that:
+
+ - Standard environment variables, such as `HTTP_PROXY` and `SOCKS_SERVER`,
+   are not honored by most Flatpak apps.
+ - `torsocks` is not a viable approach either.
+
+So instead we implemented transparent torification via the Tor's `TransPort`.
+
+# Repositories
+
+We enable [Flathub](https://flathub.org/) at build time by default, install the
+up-to-date `GPGKey` in the image, and keep its key up-to-date in Persistent
+Storage via `on-activated-hooks`.
+
+# Persistent Storage
+
+Given the storage requirements, we only support managing Flatpak apps when the
+corresponding Persistent Storage feature is enabled.
+
+That feature makes these directories persistent:
+
+- `/.local/share/flatpak`: repository data (configuration, keys, AppStream,
+  icons...), runtime environments, the actual Flatpak apps, and overrides
+- `~/.var/app`: user's application data (configuration, caches, etc.)
+- `~/.cache/gnome-software`: icons and repository data cached by GNOME Software
+  in its own format
+
+# Apps management user interface
+
+We install GNOME Software with [[!debpts gnome-software-plugin-flatpak]]. We *do
+not* install [[!debpts gnome-software-plugin-deb]]: in Tails, GNOME Software is
+for Flatpak apps, while Debian packages are managed in other ways (APT on the
+command line, Synaptic as long as we ship it).
+
+GNOME Software uses AppStream to get the list of apps available on Flathub:
+"AppStream is a metadata specification enabling software to provide rich,
+machine-readable information (screenshots, descriptions, versions) for app
+stores, including Flathub".
+
+## GNOME Software startup and update schedule
+
+GNOME Software follows an update schedule by checking if certain
+conditions are met on its startup and every hour following that, and
+if met proceeds to fetch updates. The main condition is that it will
+only fetch updates if the last attempt for that was done another
+calendar day. It implements that by comparing the current time with a
+timestamp (`org.gnome.software.check-timestamp` GSetting) that was set
+last time it fetched updates (if not set it will also proceed).
+
+An issue in Tails is that this timestamp is updated even when the
+update fetch fails, so if GNOME Software starts before Tor has
+bootstrapped it will set the timestamp even though no updates were
+fetched. Combined with the condition mentioned above that means that
+GNOME Software only will fetch updates in Tails sessions that run from
+one calendar day to the next. For this reason we take great care in
+preventing GNOME Software from starting before Tor has bootstrapped.
+
+A wrapper for GNOME Software prevents it from starting if Tor isn't
+bootstrapped, informing users of this requirement:
+
+- [[!tails_gitweb
+  config/chroot_local-includes/usr/local/bin/gnome-software]]
+
+The service that starts GNOME Software is scheduled to start after Tor
+has bootstrapped:
+
+- [[!tails_gitweb
+  config/chroot_local-includes/usr/lib/systemd/user/gnome-software.service.d/after-tor-has-bootstrapped.conf]]
+
+XDG autostart is disabled, and `DBusActivatable` is dropped from the
+Desktop file to ensure that it executes the wrapper:
+
+- [[!tails_gitweb config/chroot_local-hooks/30-flatpak]]
+
+# Related pages
+
+See also:
+
+ - [[additional software packages]]
+ - [[persistence]]

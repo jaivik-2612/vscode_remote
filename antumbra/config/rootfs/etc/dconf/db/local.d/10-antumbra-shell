@@ -1,0 +1,20 @@
+# Shell behaviour for the user's session (docs/architecture.md, "Interface
+# theme"). The look shared with the Welcome screen is in
+# /usr/share/glib-2.0/schemas/90_antumbra.gschema.override instead, because
+# the Welcome screen reads schema defaults only.
+
+[sm/puri/phosh]
+# These apps declare no X-Purism-FormFactor, so phosh's adaptive filter
+# would hide them from the app grid on the phone.
+force-adaptive=['electrum.desktop', 'fr.romainvigier.MetadataCleaner.desktop', 'org.gnome.Loupe.desktop', 'org.onionshare.OnionShare.desktop']
+
+[sm/puri/phosh/plugins]
+# Dark Mode and Night Light tiles (phosh-plugins), after phosh's built-in
+# tiles. No lock-screen plugins: nothing renders on the lock screen beyond
+# the clock and the unlock prompt (locked in locks/10-antumbra-shell).
+quick-settings=['dark-mode-quick-setting', 'night-light-quick-setting']
+lock-screen=@as []
+
+[org/gnome/desktop/notifications]
+# Notification content stays off the lock screen.
+show-in-lock-screen=false

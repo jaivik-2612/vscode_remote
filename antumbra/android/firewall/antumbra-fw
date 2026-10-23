@@ -1,0 +1,979 @@
+#!/system/bin/sh
+# antumbra-fw: the Tor-only firewall of the Antumbra Magisk module.
+#
+# Usage: antumbra-fw arm|apply|status|flush|print
+#
+#   arm     Load one small rule set, in one iptables-restore call per address
+#           family, that drops every packet leaving on an interface other than
+#           loopback, every packet arriving on one and every forwarded packet,
+#           IPv4 and IPv6. post-fs-data.sh runs it first, before zygote starts.
+#   apply   Load the full rule set, check it in the kernel, record its hash in
+#           $ANTUMBRA_DIR/state/fw/fw.hash and print the hash (64 hex digits)
+#           on standard output. If anything fails, go back to the armed state
+#           and exit 1.
+#   status  Print state=live|armed|partial|open, the hash of the Antumbra rules
+#           now in the kernel and the hash recorded by the last apply.
+#           Exit status: 0 live, 1 armed, 2 partial (the gates are in place
+#           but the rules are not the recorded ones), 3 open or unknown.
+#   flush   Go back to the armed state. It never opens the network: if the arm
+#           set cannot be put in front, the rules in place stay and it exits 1.
+#   print   Print the full rule set as iptables-restore input without loading
+#           it. Needs no root.
+#
+# It is plain POSIX sh: it runs under Android's mksh with toybox, under
+# Magisk's busybox ash, and under dash or bash on Linux for the tests. Rule
+# changes go through iptables-restore --noflush, one atomic commit per table.
+# Only when that fails (or the -restore tool is missing) do arm and flush load
+# the arm set one command at a time, in an order where every step is closed.
+# README.md next to this file explains every rule and why it is there.
+
+set -u
+set -f
+umask 022
+
+# --- Settings ---------------------------------------------------------------
+
+ANTUMBRA_DIR=${ANTUMBRA_DIR:-/data/adb/antumbra}
+# The firewall's own directory: its lock and the recorded hash. It must be
+# root's alone (checked before every write), never the tor-owned run/.
+FW_DIR=${ANTUMBRA_FW_DIR:-$ANTUMBRA_DIR/state/fw}
+HASH_FILE=$FW_DIR/fw.hash
+LOCK_DIR=$FW_DIR/fw.lock
+# Apps with their own tor, one per line: "<uid> [<port>[,<port>|<lo>:<hi>]...]".
+EXEMPT_FILE=${ANTUMBRA_FW_EXEMPT:-$ANTUMBRA_DIR/state/fw-exempt.conf}
+# Tor relays and bridges those apps may reach, one per line: "<IPv4> <port>".
+RELAYS_FILE=${ANTUMBRA_FW_RELAYS:-$ANTUMBRA_DIR/state/fw-relays.conf}
+# DNS-over-HTTPS servers no app may reach, one per line: "<IPv4>[/32]".
+DOH_FILE=${ANTUMBRA_FW_DOH:-$ANTUMBRA_DIR/lists/doh-ipv4.txt}
+# Optional NFLOG group for redirected and refused packets (CI and debugging).
+NFLOG_GROUP=${ANTUMBRA_FW_NFLOG_GROUP:-}
+case $NFLOG_GROUP in
+'') ;;
+*[!0-9]* | ?????? | 0?*)
+	echo "antumbra-fw: ignoring ANTUMBRA_FW_NFLOG_GROUP=$NFLOG_GROUP (not 0-65535)" >&2
+	NFLOG_GROUP=
+	;;
+*) [ "$NFLOG_GROUP" -le 65535 ] || NFLOG_GROUP= ;;
+esac
+
+IPT4=${ANTUMBRA_FW_IPTABLES:-iptables}
+IPT6=${ANTUMBRA_FW_IP6TABLES:-ip6tables}
+RST4=${ANTUMBRA_FW_IPTABLES_RESTORE:-iptables-restore}
+RST6=${ANTUMBRA_FW_IP6TABLES_RESTORE:-ip6tables-restore}
+# Seconds to wait for the xtables lock, which netd also takes.
+WAIT=30
+
+# Fixed by the shared contract (antumbra/android/docs/design.md, section 3).
+TOR_UID=2950          # tor
+DNS_UID=2951          # antumbra-dnsfilter
+NETSTACK_UID=1073     # AID_NETWORK_STACK: Android's DHCP client
+TRANS_PORT=9040       # tor TransPort on 127.0.0.1
+TOR_DNS_PORT=9053     # tor DNSPort on 127.0.0.1, for the DNS filter only
+FILTER_PORT=5335      # the DNS filter, UDP and TCP, on 127.0.0.1
+STATUS_PORT=5380      # the DNS filter's read-only status page on 127.0.0.1
+# Tor's pluggable transports (lyrebird, uid 2950 like tor) listen on a random
+# loopback port in the kernel's ephemeral range; tor must be able to connect
+# to them, and only to listeners of its own uid there.
+PT_LO=32768
+PT_HI=60999
+PT_PORTS=$PT_LO:$PT_HI
+# Connection-mark bits. AOSP's Fwmark (system/netd/include/Fwmark.h) uses
+# bits 0-20, reserves 21-28, gives 29-30 to vendors and 31 to wake-up
+# packets; netd copies only bits 0-19 into the connection mark
+# (CONNMARK_FWMARK_MASK 0x000FFFFF). Antumbra takes two bits from the
+# reserved field, away from the vendor bits.
+# CTMARK: connections allowed to leave the phone (the egress gate).
+CTMARK=0x10000000
+# PTMARK: tor's loopback connections to its pluggable-transport ports.
+PTMARK=0x08000000
+# Networks that are never the Internet. Tor gets none of them: no router, no
+# LAN host, no multicast. Apps' TCP to them goes into Tor like any other.
+LAN_NETS="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
+# Where a DHCP server can be: private, carrier-NAT and link-local networks.
+# Renewals go to one of them or to the broadcast address, never further.
+DHCP_NETS="10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.168.0.0/16"
+# Matches packets that no process owns (sent by the kernel itself).
+KERNEL='-m owner ! --uid-owner 0-4294967294'
+# Matches packets that a process owns (the opposite of KERNEL).
+SOCKET='-m owner --uid-owner 0-4294967294'
+
+# --- Small helpers ----------------------------------------------------------
+
+log() { echo "antumbra-fw: $*" >&2; }
+
+ipt() {
+	_f=$1
+	shift
+	if [ "$_f" = 4 ]; then "$IPT4" -w "$WAIT" "$@"; else "$IPT6" -w "$WAIT" "$@"; fi
+}
+
+restore() {
+	if [ "$1" = 4 ]; then "$RST4" -w "$WAIT" --noflush; else "$RST6" -w "$WAIT" --noflush; fi
+}
+
+tables_of() {
+	if [ "$1" = 4 ]; then echo "mangle filter nat"; else echo "mangle filter"; fi
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+ipt_tool() { if [ "$1" = 4 ]; then echo "$IPT4"; else echo "$IPT6"; fi; }
+rst_tool() { if [ "$1" = 4 ]; then echo "$RST4"; else echo "$RST6"; fi; }
+
+# need_tools TOOL...: every named tool is there, or say which one is not.
+need_tools() {
+	for _t in "$@"; do
+		have "$_t" || {
+			log "missing $_t"
+			return 1
+		}
+	done
+}
+
+# The first rule of a built-in chain, as iptables -S prints it.
+first_rule() {
+	ipt "$1" -t "$2" -S "$3" 2>/dev/null | sed -n '/^-A /{p;q;}'
+}
+
+# Turn every rule in a built-in chain that jumps to a chain matching $3 (a
+# basic regular expression) into a "-D" line, so a restore can remove it.
+# With "applied" as $4, jumps into the arm chains are left out.
+refs_to_delete() {
+	_rs=$(ipt "$1" -t "$2" -S) || return 1
+	if [ "${4:-}" = applied ]; then
+		printf '%s\n' "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e '/ -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$/d' \
+			-e "/ -[jg] $3\$/s/^-A /-D /p"
+	else
+		printf '%s\n' "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e "/ -[jg] $3\$/s/^-A /-D /p"
+	fi
+}
+
+# Applied (non-arm) Antumbra chains that exist in a table.
+applied_chains() {
+	_rs=$(ipt "$1" -t "$2" -S) || return 1
+	printf '%s\n' "$_rs" | sed -n -e '/^-N ANTUMBRA_ARM_/d' -e 's/^-N \(ANTUMBRA_[A-Z0-9_]*\)$/\1/p'
+}
+
+# --- The firewall's own directory and its lock ------------------------------
+
+# root_dir PATH: PATH is a real directory (not a symbolic link), owned by
+# uid 0 and writable by no one else.
+root_dir() {
+	[ -d "$1" ] && [ ! -L "$1" ] || return 1
+	_ls=$(ls -ldn "$1" 2>/dev/null) || return 1
+	# shellcheck disable=SC2086 # split on purpose; globbing is off (set -f)
+	set -- $_ls
+	[ "${3:-}" = 0 ] || return 1
+	case $1 in d????-??-*) return 0 ;; esac
+	return 1
+}
+
+# fw_dir_ok [create]: the firewall's directory, and the one it is in, are
+# root's alone. With "create", FW_DIR is made (mode 0700) when missing. A
+# process that could write there could swap the lock or plant a link where
+# root writes the hash, so nothing is written unless this holds.
+fw_dir_ok() {
+	if [ "${1:-}" = create ] && [ ! -e "$FW_DIR" ] && [ ! -L "$FW_DIR" ]; then
+		(umask 077 && mkdir -p "$FW_DIR") 2>/dev/null
+	fi
+	if root_dir "$FW_DIR" && root_dir "$(dirname "$FW_DIR")"; then return 0; fi
+	[ "${1:-}" = create ] && log "$FW_DIR (or its parent) is not a directory of root's alone; not using it"
+	return 1
+}
+
+LOCKED=
+boot_id() { cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo none; }
+
+lock_take() {
+	fw_dir_ok create || return 1
+	_n=0
+	while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+		_pid=
+		_bid=
+		read -r _pid _bid <"$LOCK_DIR/owner" 2>/dev/null
+		# Stale: its owner died, it is from an earlier boot, or it never got
+		# an owner file.
+		if { [ -n "$_pid" ] && { [ "$_bid" != "$(boot_id)" ] || ! kill -0 "$_pid" 2>/dev/null; }; } ||
+			{ [ -z "$_pid" ] && [ "$_n" -ge 5 ]; }; then
+			rm -rf "$LOCK_DIR"
+			continue
+		fi
+		_n=$((_n + 1))
+		[ "$_n" -ge 30 ] && return 1
+		sleep 1
+	done
+	echo "$$ $(boot_id)" >"$LOCK_DIR/owner"
+	LOCKED=1
+}
+
+lock_release() {
+	[ -n "$LOCKED" ] && rm -rf "$LOCK_DIR"
+	LOCKED=
+}
+
+# write_hash HASH: record HASH. Called with the lock held, so FW_DIR was
+# checked; the temporary file is still created with no-clobber semantics
+# (O_EXCL), so it is never an existing file or a link.
+write_hash() {
+	rm -f "$HASH_FILE.tmp"
+	(
+		set -C
+		echo "$1" >"$HASH_FILE.tmp"
+	) 2>/dev/null && mv -f "$HASH_FILE.tmp" "$HASH_FILE"
+}
+
+# --- The arm set ------------------------------------------------------------
+
+# Restore input for one table of the arm set. With "flush" as $3 it also
+# removes every jump into the applied chains, so the result is exactly the
+# armed state.
+arm_table() {
+	_f=$1 _t=$2 _mode=$3
+	echo "*$_t"
+	case $_t in
+	mangle)
+		echo ':ANTUMBRA_ARM_IN - [0:0]'
+		echo ':ANTUMBRA_ARM_POST - [0:0]'
+		echo '-A ANTUMBRA_ARM_IN -i lo -j RETURN'
+		echo '-A ANTUMBRA_ARM_IN -j DROP'
+		echo '-A ANTUMBRA_ARM_POST -o lo -j RETURN'
+		echo '-A ANTUMBRA_ARM_POST -j DROP'
+		refs_to_delete "$_f" mangle 'ANTUMBRA_ARM_[A-Z0-9_]*' || return 1
+		echo '-I PREROUTING 1 -j ANTUMBRA_ARM_IN'
+		echo '-I POSTROUTING 1 -j ANTUMBRA_ARM_POST'
+		;;
+	filter)
+		echo ':FORWARD DROP'
+		echo ':ANTUMBRA_ARM_OUT - [0:0]'
+		echo '-A ANTUMBRA_ARM_OUT -o lo -j RETURN'
+		echo '-A ANTUMBRA_ARM_OUT -j DROP'
+		refs_to_delete "$_f" filter 'ANTUMBRA_ARM_[A-Z0-9_]*' || return 1
+		echo '-I OUTPUT 1 -j ANTUMBRA_ARM_OUT'
+		;;
+	esac
+	if [ "$_mode" = flush ]; then
+		refs_to_delete "$_f" "$_t" 'ANTUMBRA_[A-Z0-9_]*' applied || return 1
+	fi
+	echo COMMIT
+}
+
+arm_text() {
+	_tabs="mangle filter"
+	[ "$2" = flush ] && [ "$1" = 4 ] && _tabs="mangle filter nat"
+	for _tt in $_tabs; do
+		arm_table "$1" "$_tt" "$2" || return 1
+	done
+}
+
+# arm_chain_slow FAMILY TABLE CHAIN BUILTIN IFACE-OPTION: make CHAIN exactly
+# "IFACE-OPTION lo -j RETURN; -j DROP" and the first rule of BUILTIN, one
+# command at a time. Every step leaves the chain closed: a DROP goes in front
+# before any old rule is deleted, and loopback is let through again last.
+arm_chain_slow() {
+	_f=$1 _t=$2 _c=$3 _b=$4 _o=$5
+	_want="-A $_c $_o lo -j RETURN
+-A $_c -j DROP"
+	if ! _have=$(ipt "$_f" -t "$_t" -S "$_c" 2>/dev/null); then
+		ipt "$_f" -t "$_t" -N "$_c" || return 1
+		_have=
+	fi
+	if [ "$(printf '%s\n' "$_have" | sed -n '/^-A /p')" != "$_want" ]; then
+		ipt "$_f" -t "$_t" -I "$_c" 1 -j DROP || return 1
+		_n=0
+		while [ "$(ipt "$_f" -t "$_t" -S "$_c" | grep -c '^-A ')" -gt 1 ]; do
+			ipt "$_f" -t "$_t" -D "$_c" 2 || return 1
+			_n=$((_n + 1))
+			[ "$_n" -le 1000 ] || return 1
+		done
+		ipt "$_f" -t "$_t" -I "$_c" 1 "$_o" lo -j RETURN || return 1
+	fi
+	[ "$(first_rule "$_f" "$_t" "$_b")" = "-A $_b -j $_c" ] && return 0
+	ipt "$_f" -t "$_t" -I "$_b" 1 -j "$_c"
+}
+
+# The arm set one command at a time, for when iptables-restore fails or is
+# missing: FORWARD first, then the egress gate, then filter OUTPUT, then
+# inbound. A failed step does not stop the later ones; the caller checks.
+arm_slow() {
+	_as=0
+	ipt "$1" -t filter -P FORWARD DROP || _as=1
+	arm_chain_slow "$1" mangle ANTUMBRA_ARM_POST POSTROUTING -o || _as=1
+	arm_chain_slow "$1" filter ANTUMBRA_ARM_OUT OUTPUT -o || _as=1
+	arm_chain_slow "$1" mangle ANTUMBRA_ARM_IN PREROUTING -i || _as=1
+	return $_as
+}
+
+# Delete jumps into the applied chains one at a time (flush fallback). Each
+# delete happens only while the arm set is in front of everything, so no
+# step can leave a family open.
+unref_slow() {
+	_f=$1
+	for _t in $(tables_of "$_f"); do
+		_dl=$(refs_to_delete "$_f" "$_t" 'ANTUMBRA_[A-Z0-9_]*' applied) || return 1
+		while read -r _d _rule; do
+			[ -n "$_rule" ] || continue
+			is_armed_family "$_f" || return 1
+			# shellcheck disable=SC2086 # split on purpose; globbing is off (set -f)
+			ipt "$_f" -t "$_t" -D $_rule || return 1
+		done <<EOF
+$_dl
+EOF
+	done
+}
+
+# The arm jumps are the first rules of their chains, the arm chains hold
+# exactly the arm set and FORWARD's policy is DROP.
+is_armed_family() {
+	[ "$(family_state "$1")" = armed ]
+}
+
+# arm_family FAMILY [flush]: put the arm set in front of FAMILY's rules; with
+# "flush", also remove every jump into the applied chains. Returns 0 only
+# when the family is armed. A failure never removes anything that closes the
+# network: the applied jumps go only once the arm jumps are in front.
+arm_family() {
+	_af=$1
+	_mode=${2:-arm}
+	_ipt=$(ipt_tool "$_af")
+	_rst=$(rst_tool "$_af")
+	have "$_ipt" || {
+		log "IPv$_af: missing $_ipt; cannot arm"
+		return 1
+	}
+	if have "$_rst"; then
+		if _txt=$(arm_text "$_af" "$_mode") && printf '%s\n' "$_txt" | restore "$_af" && is_armed_family "$_af"; then
+			return 0
+		fi
+		log "IPv$_af: iptables-restore failed; loading the arm set one rule at a time"
+	else
+		log "IPv$_af: missing $_rst; loading the arm set one rule at a time"
+	fi
+	arm_slow "$_af"
+	is_armed_family "$_af" || return 1
+	[ "$_mode" = flush ] || return 0
+	unref_slow "$_af" || return 1
+	is_armed_family "$_af"
+}
+
+# do_arm MODE: arm both families; ARMED_FAMILIES lists the ones that are.
+do_arm() {
+	_rc=0
+	ARMED_FAMILIES=
+	for _fam in 4 6; do
+		if arm_family "$_fam" "$1"; then
+			ARMED_FAMILIES="$ARMED_FAMILIES $_fam"
+		else
+			log "IPv$_fam: could not arm"
+			_rc=1
+		fi
+	done
+	return $_rc
+}
+
+# --- Input lists ------------------------------------------------------------
+
+IPV4_RE='(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}'
+PORT_RE='([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])'
+
+# A list file without comments, blank lines and surrounding spaces.
+clean_list() {
+	[ -f "$1" ] || return 0
+	sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e '/^$/d' "$1"
+}
+
+# Prints the valid lines of a list (ERE $2) sorted and de-duplicated; warns
+# about the rest. Invalid lines are left out: an app loses an exemption or a
+# server stays reachable through Tor, and the network never opens wider.
+valid_lines() {
+	_all=$(clean_list "$1")
+	[ -n "$_all" ] || return 0
+	_ok=$(printf '%s\n' "$_all" | grep -E "^$2\$" | sed -E 's/[[:space:]]+/ /g' | sort -u)
+	_bad=$(printf '%s\n' "$_all" | grep -c -v -E "^$2\$")
+	[ "$_bad" -gt 0 ] && log "$1: ignored $_bad invalid line(s)"
+	[ -n "$_ok" ] && printf '%s\n' "$_ok"
+	return 0
+}
+
+is_port() {
+	case $1 in '' | *[!0-9]* | 0*) return 1 ;; esac
+	[ "${#1}" -le 5 ] && [ "$1" -le 65535 ]
+}
+
+# Checks one exempt line and prints "<uid> <ports>" ("-" when none). Always
+# called in a command substitution, so its IFS change stays there.
+exempt_line() {
+	# shellcheck disable=SC2086 # split on purpose; globbing is off (set -f)
+	set -- $1
+	if [ $# -lt 1 ] || [ $# -gt 2 ]; then return 1; fi
+	_uid=$1
+	_ports=${2:--}
+	case $_uid in '' | *[!0-9]* | 0*) return 1 ;; esac
+	[ "${#_uid}" -ge 5 ] && [ "${#_uid}" -le 9 ] || return 1
+	# Only real apps: app IDs 10000-19999 in any Android user. Never tor,
+	# the DNS filter, root or a system UID.
+	_app=$((_uid % 100000))
+	[ "$_app" -ge 10000 ] && [ "$_app" -le 19999 ] || return 1
+	if [ "$_ports" != - ]; then
+		_slots=0
+		IFS=,
+		for _p in $_ports; do
+			case $_p in
+			*:*)
+				_lo=${_p%%:*}
+				_hi=${_p#*:}
+				if ! is_port "$_lo" || ! is_port "$_hi" || [ "$_lo" -ge "$_hi" ]; then return 1; fi
+				# A range stays out of the ephemeral range, where tor's
+				# pluggable transports and other apps' listeners are.
+				if [ "$_hi" -ge "$PT_LO" ] && [ "$_lo" -le "$PT_HI" ]; then return 1; fi
+				_slots=$((_slots + 2))
+				;;
+			*)
+				is_port "$_p" || return 1
+				_lo=$_p
+				_hi=$_p
+				_slots=$((_slots + 1))
+				;;
+			esac
+			# No app can listen below 1024, and tor's and the filter's
+			# ports are never an app's own.
+			[ "$_lo" -ge 1024 ] || return 1
+			for _sp in $TRANS_PORT $TOR_DNS_PORT $FILTER_PORT $STATUS_PORT; do
+				if [ "$_lo" -le "$_sp" ] && [ "$_hi" -ge "$_sp" ]; then return 1; fi
+			done
+		done
+		# multiport takes at most 15 ports, a range counting as two.
+		[ "$_slots" -ge 1 ] && [ "$_slots" -le 15 ] || return 1
+	fi
+	echo "$_uid $_ports"
+}
+
+exempt_entries() {
+	_seen=' '
+	_lines=$(clean_list "$EXEMPT_FILE")
+	[ -n "$_lines" ] || return 0
+	while IFS= read -r _line; do
+		if _e=$(exempt_line "$_line"); then
+			case $_seen in *" ${_e%% *} "*) log "$EXEMPT_FILE: UID ${_e%% *} listed twice; first line kept"; continue ;; esac
+			_seen="$_seen${_e%% *} "
+			echo "$_e"
+		else
+			log "$EXEMPT_FILE: ignored invalid line: $_line"
+		fi
+	done <<EOF
+$_lines
+EOF
+}
+
+load_lists() {
+	EXEMPT=$(exempt_entries)
+	RELAYS=$(valid_lines "$RELAYS_FILE" "${IPV4_RE}[[:space:]]+$PORT_RE")
+	# Single addresses only: a wider prefix would refuse whole networks.
+	DOH=$(valid_lines "$DOH_FILE" "$IPV4_RE(/32)?")
+}
+
+# --- The full rule set ------------------------------------------------------
+
+nflog() {
+	# nflog CHAIN PREFIX [MATCHES]: one NFLOG rule when a group is configured.
+	[ -n "$NFLOG_GROUP" ] && echo "-A $1 ${3:+$3 }-j NFLOG --nflog-group $NFLOG_GROUP --nflog-prefix $2"
+	return 0
+}
+
+# The jumps from the built-in chains. "fresh" (for print) assumes nothing is
+# loaded; "live" first removes the arm jumps and any old applied jumps.
+jumps() {
+	_f=$1 _t=$2 _mode=$3
+	shift 3
+	if [ "$_mode" = live ]; then
+		refs_to_delete "$_f" "$_t" 'ANTUMBRA_[A-Z0-9_]*' || return 1
+	fi
+	while [ $# -ge 2 ]; do
+		echo "-I $1 1 -j $2"
+		shift 2
+	done
+}
+
+mangle4() {
+	echo '*mangle'
+	echo ':ANTUMBRA_IN - [0:0]'
+	echo ':ANTUMBRA_POST - [0:0]'
+	# Inbound: loopback; replies on connections that were allowed out; DHCP.
+	echo '-A ANTUMBRA_IN -i lo -j RETURN'
+	echo "-A ANTUMBRA_IN -m connmark --mark $CTMARK/$CTMARK -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j RETURN"
+	for _n in $DHCP_NETS; do echo "-A ANTUMBRA_IN -s $_n -p udp -m udp --sport 67 --dport 68 -j RETURN"; done
+	nflog ANTUMBRA_IN antumbra-in-drop '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_IN -j DROP'
+	# Egress gate: only loopback and connections the filter table marked.
+	echo '-A ANTUMBRA_POST -o lo -j RETURN'
+	echo "-A ANTUMBRA_POST -m connmark --mark $CTMARK/$CTMARK -j RETURN"
+	nflog ANTUMBRA_POST antumbra-out-drop '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_POST -j DROP'
+	jumps 4 mangle "$1" PREROUTING ANTUMBRA_IN POSTROUTING ANTUMBRA_POST || return 1
+	echo COMMIT
+}
+
+nat4() {
+	echo '*nat'
+	echo ':ANTUMBRA_NAT - [0:0]'
+	echo ':ANTUMBRA_RELAYS - [0:0]'
+	# tor and the DNS filter are never translated.
+	echo "-A ANTUMBRA_NAT -m owner --uid-owner $TOR_UID -j ACCEPT"
+	echo "-A ANTUMBRA_NAT -m owner --uid-owner $DNS_UID -j ACCEPT"
+	# Every DNS query, to any address, goes to the DNS filter.
+	echo "-A ANTUMBRA_NAT -p udp -m udp --dport 53 -j REDIRECT --to-ports $FILTER_PORT"
+	echo "-A ANTUMBRA_NAT -p tcp -m tcp --dport 53 -j REDIRECT --to-ports $FILTER_PORT"
+	# The three loopback services apps may use stay as they are.
+	echo "-A ANTUMBRA_NAT -d 127.0.0.1/32 -p tcp -m multiport --dports $TRANS_PORT,$FILTER_PORT,$STATUS_PORT -j ACCEPT"
+	# Apps with their own tor: their own loopback ports, and Tor relays.
+	if [ -n "$EXEMPT" ]; then
+		while read -r _uid _ports; do
+			[ "$_ports" != - ] &&
+				echo "-A ANTUMBRA_NAT -d 127.0.0.1/32 -p tcp -m owner --uid-owner $_uid -m multiport --dports $_ports -j ACCEPT"
+			echo "-A ANTUMBRA_NAT -p tcp -m owner --uid-owner $_uid -j ANTUMBRA_RELAYS"
+		done <<EOF
+$EXEMPT
+EOF
+	fi
+	# All other TCP, whatever the destination (Internet, LAN, link-local,
+	# any other loopback port), goes into Tor's TransPort.
+	nflog ANTUMBRA_NAT antumbra-redirect '-p tcp'
+	echo "-A ANTUMBRA_NAT -p tcp -j REDIRECT --to-ports $TRANS_PORT"
+	[ -n "$RELAYS" ] && printf '%s\n' "$RELAYS" |
+		sed 's|^\([0-9.]*\) \([0-9]*\)$|-A ANTUMBRA_RELAYS -d \1/32 -p tcp -m tcp --dport \2 -j ACCEPT|'
+	jumps 4 nat "$1" OUTPUT ANTUMBRA_NAT || return 1
+	echo COMMIT
+}
+
+filter4() {
+	echo '*filter'
+	echo ':FORWARD DROP'
+	for _c in OUT SQUAT TOR DNSF APP DHCP RELAYS DOH REJECT; do echo ":ANTUMBRA_$_c - [0:0]"; done
+
+	# Refusal. Packets the kernel sends itself are dropped without an answer.
+	echo "-A ANTUMBRA_REJECT $KERNEL -j DROP"
+	nflog ANTUMBRA_REJECT antumbra-reject '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_REJECT -p tcp -j REJECT --reject-with tcp-reset'
+	echo '-A ANTUMBRA_REJECT -j REJECT --reject-with icmp-port-unreachable'
+
+	# A loopback service port answered by a socket that is not its owner's:
+	# an app that took the port while tor or the filter was not listening.
+	# Dropped, so it never completes a handshake or delivers an answer.
+	nflog ANTUMBRA_SQUAT antumbra-squat '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_SQUAT -j DROP'
+
+	# Top level. Every path below either refuses or returns; a return lets
+	# the packet go on to netd's own chains.
+	# First, who may answer on loopback: tor's ports only tor, the filter's
+	# only the filter, an exempt app's own ports only that app (tor's own
+	# connections aside), and on tor's connections to its pluggable-transport
+	# ports only tor's uid. Packets the kernel sends (resets, TIME_WAIT
+	# acknowledgements) own no socket and are not affected.
+	echo "-A ANTUMBRA_OUT -o lo -p tcp -m multiport --sports $TRANS_PORT,$TOR_DNS_PORT -m owner ! --uid-owner $TOR_UID $SOCKET -j ANTUMBRA_SQUAT"
+	echo "-A ANTUMBRA_OUT -o lo -p udp -m udp --sport $TOR_DNS_PORT -m owner ! --uid-owner $TOR_UID $SOCKET -j ANTUMBRA_SQUAT"
+	echo "-A ANTUMBRA_OUT -o lo -p tcp -m multiport --sports $FILTER_PORT,$STATUS_PORT -m owner ! --uid-owner $DNS_UID $SOCKET -j ANTUMBRA_SQUAT"
+	echo "-A ANTUMBRA_OUT -o lo -p udp -m udp --sport $FILTER_PORT -m owner ! --uid-owner $DNS_UID $SOCKET -j ANTUMBRA_SQUAT"
+	# An exempt app's port can be in the ephemeral range (Briar's tor uses
+	# 59050), where the kernel also picks other apps' source ports, so only
+	# answers (the reply direction) count there.
+	if [ -n "$EXEMPT" ]; then
+		while read -r _uid _ports; do
+			[ "$_ports" != - ] &&
+				echo "-A ANTUMBRA_OUT -o lo -p tcp -m multiport --sports $_ports -m conntrack --ctdir REPLY -m connmark ! --mark $PTMARK/$PTMARK -m owner ! --uid-owner $_uid $SOCKET -j ANTUMBRA_SQUAT"
+		done <<EOF
+$EXEMPT
+EOF
+	fi
+	echo "-A ANTUMBRA_OUT -o lo -m connmark --mark $PTMARK/$PTMARK -m owner ! --uid-owner $TOR_UID $SOCKET -j ANTUMBRA_SQUAT"
+	# Replies inside the phone.
+	echo '-A ANTUMBRA_OUT -o lo -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j RETURN'
+	echo "-A ANTUMBRA_OUT -m owner --uid-owner $TOR_UID -j ANTUMBRA_TOR"
+	echo "-A ANTUMBRA_OUT -m owner --uid-owner $TOR_UID -j RETURN"
+	echo "-A ANTUMBRA_OUT -m owner --uid-owner $DNS_UID -j ANTUMBRA_DNSF"
+	echo "-A ANTUMBRA_OUT -m owner --uid-owner $DNS_UID -j RETURN"
+	echo "-A ANTUMBRA_OUT $KERNEL -m connmark --mark $CTMARK/$CTMARK -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN"
+	echo '-A ANTUMBRA_OUT -j ANTUMBRA_APP'
+
+	# tor: the Internet and its own pluggable transports; nothing else local,
+	# not even a loopback connection it opened before the rules were loaded.
+	echo "-A ANTUMBRA_TOR -o lo -m connmark --mark $PTMARK/$PTMARK -j RETURN"
+	echo "-A ANTUMBRA_TOR -d 127.0.0.1/32 -p tcp -m tcp --dport $PT_PORTS -m conntrack --ctstate NEW -j CONNMARK --set-xmark $PTMARK/$PTMARK"
+	echo "-A ANTUMBRA_TOR -d 127.0.0.1/32 -p tcp -m tcp --dport $PT_PORTS -m conntrack --ctstate NEW -j RETURN"
+	echo '-A ANTUMBRA_TOR -d 127.0.0.0/8 -j ANTUMBRA_REJECT'
+	echo '-A ANTUMBRA_TOR -o lo -j ANTUMBRA_REJECT'
+	echo '-A ANTUMBRA_TOR -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN'
+	for _n in $LAN_NETS; do echo "-A ANTUMBRA_TOR -d $_n -j ANTUMBRA_REJECT"; done
+	echo "-A ANTUMBRA_TOR -j CONNMARK --set-xmark $CTMARK/$CTMARK"
+
+	# The DNS filter: tor's DNSPort and nothing else.
+	echo "-A ANTUMBRA_DNSF -d 127.0.0.1/32 -p udp -m udp --dport $TOR_DNS_PORT -j RETURN"
+	echo "-A ANTUMBRA_DNSF -d 127.0.0.1/32 -p tcp -m tcp --dport $TOR_DNS_PORT -j RETURN"
+	echo '-A ANTUMBRA_DNSF -j ANTUMBRA_REJECT'
+
+	# Everyone else: apps, system services and root.
+	echo "-A ANTUMBRA_APP -d 127.0.0.1/32 -p udp -m udp --dport $FILTER_PORT -j RETURN"
+	echo "-A ANTUMBRA_APP -d 127.0.0.1/32 -p tcp -m tcp --dport $FILTER_PORT -j RETURN"
+	echo '-A ANTUMBRA_APP -p tcp -m conntrack --ctstate NEW --ctorigdstport 853 -j ANTUMBRA_REJECT'
+	echo '-A ANTUMBRA_APP -p tcp -m conntrack --ctstate NEW -j ANTUMBRA_DOH'
+	echo "-A ANTUMBRA_APP -d 127.0.0.1/32 -p tcp -m multiport --dports $TRANS_PORT,$STATUS_PORT -j RETURN"
+	if [ -n "$EXEMPT" ]; then
+		while read -r _uid _ports; do
+			[ "$_ports" != - ] &&
+				echo "-A ANTUMBRA_APP -d 127.0.0.1/32 -p tcp -m owner --uid-owner $_uid -m multiport --dports $_ports -j RETURN"
+			echo "-A ANTUMBRA_APP -p tcp -m owner --uid-owner $_uid -m conntrack --ctstate NEW -j ANTUMBRA_RELAYS"
+			echo "-A ANTUMBRA_APP -p tcp -m owner --uid-owner $_uid -m conntrack --ctstate NEW -j CONNMARK --set-xmark $CTMARK/$CTMARK"
+			echo "-A ANTUMBRA_APP -p tcp -m owner --uid-owner $_uid -m conntrack --ctstate NEW -j RETURN"
+			echo "-A ANTUMBRA_APP -p tcp -m owner --uid-owner $_uid -m connmark --mark $CTMARK/$CTMARK -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN"
+		done <<EOF
+$EXEMPT
+EOF
+	fi
+	# DHCP renewals from the network stack, to a server on the LAN or to the
+	# broadcast address only (ANTUMBRA_DHCP refuses any other destination).
+	echo "-A ANTUMBRA_APP -p udp -m udp --sport 68 --dport 67 -m owner --uid-owner $NETSTACK_UID -j ANTUMBRA_DHCP"
+	echo "-A ANTUMBRA_APP -p udp -m udp --sport 68 --dport 67 -m owner --uid-owner $NETSTACK_UID -j CONNMARK --set-xmark $CTMARK/$CTMARK"
+	echo "-A ANTUMBRA_APP -p udp -m udp --sport 68 --dport 67 -m owner --uid-owner $NETSTACK_UID -j RETURN"
+	echo '-A ANTUMBRA_APP -j ANTUMBRA_REJECT'
+
+	for _n in $DHCP_NETS 255.255.255.255/32; do echo "-A ANTUMBRA_DHCP -d $_n -j RETURN"; done
+	echo '-A ANTUMBRA_DHCP -j ANTUMBRA_REJECT'
+
+	# Relays and bridges for apps with their own tor (empty until filled).
+	# Never the LAN or loopback, whatever the list says.
+	echo '-A ANTUMBRA_RELAYS -d 127.0.0.0/8 -j ANTUMBRA_REJECT'
+	for _n in $LAN_NETS; do echo "-A ANTUMBRA_RELAYS -d $_n -j ANTUMBRA_REJECT"; done
+	[ -n "$RELAYS" ] && printf '%s\n' "$RELAYS" |
+		sed 's|^\([0-9.]*\) \([0-9]*\)$|-A ANTUMBRA_RELAYS -d \1/32 -p tcp -m tcp --dport \2 -j RETURN|'
+	echo '-A ANTUMBRA_RELAYS -j ANTUMBRA_REJECT'
+
+	# DNS-over-HTTPS servers, matched on the address the app asked for.
+	[ -n "$DOH" ] && printf '%s\n' "$DOH" |
+		sed 's|^\(.*\)$|-A ANTUMBRA_DOH -m conntrack --ctorigdst \1 -j ANTUMBRA_REJECT|'
+
+	jumps 4 filter "$1" OUTPUT ANTUMBRA_OUT || return 1
+	echo COMMIT
+}
+
+mangle6() {
+	echo '*mangle'
+	echo ':ANTUMBRA_IN - [0:0]'
+	echo ':ANTUMBRA_POST - [0:0]'
+	echo '-A ANTUMBRA_IN -i lo -j RETURN'
+	nflog ANTUMBRA_IN antumbra-in6-drop '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_IN -j DROP'
+	echo '-A ANTUMBRA_POST -o lo -j RETURN'
+	nflog ANTUMBRA_POST antumbra-out6-drop '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_POST -j DROP'
+	jumps 6 mangle "$1" PREROUTING ANTUMBRA_IN POSTROUTING ANTUMBRA_POST || return 1
+	echo COMMIT
+}
+
+filter6() {
+	echo '*filter'
+	echo ':FORWARD DROP'
+	echo ':ANTUMBRA_OUT - [0:0]'
+	echo ':ANTUMBRA_REJECT - [0:0]'
+	echo "-A ANTUMBRA_REJECT $KERNEL -j DROP"
+	nflog ANTUMBRA_REJECT antumbra-reject6 '-m limit --limit 20/sec'
+	echo '-A ANTUMBRA_REJECT -p tcp -j REJECT --reject-with tcp-reset'
+	echo '-A ANTUMBRA_REJECT -j REJECT --reject-with icmp6-adm-prohibited'
+	# IPv6 is only ::1, and only for the system (user 0's UIDs below 10000).
+	echo '-A ANTUMBRA_OUT -o lo -m conntrack --ctstate RELATED,ESTABLISHED --ctdir REPLY -j RETURN'
+	echo "-A ANTUMBRA_OUT -s ::1/128 -d ::1/128 -o lo -m owner --uid-owner $TOR_UID-$DNS_UID -j ANTUMBRA_REJECT"
+	echo '-A ANTUMBRA_OUT -s ::1/128 -d ::1/128 -o lo -m owner --uid-owner 0-9999 -j RETURN'
+	echo "-A ANTUMBRA_OUT -s ::1/128 -d ::1/128 -o lo $KERNEL -j RETURN"
+	echo '-A ANTUMBRA_OUT -j ANTUMBRA_REJECT'
+	jumps 6 filter "$1" OUTPUT ANTUMBRA_OUT || return 1
+	echo COMMIT
+}
+
+# full_text FAMILY MODE: restore input for the whole applied rule set. The
+# table order matters: the egress gate in mangle is opened last, so every
+# intermediate state of a load is closed.
+full_text() {
+	if [ "$1" = 4 ]; then
+		nat4 "$2" && filter4 "$2" && mangle4 "$2"
+	else
+		filter6 "$2" && mangle6 "$2"
+	fi
+}
+
+# --- Checks -----------------------------------------------------------------
+
+live_dump() {
+	for _df in 4 6; do
+		for _dt in $(tables_of "$_df"); do
+			echo "# IPv$_df $_dt"
+			_out=$(ipt "$_df" -t "$_dt" -S) || return 1
+			printf '%s\n' "$_out" | grep -e 'ANTUMBRA_' -e '^-P FORWARD '
+		done
+	done
+	return 0
+}
+
+live_hash() {
+	_dump=$(live_dump) || return 1
+	printf '%s\n' "$_dump" | sha256sum | cut -d' ' -f1
+}
+
+# Every chain of the restore input in file $3 has as many rules in the kernel
+# as in the file, every jump of the file is the first rule of its built-in
+# chain and the only jump there, and no arm jump is left.
+verify_family() {
+	_vf=$1
+	_text=$2
+	_cur=
+	_s=
+	_plan=$(printf '%s\n' "$_text" | sed -n -e 's/^\*\([a-z]*\)$/T \1/p' -e 's/^:\(ANTUMBRA_[A-Z0-9_]*\) .*/C \1/p' \
+		-e 's/^-I \([A-Z]*\) 1 -j \(ANTUMBRA_[A-Z0-9_]*\)$/J \1 \2/p')
+	_ok=0
+	while read -r _k _a _b; do
+		case $_k in
+		T)
+			_cur=$_a
+			_s=$(ipt "$_vf" -t "$_cur" -S) || { _ok=1; break; }
+			if printf '%s\n' "$_s" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
+				log "IPv$_vf $_cur: an arm jump is still loaded"
+				_ok=1
+			fi
+			;;
+		C)
+			_want=$(printf '%s\n' "$_text" | sed -n "/^\*$_cur\$/,/^COMMIT\$/p" | grep -c "^-A $_a ")
+			_have=$(printf '%s\n' "$_s" | grep -c "^-A $_a ")
+			if [ "$_want" != "$_have" ]; then
+				log "IPv$_vf $_cur $_a: $_have rules loaded, $_want expected"
+				_ok=1
+			fi
+			;;
+		J)
+			if [ "$(first_rule "$_vf" "$_cur" "$_a")" != "-A $_a -j $_b" ]; then
+				log "IPv$_vf $_cur $_a: the jump to $_b is not the first rule"
+				_ok=1
+			fi
+			_n=$(printf '%s\n' "$_s" | grep -c -e "^-A [A-Z]* .*-[jg] $_b\$")
+			if [ "$_n" != 1 ]; then
+				log "IPv$_vf $_cur: $_n jumps to $_b"
+				_ok=1
+			fi
+			;;
+		esac
+	done <<EOF
+$_plan
+EOF
+	[ "$(ipt "$_vf" -t filter -S FORWARD | sed -n 1p)" = '-P FORWARD DROP' ] || {
+		log "IPv$_vf: FORWARD policy is not DROP"
+		_ok=1
+	}
+	return $_ok
+}
+
+# STATE of one family: applied, armed, closed (both egress gates are ours) or
+# open.
+family_state() {
+	_pre=$(first_rule "$1" mangle PREROUTING)
+	_post=$(first_rule "$1" mangle POSTROUTING)
+	_out=$(first_rule "$1" filter OUTPUT)
+	_nat='-A OUTPUT -j ANTUMBRA_NAT'
+	[ "$1" = 4 ] && _nat=$(first_rule 4 nat OUTPUT)
+	_all=$(for _st in $(tables_of "$1"); do ipt "$1" -t "$_st" -S; done 2>/dev/null)
+	_fwd=$(ipt "$1" -t filter -S FORWARD 2>/dev/null | sed -n 1p)
+	if [ "$_pre" = '-A PREROUTING -j ANTUMBRA_IN' ] && [ "$_post" = '-A POSTROUTING -j ANTUMBRA_POST' ] &&
+		[ "$_out" = '-A OUTPUT -j ANTUMBRA_OUT' ] && [ "$_nat" = '-A OUTPUT -j ANTUMBRA_NAT' ] &&
+		[ "$_fwd" = '-P FORWARD DROP' ] &&
+		! printf '%s\n' "$_all" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
+		echo applied
+	elif [ "$_pre" = '-A PREROUTING -j ANTUMBRA_ARM_IN' ] && [ "$_post" = '-A POSTROUTING -j ANTUMBRA_ARM_POST' ] &&
+		[ "$_out" = '-A OUTPUT -j ANTUMBRA_ARM_OUT' ] && [ "$_fwd" = '-P FORWARD DROP' ] &&
+		[ "$(printf '%s\n' "$_all" | grep '^-A ANTUMBRA_ARM_')" = "$(arm_rules)" ]; then
+		echo armed
+	else
+		case "$_post" in '-A POSTROUTING -j ANTUMBRA_POST' | '-A POSTROUTING -j ANTUMBRA_ARM_POST') ;; *)
+			echo open
+			return
+			;;
+		esac
+		case "$_out" in '-A OUTPUT -j ANTUMBRA_OUT' | '-A OUTPUT -j ANTUMBRA_ARM_OUT') echo closed ;; *) echo open ;; esac
+	fi
+}
+
+# The arm chains as iptables -S prints them (filter and mangle, in table order).
+arm_rules() {
+	echo '-A ANTUMBRA_ARM_IN -i lo -j RETURN'
+	echo '-A ANTUMBRA_ARM_IN -j DROP'
+	echo '-A ANTUMBRA_ARM_POST -o lo -j RETURN'
+	echo '-A ANTUMBRA_ARM_POST -j DROP'
+	echo '-A ANTUMBRA_ARM_OUT -o lo -j RETURN'
+	echo '-A ANTUMBRA_ARM_OUT -j DROP'
+}
+
+# --- Commands ---------------------------------------------------------------
+
+cmd_arm() {
+	lock_take || log "could not take the lock; arming anyway"
+	do_arm arm
+	_rc=$?
+	lock_release
+	[ $_rc = 0 ] && log "armed: only loopback traffic is allowed"
+	return $_rc
+}
+
+# remove_applied_chains FAMILY...: delete the applied chains of each FAMILY
+# (one that is armed, with no jump left into them), one atomic commit per
+# table: a chain that something still jumps to makes the commit fail, and
+# nothing is flushed. Failing here leaves them unused, not open.
+remove_applied_chains() {
+	for _ff in "$@"; do
+		have "$(rst_tool "$_ff")" || {
+			log "IPv$_ff: no $(rst_tool "$_ff"); the unused chains stay"
+			continue
+		}
+		_txt=
+		for _ft in $(tables_of "$_ff"); do
+			_ch=$(applied_chains "$_ff" "$_ft") || continue
+			[ -n "$_ch" ] || continue
+			_txt="$_txt*$_ft
+$(for _c in $_ch; do echo "-F $_c"; done)
+$(for _c in $_ch; do echo "-X $_c"; done)
+COMMIT
+"
+		done
+		if [ -n "$_txt" ]; then
+			printf '%s' "$_txt" | restore "$_ff" || log "IPv$_ff: could not delete the unused chains"
+		fi
+	done
+	return 0
+}
+
+# go_armed: back to the armed state, then delete the applied chains of each
+# family that got there. A family that could not be armed keeps its rules.
+go_armed() {
+	do_arm flush
+	_ga=$?
+	# shellcheck disable=SC2086 # a list of families
+	remove_applied_chains $ARMED_FAMILIES
+	return $_ga
+}
+
+cmd_flush() {
+	if lock_take; then
+		rm -f "$HASH_FILE"
+	else
+		log "could not take the lock; flushing anyway"
+	fi
+	go_armed
+	_rc=$?
+	lock_release
+	if [ $_rc = 0 ]; then
+		log "flushed: back to the armed state"
+	else
+		log "flush incomplete: a family that could not be armed keeps the rules it had"
+	fi
+	return $_rc
+}
+
+cmd_apply() {
+	need_tools "$IPT4" "$IPT6" "$RST4" "$RST6" || return 1
+	lock_take || {
+		log "could not take the lock $LOCK_DIR"
+		return 1
+	}
+	rm -f "$HASH_FILE"
+	if [ "$(family_state 4)" != applied ] || [ "$(family_state 6)" != applied ]; then
+		do_arm arm || {
+			log "could not arm; not applying"
+			lock_release
+			return 1
+		}
+	fi
+	load_lists
+	_rc=0
+	for _af in 6 4; do
+		if ! _txt=$(full_text "$_af" live); then
+			log "IPv$_af: could not read the current rules"
+			_rc=1
+			break
+		fi
+		if ! printf '%s\n' "$_txt" | restore "$_af"; then
+			log "IPv$_af: iptables-restore failed"
+			_rc=1
+			break
+		fi
+		if ! verify_family "$_af" "$_txt"; then
+			_rc=1
+			break
+		fi
+	done
+	if [ $_rc = 0 ]; then
+		_h=$(live_hash) || _rc=1
+	fi
+	if [ $_rc = 0 ] && [ "$(family_state 4)" = applied ] && [ "$(family_state 6)" = applied ]; then
+		write_hash "$_h" || {
+			log "could not record the hash in $FW_DIR"
+			_rc=1
+		}
+	else
+		_rc=1
+	fi
+	if [ $_rc != 0 ]; then
+		log "apply failed; going back to the armed state"
+		rm -f "$HASH_FILE"
+		go_armed || log "could not arm either: check 'antumbra-fw status'"
+		lock_release
+		return 1
+	fi
+	lock_release
+	log "live: $_h"
+	echo "$_h"
+}
+
+cmd_status() {
+	need_tools "$IPT4" "$IPT6" || {
+		echo 'state=open'
+		return 3
+	}
+	_s4=$(family_state 4)
+	_s6=$(family_state 6)
+	_h=$(live_hash) || _h=none
+	_rec=none
+	# The recorded hash counts only from a directory of root's alone.
+	if fw_dir_ok && [ -f "$HASH_FILE" ] && [ ! -L "$HASH_FILE" ]; then
+		read -r _rec <"$HASH_FILE"
+	fi
+	[ -n "$_rec" ] || _rec=none
+	if [ "$_s4" = applied ] && [ "$_s6" = applied ] && [ "$_h" = "$_rec" ]; then
+		_state=live _rc=0
+	elif [ "$_s4" = armed ] && [ "$_s6" = armed ]; then
+		_state=armed _rc=1
+	elif [ "$_s4" != open ] && [ "$_s6" != open ]; then
+		_state=partial _rc=2
+	else
+		_state=open _rc=3
+	fi
+	echo "state=$_state"
+	echo "ipv4=$_s4"
+	echo "ipv6=$_s6"
+	echo "hash=$_h"
+	echo "recorded=$_rec"
+	return $_rc
+}
+
+cmd_print() {
+	load_lists
+	echo '# antumbra-fw: IPv4 (iptables-restore --noflush input)'
+	full_text 4 fresh || return 1
+	echo '# antumbra-fw: IPv6 (ip6tables-restore --noflush input)'
+	full_text 6 fresh
+}
+
+trap 'lock_release' EXIT
+trap 'exit 130' INT TERM HUP
+
+case ${1:-} in
+arm) cmd_arm ;;
+apply) cmd_apply ;;
+status) cmd_status ;;
+flush) cmd_flush ;;
+print) cmd_print ;;
+*)
+	echo 'usage: antumbra-fw arm|apply|status|flush|print' >&2
+	exit 64
+	;;
+esac

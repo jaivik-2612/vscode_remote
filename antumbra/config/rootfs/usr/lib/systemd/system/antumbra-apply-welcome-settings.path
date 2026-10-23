@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for the Welcome screen's settings marker
+
+[Path]
+PathExists=/var/lib/antumbra/settings/transient/welcome-done
+Unit=antumbra-apply-welcome-settings.service
+
+[Install]
+WantedBy=multi-user.target

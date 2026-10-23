@@ -1,0 +1,74 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Gradle wrapper for the Antumbra Welcome app, written as a plain script so
+# that the repository holds no gradle-wrapper.jar (no binaries in the tree).
+#
+# It reads distributionUrl and distributionSha256Sum from
+# gradle/wrapper/gradle-wrapper.properties, downloads that Gradle
+# distribution once over HTTPS, refuses it unless its SHA-256 matches, keeps
+# it under $GRADLE_USER_HOME/wrapper/dists, and runs it from this directory.
+# The properties file keeps the standard format, so Android Studio's own
+# wrapper reads the same pin.
+#
+# Needs: curl, unzip, and sha256sum or shasum. Java comes from JAVA_HOME or
+# PATH (JDK 17 or later; CI and the local build use JDK 21).
+
+set -eu
+
+here=$(cd "$(dirname "$0")" && pwd)
+props="$here/gradle/wrapper/gradle-wrapper.properties"
+
+prop() {
+    # The value of key $1; '\:' is the properties-file escape for ':'.
+    sed -n "s/^$1=//p" "$props" | tail -n 1 | sed 's/\\:/:/g'
+}
+
+die() {
+    echo "gradlew: $*" >&2
+    exit 1
+}
+
+url=$(prop distributionUrl)
+want=$(prop distributionSha256Sum)
+[ -n "$url" ] || die "no distributionUrl in $props"
+printf '%s\n' "$want" | grep -Eq '^[0-9a-f]{64}$' || die "no valid distributionSha256Sum in $props"
+case "$url" in
+    https://services.gradle.org/distributions/gradle-*-bin.zip) ;;
+    *) die "distributionUrl must be a services.gradle.org -bin.zip over HTTPS: $url" ;;
+esac
+
+name=$(basename "$url" .zip)      # gradle-9.8.1-bin
+version=${name#gradle-}
+version=${version%-bin}           # 9.8.1
+dists="${GRADLE_USER_HOME:-$HOME/.gradle}/wrapper/dists/antumbra"
+dest="$dists/$name-$(printf '%s' "$want" | cut -c1-16)"
+gradle="$dest/gradle-$version/bin/gradle"
+
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | cut -d ' ' -f 1
+    else
+        shasum -a 256 "$1" | cut -d ' ' -f 1
+    fi
+}
+
+if [ ! -x "$gradle" ]; then
+    mkdir -p "$dists"
+    tmp=$(mktemp -d "$dists/.download.XXXXXX")
+    trap 'rm -rf "$tmp"' EXIT INT TERM
+    echo "gradlew: downloading $url" >&2
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+        --retry 3 --output "$tmp/dist.zip" "$url"
+    got=$(sha256 "$tmp/dist.zip")
+    [ "$got" = "$want" ] || die "SHA-256 of $url is $got, expected $want; refusing it"
+    unzip -q "$tmp/dist.zip" -d "$tmp/unpacked"
+    [ -x "$tmp/unpacked/gradle-$version/bin/gradle" ] || die "the archive has no gradle-$version/bin/gradle"
+    rm -rf "$dest"
+    mv "$tmp/unpacked" "$dest"
+    rm -rf "$tmp"
+    trap - EXIT INT TERM
+fi
+
+cd "$here"
+exec "$gradle" "$@"

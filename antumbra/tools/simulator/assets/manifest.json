@@ -1,0 +1,1310 @@
+{
+ "generated_from": "build/work/qemu-virt/rootfs (relative to antumbra/)",
+ "naming": "icons/<desktop id without .desktop>.<ext>; symbolic/<icon name>.svg (freedesktop icon name as GTK looks it up)",
+ "notes": [
+  "Symbolic SVGs are monochrome templates: GTK recolours them to the widget's foreground colour; paths with class=\"error\" or \"warning\" take GTK's error/warning colours (observed: battery-level-0 drawn #cc0000).",
+  "Icon lookup order in the session: Antumbra -> Adwaita -> hicolor (incl. phosh's built-in resource icons); where two exist, the earlier one is what the session shows."
+ ],
+ "skipped_over_60KB": [
+  {
+   "would_be": "icons/org.onionshare.OnionShare.svg",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.onionshare.OnionShare.svg",
+   "bytes": 160685,
+   "what": "app icon: OnionShare (app grid), scalable SVG",
+   "reason": "over the 60 KB limit"
+  },
+  {
+   "would_be": "icons/antumbra-android.png",
+   "source_in_image": "/usr/share/icons/hicolor/512x512/apps/waydroid.png",
+   "bytes": 174212,
+   "what": "app icon: Android launcher (Icon=waydroid)",
+   "reason": "over the 60 KB limit"
+  }
+ ],
+ "assets": [
+  {
+   "path": "antumbra-dark.svg",
+   "what": "wallpaper, 1440x3120 SVG, home wallpaper while color-scheme is prefer-dark (the default): org.gnome.desktop.background picture-uri-dark",
+   "source_in_image": "/usr/share/backgrounds/antumbra/antumbra-dark.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/backgrounds/antumbra/antumbra-dark.svg)",
+   "licence": "GPL-3.0-or-later (SPDX header in the file)",
+   "licence_source": "/usr/share/backgrounds/antumbra/antumbra-dark.svg",
+   "bytes": 5119,
+   "sha256": "2bc8e579c8da469d06068a5b34867c4d9480ab55883057df3870da2a8a7d097d"
+  },
+  {
+   "path": "antumbra-light.svg",
+   "what": "wallpaper, 1440x3120 SVG, home wallpaper after the Dark Mode tile turns dark mode off: org.gnome.desktop.background picture-uri",
+   "source_in_image": "/usr/share/backgrounds/antumbra/antumbra-light.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/backgrounds/antumbra/antumbra-light.svg)",
+   "licence": "GPL-3.0-or-later (SPDX header in the file)",
+   "licence_source": "/usr/share/backgrounds/antumbra/antumbra-light.svg",
+   "bytes": 2506,
+   "sha256": "1424a941afc4c89bd81cff1f39fa23dc8746eb103f64c22b9584814c916ec416"
+  },
+  {
+   "path": "antumbra-lock.svg",
+   "what": "wallpaper, 1440x3120 SVG, lock-screen wallpaper: org.gnome.desktop.screensaver picture-uri",
+   "source_in_image": "/usr/share/backgrounds/antumbra/antumbra-lock.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/backgrounds/antumbra/antumbra-lock.svg)",
+   "licence": "GPL-3.0-or-later (SPDX header in the file)",
+   "licence_source": "/usr/share/backgrounds/antumbra/antumbra-lock.svg",
+   "bytes": 1768,
+   "sha256": "7b0ad6216b73ee4adde79aca0353767fef6b37ea217de33e0c285a1fe1e3f262"
+  },
+  {
+   "path": "symbolic/pill-symbolic.svg",
+   "what": "Antumbra gesture pill for phosh's home bar (#powerbar), 324x12 drawn for 108x4 at scale 3; recoloured to the shell foreground (#e6e1e9) at runtime",
+   "source_in_image": "/usr/share/antumbra/theme/pill-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/antumbra/theme/pill-symbolic.svg)",
+   "licence": "GPL-3.0-or-later (SPDX header in the file)",
+   "licence_source": "/usr/share/antumbra/theme/pill-symbolic.svg",
+   "bytes": 538,
+   "sha256": "9bcd36e0ae1b84f30a710327c4aba8d8d222eb7d3928129abee24b72e5551b10"
+  },
+  {
+   "path": "icons/tor-browser.png",
+   "what": "app icon: Tor Browser (dock 1st)",
+   "source_in_image": "/usr/share/icons/hicolor/128x128/apps/tor-browser.png",
+   "package": "none (installed by config/hooks/54-session-tor-browser.sh:25-28 from /usr/local/lib/tor-browser/browser/chrome/icons/default/default128.png, Tor Browser 16.0a13 bundle)",
+   "licence": "not stated next to the icon; the bundle's TorBrowser/Docs/Licenses/Firefox.txt is the MPL-2.0 text; the logo is Tor Project branding (README.md:11-12 on the Tor trademark)",
+   "licence_source": "/usr/local/lib/tor-browser/TorBrowser/Docs/Licenses/Firefox.txt",
+   "bytes": 15924,
+   "sha256": "1dac790ea6437642d06d5555dd636c286ab2fec3dc524b8bf08ad0f7fc2b7d3b",
+   "note": "No SVG in hicolor; largest PNG is 128x128. The bundle also has browser/chrome/icons/default/about-logo.svg (62923 bytes, over the limit, not the icon GTK resolves for Icon=tor-browser)."
+  },
+  {
+   "path": "icons/org.gnome.Nautilus.svg",
+   "what": "app icon: Files (dock 2nd)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Nautilus.svg",
+   "package": "nautilus-data",
+   "licence": "GPL-3+ (debian/copyright has no per-file stanza; whole package)",
+   "licence_source": "/usr/share/doc/nautilus-data/copyright",
+   "bytes": 9431,
+   "sha256": "f38bab4647df800d79f3de043975c8b8d05ce6f7e67c966b49e820efb58d44f9"
+  },
+  {
+   "path": "icons/org.gnome.Snapshot.svg",
+   "what": "app icon: Camera, GNOME Snapshot (dock 3rd)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Snapshot.svg",
+   "package": "gnome-snapshot",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/gnome-snapshot/copyright",
+   "bytes": 7483,
+   "sha256": "d64d689ccad506f1033781f692e95be85f0acf47b0ff3d1fa650b3b400c14091"
+  },
+  {
+   "path": "icons/org.gnome.Console.svg",
+   "what": "app icon: Console (dock 4th)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Console.svg",
+   "package": "gnome-console",
+   "licence": "CC-BY-SA-4.0 (Files: data/org.gnome.Console*.svg)",
+   "licence_source": "/usr/share/doc/gnome-console/copyright",
+   "bytes": 1754,
+   "sha256": "76274314c637b6bc820e1e3853f8b3551d27924107969322268ece8d0c18b13b"
+  },
+  {
+   "path": "icons/org.gnome.Calculator.svg",
+   "what": "app icon: Calculator (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Calculator.svg",
+   "package": "gnome-calculator",
+   "licence": "GPL-2+ (Files: *)",
+   "licence_source": "/usr/share/doc/gnome-calculator/copyright",
+   "bytes": 3533,
+   "sha256": "4b54f2e97203f5a980eb9a59c184f921e4cbe466c05c006426795ab4437106d6"
+  },
+  {
+   "path": "icons/org.gnome.clocks.svg",
+   "what": "app icon: Clocks (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.clocks.svg",
+   "package": "gnome-clocks",
+   "licence": "CC-BY-SA-4.0 (Files: data/icons/*)",
+   "licence_source": "/usr/share/doc/gnome-clocks/copyright",
+   "bytes": 10293,
+   "sha256": "3a0d7d7ee0d58457b2cd2aedab11b5e3da8822efed0cbd5602c3aad13efaaeec"
+  },
+  {
+   "path": "icons/electrum.png",
+   "what": "app icon: Electrum Bitcoin Wallet (app grid; largest hicolor size is 128x128 PNG, no SVG)",
+   "source_in_image": "/usr/share/icons/hicolor/128x128/apps/electrum.png",
+   "package": "electrum",
+   "licence": "Expat (Files: *)",
+   "licence_source": "/usr/share/doc/electrum/copyright",
+   "bytes": 24089,
+   "sha256": "087c5b85cec4a1e78f89eae1d5a992016fbff021aee065317d57a4e8411b1f86"
+  },
+  {
+   "path": "icons/org.gnome.Loupe.svg",
+   "what": "app icon: Image Viewer (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Loupe.svg",
+   "package": "loupe",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/loupe/copyright",
+   "bytes": 13678,
+   "sha256": "3875dd74eac356ebd618e6d3464b84e1859f607e602a1e5408501d310d0a953d"
+  },
+  {
+   "path": "icons/fr.romainvigier.MetadataCleaner.svg",
+   "what": "app icon: Metadata Cleaner (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/fr.romainvigier.MetadataCleaner.svg",
+   "package": "metadata-cleaner",
+   "licence": "CC-BY-SA-4.0 (Files: */*.svg, */*.png)",
+   "licence_source": "/usr/share/doc/metadata-cleaner/copyright",
+   "bytes": 3910,
+   "sha256": "7e02712b8cfcd9a881aed34adfe62053c96cf5f8e8294a182ac2a9e94ef3ee2f"
+  },
+  {
+   "path": "icons/mobi.phosh.MobileSettings.svg",
+   "what": "app icon: Mobile Settings (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/mobi.phosh.MobileSettings.svg",
+   "package": "phosh-mobile-settings",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh-mobile-settings/copyright",
+   "bytes": 10143,
+   "sha256": "cbaae2fb1ce452e2e2ca932d81a3c0f3492e244e7eceabbaee62ab03959b8f0c"
+  },
+  {
+   "path": "icons/org.gnome.Papers.svg",
+   "what": "app icon: Papers (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.Papers.svg",
+   "package": "papers",
+   "licence": "CC-BY-SA-4.0 (Files: data/icons/scalable/*)",
+   "licence_source": "/usr/share/doc/papers/copyright",
+   "bytes": 16364,
+   "sha256": "8262ba8f8e9e588270146e50a393117d06766b8c18d663ce2db1b0c1a4c28575"
+  },
+  {
+   "path": "icons/org.gnome.World.Secrets.svg",
+   "what": "app icon: Secrets (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.World.Secrets.svg",
+   "package": "secrets",
+   "licence": "GPL-3 (Files: *)",
+   "licence_source": "/usr/share/doc/secrets/copyright",
+   "bytes": 3486,
+   "sha256": "d7f2aee8f9bacfaa977b03f93d36471e101695ba03240a71370ddebc903a4195"
+  },
+  {
+   "path": "icons/org.gnome.TextEditor.svg",
+   "what": "app icon: Text Editor (app grid)",
+   "source_in_image": "/usr/share/icons/hicolor/scalable/apps/org.gnome.TextEditor.svg",
+   "package": "gnome-text-editor",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/gnome-text-editor/copyright",
+   "bytes": 5094,
+   "sha256": "72d965e4c36df8f9d0dc7744e8a7945ac5701abda03b10293bc7e08ab04c1a81"
+  },
+  {
+   "path": "icons/org.onionshare.OnionShare.png",
+   "what": "app icon: OnionShare (app grid), largest PNG (512x512), used because the SVG is over 60 KB",
+   "source_in_image": "/usr/share/icons/hicolor/512x512/org.onionshare.OnionShare.png",
+   "package": "onionshare",
+   "licence": "GPL-3.0+ (Files: *)",
+   "licence_source": "/usr/share/doc/onionshare/copyright",
+   "bytes": 24613,
+   "sha256": "26dc432004ec73eeff8b5e942c69e3f712ab13381604c29fe28e7dc9a41be19f",
+   "note": "hicolor installs it outside the apps/ context directory (/usr/share/icons/hicolor/512x512/org.onionshare.OnionShare.png); GTK may prefer the scalable SVG at runtime, the artwork is the same logo"
+  },
+  {
+   "path": "icons/antumbra-android-192.png",
+   "what": "app icon: Android launcher (antumbra-android.desktop, Icon=waydroid), resized to 192x192 = Phosh's 64px app-grid icon at the phone's scale 3",
+   "source_in_image": "/usr/share/icons/hicolor/512x512/apps/waydroid.png",
+   "package": "waydroid",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/waydroid/copyright",
+   "bytes": 26083,
+   "sha256": "021f90fdb0df932388fbe5ee335786ae67eb53bb9d736248eb93be156a664b97",
+   "derived": "resized from the 512x512 original (174212 bytes, over the 60 KB limit, not copied) with ImageMagick convert -resize 192x192 -strip"
+  },
+  {
+   "path": "icons/waydroid.org.fdroid.fdroid.png",
+   "what": "app icon: F-Droid inside the app grid's Android folder (desktop id waydroid.org.fdroid.fdroid.desktop, written by Waydroid at runtime)",
+   "source_in_image": "/usr/share/antumbra/android/F-Droid.apk!res/o-.png",
+   "package": "none (APK pinned by build/fetch-sources.sh, installed into Android by antumbra-fdroid-install)",
+   "licence": "not stated in the image (the APK carries no licence for its artwork)",
+   "licence_source": null,
+   "bytes": 6254,
+   "sha256": "6c131182b2ac56e27385b47ded42f6ad97af0ec6b5771ac86a819d721272c2df",
+   "derived": "extracted from the APK; resource names are obfuscated, so the 192x192 launcher PNG (res/o-.png) was identified by eye. At runtime Phosh shows the PNG Waydroid writes to ~/.local/share/waydroid/data/icons/org.fdroid.fdroid.png (rendered by Android, not in the image)"
+  },
+  {
+   "path": "icons/app-icon-unknown.svg",
+   "what": "Phosh's fallback app icon (app-grid-button.ui default icon-name app-icon-unknown)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/app-icon-unknown.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 3070,
+   "sha256": "46c89e7181dd96c14750bda749a81005b5a72f325c246745efbe95e3280dad48"
+  },
+  {
+   "path": "symbolic/battery-level-0-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-0-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-0-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 502,
+   "sha256": "da7318465645e5f23cfab9af9a0b4c53323210c1a0b090edf7d018b39330dc54"
+  },
+  {
+   "path": "symbolic/battery-level-0-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-0-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-0-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 408,
+   "sha256": "9ec230487fd6245ed7e8b49ccd9ef4da3bec81ec0ba9b79f22ef44e476fe1b89"
+  },
+  {
+   "path": "symbolic/battery-level-10-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-10-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-10-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 502,
+   "sha256": "da7318465645e5f23cfab9af9a0b4c53323210c1a0b090edf7d018b39330dc54"
+  },
+  {
+   "path": "symbolic/battery-level-10-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-10-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-10-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 409,
+   "sha256": "9470641f2890f5392ddebcdf9ee42099ba0d0d27b2a1dc6c7ff7b5c298720bb4"
+  },
+  {
+   "path": "symbolic/battery-level-100-charged-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-100-charged-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-100-charged-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 629,
+   "sha256": "26f1abf03dfbb62c4e7e3300e8af5c25b4708839ac17a5759c40edb6ebb9678d"
+  },
+  {
+   "path": "symbolic/battery-level-100-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-100-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-100-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 370,
+   "sha256": "28d7df65c642f355c37e2c7a40dd9d56185bf203367284616b618a7b77c00333"
+  },
+  {
+   "path": "symbolic/battery-level-20-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-20-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-20-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 502,
+   "sha256": "da7318465645e5f23cfab9af9a0b4c53323210c1a0b090edf7d018b39330dc54"
+  },
+  {
+   "path": "symbolic/battery-level-20-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-20-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-20-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 411,
+   "sha256": "f54cf6afb4e95efdf637e2a73c0c6896cb2d2c1f753f0eb29ec332641aa70994"
+  },
+  {
+   "path": "symbolic/battery-level-30-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-30-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-30-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 651,
+   "sha256": "c404af3d4ee18ff9aac062cfae801a4dc09274dba52d390db686c24154f0e793"
+  },
+  {
+   "path": "symbolic/battery-level-30-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-30-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-30-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 395,
+   "sha256": "65239a60204e3a8cbbb7e130750ab9657be9629713d9f2bac4faa0dc1213159e"
+  },
+  {
+   "path": "symbolic/battery-level-40-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-40-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-40-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 651,
+   "sha256": "c404af3d4ee18ff9aac062cfae801a4dc09274dba52d390db686c24154f0e793"
+  },
+  {
+   "path": "symbolic/battery-level-40-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-40-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-40-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 395,
+   "sha256": "65239a60204e3a8cbbb7e130750ab9657be9629713d9f2bac4faa0dc1213159e"
+  },
+  {
+   "path": "symbolic/battery-level-50-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-50-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-50-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 521,
+   "sha256": "e7c123782ecc96c9ef4a432d6814c2e7c1cd8372a65c5b4e521187e32b8dd977"
+  },
+  {
+   "path": "symbolic/battery-level-50-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-50-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-50-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 395,
+   "sha256": "778d2d47fa9719485b20f583cb1349abdfcdfaacc4f0b601f3ed8fc3c0843f46"
+  },
+  {
+   "path": "symbolic/battery-level-60-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-60-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-60-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 655,
+   "sha256": "73390d47e2eae3d8fc495f000d2bef1e7fa0764e8bc6fbcea9dd95f3385ac3ab"
+  },
+  {
+   "path": "symbolic/battery-level-60-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-60-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-60-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 396,
+   "sha256": "9b7844e391149c579c8c654dac3025332396ea1739cfdda238593f21dee7278b"
+  },
+  {
+   "path": "symbolic/battery-level-70-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-70-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-70-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 655,
+   "sha256": "73390d47e2eae3d8fc495f000d2bef1e7fa0764e8bc6fbcea9dd95f3385ac3ab"
+  },
+  {
+   "path": "symbolic/battery-level-70-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-70-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-70-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 396,
+   "sha256": "9b7844e391149c579c8c654dac3025332396ea1739cfdda238593f21dee7278b"
+  },
+  {
+   "path": "symbolic/battery-level-80-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-80-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-80-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 654,
+   "sha256": "b26a5c45e82a24cde49ca30313b3e3b4247e62bbdb04025bfe5aebeef8d3f1ed"
+  },
+  {
+   "path": "symbolic/battery-level-80-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-80-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-80-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 395,
+   "sha256": "d24e3314aeef77a157adc28601b2b2063e95f5b318a89578966a14a9f012e73e"
+  },
+  {
+   "path": "symbolic/battery-level-90-charging-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-90-charging-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-90-charging-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 654,
+   "sha256": "d5a6c150ef47b98d5e6a629273dd2c612a5275e1838b66bb39c39e6370418214"
+  },
+  {
+   "path": "symbolic/battery-level-90-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-level-90-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-level-90-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 395,
+   "sha256": "d24e3314aeef77a157adc28601b2b2063e95f5b318a89578966a14a9f012e73e"
+  },
+  {
+   "path": "symbolic/battery-missing-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon battery-missing-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/battery-missing-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 860,
+   "sha256": "37f99938005c528657b13459c9c80a0619041ef254dbbdda245e14a46a88e19b"
+  },
+  {
+   "path": "symbolic/bluetooth-active-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon bluetooth-active-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/bluetooth-active-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 438,
+   "sha256": "0ca25533201c5ec9d4c758b45187d5a22346dbffe7c6c97c55bd0d1602196a72"
+  },
+  {
+   "path": "symbolic/bluetooth-disabled-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon bluetooth-disabled-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/bluetooth-disabled-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 450,
+   "sha256": "0df3e78af3876f57dc833cd4a88c65e83dd6d3907c9db094e232bce40434bb93"
+  },
+  {
+   "path": "symbolic/dark-mode-disabled-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon dark-mode-disabled-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/dark-mode-disabled-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 474,
+   "sha256": "f004cbc4e465dc272d152690120d37f058851803eec855c764778537edd63ce7"
+  },
+  {
+   "path": "symbolic/dark-mode-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon dark-mode-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/dark-mode-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 314,
+   "sha256": "af68e2bada0ef2ef913296de0a7f513ecfb2c6f3d439c75f1a4a9c3d08f7990c"
+  },
+  {
+   "path": "symbolic/network-wireless-acquiring-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-acquiring-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-acquiring-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 629,
+   "sha256": "064ffeff820400d54a93ea5520ef777c576882977e2d0a868e751b70f0ea242c"
+  },
+  {
+   "path": "symbolic/network-wireless-signal-excellent-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-signal-excellent-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-signal-excellent-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 339,
+   "sha256": "1b1f432d919489cfa51e6fa83f6ffe800bb87cf5b14c9cac8e3aed940c15c176"
+  },
+  {
+   "path": "symbolic/network-wireless-signal-good-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-signal-good-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-signal-good-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 410,
+   "sha256": "b51e4fa1718620956b12639541d692d38a316d8a1ac79bf46107be1e38e04e49"
+  },
+  {
+   "path": "symbolic/network-wireless-signal-none-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-signal-none-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-signal-none-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 366,
+   "sha256": "8065da63ecc9b2f5ded9f43dc69de963b036233d9823a29e65b4227c61e54d4a"
+  },
+  {
+   "path": "symbolic/network-wireless-signal-ok-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-signal-ok-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-signal-ok-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 412,
+   "sha256": "6d3f763a7cf04e553e0c8b01fa47afa000bf10d37316cfc3bebac52cfa734f07"
+  },
+  {
+   "path": "symbolic/network-wireless-signal-weak-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon network-wireless-signal-weak-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/network-wireless-signal-weak-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 496,
+   "sha256": "bbb2d1f549f90189fc8144cb525fbb0b5c6d4ece44406af55b0559af678d5b52"
+  },
+  {
+   "path": "symbolic/night-light-disabled-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon night-light-disabled-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/night-light-disabled-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 612,
+   "sha256": "bb83edd53b306c472b098acbf21af4beca96d2708ee93d9768049b255a5e6fc4"
+  },
+  {
+   "path": "symbolic/night-light-symbolic.svg",
+   "what": "Antumbra icon theme (Material Symbols Rounded, wght 400) status icon night-light-symbolic; shadows Adwaita's",
+   "source_in_image": "/usr/share/icons/Antumbra/symbolic/status/night-light-symbolic.svg",
+   "package": "none (Antumbra overlay: config/rootfs/usr/share/icons/Antumbra/symbolic/status)",
+   "licence": "Apache-2.0 (Material Symbols; usr/share/icons/Antumbra/LICENSE, provenance in SOURCES)",
+   "licence_source": "/usr/share/icons/Antumbra/SOURCES",
+   "bytes": 372,
+   "sha256": "81b227f002e5cc34d6e768be208a1058fe774384791edd5b46334686075ae46d"
+  },
+  {
+   "path": "symbolic/system-shutdown-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: top-bar drawer power button; power-menu Power Off; system menu Power Off…",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/system-shutdown-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1164,
+   "sha256": "f486625bee93179b337afe78325c76268b479588898a17002f9604814ebbe65f"
+  },
+  {
+   "path": "symbolic/system-reboot-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: system menu Restart…",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/system-reboot-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 946,
+   "sha256": "96d92eab20846ac99549065f3c0bde461232fdd0a51b546ba682ddcb7e122986"
+  },
+  {
+   "path": "symbolic/system-log-out-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: system menu Log Out…",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/system-log-out-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1244,
+   "sha256": "69565e1980553660344047af0261a38485bf3e23d4f919def1d38afa863e2926"
+  },
+  {
+   "path": "symbolic/system-lock-screen-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: power-menu Lock",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/system-lock-screen-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 457,
+   "sha256": "1ae63c45551ac54158a0d5a8131feeb56f1055f9099dd2fb7a60cd8630ec7bae"
+  },
+  {
+   "path": "symbolic/display-brightness-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: brightness slider",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/display-brightness-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2157,
+   "sha256": "ad0f64fc22d1415ef890a1ac59121c0bb821c81c3cfda33ac37f8b149811ba54"
+  },
+  {
+   "path": "symbolic/audio-speakers-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: volume slider (audio-settings.ui icon-name audio-speakers, symbolic variant observed in tour-quick-settings.png)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/devices/audio-speakers-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 928,
+   "sha256": "b23ef5e92807e03034eaad59519ff6b521597634f7252fb3924fa2c5d46e757f"
+  },
+  {
+   "path": "symbolic/audio-volume-high-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: volume OSD/slider state (not observed)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/audio-volume-high-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1448,
+   "sha256": "ed111cb22410a2c6b0556678662308f4ba3aa1cbca53b12fdd4939a52c0c7f52"
+  },
+  {
+   "path": "symbolic/audio-volume-medium-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: volume OSD/slider state (not observed)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/audio-volume-medium-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1521,
+   "sha256": "d2339a7d194e7b3ce9d352765883d167dd0e5c53a0a0983ed61faf4b755cb68c"
+  },
+  {
+   "path": "symbolic/audio-volume-low-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: volume OSD/slider state (not observed)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/audio-volume-low-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 910,
+   "sha256": "789ad418ac0af947aeecaaf863b1fe622a2b657b9ae2346f79eb9aca1270d308"
+  },
+  {
+   "path": "symbolic/audio-volume-muted-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: volume OSD/slider state (not observed)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/audio-volume-muted-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1109,
+   "sha256": "9df9074f7acd05ae7f36e5bd26e5ef89eb188cd382106f807b039caf409ff539"
+  },
+  {
+   "path": "symbolic/preferences-system-notifications-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: feedback tile 'On' (bell, observed)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/legacy/preferences-system-notifications-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1378,
+   "sha256": "af69554ce518641970662f360384428c448eacf4632ac02aa968a74424d387bb"
+  },
+  {
+   "path": "symbolic/notifications-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: feedback tile 'Silent'",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/notifications-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1159,
+   "sha256": "41a8633cf3fdb151f2365c6af9cc743fdeb0667e8ee6a5d022935ffc244483a1"
+  },
+  {
+   "path": "symbolic/network-cellular-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Cellular tile without a modem (observed; shadows phosh's own)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-cellular-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 858,
+   "sha256": "77c6c615979a80bd45d3280744391a9cac4afc856fb813cb54b9adf895b3c359"
+  },
+  {
+   "path": "symbolic/network-wireless-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi tile with Wi-Fi off/absent (observed; shadows phosh's own)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1932,
+   "sha256": "db9404f34b5eece58309839caf182d42949a0de739446daa352bd2ba41190a33"
+  },
+  {
+   "path": "symbolic/network-wireless-offline-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi state",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-offline-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2312,
+   "sha256": "6ba12c6b4b5fec8df3b5e6771c108eb7ef080561ab5fc2f5206b2b35f9e498bb"
+  },
+  {
+   "path": "symbolic/network-wireless-hardware-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi status page 'No Wi-Fi Device Found'",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-hardware-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 679,
+   "sha256": "d29e64ece1a3b3fc32ce7a7e0cfc8a1e5bb40ee029fbc9d0a57c100738f0de85"
+  },
+  {
+   "path": "symbolic/network-wireless-no-route-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi status page state",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-no-route-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2412,
+   "sha256": "e18b108d42d13ea0113ac1160a0804d94645210f49044da9096fee77c73a46a4"
+  },
+  {
+   "path": "symbolic/network-wireless-hotspot-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi hotspot state",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-hotspot-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 868,
+   "sha256": "5522ad9f8b36fe43efe92630505a6f22f22ee12881b79b1bd0cc644d35efcffc"
+  },
+  {
+   "path": "symbolic/network-wireless-connected-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi state",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-connected-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1450,
+   "sha256": "25eaeb1a984dc199726a67da08209363ca07dc019c47944317854a1f03214da2"
+  },
+  {
+   "path": "symbolic/network-transmit-receive-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: connectivity indicator",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-transmit-receive-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1104,
+   "sha256": "ea8a62c72b83675161a7df27b17888434b832775c21bbe1ac358207eef5a1ca4"
+  },
+  {
+   "path": "symbolic/network-offline-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: connectivity indicator (top bar, shown when NetworkManager reports no full connectivity)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-offline-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1774,
+   "sha256": "1039cbc8229c0a2b78d50322e4d7f55b077ca70760f4fbb9706d72c001955f54"
+  },
+  {
+   "path": "symbolic/network-no-route-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: connectivity indicator",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-no-route-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2305,
+   "sha256": "229469bf09a983035d71984692220648c7fe74d1530076155d5e609fca8d7821"
+  },
+  {
+   "path": "symbolic/network-vpn-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: VPN tile (hidden unless a VPN exists)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-vpn-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1498,
+   "sha256": "93a014988c692a1cba00972c1193ff8f99600fce28bca9a3964d310058fb7b48"
+  },
+  {
+   "path": "symbolic/airplane-mode-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Adwaita airplane icon: Phosh 0.46 has NO airplane-mode tile; not shown anywhere in the session",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/airplane-mode-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 806,
+   "sha256": "81078ae527769ba8141768b27287f30da50028f41b8decef09b8c7049e844750"
+  },
+  {
+   "path": "symbolic/go-next-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: tile arrow (Wi-Fi, Bluetooth), volume details arrow, lock-screen deck button",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/go-next-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 638,
+   "sha256": "d868d51ab13b03a9ef999b6355e5472f082c697c02ba12bb18e2db7562ed8b79"
+  },
+  {
+   "path": "symbolic/go-previous-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: app-grid folder page back button",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/go-previous-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 638,
+   "sha256": "989eaa987a8c96a0bcd4265839274e97f27e8761cc1ae9d2e41df37ea5840118"
+  },
+  {
+   "path": "symbolic/go-down-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: audio details expanded",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/go-down-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 591,
+   "sha256": "0f34ae1e37d81fc4ce366da0ae7fa2e3d7cb43e15f03f671bda3b3800263d032"
+  },
+  {
+   "path": "symbolic/edit-clear-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: lock-screen keypad delete key",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/edit-clear-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1400,
+   "sha256": "1e6370b781b4739a2f9907f988c9285ca5a5a355d95bdc5574e35c0b74c445c5"
+  },
+  {
+   "path": "symbolic/input-keyboard-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: lock-screen keypad keyboard key",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/devices/input-keyboard-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2309,
+   "sha256": "f065743d82110e80d73f5fb0cd0268c791882013b4ba22d3752ad72cc4dbf170"
+  },
+  {
+   "path": "symbolic/edit-find-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: app-grid search entry primary icon (GtkSearchEntry)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/edit-find-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 590,
+   "sha256": "e65ed504332ab9ff5792b22fdf8a1f0c3baad0803c3fdd13ceace101600185bc"
+  },
+  {
+   "path": "symbolic/camera-photo-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: camera in use / camera-related indicator",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/devices/camera-photo-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1030,
+   "sha256": "8e9d182746e6366e0515a204d95d5edb4dbe17d82951b7f4cd48e5a91aaa2b68"
+  },
+  {
+   "path": "symbolic/camera-hardware-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: top-bar camera hardware-kill-switch indicator (shadows phosh's)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/camera-hardware-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1107,
+   "sha256": "01e50c20b2cece4bcdd957c57fc8ed248d06d4d6f1888732f884323535927770"
+  },
+  {
+   "path": "symbolic/microphone-hardware-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: top-bar microphone hardware-kill-switch indicator (shadows phosh's)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/microphone-hardware-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 595,
+   "sha256": "4257500416973ce64c18523532d37ecbb018b453fce744e4a90c6829a8769d5f"
+  },
+  {
+   "path": "symbolic/location-services-active-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: top-bar location indicator (location is off and locked in Antumbra)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/location-services-active-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 808,
+   "sha256": "7f1943ce1c28b0fa13c284acc8803612ebcb7b650a1e6fc03cdd9793b6d0d0e7"
+  },
+  {
+   "path": "symbolic/rotation-locked-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: rotation tile when an accelerometer exists (not on Antumbra: sensors disabled)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/rotation-locked-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1429,
+   "sha256": "e72c0b5783092c1664673b56d523e0593ee2be93c73ad3d61f3701dec1c0a3f1"
+  },
+  {
+   "path": "symbolic/rotation-allowed-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: rotation tile when an accelerometer exists (not on Antumbra)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/rotation-allowed-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1406,
+   "sha256": "b74c38e89806dac880b4c5b4f07617447bb8ed7617c65842e703fdaf2e41c014"
+  },
+  {
+   "path": "symbolic/folder-open-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: empty app folder page",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/folder-open-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1755,
+   "sha256": "caa94690a91374c8ccbf97f41d6cdcb08f33f0ad2a5e5e527a46c6e1ec0687c3"
+  },
+  {
+   "path": "symbolic/document-edit-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: app folder rename button",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/document-edit-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 574,
+   "sha256": "7a1cbca134efc37ed1b8a5c51a4a9dc2ec0b52fac1547e2dcc537d84a8e9df14"
+  },
+  {
+   "path": "symbolic/view-refresh-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Wi-Fi status page rescan",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/view-refresh-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1118,
+   "sha256": "43281dccb17fe4ef2d2fd459de33debf0fbd9294dac9275c0f047c9fe7d9ae5c"
+  },
+  {
+   "path": "symbolic/weather-clear-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: referenced by the dark-mode plugin (string weather-clear); exact use not in the repo",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/weather-clear-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2384,
+   "sha256": "3c31c11ae926ddc3b5415b1de890433213546afdc4cff4496dce1ebd33e79a03"
+  },
+  {
+   "path": "symbolic/adwaita-night-light-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Adwaita's version, shadowed by Antumbra's (for comparison only)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/night-light-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 2103,
+   "sha256": "8660782ffb0513a8d4ee8546b7e1f9117f1b3faa1b1f44a4de17a6518efb35a8"
+  },
+  {
+   "path": "symbolic/adwaita-battery-level-0-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Adwaita's version, shadowed by Antumbra's (for comparison only)",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/battery-level-0-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1099,
+   "sha256": "4000eae28ae0b83dbbab6d557f1852fb8e811539829513d22153ecd202bda3cb"
+  },
+  {
+   "path": "symbolic/padlock-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: drawer lock button (top-panel.ui btn_lock)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/padlock-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 383,
+   "sha256": "0ea5fbe5b4da4e27fbe2f887bd4590dd689e24fdf45a9249feb481847f9bbd82"
+  },
+  {
+   "path": "symbolic/swipe-arrow-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: lock screen arrow above 'Slide up to unlock'",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/swipe-arrow-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 2300,
+   "sha256": "dcde3f0f5ac6f61526ddf94ceef2c4a118ef1fd508d86f756c58745565089aca"
+  },
+  {
+   "path": "symbolic/input-powerbar-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: phosh's own wide home bar, replaced by Antumbra's pill (reference only)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/input-powerbar-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 193,
+   "sha256": "cb9fad50fcc35568d77cc85ca6a5f5f7230dd7e761736315a82442d9d3987621"
+  },
+  {
+   "path": "symbolic/no-notifications-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: drawer 'No notifications' placeholder (48px)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/no-notifications-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 710,
+   "sha256": "5a4709f8533c042d694adea90a5cc4d51f23ac10c0e24032229628d863056089"
+  },
+  {
+   "path": "symbolic/screen-rotation-portrait-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: rotation tile 'Portrait' (observed)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/screen-rotation-portrait-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 4921,
+   "sha256": "d44009758e61cd56949f3fe879ec134f6ae614c00c26d0647a038176affc49ff"
+  },
+  {
+   "path": "symbolic/screen-rotation-landscape-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: rotation tile 'Landscape'",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/screen-rotation-landscape-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 4916,
+   "sha256": "cd8f73c9b4a13beab73f2f31d18478f9730bd8cd7ce105667b7a11bc88f78a97"
+  },
+  {
+   "path": "symbolic/torch-enabled-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: torch tile on / torch slider",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/torch-enabled-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 642,
+   "sha256": "56c9d4fe24d52650d8023f71cbae9ed10c6237d9070424f76143cef3671b82ed"
+  },
+  {
+   "path": "symbolic/torch-disabled-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: torch tile off",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/torch-disabled-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 765,
+   "sha256": "2eba336b89d80fd2689af2055c0f6f6387d746379fa5eedd20fe6964fc67dec0"
+  },
+  {
+   "path": "symbolic/feedback-quiet-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: feedback tile 'Quiet'",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/feedback-quiet-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 1143,
+   "sha256": "e71759f3d533c17c3435d527f65fd43a81aff167bae16a57bf2d25c680fcaeae"
+  },
+  {
+   "path": "symbolic/moon-filled-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: power menu Suspend; system menu Suspend…",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/moon-filled-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 657,
+   "sha256": "9f728aea6b5285efafc2acac97e4e9a000b9a443ef0a19df2196e1b05a5bde87"
+  },
+  {
+   "path": "symbolic/screenshot-portrait-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: power menu Screenshot",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/screenshot-portrait-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 665,
+   "sha256": "50beb48c9d7a2b8fc3de54fb1f02cab0492d950f5453c0e63dc51552b0b45fca"
+  },
+  {
+   "path": "symbolic/asterisk-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: power menu Emergency",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/asterisk-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 404,
+   "sha256": "c5b32fedf05f7e52fa6304630bb08db5158e34dda67a3f5c9bf151529faf91d5"
+  },
+  {
+   "path": "symbolic/app-close-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: power menu close button; running-app card close button",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/app-close-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 822,
+   "sha256": "61642d5632541ba59255f5214796b0b522508d33e5bc593af51b6c8cec8c202d"
+  },
+  {
+   "path": "symbolic/eye-open-negative-filled-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: app grid 'Show All Apps' button (observed)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/eye-open-negative-filled-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 2104,
+   "sha256": "4f8cd96996393cf6f24902d1c531913abd245e7721f3504279667470fc0ec20a"
+  },
+  {
+   "path": "symbolic/eye-not-looking-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: app grid filter button, other state",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/eye-not-looking-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 570,
+   "sha256": "5b92811341b805bfdf5831f49dfd7424c014480fb6f1c1b0b82b61e0081b7325"
+  },
+  {
+   "path": "symbolic/phone-docked-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: docked-mode tile (hidden unless docking is possible)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/phone-docked-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 2361,
+   "sha256": "10b01a4706f47b4508e0a5668f9055bd46acc987813b5b73bbae9ad87d0847a3"
+  },
+  {
+   "path": "symbolic/phone-undocked-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: docked-mode tile",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/phone-undocked-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 2582,
+   "sha256": "3d3ab7b2b69d477af6b356c0a6d470daa115affd42aaa3d3dae405510dbd6313"
+  },
+  {
+   "path": "symbolic/mobile-data-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: mobile-data plugin (not enabled in Antumbra)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/mobile-data-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 533,
+   "sha256": "980d84b902661e9b5915b10fe291c979e9ffab20a5ea20c60a41f557d5fbbe87"
+  },
+  {
+   "path": "symbolic/mobile-data-disabled-symbolic.svg",
+   "what": "Phosh 0.46 built-in icon: mobile-data plugin (not enabled in Antumbra)",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/scalable/status/mobile-data-disabled-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 847,
+   "sha256": "06d47bfa9a46d52376369aa79e93473ced89a3a62c7eb51abc5c98f3e07c082d"
+  },
+  {
+   "path": "symbolic/app-icon-unknown-symbolic.svg",
+   "what": "Phosh fallback app icon, symbolic",
+   "source_in_image": "/usr/libexec/phosh (gresource /mobi/phosh/icons/app-icon-unknown-symbolic.svg)",
+   "package": "phosh",
+   "licence": "GPL-3+ (Files: *)",
+   "licence_source": "/usr/share/doc/phosh/copyright",
+   "bytes": 1135,
+   "sha256": "c5b36a344cfeae47cdd43d946a98479c0a4bd5bd6b4227e8ca3d71bcad2adb8c"
+  },
+  {
+   "path": "symbolic/camera-disabled-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Snapshot's 'Missing Camera Permission' status page",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/camera-disabled-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 1475,
+   "sha256": "ce515a767ae37f64a7f66a5aa83ad2e92f8d27100b2a78b08dce69de0619407d"
+  },
+  {
+   "path": "symbolic/open-menu-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Snapshot's main-menu button",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/actions/open-menu-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 314,
+   "sha256": "dd3f1c117437a6f5124905de7212a1a320e76f9b33d8411bf70dbdbefa8e9bad"
+  },
+  {
+   "path": "symbolic/network-wireless-encrypted-symbolic.svg",
+   "what": "Adwaita 48 symbolic icon: Phosh Wi-Fi row's 8 px secured badge",
+   "source_in_image": "/usr/share/icons/Adwaita/symbolic/status/network-wireless-encrypted-symbolic.svg",
+   "package": "adwaita-icon-theme",
+   "licence": "CC-BY-SA-3.0 or LGPL-3, and CC-BY-SA-4.0 (Files: *)",
+   "licence_source": "/usr/share/doc/adwaita-icon-theme/copyright",
+   "bytes": 457,
+   "sha256": "1ae63c45551ac54158a0d5a8131feeb56f1055f9099dd2fb7a60cd8630ec7bae"
+  },
+  {
+   "path": "fonts/Roboto-300.woff2",
+   "what": "Roboto 300, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Light.ttf",
+   "package": "fonts-roboto-unhinted",
+   "licence": "Apache-2.0",
+   "licence_source": "/usr/share/doc/fonts-roboto-unhinted/copyright",
+   "bytes": 14796,
+   "sha256": "9006a57bb93d3260f694991984953d4b11a2a1bb9013cd9f375eab6348149931"
+  },
+  {
+   "path": "fonts/Roboto-400.woff2",
+   "what": "Roboto 400, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Regular.ttf",
+   "package": "fonts-roboto-unhinted",
+   "licence": "Apache-2.0",
+   "licence_source": "/usr/share/doc/fonts-roboto-unhinted/copyright",
+   "bytes": 14632,
+   "sha256": "28e7ac7b3cbf2e448c39cf9780708b0440bac43dcd4dd5d63d4ad91a95c5effb"
+  },
+  {
+   "path": "fonts/Roboto-500.woff2",
+   "what": "Roboto 500, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Medium.ttf",
+   "package": "fonts-roboto-unhinted",
+   "licence": "Apache-2.0",
+   "licence_source": "/usr/share/doc/fonts-roboto-unhinted/copyright",
+   "bytes": 14688,
+   "sha256": "16641f80a4f4b798977027986c380e9d27f63ce602ed41cfde1701ec3464aace"
+  },
+  {
+   "path": "fonts/Roboto-700.woff2",
+   "what": "Roboto 700, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Bold.ttf",
+   "package": "fonts-roboto-unhinted",
+   "licence": "Apache-2.0",
+   "licence_source": "/usr/share/doc/fonts-roboto-unhinted/copyright",
+   "bytes": 14724,
+   "sha256": "31f4eba3dbe50e1c2ba3bd926fd748b194a12bfa4b3117593bdafe612d8ec5ae"
+  },
+  {
+   "path": "fonts/Roboto-900.woff2",
+   "what": "Roboto 900, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Black.ttf",
+   "package": "fonts-roboto-unhinted",
+   "licence": "Apache-2.0",
+   "licence_source": "/usr/share/doc/fonts-roboto-unhinted/copyright",
+   "bytes": 14516,
+   "sha256": "01cc15e430c926418bb02ee22fadbf79cae565306f65232bba644154504921ef"
+  },
+  {
+   "path": "fonts/NotoSansMono-400.woff2",
+   "what": "Noto Sans Mono 400, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+   "package": "fonts-noto-mono",
+   "licence": "OFL-1.1",
+   "licence_source": "/usr/share/doc/fonts-noto-mono/copyright",
+   "bytes": 20860,
+   "sha256": "317754728ba0abb72b3504288fe26773aad016aca0169343bcfd072cc86b17a4"
+  },
+  {
+   "path": "fonts/NotoSansMono-700.woff2",
+   "what": "Noto Sans Mono 700, Latin subset as WOFF2 (make_fonts.py), embedded so the page makes no font request",
+   "source_in_image": "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf",
+   "package": "fonts-noto-mono",
+   "licence": "OFL-1.1",
+   "licence_source": "/usr/share/doc/fonts-noto-mono/copyright",
+   "bytes": 21384,
+   "sha256": "e26061c2632c1df8a329caa16352fc1420a3710b5d03e0d5f4ecfbd88f5a51f2"
+  }
+ ]
+}

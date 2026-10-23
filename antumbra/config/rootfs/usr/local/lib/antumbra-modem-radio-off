@@ -1,0 +1,60 @@
+#!/bin/sh
+# Keep the cellular radio off while the modem processor runs (it must run:
+# the Wi-Fi firmware lives on it). Puts the modem's DMS operating mode into
+# persistent-low-power (IMSI detach, RF off), falling back to low-power, and
+# records the result in /run/antumbra/modem-mode. Re-run periodically by
+# antumbra-modem-radio-off.timer so a modem restart cannot bring RF back.
+set -eu
+STATE_DIR=/run/antumbra
+STATE="${STATE_DIR}/modem-mode"
+mkdir -p "${STATE_DIR}"
+log() { logger -t modem-radio-off -p daemon.info -- "$*"; }
+
+if ! command -v qmicli >/dev/null 2>&1 || ! command -v qrtr-lookup >/dev/null 2>&1; then
+    printf 'unavailable: qmi tools missing\n' > "${STATE}"
+    exit 0
+fi
+
+# A virtual machine (the qemu-virt test profile) has no modem processor.
+if systemd-detect-virt -q --vm; then
+    printf 'absent: virtual machine\n' > "${STATE}"
+    exit 0
+fi
+
+# Wait for the DMS service (QMI service id 2) to appear on the QRTR bus.
+i=0
+until qrtr-lookup 2>/dev/null | grep -q -E '^\s*2\b|Device Management Service'; do
+    i=$((i + 1))
+    if [ "${i}" -ge 120 ]; then
+        log "modem DMS service never appeared; modem processor off or firmware missing"
+        printf 'absent: no DMS service on QRTR\n' > "${STATE}"
+        exit 0
+    fi
+    sleep 1
+done
+
+mode() { qmicli -d qrtr://0 --dms-get-operating-mode 2>/dev/null | sed -n "s/.*Mode: '\([a-z-]*\)'.*/\1/p" | head -n1; }
+current="$(mode || true)"
+log "modem operating mode at start: ${current:-unknown}"
+case "${current}" in
+    persistent-low-power|low-power)
+        ;;
+    *)
+        if ! qmicli -d qrtr://0 --dms-set-operating-mode=persistent-low-power >/dev/null 2>&1; then
+            log "persistent-low-power rejected, trying low-power"
+            qmicli -d qrtr://0 --dms-set-operating-mode=low-power >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
+current="$(mode || true)"
+reg="$(qmicli -d qrtr://0 --nas-get-serving-system 2>/dev/null | sed -n "s/.*Registration state: '\([a-z-]*\)'.*/\1/p" | head -n1)"
+printf 'mode: %s\nregistration: %s\n' "${current:-unknown}" "${reg:-unknown}" > "${STATE}"
+case "${current}" in
+    persistent-low-power|low-power)
+        log "radio off (mode ${current}, registration ${reg:-unknown})"
+        ;;
+    *)
+        log "WARNING: could not put the modem radio into low-power mode (mode ${current:-unknown})"
+        exit 1
+        ;;
+esac

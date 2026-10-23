@@ -1,0 +1,13 @@
+# Android apps (Waydroid), only in images built with ANTUMBRA_ANDROID=1
+# (build/rootfs.sh). Waydroid and its binder libraries come from
+# trixie-backports (pinned in config/rootfs/etc/apt/preferences.d/antumbra-backports),
+# LXC from trixie. config/hooks/56-session-android.sh masks LXC's own
+# services and gates Waydroid's container service on the Welcome screen.
+waydroid
+python3-gbinder
+libgbinder1
+libglibutil1
+lxc
+# The Android bridge's DHCP server (antumbra-waydroid-dhcp.service); lxc
+# depends on it too.
+dnsmasq-base

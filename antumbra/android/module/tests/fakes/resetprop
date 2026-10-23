@@ -1,0 +1,12 @@
+#!/system/bin/sh
+# Test stand-in for Magisk's resetprop: -n NAME VALUE, --delete NAME,
+# NAME [VALUE]. Every call is logged to /antumbra-test/resetprop.log.
+echo "$*" >>/antumbra-test/resetprop.log
+case ${1-} in
+-n) shift ;;
+-d | --delete) exec /system/bin/setprop "$2" '' ;;
+esac
+if [ $# -eq 1 ]; then
+	exec /system/bin/getprop "$1"
+fi
+exec /system/bin/setprop "$1" "$2"

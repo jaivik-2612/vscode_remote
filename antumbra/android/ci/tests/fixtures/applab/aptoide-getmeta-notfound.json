@@ -1,0 +1,12 @@
+{
+ "errors": [
+  {
+   "code": "APP-1",
+   "description": "Application 'package:org.telegram.messenger' not found",
+   "details": {}
+  }
+ ],
+ "info": {
+  "status": "FAIL"
+ }
+}

@@ -1,0 +1,197 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+  Antumbra Live: the phone's screen (served by websockify next to the
+  landing page, index.html, and noVNC's core; see ci/live-stream.sh).
+  It connects to this page's own host only, with the token the landing
+  page left in this tab's sessionStorage. It reads nothing from its address:
+  noVNC's own pages (vnc.html), which take the server's host, port and path
+  from the address, are not served, so a crafted link cannot send the token
+  anywhere else. Nothing here is secret: the page is in the public
+  repository.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex, nofollow">
+<title>Antumbra Live phone</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --fg: #1b1c1e; --muted: #5c5f66; --bar: #ffffff; --line: #dcdcd8;
+    --accent: #3a4a8c; --accent-fg: #ffffff; --bad: #a3271c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141518; --fg: #e9e9ec; --muted: #a2a5ad; --bar: #1e2024; --line: #33363c;
+      --accent: #8796e0; --accent-fg: #101114; --bad: #ff8a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden; }
+  body {
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex; flex-direction: column; -webkit-text-size-adjust: 100%;
+  }
+  #bar {
+    display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+    padding-top: max(6px, env(safe-area-inset-top));
+    background: var(--bar); border-bottom: 1px solid var(--line); flex: none;
+  }
+  #bar a, #bar button {
+    font: inherit; font-weight: 600; border-radius: 8px; padding: 8px 12px; min-height: 40px;
+    text-decoration: none; display: inline-flex; align-items: center;
+  }
+  #bar a { color: var(--accent); border: 1px solid var(--accent); }
+  #bar button { background: var(--accent); color: var(--accent-fg); border: 0; }
+  #status { flex: 1; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status.bad { color: var(--bad); }
+  #screen { flex: 1; min-height: 0; position: relative; touch-action: none; background: #000; }
+  #kbd {
+    position: absolute; left: -40px; top: 0; width: 1px; height: 1px; opacity: 0;
+    border: 0; padding: 0; color: transparent; background: transparent; z-index: -1;
+  }
+  #nope { padding: 20px 16px; max-width: 34rem; margin: 0 auto; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <a href="./" id="back">Page</a>
+  <div id="status" role="status">Connecting…</div>
+  <button id="keys" type="button">Keyboard</button>
+</div>
+<div id="screen"></div>
+<div id="nope" class="hidden">
+  <p>This tab has no key for the phone. Open the link's main page, type the password and tap
+    <em>Open the phone</em>.</p>
+  <p><a href="./">The main page</a></p>
+</div>
+<textarea id="kbd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" tabindex="-1"></textarea>
+<script type="module">
+import RFB from "./core/rfb.js";
+import KeyTable from "./core/input/keysym.js";
+import keysyms from "./core/input/keysymdef.js";
+import Keyboard from "./core/input/keyboard.js";
+
+// On a touch screen noVNC turns a finger held still into a right click,
+// which Android ignores. Here it is the left button, held until the finger
+// lifts: Android's long press (and Power's menu on the toolbar).
+if (typeof RFB.prototype._handleGesture === "function") {
+  const orig = RFB.prototype._handleGesture;
+  RFB.prototype._handleGesture = function (ev) {
+    if (ev.detail && ev.detail.type === "longpress") {
+      try { ev.detail.type = "drag"; } catch (e) { /* leave it */ }
+    }
+    return orig.call(this, ev);
+  };
+}
+
+const $ = (id) => document.getElementById(id);
+const KEY_TOKEN = "antumbra-live-token";
+
+function stored(kind, key) {
+  try { return (kind === "local" ? window.localStorage : window.sessionStorage).getItem(key); } catch (e) { return null; }
+}
+function status(text, bad) { $("status").textContent = text; $("status").className = bad ? "bad" : ""; }
+
+// Not in a frame of another site's page.
+const framed = (() => { try { return window.top !== window.self; } catch (e) { return true; } })();
+// An older version of these pages kept the token in noVNC's "path" setting.
+try { window.localStorage.removeItem("path"); } catch (e) { /* no storage */ }
+
+const token = framed ? null : stored("session", KEY_TOKEN);
+if (!token || !/^[0-9a-f]{64}$/.test(token)) {
+  $("screen").classList.add("hidden");
+  $("keys").classList.add("hidden");
+  $("nope").classList.remove("hidden");
+  status(framed ? "Open this page on its own." : "No key in this tab.", true);
+} else {
+  start(token);
+}
+
+function start(tok) {
+  // This page's own host, always: nothing in the address can change it.
+  const url = (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/websockify?token=" + tok;
+  let rfb = null;
+  let failures = 0;
+  let connectedOnce = false;
+
+  function connect() {
+    status(connectedOnce ? "Connecting again…" : "Connecting…");
+    rfb = new RFB($("screen"), url, { wsProtocols: ["binary"], shared: true });
+    rfb.scaleViewport = true;
+    rfb.resizeSession = false;
+    rfb.showDotCursor = true;
+    rfb.background = "#000";
+    rfb.addEventListener("connect", () => {
+      failures = 0;
+      connectedOnce = true;
+      status("Connected. The session ends by itself.");
+    });
+    rfb.addEventListener("disconnect", (ev) => {
+      rfb = null;
+      failures += 1;
+      if (failures > 5) {
+        status("The screen does not answer: the session may have ended. Tap Page.", true);
+        return;
+      }
+      status((ev.detail && ev.detail.clean ? "The screen closed." : "The connection dropped.") + " Trying again…", true);
+      setTimeout(connect, 3000);
+    });
+  }
+  connect();
+
+  // The on-screen keyboard: a hidden text field that the Keyboard button
+  // focuses (Safari shows its keyboard only for a field). What is typed in
+  // it is sent as key presses, as noVNC's own page does it.
+  const kbd = $("kbd");
+  const LEN = 100;
+  let last = "";
+  function reset() { kbd.value = new Array(LEN).join("_"); last = kbd.value; }
+  reset();
+  const touchKeys = new Keyboard(kbd);
+  touchKeys.onkeyevent = (keysym, code, down) => { if (rfb) rfb.sendKey(keysym, code, down); };
+  touchKeys.grab();
+  kbd.addEventListener("input", (ev) => {
+    if (!rfb) return;
+    const now = ev.target.value;
+    let newLen;
+    try { newLen = Math.max(ev.target.selectionStart, now.length); } catch (e) { newLen = now.length; }
+    const oldLen = last.length;
+    let inputs = newLen - oldLen;
+    let backspaces = inputs < 0 ? -inputs : 0;
+    for (let i = 0; i < Math.min(oldLen, newLen); i++) {
+      if (now.charAt(i) !== last.charAt(i)) { inputs = newLen - i; backspaces = oldLen - i; break; }
+    }
+    for (let i = 0; i < backspaces; i++) rfb.sendKey(KeyTable.XK_BackSpace, "Backspace");
+    for (let i = newLen - inputs; i < newLen; i++) rfb.sendKey(keysyms.lookup(now.charCodeAt(i)));
+    if (newLen > 2 * LEN) {
+      reset();
+    } else if (newLen < 1) {
+      reset();
+      ev.target.blur();
+      setTimeout(() => ev.target.focus(), 0);
+    } else {
+      last = now;
+    }
+  });
+  kbd.addEventListener("focus", () => { $("keys").textContent = "Hide keyboard"; if (rfb) rfb.focusOnClick = false; });
+  kbd.addEventListener("blur", () => { $("keys").textContent = "Keyboard"; if (rfb) rfb.focusOnClick = true; });
+  $("keys").addEventListener("click", () => {
+    if (document.activeElement === kbd) {
+      kbd.blur();
+    } else {
+      kbd.focus();
+      try { kbd.setSelectionRange(kbd.value.length, kbd.value.length); } catch (e) { /* not supported */ }
+    }
+  });
+  // A tap on the phone keeps the keyboard up while it is open.
+  document.documentElement.addEventListener("mousedown", (ev) => {
+    if (document.activeElement === kbd && ev.target !== $("keys") && ev.target !== $("back")) ev.preventDefault();
+  }, true);
+}
+</script>
+</body>
+</html>

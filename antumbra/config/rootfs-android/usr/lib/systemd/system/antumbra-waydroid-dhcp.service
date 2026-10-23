@@ -1,0 +1,19 @@
+[Unit]
+# The Android container takes its address by DHCP on the waydroid-tor
+# bridge. This dnsmasq serves DHCP only (--port=0: no DNS; the container's
+# DNS goes to Tor's DNSPort through the firewall) and one address, the
+# container's (Waydroid's fixed MAC address). The lease file keeps
+# Waydroid's name so that "waydroid status" finds the address.
+Description=DHCP for the Android container (waydroid-tor bridge, no DNS)
+ConditionPathExists=/run/antumbra/android-enabled
+Requires=antumbra-create-netns.service
+After=antumbra-create-netns.service nftables.service
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dnsmasq --keep-in-foreground --conf-file=/dev/null --pid-file --port=0 \
+    --interface=waydroid-tor --bind-interfaces --except-interface=lo --listen-address=10.200.2.1 \
+    --dhcp-range=10.200.2.2,10.200.2.2,255.255.255.252,12h --dhcp-host=00:16:3e:f9:d3:03,10.200.2.2 \
+    --dhcp-option=option:router,10.200.2.1 --dhcp-option=option:dns-server,10.200.2.1 \
+    --dhcp-authoritative --no-ping --dhcp-leasefile=/var/lib/misc/dnsmasq.waydroid0.leases -u dnsmasq
+Restart=on-failure

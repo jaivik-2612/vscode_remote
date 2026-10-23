@@ -1,0 +1,44 @@
+#!/system/bin/sh
+# Test stand-in for Android's settings command. It fails like the real one
+# while the framework is down (no /antumbra-test/framework-up). Values are
+# NAME=VALUE lines in /antumbra-test/settings; changes are logged to
+# /antumbra-test/settings.log. Writes take a lock, which the stand-in for
+# cmd (airplane mode) shares.
+T=/antumbra-test
+if [ ! -f $T/framework-up ]; then
+	echo "cmd: Can't find service: settings" >&2
+	exit 20
+fi
+[ "${2-}" = global ] || { echo "settings: only 'global' is faked" >&2; exit 1; }
+lock() {
+	i=0
+	while ! mkdir $T/settings.lock 2>/dev/null; do
+		i=$((i + 1))
+		[ "$i" -gt 100 ] && break
+		sleep 0.1
+	done
+}
+case $1 in
+list)
+	cat $T/settings
+	;;
+get)
+	v=$(grep -F "$3=" $T/settings | sed -n "s/^$3=//p" | tail -n 1)
+	printf '%s\n' "${v:-null}"
+	;;
+put)
+	lock
+	echo "put $3 $4" >>$T/settings.log
+	{ grep -v -F "$3=" $T/settings; printf '%s=%s\n' "$3" "$4"; } >$T/settings.new
+	mv -f $T/settings.new $T/settings
+	rmdir $T/settings.lock 2>/dev/null
+	;;
+delete)
+	lock
+	echo "delete $3" >>$T/settings.log
+	grep -v -F "$3=" $T/settings >$T/settings.new
+	mv -f $T/settings.new $T/settings
+	rmdir $T/settings.lock 2>/dev/null
+	;;
+*) exit 1 ;;
+esac
