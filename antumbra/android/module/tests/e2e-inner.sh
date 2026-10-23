@@ -13,8 +13,8 @@
 #             ASH_STANDALONE=1 and resetprop on PATH, as under Magisk;
 #             mksh: they run in Android's mksh without resetprop, as on the
 #             CI emulator
-#   SCENARIO  bridges, direct, offline, pt, badbridges or cell (see
-#             e2e-host.sh)
+#   SCENARIO  bridges, direct, offline, pt, badbridges, cell, phone or data
+#             (see e2e-host.sh)
 # Prints one line per check; exits 1 if any check failed. The module's
 # scripts run with umask 0, as from adb's shell on the CI emulator.
 set -u
@@ -209,13 +209,56 @@ clock_jump() {
 	uptime_line 1<>$T/uptime
 	sleep 2
 }
-# mark: from here on, new_cmd, new_log, new_setting, new_word and
-# no_switch_off_for look only at what follows.
+# mark: from here on, new_cmd, new_log, new_setting, new_word, new_cells
+# and no_switch_off_for look only at what follows.
 mark() {
 	MARK_CMD=$(wc -l <$T/cmd.log)
 	MARK_LOG=$(wc -l <$A/log/module.log)
 	MARK_SET=$(wc -l <$T/settings.log)
 	MARK_WORD=$(words_n)
+	MARK_CELLS=$(cells_n)
+}
+# The module's word on the cell radio to Welcome (WEL8, module_cell), as
+# the stand-in for 'content call' recorded it: one line per word, "v:i:1
+# gate:s:GATE cell:s:CELL radio:s:RADIO at:l:AT".
+cells_n() { if [ -s $T/welcome.cells ]; then grep -c . $T/welcome.cells; else echo 0; fi; }
+new_cells() { tail -n +$((MARK_CELLS + 1)) $T/welcome.cells 2>/dev/null; }
+# cell_told TEXT: a word on the cell radio holding TEXT was told (ever);
+# cell_told_since TEXT: since the mark.
+cell_told() { grep -q -F -- "$1" $T/welcome.cells 2>/dev/null; }
+cell_told_since() { new_cells | grep -q -F -- "$1"; }
+# gate_write VALUE: the Phone-mode gate written as the install's PH3 step
+# writes it: root's, 0600, in /data/adb.
+gate_write() {
+	printf '%s\n' "$1" >/data/adb/antumbra-cell.new
+	chmod 0600 /data/adb/antumbra-cell.new
+	mv -f /data/adb/antumbra-cell.new /data/adb/antumbra-cell
+}
+# person_setting KEY VALUE: a Settings.Global value written as the person
+# (or an app) writes it, not by the module (so not in settings.log).
+person_setting() {
+	while ! mkdir $T/settings.lock 2>/dev/null; do sleep 0.1; done
+	{
+		grep -v -F "$1=" $T/settings
+		printf '%s=%s\n' "$1" "$2"
+	} >$T/settings.person
+	mv -f $T/settings.person $T/settings
+	rmdir $T/settings.lock
+}
+# ims_set: the phone process's dump with IMS registered over the cell
+# network (WWAN), as Android 16 prints the parts the module reads.
+ims_set() {
+	printf '%s\n' 'SERVICE com.android.phone/.TelephonyDebugService 6a1 pid=1234 user=0' '  Client:' \
+		'    PhoneFactory:' '      Phone: subId=0' '      ++++++++++++++++++++++++++++++++' '      ImsPhone:' \
+		'        mImsMmTelRegistrationState = 2' '       Registration Log:' \
+		'        2026-10-15T10:00:01.000 - handleImsRegistered: onImsMmTelConnected imsTransportType=WWAN' \
+		'      ++++++++++++++++++++++++++++++++' >$T/ims
+}
+# new_cmd_before A B: since the mark, the module ran command A before B.
+new_cmd_before() {
+	_ca=$(tail -n +$((MARK_CMD + 1)) $T/cmd.log | grep -n -x -F "$1" | head -n 1 | cut -d: -f1)
+	_cb=$(tail -n +$((MARK_CMD + 1)) $T/cmd.log | grep -n -x -F "$2" | tail -n 1 | cut -d: -f1)
+	[ -n "$_ca" ] && [ -n "$_cb" ] && [ "$_ca" -lt "$_cb" ]
 }
 # The module's word to Welcome (MOD11), as the stand-in for 'content call'
 # recorded it: one line per word, "v:i:1 calls:s:KIND at:l:AT until:l:UNTIL
@@ -317,6 +360,8 @@ check "clock: the test moves the module's clock on ($u1 s, then $u2 s)" test "$(
 check "clock: ... by what it says" test "$((u2 - u1))" -le 105
 
 # --- 1. Installation (Android running) ---------------------------------------
+# A Welcome from before WEL8, without the cell column and module_cell.
+[ "$SCEN" = direct ] && touch $T/welcome-old
 phone_start
 check "phone process: the stand-in runs, and toybox pidof finds it" \
 	test "$(/system/bin/toybox pidof com.android.phone)" = "$(cat $T/phone.pid)"
@@ -393,6 +438,10 @@ check "post-fs-data: no firewall property yet" test -z "$(prop antumbra.fw.armed
 check "post-fs-data: no problem recorded" test ! -s $A/state/module/problem -o "$(cat $A/state/module/problem)" = ""
 
 # --- 3. service.sh, before the framework is up ----------------------------------------
+# The Phone-mode gate, as the install's PH3 step writes it (WEL8): "data"
+# on this LineageOS hotdog (the module stops at "phone" on a phone until
+# FW9 and CI12), "data" on the emulator.
+case $SCEN in phone | data) gate_write data ;; esac
 start_service
 check "service: firewall property published" wait_until 60 eval 'test -n "$(prop antumbra.fw.armed)"'
 check "service: the property is the live rule set's hash" prop_is_live
@@ -459,12 +508,14 @@ fi
 check "settings: Wi-Fi scanning for location off now" grep -q '^wifi set-scan-always-available disabled$' $T/cmd.log
 
 # --- 5. The Welcome screen's Start -------------------------------------------------------------
-welcome() { # MODE MAC SESSION_ID [BRIDGE LINE...]
+# welcome MODE MAC SESSION_ID [BRIDGE LINE...]: Welcome's Start, with the
+# cell column WCELL (default off).
+welcome() {
 	_m=$1 _mac=$2 _sid=$3
 	shift 3
 	printf '%s\n' "$@" >$T/welcome.bridges.new
-	printf 'started=1\ntor_mode=%s\nmac=%s\nadmin=0\nunsafe_browser=0\npersistent=0\nsession_id=%s\n' \
-		"$_m" "$_mac" "$_sid" >$T/welcome.new
+	printf 'started=1\ntor_mode=%s\nmac=%s\nadmin=0\nunsafe_browser=0\npersistent=0\nsession_id=%s\ncell=%s\n' \
+		"$_m" "$_mac" "$_sid" "${WCELL:-off}" >$T/welcome.new
 	mv -f $T/welcome.bridges.new $T/welcome.bridges
 	mv -f $T/welcome.new $T/welcome
 }
@@ -484,6 +535,9 @@ bridges)
 250 closing connection"
 	check "start: MAC 'keep' sets non-persistent randomization off" grep -q '^put non_persistent_mac_randomization_force_enabled 0$' $T/settings.log
 	check "start: no bridge line in the module log" test -z "$(grep -F '1.2.3.4' $A/log/module.log)"
+	check "module_cell: before Start: no gate, nothing carried out" \
+		test "$(head -n 1 $T/welcome.cells | cut -d' ' -f2,3)" = "gate:s:off cell:s:none"
+	check "module_cell: after Start: the cell radio off" wait_until 30 cell_told 'gate:s:off cell:s:off '
 
 	# Welcome's process restarts with a new, unstarted session: ignored.
 	printf 'started=0\ntor_mode=offline\nmac=new\nsession_id=%s\n' $SID2 >$T/welcome
@@ -562,10 +616,30 @@ direct)
 250 DisableNetwork=0
 250 closing connection"
 	check "start: MAC 'new' keeps non-persistent randomization on" test -z "$(grep 'non_persistent_mac_randomization_force_enabled 0' $T/settings.log)"
+	# A Welcome from before WEL8: its row read without the cell column.
+	check "older Welcome: Start read without the cell column, logged once" \
+		test "$(grep -c 'has no cell column (an older one)' $A/log/module.log)" = 1
+	check "older Welcome: module_cell refused: logged once" \
+		test "$(grep -c "did not take the module's word on the cell radio" $A/log/module.log)" = 1
+	# Tried again after 30 s, then after twice as long each time, up to
+	# 300 s: never at every turn.
+	gaps=$(awk 'NR > 1 { printf "%s ", $2 - t } { t = $2 }' $T/welcome.cells-refused)
+	check "older Welcome: module_cell tried again after 30 s, then less often (gaps: ${gaps:-none})" \
+		awk 'BEGIN { w = 30 } NR > 1 { if ($2 - t < w - 1) bad = 1; w = w * 2 > 300 ? 300 : w * 2 } { t = $2 } END { exit bad + (NR == 0) }' \
+		$T/welcome.cells-refused
+	check "older Welcome: no word on the cell radio taken" test ! -s $T/welcome.cells
 	;;
 offline)
+	# Calls and texts chosen, on a phone without the gate (every phone as
+	# installed): the cell radio stays off.
+	WCELL=phone
 	welcome offline new $SID1
+	WCELL=
 	check "start: the session is read" wait_until 30 status_has '"started":true'
+	check "Phone chosen without the gate: logged" \
+		wait_until 10 grep -q "the session chose phone; this phone's gate allows off, so the module carries out off" $A/log/module.log
+	check "Phone chosen without the gate: module_cell says the cell radio stays off" \
+		wait_until 30 cell_told 'gate:s:off cell:s:off '
 	sleep 4
 	check "start: offline keeps tor's network off" test "$(getconf DisableNetwork)" = "250 DisableNetwork=1
 250 closing connection"
@@ -597,6 +671,13 @@ offline)
 	r=$(as_app dns "$blocked")
 	check "filter's port free: blocking again ($r)" test "$r" = NXDOMAIN
 
+	# The gate written during the session (as the install's step might be
+	# run now): nothing changes until the next start.
+	gate_write phone
+	check "gate raised during the session: seen" wait_until 15 grep -q 'Phone-mode gate now phone' $A/log/module.log
+	check "gate raised during the session: module_cell says so, the cell radio still off" \
+		wait_until 30 cell_told 'gate:s:phone cell:s:off '
+
 	# Removal. During a boot (post-fs-data) the restore waits for boot.
 	check "list narrowed before the removal" wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
 	svc=$(cat $A/state/module/service.lock/pid)
@@ -623,6 +704,7 @@ offline)
 	check "uninstall: mobile_data_always_on deleted" new_setting 'delete mobile_data_always_on'
 	check "uninstall: the restore script removed itself" test ! -e /data/adb/service.d/antumbra-restore.sh
 	check "uninstall: the early arm script removed" test ! -e /data/adb/post-fs-data.d/antumbra-arm.sh
+	check "uninstall: the Phone-mode gate removed" test ! -e /data/adb/antumbra-cell
 	n=$(wc -l <$T/settings.log)
 	sleep 12
 	check "uninstall: nothing writes the values again afterwards" test "$(wc -l <$T/settings.log)" = "$n"
@@ -996,38 +1078,197 @@ cell)
 	check "shutdown during a call: no airplane-mode command" eval \
 		'! new_cmd "connectivity airplane-mode enable" && ! new_cmd "connectivity airplane-mode disable"'
 	;;
+phone)
+	# Calls and texts on a LineageOS hotdog whose gate file says "data" (it
+	# counts as "phone" on a phone until FW9 and CI12). Nothing before
+	# Start (D12).
+	check "phone: module_cell before Start: the gate stops at phone on a phone" \
+		wait_until 30 cell_told 'gate:s:phone cell:s:none '
+	check "phone: logged" grep -q "this phone's Phone-mode gate: phone" $A/log/module.log
+	check "phone: nothing switched before Start (D12)" test -z "$(grep airplane-mode $T/cmd.log)"
+	check "phone: no IMS reading before Start" test -z "$(grep -F 'ims:s:' $T/welcome.words | grep -v -F 'ims:s:off ')"
+	ims_set
+	mark
+	WCELL=phone
+	welcome offline new $SID1
+	WCELL=
+	check "phone: the session is read" wait_until 30 status_has '"started":true'
+	check "phone: recorded: cell=phone, gate=phone" eval 'session_has cell=phone && session_has gate=phone'
+	check "phone: the radio switched on at Start (once the list is narrowed)" \
+		wait_until 45 new_cmd 'connectivity airplane-mode disable'
+	check "phone: mobile data off first" new_cmd_before 'phone data disable' 'connectivity airplane-mode enable'
+	check "phone: enable, then disable (the radio was off since power-on)" \
+		new_cmd_before 'connectivity airplane-mode enable' 'connectivity airplane-mode disable'
+	check "phone: the radio is on" wait_until 10 eval 'test "$(cat $T/radio)" = 1'
+	check "phone: logged" wait_until 5 new_log 'Phone mode: the cell radio on, mobile data off'
+	check "phone: module_cell: phone carried out, the radio on" wait_until 30 cell_told_since 'cell:s:phone radio:s:on '
+	check "phone: IMS read, registered over the cell network (the VoLTE line)" \
+		wait_until 30 eval 'new_words | grep -q -F "ims:s:cell "'
+	check "phone: mobile data never switched on" eval '! new_cmd "phone data enable"'
+	# An ordinary call (MOD11's "ordinary", in Phone mode only).
+	mark
+	telecom_set 1 ACTIVE
+	phone_state '2 0 1 0 0 0'
+	check "phone: an ordinary call: looked at" wait_look
+	check "phone: an ordinary call in Phone mode: ordinary" wait_until 20 new_word ordinary
+	telecom_set 1
+	phone_state "$IDLE"
+	check "phone: the call ended: looked at" wait_look
+	check "phone: the call ended: looked at again" wait_look
+	check "phone: the call ended: still ordinary, never unknown" eval 'last_word_is ordinary && ! new_word unknown'
+	check "phone: the call held nothing: no switch-off" eval '! switched_off'
+	# Mobile data switched on in Settings: off again at the next look.
+	mark
+	person_setting mobile_data1 1
+	clock_jump 11
+	check "phone: mobile data switched on in Settings: off again" wait_until 20 new_setting 'put mobile_data1 0'
+	check "phone: ... logged" wait_until 5 new_log 'mobile data was switched on; off again'
+	# The gate taken away right after the call: the radio off only 5
+	# minutes after the call.
+	mark
+	rm -f /data/adb/antumbra-cell
+	check "phone: the gate removed: seen" wait_until 15 new_log 'Phone-mode gate now off'
+	check "phone: the gate removed right after a call: held (recent)" wait_until 20 new_log 'held: recent'
+	check "phone: ... still on" no_switch_off_for 8
+	check "phone: module_cell: nothing carried out any more, the radio still on" \
+		wait_until 30 cell_told_since 'gate:s:off cell:s:off radio:s:on '
+	clock_jump 300
+	check "phone: 5 minutes after the call: off (airplane mode)" wait_until 20 switched_off
+	check "phone: IMS no longer read" wait_until 30 eval 'tail -n 1 $T/welcome.words | grep -q -F "ims:s:off ims_at:l:0"'
+	# The gate written again in the same session: the lower gate holds
+	# until the next start, also when the person then switches airplane
+	# mode off (the radio comes back on; Phone mode would keep it so).
+	mark
+	gate_write phone
+	check "phone: the gate written again: seen" wait_until 15 new_log 'Phone-mode gate now phone'
+	check "phone: ... the session keeps off: module_cell says so" wait_until 30 cell_told_since 'gate:s:phone cell:s:off '
+	mark
+	person_airplane disable
+	check "phone: ... airplane mode off by the person: looked at" wait_look
+	clock_jump 300
+	check "phone: ... the radio off again after the hold (no Phone mode until the next start)" wait_until 30 switched_off
+	check "phone: ... never switched on by the module" eval '! new_cmd "connectivity airplane-mode disable"'
+	mark
+	/system/bin/setprop sys.shutdown.requested 0userrequested
+	check "phone: shutdown: enable_cellular_on_boot 0 stored" wait_until 20 new_setting 'put enable_cellular_on_boot 0'
+	check "phone: shutdown: mobile data off stored" new_setting 'put mobile_data1 0'
+	check "phone: shutdown: airplane mode stored off, cell_on 1 (no call holds it)" wait_until 10 eval \
+		'new_setting "put cell_on 1" && new_setting "put airplane_mode_on 0"'
+	;;
+data)
+	# Mobile data through Tor, on the emulator (gate "data").
+	check "data: module_cell before Start: gate data" wait_until 30 cell_told 'gate:s:data cell:s:none '
+	# An offline row asking for mobile data: refused, still waiting.
+	WCELL=data
+	welcome offline new $SID1
+	check "data: offline with mobile data: refused (still waiting)" \
+		wait_until 20 grep -q 'the row has an invalid cell; still waiting' $A/log/module.log
+	check "data: ... not started" status_has '"welcome":{"started":false}}'
+	mark
+	welcome direct new $SID1
+	WCELL=
+	check "data: the session is read" wait_until 30 status_has '"started":true'
+	check "data: recorded: cell=data, gate=data" eval 'session_has cell=data && session_has gate=data'
+	check "data: the radio switched on at Start" wait_until 45 new_cmd 'connectivity airplane-mode disable'
+	check "data: mobile data on for the session" wait_until 30 new_cmd 'phone data enable'
+	check "data: ... after the switch-on and its own mobile data off" eval \
+		'new_cmd_before "connectivity airplane-mode disable" "phone data enable" && new_cmd_before "phone data disable" "phone data enable"'
+	check "data: ... over the live firewall" prop_is_live
+	check "data: logged" new_log "mobile data on (the session's Internet is mobile data)"
+	check "data: the default data SIM's mobile data stored on" grep -q '^mobile_data1=1$' $T/settings
+	check "data: tor's network on" wait_until 30 status_has '"network":"enabled"'
+	check "data: module_cell: data carried out, the radio on" wait_until 30 cell_told_since 'gate:s:data cell:s:data radio:s:on '
+	# The person switches airplane mode on, then off: mobile data off, then
+	# on again once the radio is back.
+	person_airplane enable
+	clock_jump 11
+	check "data: airplane mode on by the person: looked at" wait_look
+	mark
+	person_airplane disable
+	check "data: airplane mode off again: mobile data off, then on again" wait_until 30 eval \
+		'new_cmd_before "phone data disable" "phone data enable"'
+	# The gate lowered to phone: mobile data off at once, the radio stays on.
+	mark
+	gate_write phone
+	check "data: the gate lowered to phone: mobile data off at once" wait_until 15 new_cmd 'phone data disable'
+	check "data: ... logged" wait_until 5 new_log "mobile data off (this phone's gate no longer allows it)"
+	check "data: ... the radio stays on" no_switch_off_for 8
+	check "data: ... mobile data not switched on again" eval '! new_cmd "phone data enable"'
+	check "data: module_cell: phone carried out" wait_until 30 cell_told_since 'gate:s:phone cell:s:phone '
+	mark
+	/system/bin/setprop sys.shutdown.requested 0userrequested
+	check "data: shutdown: mobile data stored off" wait_until 20 new_setting 'put mobile_data1 0'
+	check "data: shutdown: mobile data not switched on again" eval 'sleep 6; ! new_cmd "phone data enable"'
+	;;
 esac
 
 # Every scenario: the cell radio's watch.
 check "cell: airplane mode's list narrowed to the cell radio" \
 	wait_until 45 grep -q '^put airplane_mode_radios cell$' $T/settings.log
 case $SCEN in
-pt | cell) ;;
+pt | cell | phone | data) ;;
 *)
 	check "cell: the radio stayed off: no airplane-mode command" test -z "$(grep airplane-mode $T/cmd.log)"
 	check "cell: no Bluetooth command" test -z "$(grep bluetooth $T/cmd.log)"
 	;;
 esac
-check "cell: the module never switched the radio on" test -z "$(grep -x 'connectivity airplane-mode disable' $T/cmd.log)"
+case $SCEN in
+phone | data) ;;
+*)
+	check "cell: the module never switched the radio on" test -z "$(grep -x 'connectivity airplane-mode disable' $T/cmd.log)"
+	check "cell: mobile data never switched on" test -z "$(grep -x 'phone data enable' $T/cmd.log)"
+	;;
+esac
 if [ -s $A/state/module/session ]; then
-	check "cell: the session record says cell=off" session_has cell=off
+	case $SCEN in
+	phone) want='cell=phone gate=phone' ;;
+	data) want='cell=data gate=data' ;;
+	offline) want='cell=phone gate=off' ;;
+	*) want='cell=off gate=off' ;;
+	esac
+	check "cell: the session record says $want" eval 'session_has "${want% *}" && session_has "${want#* }"'
 fi
+case $SCEN in
+offline | phone | data) ;;
+*) check "cell: no Phone-mode gate: nothing writes one" test ! -e /data/adb/antumbra-cell ;;
+esac
 check "cell: no number and no dump in the module's log" test -z "$(grep -E 'mCall|TC@|Phone Id|tel:' $A/log/module.log)"
 # Every scenario: the module's word to Welcome (MOD11) went to Welcome's
 # provider alone, holds nothing but its six fields, and neither status.json
 # (which every app can read) nor the module's log names a word.
 check "word: Welcome was told (at least the first turn's 'none')" wait_until 70 grep -q 'calls:s:none ' $T/welcome.words
+case $SCEN in
+phone | data) ims='(off|cell|wifi|registered|none|unknown) ims_at:l:[0-9]+' ;;
+*) ims='off ims_at:l:0' ;;
+esac
 check "word: nothing but the six fields" test -z "$(grep -v -E \
-	'^v:i:1 calls:s:(emergency|ordinary|unknown|none) at:l:[0-9]+ until:l:[0-9]+ ims:s:off ims_at:l:0$' $T/welcome.words)"
+	"^v:i:1 calls:s:(emergency|ordinary|unknown|none) at:l:[0-9]+ until:l:[0-9]+ ims:s:$ims\$" $T/welcome.words)"
 check "word: status.json says nothing of calls or IMS" test -z "$(status_json | grep -i -E 'ordinary|emergency|"calls"|"ims"|until|callback')"
 check "word: the module's log names no word" test -z "$(grep -E 'ordinary|calls:|until:|ims:|ims=' $A/log/module.log)"
-# Outside Phone mode (every session until WEL8) the word is never ordinary.
-check "word: never 'ordinary' outside Phone mode" test -z "$(grep -F 'calls:s:ordinary ' $T/welcome.words)"
+# Outside Phone mode the word is never ordinary (the phone scenario has an
+# ordinary call in Phone mode).
+case $SCEN in
+phone) ;;
+*) check "word: never 'ordinary' outside Phone mode" test -z "$(grep -F 'calls:s:ordinary ' $T/welcome.words)" ;;
+esac
 check "word: no word in a file of the module" test -z "$(grep -r -l -F 'calls:s:' $A 2>/dev/null)"
 case $SCEN in
-pt | cell) ;;
+pt | cell | phone | data) ;;
 *) check "word: no call in this scenario: one word, 'none'" test "$(words_n)" = 1 ;;
 esac
+# Every scenario: the module's word on the cell radio (WEL8) went to
+# Welcome's provider alone, holds nothing but its five fields, and neither
+# status.json nor the module's log holds it.
+case $SCEN in
+direct) ;;
+*) check "module_cell: Welcome was told" test -s $T/welcome.cells ;;
+esac
+check "module_cell: nothing but the five fields" test -z "$(grep -v -E \
+	'^v:i:1 gate:s:(off|phone|data) cell:s:(none|off|phone|data) radio:s:(on|off|wait|unknown) at:l:[0-9]+$' \
+	$T/welcome.cells 2>/dev/null)"
+check "module_cell: status.json says nothing of the gate, the cell choice or the radio" \
+	test -z "$(status_json | grep -E '"gate"|"cell"|"radio"|gate:|phone_mode|"sim')"
+check "module_cell: the module's log names no word" test -z "$(grep -E 'gate:s|cell:s:|radio:s:' $A/log/module.log)"
 
 check "module log has no shell errors" test -z "$(grep -i -E 'not found|syntax error|bad substitution|unexpected' $A/log/module.log)"
 echo "-- module.log --"

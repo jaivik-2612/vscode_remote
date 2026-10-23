@@ -6,7 +6,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** How tor connects in this session (the provider's tor_mode column). */
+/**
+ * How tor connects in this session (the provider's tor_mode column):
+ * OFFLINE when the session has no Internet.
+ */
 enum class TorMode(val wire: String) {
     DIRECT("direct"),
     BRIDGES("bridges"),
@@ -15,9 +18,42 @@ enum class TorMode(val wire: String) {
 
 enum class BridgeSource { BUILT_IN, CUSTOM }
 
-/** The Welcome screen's controls, before Start. */
+/** The session's Internet (WEL8): Wi-Fi or the SIM's mobile data, both through Tor, or none. */
+enum class Internet { WIFI, MOBILE, NONE }
+
+/**
+ * The cell radio for the session (the provider's cell column), in the
+ * order of what each allows: OFF (the radio stays off), PHONE (calls and
+ * texts: the radio on from Start, mobile data off), DATA (also mobile data,
+ * through Tor). Also the Phone-mode gate's levels, as the module reports
+ * them ([CellWord]).
+ */
+enum class CellLevel(val wire: String) {
+    OFF("off"),
+    PHONE("phone"),
+    DATA("data"),
+    ;
+
+    companion object {
+        fun of(wire: String): CellLevel? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
+/**
+ * The Welcome screen's controls, before Start. Internet and Phone are two
+ * choices; Tor's way to connect applies only when there is Internet.
+ * Mobile data needs the cellular radio, and while the radio is on the
+ * carrier delivers calls and texts, so Mobile data always comes with
+ * Phone: calls and texts ([cell]); Phone: off cannot be chosen with it
+ * ([withPhone]). The person's own Phone choice ([phone]) is kept, and
+ * counts again once Internet is not mobile data.
+ */
 data class Choices(
+    val internet: Internet = Internet.WIFI,
+    /** DIRECT or BRIDGES: how tor connects when there is Internet. */
     val torMode: TorMode = TorMode.DIRECT,
+    /** Phone: calls and texts (the cell radio on from Start), as the person chose it. */
+    val phone: Boolean = false,
     // Built-in bridges are obfs4, which needs lyrebird (Bridges.TRANSPORTS_AVAILABLE).
     val bridgeSource: BridgeSource = if (Bridges.TRANSPORTS_AVAILABLE) BridgeSource.BUILT_IN else BridgeSource.CUSTOM,
     val bridgeText: String = "",
@@ -25,7 +61,29 @@ data class Choices(
     val admin: Boolean = false,
     /** Always false in v0: the Unsafe Browser comes later (W11). */
     val unsafeBrowser: Boolean = false,
-)
+) {
+    /** The provider's cell column for these choices. */
+    val cell: CellLevel
+        get() = when {
+            internet == Internet.MOBILE -> CellLevel.DATA
+            phone -> CellLevel.PHONE
+            else -> CellLevel.OFF
+        }
+
+    /** The provider's tor_mode for these choices: offline without Internet, else direct or bridges. */
+    val wireTorMode: TorMode
+        get() = when {
+            internet == Internet.NONE -> TorMode.OFFLINE
+            torMode == TorMode.BRIDGES -> TorMode.BRIDGES
+            else -> TorMode.DIRECT
+        }
+
+    /** Internet chosen (Mobile data brings calls and texts with it: [cell]). */
+    fun withInternet(i: Internet): Choices = copy(internet = i)
+
+    /** Phone chosen; Off is refused while Internet is mobile data (unchanged then). */
+    fun withPhone(on: Boolean): Choices = if (!on && internet == Internet.MOBILE) this else copy(phone = on)
+}
 
 /**
  * What the provider reports. Before Start every field holds its safe value
@@ -35,6 +93,7 @@ data class Choices(
  */
 data class SessionState(
     val started: Boolean,
+    val internet: Internet,
     val torMode: TorMode,
     val bridges: List<String>,
     val newMac: Boolean,
@@ -42,6 +101,8 @@ data class SessionState(
     val unsafeBrowser: Boolean,
     val persistent: Boolean,
     val sessionId: String,
+    /** The cell radio chosen (OFF before Start); the module carries out no more than its gate allows. */
+    val cell: CellLevel,
 )
 
 /**
@@ -63,6 +124,7 @@ object Session {
     /** The row before Start. */
     internal val notStarted = SessionState(
         started = false,
+        internet = Internet.NONE,
         torMode = TorMode.OFFLINE,
         bridges = emptyList(),
         newMac = true,
@@ -70,6 +132,7 @@ object Session {
         unsafeBrowser = false,
         persistent = false,
         sessionId = id,
+        cell = CellLevel.OFF,
     )
 
     private val flow = MutableStateFlow(notStarted)
@@ -85,15 +148,18 @@ object Session {
     @Synchronized
     fun start(choices: Choices, bridges: List<String>): Boolean {
         if (flow.value.started) return false
+        val torMode = choices.wireTorMode
         flow.value = SessionState(
             started = true,
-            torMode = choices.torMode,
-            bridges = if (choices.torMode == TorMode.BRIDGES) bridges.toList() else emptyList(),
+            internet = choices.internet,
+            torMode = torMode,
+            bridges = if (torMode == TorMode.BRIDGES) bridges.toList() else emptyList(),
             newMac = choices.newMac,
             admin = choices.admin,
             unsafeBrowser = choices.unsafeBrowser,
             persistent = false,
             sessionId = id,
+            cell = choices.cell,
         )
         return true
     }

@@ -12,6 +12,7 @@ import io
 import ipaddress
 import json
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -1251,6 +1252,144 @@ class ModuleParsersTest(unittest.TestCase):
         self.assertIn('check module_parsers "$(module_parsers_level "$out")" "$out"', text)
         # phone_proc's own stderr cannot add a line before the known parts.
         self.assertIn("phone_proc >/dev/null 2>&1 && p=yes", text)
+
+
+class Wel8EmulatorTest(unittest.TestCase):
+    """emulator-antumbra.sh's WEL8 steps: the Phone-mode gate written as
+    root as the install writes it, every new check a warning until it has
+    passed on CI once, the walk before Start and the checks after it."""
+
+    def script(self):
+        return read(os.path.join(CI, "emulator-antumbra.sh"))
+
+    def fn(self, name):
+        text = self.script()
+        start = text.index(name + "() {")
+        return text[start:text.index("\n}\n", start) + 3]
+
+    def gate(self, level):
+        # ash and event stand in for adb and the event log: they print what
+        # they get (ash on fd 3: cell_gate sends adb's output to /dev/null).
+        r = subprocess.run(["bash", "-c", 'ash() { echo "ash: $1" >&3; }; event() { echo "event: $*" >&2; }; '
+                            + self.fn("cell_gate") + '{ cell_gate "$1"; } 3>&1', "probe", level],
+                           capture_output=True, text=True)
+        return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+    def test_the_gate_as_the_install_writes_it(self):
+        self.assertEqual(self.gate("off"), (0, "ash: rm -f /data/adb/antumbra-cell", "event: cell_gate off"))
+        for level in ("phone", "data"):
+            rc, out, err = self.gate(level)
+            self.assertEqual(rc, 0)
+            self.assertEqual(err, "event: cell_gate " + level)
+            # Written whole (a new file moved into place), root's, 0600.
+            self.assertEqual(out, "ash: printf '%%s\\n' %s >/data/adb/antumbra-cell.new && chmod 0600 "
+                                  "/data/adb/antumbra-cell.new && chown 0:0 /data/adb/antumbra-cell.new && "
+                                  "mv -f /data/adb/antumbra-cell.new /data/adb/antumbra-cell" % level)
+        for level in ("", "Phone", "calls", "phone data", "on"):
+            self.assertEqual(self.gate(level), (1, "", ""), level)
+
+    def test_every_new_check_warns_until_it_has_passed_once(self):
+        r = subprocess.run(["bash", "-c", self.fn("choices_level") + "choices_level"],
+                           capture_output=True, text=True, check=True)
+        self.assertEqual(r.stdout.strip(), "warn")
+        text = self.script()
+        names = ("welcome_choices_gate_", "welcome_radio_line", "welcome_phone_start", "provider_cell",
+                 "cell_phone_mode", "welcome_phone_status", "welcome_module_cell")
+        for n in names:
+            uses = [l.strip() for l in text.splitlines() if re.search(r'(^|[;)]\s*)check "?' + n, l.strip())]
+            self.assertTrue(uses, n)
+            for l in uses:
+                # ok, or the level: never a failure of its own.
+                self.assertRegex(l, r'check "?%s[a-z_$"{}]* (ok|"\$\(choices_level\)")( |$)' % n)
+
+    def test_the_walk_comes_before_start_and_the_checks_after(self):
+        text = self.script()
+        start = self.fn("welcome_start")
+        # Every combination at each level, before the session's own choices and Start.
+        self.assertLess(start.index("welcome_power_menu"), start.index("welcome_choices"))
+        self.assertLess(start.index("welcome_choices"), start.index("cell_gate phone"))
+        self.assertLess(start.index("cell_gate phone"), start.index("ui_choose phone_calls"))
+        self.assertLess(start.index("ui_choose phone_calls"), start.index("ui_tap start_button"))
+        walk = self.fn("welcome_choices")
+        self.assertIn("for gate in off phone data; do", walk)
+        self.assertIn('check-choices --gate "$gate"', walk)
+        # Bounded: 7 minutes a gate, no gate begun after 15, so the step cannot run out of time.
+        self.assertIn('timeout "$WALK_GATE_S" bash "$WELCOME_ADB"', walk)
+        self.assertIn("WALK_GATE_S=420\nWALK_BUDGET_S=900\n", text)
+        self.assertLess(walk.index("WALK_BUDGET_S"), walk.index("cell_gate"))
+        # After Start: Phone mode carried out, the status screen, then the word from root only.
+        main = text[text.index("\nwelcome_checks\n"):]
+        self.assertLess(main.index("\nmodule_word\n"), main.index("\nphone_checks\n"))
+        self.assertLess(main.index("\nphone_checks\n"), main.index("wait_bootstrap"))
+        checks = self.fn("phone_checks")
+        self.assertLess(checks.index("check-phone"), checks.index("check-module-cell"))
+        # Nothing here dials or sets an emergency number.
+        for f in ("welcome_choices", "phone_checks", "cell_gate", "ui_enabled_is", "ui_choose", "ui_top"):
+            for word in ("emergency-number-test-mode", "KEYCODE_CALL", "tel:", "112"):
+                self.assertNotIn(word, self.fn(f), f)
+
+    def test_the_run_chooses_its_rows_by_test_tag_alone(self):
+        start = self.fn("welcome_start")
+        # No text search for the Internet, Phone or Tor rows: "Wi-Fi" is also
+        # in None's detail, "Calls and texts" in Phone off's.
+        self.assertNotRegex(start, r"ui_tap (internet|phone|tor)_")
+        self.assertNotRegex(start, r"ui_choose \w+ '")
+        # Internet and Tor are the run's own: it stops without them.
+        self.assertIn("ui_choose internet_wifi || abort welcome_choice", start)
+        self.assertIn("ui_choose tor_direct || abort welcome_choice", start)
+        self.assertLess(start.index("ui_choose internet_wifi"), start.index("ui_choose phone_calls"))
+        # Phone is WEL8's: a warning, never a stop, and the row after Start says which.
+        phone = start[start.index("ui_choose phone_calls"):start.index("ui_choose tor_direct")]
+        self.assertNotIn("abort", phone)
+        self.assertIn("elif ui_choose phone_off; then", phone)
+        self.assertIn("case $cell_now in phone) PHONE_CHOICE=calls ;; *) PHONE_CHOICE=off ;; esac", start)
+        # ui_choose itself never passes a text on.
+        choose = self.fn("ui_choose")
+        self.assertIn('ui_locate "$id")', choose)
+        self.assertIn('ui_find "$id")', choose)
+
+    def choose(self, finds, locate="540 300 false true"):
+        """ui_choose with stand-ins: ui_locate prints LOCATE (and records its
+        arguments), ui_find prints the next of FINDS, ash records taps."""
+        stub = ('ui_top() { echo top >&3; }; say() { :; }; ash() { echo "ash: $1" >&3; }; sleep() { :; }; '
+                'n=0; finds=(%s); '
+                'ui_locate() { echo "locate: $#: $*" >&3; [ -n "%s" ] && echo "%s"; }; '
+                'ui_find() { echo "find: $#: $*" >&3; echo "${finds[$n]}"; n=$((n + 1)); }; '
+                % (" ".join("'%s'" % f for f in finds), locate, locate))
+        r = subprocess.run(["bash", "-c", stub + self.fn("ui_choose") + '{ ui_choose internet_wifi; echo "rc=$?" >&3; } 3>&1'],
+                           capture_output=True, text=True)
+        return r.stdout.strip().splitlines()
+
+    def test_ui_choose_reads_the_row_back(self):
+        # Checked after the tap: one tap, done.
+        out = self.choose(["540 300 true true"])
+        self.assertEqual(out, ["top", "locate: 1: internet_wifi", "ash: input tap 540 300", "find: 1: internet_wifi", "rc=0"])
+        # Already checked: no tap.
+        out = self.choose([], locate="540 300 true true")
+        self.assertEqual(out, ["top", "locate: 1: internet_wifi", "rc=0"])
+        # Never reads checked: a second try from the top, then a failure.
+        out = self.choose(["540 300 false true", "540 300 false true"])
+        self.assertEqual(out.count("top"), 2)
+        self.assertEqual(out.count("ash: input tap 540 300"), 2)
+        self.assertEqual(out[-1], "rc=1")
+        # Not found by its tag: no tap at all.
+        out = self.choose([], locate="")
+        self.assertNotIn("ash: input tap 540 300", out)
+        self.assertEqual(out[-1], "rc=1")
+
+    def test_a_tag_lookup_never_lands_on_another_rows_text(self):
+        # Internet Wi-Fi scrolled off the top; None's detail names Wi-Fi.
+        xml = ('<?xml version="1.0"?><hierarchy><node resource-id="" scrollable="true" bounds="[0,100][1080,1900]">'
+               '<node resource-id="internet_mobile" checked="false" enabled="true" bounds="[0,100][1080,190]"/>'
+               '<node resource-id="internet_none" checked="false" enabled="true" bounds="[0,190][1080,400]">'
+               '<node text="None" bounds="[0,200][1080,280]"/>'
+               '<node text="No Internet in this session. Wi-Fi and mobile data stay off, and Tor does not connect." '
+               'bounds="[0,280][1080,390]"/></node></node></hierarchy>')
+        # By its tag alone: not on this screen (ui_locate scrolls on).
+        self.assertIsNone(citool.ui_find(xml, "internet_wifi"))
+        # The text search the run used to fall back to lands inside None's row.
+        x, y, _, _ = citool.ui_find(xml, "internet_wifi", "Wi-Fi")
+        self.assertTrue(190 <= y < 400, (x, y))
 
 
 if __name__ == "__main__":

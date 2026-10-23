@@ -20,7 +20,8 @@
 #   --busybox        busybox with FEATURE_SH_STANDALONE, standing in for
 #                    Magisk's
 #   --scenarios      default: "bridges:busybox direct:mksh offline:mksh
-#                    pt:busybox badbridges:mksh cell:busybox"
+#                    pt:busybox badbridges:mksh cell:busybox phone:mksh
+#                    data:busybox"
 #
 # tests/build-test-tools.sh builds --toybox, --mksh and --busybox from
 # pinned sources.
@@ -42,16 +43,22 @@
 # service.sh, and plays the scenario:
 #   bridges     plain bridges, MAC "keep"; Welcome restarting; tor, the
 #               filter and the firewall broken and repaired; shutdown puts
-#               the fail-safe Settings back
-#   direct      on a LineageOS hotdog (by its properties): an app takes
-#               127.0.0.1:9040 before Start (firewall back to armed, tor's
-#               network held off until the port is free); mobile data off
-#               for every SIM; no bridges
+#               the fail-safe Settings back; the module's word on the cell
+#               radio (module_cell): no gate, nothing carried out, then off
+#   direct      on a LineageOS hotdog (by its properties), with a Welcome
+#               from before WEL8 (no cell column, no module_cell): an app
+#               takes 127.0.0.1:9040 before Start (firewall back to armed,
+#               tor's network held off until the port is free); mobile data
+#               off for every SIM; no bridges; Start read without the cell
+#               column, module_cell refused, each logged once
 #   offline     an update over a record made before the cell radio work
-#               (the keys it lacks added); tor stays off; an app takes the
-#               filter's 5335 while the filter restarts; then uninstall.sh,
-#               during a boot and while Android runs (service.sh stopped
-#               first), puts the Settings back and nothing writes them again
+#               (the keys it lacks added); calls and texts chosen without
+#               the Phone-mode gate: the radio stays off; tor stays off; an
+#               app takes the filter's 5335 while the filter restarts; the
+#               gate written during the session changes nothing; then
+#               uninstall.sh, during a boot and while Android runs
+#               (service.sh stopped first), puts the Settings back, deletes
+#               the gate, and nothing writes them again
 #   pt          obfs4 bridges without lyrebird: refused, network off; then,
 #               during a call on the cell radio, iptables broken: the
 #               firewall reports open, Wi-Fi and mobile data go off at once,
@@ -74,13 +81,30 @@
 #               refusing an emergency word (tried after each look) and
 #               another word (tried once, then 300 s later); shutdown
 #               during a call leaves airplane mode as it is
+#   phone       WEL8 on a LineageOS hotdog, the gate file saying "data"
+#               (which a phone takes as "phone" until FW9 and CI12): calls
+#               and texts with no Internet; nothing before Start; at Start
+#               mobile data off, then airplane mode enable and disable; the
+#               IMS registration read from a stand-in phone-process dump
+#               (the VoLTE line); an ordinary call reads "ordinary" (MOD11
+#               in Phone mode); mobile data switched on in Settings is
+#               switched off again; the gate removed right after the call:
+#               the radio off 5 minutes after it; shutdown
+#   data        WEL8 on the emulator, the gate "data": an offline row asking
+#               for mobile data refused; tor directly over mobile data: the
+#               radio on at Start, then mobile data on over the live
+#               firewall; airplane mode off and on by the person: mobile
+#               data off, then on again; the gate lowered to "phone":
+#               mobile data off at once, the radio stays on; shutdown
 #
 # Every scenario also checks the cell radio's stored values, the narrowed
-# airplane-mode list, cell=off in the session record, that the module
-# never switches the radio on, and that the module's word went to
-# Welcome's provider only (never into status.json, a file or the log) and
-# was never "ordinary" (no scenario is in Phone mode). A copy of sleep
-# named com.android.phone stands in for the phone process.
+# airplane-mode list, the cell choice and gate in the session record, that
+# outside phone and data the module never switches the radio or mobile data
+# on and no gate file appears, and that the module's two words (MOD11's on
+# the calls, WEL8's on the cell radio) went to Welcome's provider only
+# (never into status.json, a file or the log), the first never "ordinary"
+# outside the phone scenario. A copy of sleep named com.android.phone
+# stands in for the phone process.
 #
 # What it cannot show: Android itself (SELinux, netd, Magisk's timing,
 # Welcome, the framework restart). The emulator job does that.
@@ -89,7 +113,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 MODULE=$(cd "$HERE/.." && pwd)
 
 TOR_BIN='' DNS_BIN='' BLOCKLIST='' TOYBOX='' MKSH='' BUSYBOX='' KEEP=0
-SCENARIOS='bridges:busybox direct:mksh offline:mksh pt:busybox badbridges:mksh cell:busybox'
+SCENARIOS='bridges:busybox direct:mksh offline:mksh pt:busybox badbridges:mksh cell:busybox phone:mksh data:busybox'
 while [ $# -gt 0 ]; do
 	case $1 in
 	--tor-bin) TOR_BIN=$2; shift 2 ;;
@@ -177,7 +201,7 @@ populate() {
 	cp "$HERE/probe.py" "$HERE/e2e-inner.sh" "$U/antumbra-test/"
 	# The phone (two SIM slots) or the emulator (one).
 	case $2 in
-	direct | cell)
+	direct | cell | phone)
 		printf 'ro.product.device=hotdog\nro.lineage.device=hotdog\nro.lineage.version=23.2-20261009-NIGHTLY-hotdog\nro.hardware=qcom\n' >"$U/antumbra-test/props"
 		echo 2 >"$U/antumbra-test/phones"
 		;;

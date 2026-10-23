@@ -2,6 +2,7 @@
 package org.antumbra.welcome.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Spacer
@@ -35,9 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.NumberFormat
 import org.antumbra.welcome.AddOnCheck
+import org.antumbra.welcome.Internet
+import org.antumbra.welcome.PhoneStatus
+import org.antumbra.welcome.PhoneTexts
 import org.antumbra.welcome.R
 import org.antumbra.welcome.SessionState
-import org.antumbra.welcome.TorMode
 
 data class StatusUi(
     val session: SessionState,
@@ -51,12 +54,15 @@ data class StatusUi(
     /** A message, such as why Quick power off failed or waits (an error) or that the tile was added. */
     val message: String? = null,
     val messageIsError: Boolean = false,
+    /** The SIM, the cell radio, what the add-on carries out and the VoLTE line (WEL8). */
+    val phone: PhoneStatus = PhoneStatus(),
 )
 
 /**
  * Screen 2, after Start: Tor's bootstrap progress and the tracker filter's
- * counters, both read from http://127.0.0.1:5380/status, the session's
- * choices, "Emergency call" and "Power off now".
+ * counters, both read from http://127.0.0.1:5380/status, the Phone card
+ * (SIM, cellular radio, VoLTE) and what the carrier sees now, the
+ * session's choices, "Emergency call" and "Power off now".
  */
 @Composable
 fun StatusScreen(
@@ -126,12 +132,17 @@ private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> U
     val s = ui.session
     Title(stringResource(R.string.status_title))
     Spacer(Modifier.height(8.dp))
-    Body(
-        when (s.torMode) {
-            TorMode.DIRECT -> stringResource(R.string.status_mode_direct)
-            TorMode.BRIDGES -> pluralStringResource(R.plurals.status_mode_bridges, s.bridges.size, s.bridges.size)
-            TorMode.OFFLINE -> stringResource(R.string.status_mode_offline)
+    // "Offline" only with no Internet, no Phone and the cellular radio known to be off.
+    val header = PhoneTexts.status(s.internet, s.torMode, ui.phone.radio, s.cell, ui.phone.carried)
+    Text(
+        if (PhoneTexts.statusIsPlural(s.internet, s.torMode, ui.phone.carried)) {
+            pluralStringResource(header, s.bridges.size, s.bridges.size)
+        } else {
+            stringResource(header)
         },
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 8.dp).testTag("status_mode"),
     )
     if (ui.policyFailures.isNotEmpty()) {
         Spacer(Modifier.height(16.dp))
@@ -147,12 +158,28 @@ private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> U
 
     Card(stringResource(R.string.card_tor), "card_tor") { TorPart(ui) }
     Card(stringResource(R.string.card_filter), "card_filter") { FilterPart(ui) }
+    SectionTitle(stringResource(R.string.card_phone))
+    Box(Modifier.testTag("card_phone")) {
+        PhoneLines(ui.phone) {
+            InfoRow(
+                stringResource(R.string.row_ims),
+                stringResource(PhoneTexts.ims(ui.phone.ims, PhoneTexts.phoneMode(s.cell, ui.phone.carried))),
+                tag = "ims_status",
+            )
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    TextCard(
+        stringResource(R.string.card_carrier),
+        PhoneTexts.carrierNow(ui.phone.radio, s.internet, s.torMode, ui.phone.carried),
+        tag = "card_carrier",
+    )
     Card(stringResource(R.string.card_session), "card_session") { SessionPart(ui) }
 
     Spacer(Modifier.height(24.dp))
     OutlinedButton(
         onClick = onWifiSettings,
-        enabled = s.torMode != TorMode.OFFLINE,
+        enabled = s.internet == Internet.WIFI,
         modifier = Modifier.fillMaxWidth().height(56.dp).testTag("wifi_settings"),
     ) { Text(stringResource(R.string.wifi_settings)) }
     Spacer(Modifier.height(12.dp))
@@ -196,7 +223,7 @@ private fun TorPart(ui: StatusUi) {
     val module = ui.check?.status?.module
     val progress = module?.torBootstrap
     when {
-        ui.session.torMode == TorMode.OFFLINE -> Body(stringResource(R.string.tor_offline_state), inset = false)
+        ui.session.internet == Internet.NONE -> Body(stringResource(R.string.tor_no_internet), inset = false)
         ui.check == null -> Body(stringResource(R.string.tor_waiting), inset = false)
         !ui.check.status.filterAnswered -> Body(stringResource(R.string.addon_not_answering), inset = false)
         module == null || progress == null -> Body(stringResource(R.string.tor_no_module_status), inset = false)
@@ -222,7 +249,7 @@ private fun TorPart(ui: StatusUi) {
     // The module's reason when tor cannot connect (for example bridges
     // that need lyrebird). Display only.
     val error = module?.torError
-    if (error != null && ui.session.torMode != TorMode.OFFLINE) {
+    if (error != null && ui.session.internet != Internet.NONE) {
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.tor_error, error),
@@ -257,14 +284,15 @@ private fun SessionPart(ui: StatusUi) {
     val on = stringResource(R.string.value_on)
     val off = stringResource(R.string.value_off)
     ValueLine(
-        stringResource(R.string.row_tor),
-        stringResource(
-            when (s.torMode) {
-                TorMode.DIRECT -> R.string.value_direct
-                TorMode.BRIDGES -> R.string.value_bridges
-                TorMode.OFFLINE -> R.string.value_offline
-            },
-        ),
+        stringResource(R.string.row_internet),
+        stringResource(PhoneTexts.internetValue(s.internet, ui.phone.carried)),
+        tag = "row_internet",
+    )
+    ValueLine(stringResource(R.string.row_tor), stringResource(PhoneTexts.torValue(s.internet, s.torMode)), tag = "row_tor")
+    ValueLine(
+        stringResource(R.string.row_phone),
+        stringResource(PhoneTexts.phoneValue(s.cell, ui.phone.carried)),
+        tag = "row_phone",
     )
     ValueLine(stringResource(R.string.row_mac), stringResource(if (s.newMac) R.string.value_new else R.string.value_keep))
     ValueLine(stringResource(R.string.row_admin), if (s.admin) on else off)

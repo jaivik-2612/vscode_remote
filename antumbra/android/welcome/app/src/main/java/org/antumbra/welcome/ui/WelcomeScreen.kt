@@ -38,7 +38,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.antumbra.welcome.BridgeSource
 import org.antumbra.welcome.Bridges
+import org.antumbra.welcome.CellLevel
 import org.antumbra.welcome.Choices
+import org.antumbra.welcome.Internet
+import org.antumbra.welcome.PhoneChoices
+import org.antumbra.welcome.PhoneStatus
+import org.antumbra.welcome.PhoneTexts
 import org.antumbra.welcome.R
 import org.antumbra.welcome.TorMode
 
@@ -56,6 +61,8 @@ data class WelcomeUi(
     val emergencyError: String? = null,
     /** A call is in progress: "Return to call" is shown. */
     val inCall: Boolean = false,
+    /** The SIM, the cell radio and what the add-on allows (WEL8). */
+    val phone: PhoneStatus = PhoneStatus(),
 )
 
 /**
@@ -110,30 +117,65 @@ fun WelcomeScreen(
                 Spacer(Modifier.height(16.dp))
                 WarningBanner(stringResource(R.string.warning_no_addon), tag = "warning_no_addon")
             }
+            if (PhoneTexts.simUnlockedWithoutAddOn(ui.phone.sims, ui.addOnPresent)) {
+                Spacer(Modifier.height(16.dp))
+                WarningBanner(stringResource(R.string.warning_sim_unlocked_no_addon), tag = "warning_sim_unlocked_no_addon")
+            }
 
-            SectionTitle(stringResource(R.string.section_tor))
+            SectionTitle(stringResource(R.string.section_internet))
             RowGroup(Modifier.selectableGroup()) {
-                RadioRow(
-                    stringResource(R.string.tor_direct), stringResource(R.string.tor_direct_detail),
-                    selected = c.torMode == TorMode.DIRECT, tag = "tor_direct",
-                    onSelect = { onChoices(c.copy(torMode = TorMode.DIRECT)) },
-                )
+                InternetRow(Internet.WIFI, R.string.internet_wifi, R.string.internet_wifi_detail, "internet_wifi", ui, onChoices)
                 GroupDivider()
-                RadioRow(
-                    stringResource(R.string.tor_bridges), stringResource(R.string.tor_bridges_detail),
-                    selected = c.torMode == TorMode.BRIDGES, tag = "tor_bridges",
-                    onSelect = { onChoices(c.copy(torMode = TorMode.BRIDGES)) },
-                )
-                if (c.torMode == TorMode.BRIDGES) {
-                    BridgeChoices(ui, onChoices)
+                InternetRow(Internet.MOBILE, R.string.internet_mobile, R.string.internet_mobile_detail, "internet_mobile", ui, onChoices)
+                GroupDivider()
+                InternetRow(Internet.NONE, R.string.internet_none, R.string.internet_none_detail, "internet_none", ui, onChoices)
+            }
+
+            // How tor connects, only for a session with Internet.
+            if (c.internet != Internet.NONE) {
+                SectionTitle(stringResource(R.string.section_tor))
+                RowGroup(Modifier.selectableGroup()) {
+                    RadioRow(
+                        stringResource(R.string.tor_direct), stringResource(R.string.tor_direct_detail),
+                        selected = c.torMode != TorMode.BRIDGES, tag = "tor_direct",
+                        onSelect = { onChoices(c.copy(torMode = TorMode.DIRECT)) },
+                    )
+                    GroupDivider()
+                    RadioRow(
+                        stringResource(R.string.tor_bridges), stringResource(R.string.tor_bridges_detail),
+                        selected = c.torMode == TorMode.BRIDGES, tag = "tor_bridges",
+                        onSelect = { onChoices(c.copy(torMode = TorMode.BRIDGES)) },
+                    )
+                    if (c.torMode == TorMode.BRIDGES) {
+                        BridgeChoices(ui, onChoices)
+                    }
                 }
-                GroupDivider()
+            }
+
+            SectionTitle(stringResource(R.string.section_phone))
+            PhoneLines(ui.phone)
+            Spacer(Modifier.height(8.dp))
+            RowGroup(Modifier.selectableGroup()) {
+                val offReason = PhoneChoices.offReason(c)
                 RadioRow(
-                    stringResource(R.string.tor_offline), stringResource(R.string.tor_offline_detail),
-                    selected = c.torMode == TorMode.OFFLINE, tag = "tor_offline",
-                    onSelect = { onChoices(c.copy(torMode = TorMode.OFFLINE)) },
+                    stringResource(R.string.phone_off),
+                    stringResource(offReason ?: R.string.phone_off_detail),
+                    selected = c.cell == CellLevel.OFF, tag = "phone_off",
+                    enabled = offReason == null,
+                    onSelect = { onChoices(c.withPhone(false)) },
+                )
+                GroupDivider()
+                val callsReason = PhoneChoices.callsReason(ui.phone, ui.addOnPresent)
+                RadioRow(
+                    stringResource(R.string.phone_calls),
+                    stringResource(callsReason ?: R.string.phone_calls_detail),
+                    selected = c.cell != CellLevel.OFF, tag = "phone_calls",
+                    enabled = callsReason == null,
+                    onSelect = { onChoices(c.withPhone(true)) },
                 )
             }
+            Spacer(Modifier.height(8.dp))
+            TextCard(stringResource(R.string.card_carrier), PhoneTexts.carrierChoice(c), tag = "card_carrier_choice")
 
             SectionTitle(stringResource(R.string.section_network))
             RowGroup {
@@ -291,3 +333,62 @@ private fun BridgeChoices(ui: WelcomeUi, onChoices: (Choices) -> Unit) {
     Spacer(Modifier.height(4.dp))
 }
 
+/** One Internet choice; Mobile data only where the add-on allows it, with the reason otherwise. */
+@Composable
+private fun InternetRow(i: Internet, title: Int, detail: Int, tag: String, ui: WelcomeUi, onChoices: (Choices) -> Unit) {
+    val c = ui.choices
+    val reason = PhoneChoices.internetReason(i, ui.phone, ui.addOnPresent)
+    RadioRow(
+        stringResource(title), stringResource(reason ?: detail),
+        selected = c.internet == i, tag = tag, enabled = reason == null,
+        onSelect = { onChoices(c.withInternet(i)) },
+    )
+}
+
+/**
+ * The SIM card(s), the cellular radio and, while a SIM is in the phone,
+ * what to know about its PIN, on the Welcome and status screens. Shown
+ * inside Welcome only; nothing that identifies the SIM is read.
+ */
+@Composable
+fun PhoneLines(phone: PhoneStatus, ims: (@Composable () -> Unit)? = null) {
+    RowGroup {
+        phone.sims.forEachIndexed { i, sim ->
+            InfoRow(
+                if (phone.sims.size > 1) stringResource(R.string.row_sim_n, i + 1) else stringResource(R.string.row_sim),
+                stringResource(PhoneTexts.sim(sim)),
+                tag = "sim_status_${i + 1}",
+            )
+            GroupDivider()
+        }
+        InfoRow(stringResource(R.string.row_radio), stringResource(PhoneTexts.radio(phone.radio)), tag = "radio_status")
+        if (ims != null) {
+            GroupDivider()
+            ims()
+        }
+        PhoneTexts.simHelp(phone.sims)?.let {
+            GroupDivider()
+            InfoRow(stringResource(R.string.sim_pin_title), stringResource(it), tag = "sim_pin_help")
+        }
+    }
+}
+
+/** A titled card of plain paragraphs (string resources), such as "What your carrier sees". */
+@Composable
+fun TextCard(title: String, texts: List<Int>, tag: String) {
+    Surface(
+        shape = GroupShape,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(tag),
+    ) {
+        Column(Modifier.padding(20.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            texts.forEach {
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(it), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}

@@ -2,9 +2,15 @@
 
 The Welcome app is the device owner of an Antumbra phone, and its home
 screen until the session starts. At every boot it asks the questions the
-Tails Welcome Screen asks: connect to Tor directly, through bridges, or
-stay offline; use a new Wi-Fi hardware address; Administration. (The
-Unsafe Browser is shown but comes later.) It applies the device-owner
+Tails Welcome Screen asks, and two of its own (WEL8): Internet (Wi-Fi,
+mobile data through Tor, or none); with Internet, connect to Tor directly
+or through bridges; Phone (off, or calls and texts, which are not
+anonymous); use a new Wi-Fi hardware address; Administration. (The Unsafe
+Browser is shown but comes later.) Mobile data and calls are offered only
+as far as the phone's Phone-mode gate allows, which the module reports
+(none as installed). It shows the SIM's state, the cellular radio, the
+VoLTE line and what the carrier sees, and says when to type the SIM PIN,
+which Android's own screen asks for. It applies the device-owner
 policies for the session and hands the choices to the Antumbra module
 through a content provider. After Start it shows Tor's progress and the
 tracker filter's counters, and offers Quick power off, an immediate power-off.
@@ -18,8 +24,8 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 |---|---|
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
-| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), and the texts |
-| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` and `check-addon`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
+| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, and the texts |
+| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb`, `check-addon`, `check-module-word`, `check-choices`, `check-phone` and `check-module-cell`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
 | `gradlew`, `gradle/wrapper/gradle-wrapper.properties` | The pinned Gradle (see "Building") |
@@ -31,10 +37,26 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 
 1. **Welcome** (`WelcomeActivity`, `ui/WelcomeScreen.kt`). Title "Welcome to
    Antumbra", then:
-   - **Tor**: *Connect to Tor directly* (default), *Connect through bridges*
-     with *Bridges I enter* (a text field, one bridge line per line), or
-     *Stay offline*. *Built-in bridges (obfs4)* is shown but disabled, "Not
-     available yet", until the module ships lyrebird (see "Bridges").
+   - **Internet** (WEL8): *Wi-Fi* (default), *Mobile data, through Tor*,
+     or *None*. Mobile data is offered only where the module's gate says
+     `data` (the emulator, until FW9 and CI12), else shown disabled with
+     "Not available yet: mobile data through Tor needs checks on this
+     phone first." Mobile data needs the cellular radio, and while it is
+     on the carrier delivers calls and texts, so choosing it selects
+     *Calls and texts* and disables *Off*, with the reason on screen.
+   - **Tor**, only when Internet is not None: *Connect to Tor directly*
+     (default) or *Connect through bridges* with *Bridges I enter* (a text
+     field, one bridge line per line). *Built-in bridges (obfs4)* is shown
+     but disabled, "Not available yet", until the module ships lyrebird
+     (see "Bridges"). Plain bridges reach Tor but do not hide that you use
+     Tor, and the text says so.
+   - **Phone** (WEL8): the SIM's state per slot ("SIM card", "SIM card 2"
+     with two), the cellular radio (On, Off, Not known), "About the SIM
+     PIN" while a SIM is in the phone (the PUK's text while one needs it),
+     then *Off* (default) or *Calls and texts*, offered where the module's
+     gate says `phone` or `data`, else disabled with "Not available yet:
+     Phone needs checks on this phone first." Then the card **What your
+     carrier sees** for the choice made.
    - **Network**: *New Wi-Fi hardware address*, on by default.
    - **Persistent Storage**: shown, disabled, "Not set up yet" (v0).
    - **Additional settings**: *Administration*, off; *Unsafe Browser*,
@@ -46,15 +68,26 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
      calls"). When Start is refused, the reason appears above it.
 
    A red banner says when the add-on is not running (Wi-Fi then stays off
-   for the session) or when Welcome is not the device owner.
+   and Phone is not available for the session, and the SIM PIN is not to
+   be typed), when a SIM is unlocked while the add-on is not running, or
+   when Welcome is not the device owner.
 2. **Status** (`StatusActivity`, `ui/StatusScreen.kt`), after Start, and the
    "Antumbra" entry in the launcher: Tor's bootstrap progress and, when the
    module gives one, its reason why tor cannot connect; the tracker
    filter's counters (lookups, blocked, domains on the list, list version);
-   the session's choices and the firewall row ("Live (rules …)" only from
+   the **Phone** card (the SIM, the cellular radio, "Calls and texts
+   (VoLTE)" from the module's IMS reading in a Phone-mode session, "Not
+   checked" otherwise) and **What your carrier sees** for the radio as
+   it is now and what the add-on carries out; the session's choices (Internet, Tor, Phone, Wi-Fi address,
+   Administration, Unsafe Browser) and the firewall row ("Live (rules …)" only from
    `antumbra.fw.armed`); buttons for Wi-Fi settings and for adding the
    Quick Settings tile; and **Emergency call** and **Power off now** (Quick
-   power off) buttons that stay on screen. It polls `http://127.0.0.1:5380/status` every two seconds while
+   power off) buttons that stay on screen. Its first line says
+   "Offline" only when the session has no Internet and no Phone and the
+   cellular radio is known to be off (with Phone on, the radio comes back
+   on without a restart); no other text on either screen says it. Mobile
+   data the add-on did not allow (its gate lowered during the session) is
+   said to be off, with no Internet, never "over mobile data". It polls `http://127.0.0.1:5380/status` every two seconds while
    visible. If Welcome's process was restarted after Start and the module
    still holds the session, it says so and asks for a restart instead of
    offering the Welcome screen again.
@@ -74,10 +107,14 @@ Laid out for 412 dp wide phones and narrower.
 
 The UI's test tags are exposed as resource ids
 (`testTagsAsResourceId`), so uiautomator and test scripts find controls by
-name: `tor_direct`, `tor_bridges`, `tor_offline`, `bridges_builtin`,
-`bridges_custom`, `bridges_text`, `switch_mac`, `switch_admin`,
+name: `internet_wifi`, `internet_mobile`, `internet_none`, `tor_direct`,
+`tor_bridges`, `bridges_builtin`, `bridges_custom`, `bridges_text`,
+`sim_status_1` (and `_2`), `radio_status`, `sim_pin_help`, `phone_off`,
+`phone_calls`, `card_carrier_choice`, `switch_mac`, `switch_admin`,
 `switch_unsafe_browser`, `start_button`, `start_error`,
-`warning_not_owner`, `warning_no_addon`, `status_title`, `card_tor`,
+`warning_not_owner`, `warning_no_addon`, `warning_sim_unlocked_no_addon`,
+`status_title`, `status_mode`, `card_phone`, `ims_status`, `card_carrier`,
+`row_internet`, `row_tor`, `row_phone`, `card_tor`,
 `tor_progress`, `tor_error`, `card_filter`, `filter_queries`,
 `filter_blocked`, `row_firewall`, `warning_policies`, `warning_wifi_off`,
 `warning_lost`, `open_welcome`, `wifi_settings`, `add_tile`,
@@ -232,18 +269,26 @@ shutdown for the next boot; `BootState`, `Home`):
    "Add-on check"). If the module's status page says it already holds a
    started session from this boot (`module.welcome.started`), Start is
    refused and the user is asked to restart the phone: the module latches
-   the first session, so a second Start could only mislead.
+   the first session, so a second Start could only mislead. Then the
+   Phone and Internet choices are checked again against the module's last
+   word on the cell radio (WEL8): a choice it no longer offers (its gate
+   lowered, the add-on gone) is taken back on screen and Start refused
+   ("The add-on does not offer this choice on this phone any more"), with
+   nothing written and nothing loosened.
 4. The device-owner policies for the session are applied (`Policies.applyAtStart`):
-   the baseline again, and the Wi-Fi lock unless the session uses the
-   network and the add-on is present. **A network session (direct or
-   bridges) is refused when a protective policy failed**: tethering, Wi-Fi
-   Direct or safe-boot lock, USB debugging off, or, when Wi-Fi must stay
-   off, the Wi-Fi lock and Wi-Fi being off. Nothing is loosened then, and
-   the message says to choose *Stay offline* or restart. An offline session
-   starts anyway and lists the failures on the status screen.
+   the baseline again, and the Wi-Fi lock unless the session's Internet is
+   Wi-Fi and the add-on is present (a mobile-data session keeps Wi-Fi off
+   and locked too). **A session with Internet (Wi-Fi or mobile data) is
+   refused when a protective policy failed**: tethering, Wi-Fi Direct or
+   safe-boot lock, USB debugging off, or, when Wi-Fi must stay off, the
+   Wi-Fi lock and Wi-Fi being off. Nothing is loosened then, and the
+   message says to choose *Internet: None* or restart. A session without
+   Internet starts anyway and lists the failures on the status screen.
 5. Only then are the session's choices loosened: Administration lifts its
-   restrictions; for a network session with the add-on, the Wi-Fi lock is
-   lifted and Wi-Fi switched on.
+   restrictions; for a Wi-Fi session with the add-on, the Wi-Fi lock is
+   lifted and Wi-Fi switched on. The cellular radio and mobile data are the
+   module's (root): Welcome only reports the choice (`cell`), and the
+   module carries it out as far as the phone's gate allows.
 6. A leftover power-off request is deleted (see "Quick power off"), the
    session's choices are fixed in memory, and the provider starts
    answering `started = 1`. Policies come first because the module opens
@@ -289,6 +334,7 @@ projection may name any subset of the columns, in any order.
 | `unsafe_browser` | integer | `0` | `0` (the switch is disabled in v0) |
 | `persistent` | integer | `0` | `0` (Persistent Storage is not set up in v0) |
 | `session_id` | text | 32 hex digits, random per process | the same |
+| `cell` | text | `off` | `off`, `phone` (calls and texts) or `data` (mobile data through Tor, which comes with calls and texts); never `data` with `tor_mode=offline` (WEL8) |
 
 Before Start every column holds its safe value, so a module that read the
 row too early would still keep the network closed. Only `started = 1` makes
@@ -299,8 +345,8 @@ How the module should read it:
 
 ```sh
 content query --uri content://org.antumbra.welcome.state/session \
-    --projection started:tor_mode:mac:admin:unsafe_browser:persistent:session_id
-# Row: 0 started=1, tor_mode=bridges, mac=new, admin=0, unsafe_browser=0, persistent=0, session_id=5f0c...
+    --projection started:tor_mode:mac:session_id:cell
+# Row: 0 started=1, tor_mode=bridges, mac=new, session_id=5f0c..., cell=phone
 content query --uri content://org.antumbra.welcome.state/session --projection bridges
 # Row: 0 bridges=192.0.2.1:443 0123...ABCD
 # 192.0.2.2:443 ...
@@ -325,6 +371,10 @@ Rules for the module:
   (`dpm list-owners` shows `org.antumbra.welcome`); Welcome itself never
   reports `started = 1` otherwise, but another app could answer for a
   missing Welcome.
+- `cell` is the person's choice, not a permission: the module carries out
+  no more than the phone's Phone-mode gate allows, whatever the row says.
+  A Welcome from before WEL8 has no `cell` column (`Unknown column: cell`);
+  the module then reads its row without it and keeps the radio off.
 
 ### The module's word on the last calls (MOD11)
 
@@ -356,6 +406,36 @@ answers only `Result: Bundle[{v=1}]`, keeps the word in memory, never logs
 or shows it, and has no way to read it back. The module sends it only
 while Welcome is the device owner, and treats any other output as not
 taken.
+
+### The module's word on the cell radio (WEL8)
+
+A second method, the same rules (uid 0 only, checked before the method or
+the extras are looked at; `ModuleCalls` dispatches only then): what this
+phone's Phone-mode gate allows, what the module carries out, and the
+cellular radio as its last look read it.
+
+```sh
+content call --user 0 --uri content://org.antumbra.welcome.state --method module_cell \
+    --extra v:i:1 --extra gate:s:phone --extra cell:s:none --extra radio:s:off --extra at:l:1234
+# Result: Bundle[{v=1}]
+```
+
+| Extra | Type | Values |
+|---|---|---|
+| `v` | int | `1` |
+| `gate` | string | `off`, `phone`, `data`: the most the module carries out on this phone now |
+| `cell` | string | `none` before the module read a Start; then what it carries out: `off`, `phone`, `data` |
+| `radio` | string | `on`, `off`, `wait` (the modem starting or stopping), `unknown` |
+| `at` | long | that look's time since boot; `0` before the first look |
+
+Exactly these five, with these types; anything else is malformed and
+clears the word Welcome held (the safe side: no Phone choices, the radio
+"Not known"). The module sends it when one of them changes, when Welcome's
+process started again before Start, and every 5 minutes; Welcome trusts a
+radio reading for 10 minutes. It offers Mobile data only with `gate=data`
+and Calls and texts with `gate` `phone` or `data`; without a word (an
+older module, no add-on), neither. It is kept in memory (`CellWatch`),
+never logged, written or handed out, and shown only as the Phone lines.
 
 ## What Welcome reads from the status page
 
@@ -426,16 +506,19 @@ Start; only a Start loosens anything (`Policies.kt`).
 | Automatic time off, automatic time zone off, time zone UTC | always | See "Automatic time". |
 | `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY` | unless Administration | No apps from outside the preinstalled store. |
 | `DISALLOW_BLUETOOTH` | unless Administration | Bluetooth tethering and nearby-device scans. |
-| `DISALLOW_CONFIG_LOCATION`, and Location off | restriction unless Administration; Location switched off before Start and at every Start | Location, scans and GNSS through Tor still locate you. |
-| Wi-Fi locked: `DISALLOW_CHANGE_WIFI_STATE`, `DISALLOW_CONFIG_WIFI`, `DISALLOW_ADD_WIFI_CONFIG`; Wi-Fi off, checked | before Start; offline sessions; add-on missing | Fail closed: no network without the add-on. A device owner can still switch Wi-Fi (`WifiServiceImpl`, Android 16), except in airplane mode (below). |
-| Wi-Fi lock lifted, Wi-Fi on | Start, direct or bridges, add-on present | The user then adds a network in Settings. |
+| `DISALLOW_CONFIG_LOCATION`, and Location off | always, Administration included (since WEL8; Location switched off before Start and at every Start) | Location, scans and GNSS through Tor still locate you. Until WEL9 ("off, or on for chosen apps") there is no way to switch Location on. |
+| Wi-Fi locked: `DISALLOW_CHANGE_WIFI_STATE`, `DISALLOW_CONFIG_WIFI`, `DISALLOW_ADD_WIFI_CONFIG`; Wi-Fi off, checked | before Start; sessions whose Internet is not Wi-Fi (None, mobile data); add-on missing | Fail closed: no network without the add-on. A device owner can still switch Wi-Fi (`WifiServiceImpl`, Android 16), except in airplane mode (below). |
+| Wi-Fi lock lifted, Wi-Fi on | Start, Internet Wi-Fi, add-on present | The user then adds a network in Settings. |
 | `POST_NOTIFICATIONS` granted to itself | Start | The session notification. |
 | `READ_PHONE_STATE` granted to itself | before Start (`Home.claim`) | "Return to call" (`TelecomManager.showInCallScreen`; see "Emergency calls"). WEL9's phone-state denial must leave Welcome out. |
 
-"Administration" lifts the three "unless Administration" rows from Start
-until the next shutdown; it never turns debugging on. The protective rows
-(safe boot, tethering, Wi-Fi Direct, debugging, and the Wi-Fi lock when
-Wi-Fi must stay off) refuse a network session when they fail.
+"Administration" lifts the two "unless Administration" rows from Start
+until the next shutdown; it never turns debugging or Location on. The
+protective rows (safe boot, tethering, Wi-Fi Direct, debugging, and the
+Wi-Fi lock when Wi-Fi must stay off) refuse a session with Internet when
+they fail. No call or SMS restriction is set (`DISALLOW_OUTGOING_CALLS`,
+`DISALLOW_SMS`): emergency calls must work in every session, and Phone
+off is the module's radio, not a restriction.
 
 **Wi-Fi in airplane mode.** Android 16 lets only Settings switch Wi-Fi in
 airplane mode (`WifiServiceImpl.setWifiEnabled`: "only Settings can toggle
@@ -443,7 +526,7 @@ wifi"); a device owner is not privileged there. If the user switched Wi-Fi
 on in airplane mode, Welcome cannot switch it off. Then:
 
 - the configuration restrictions and the removed networks leave Wi-Fi
-  nothing to join, before Start and in an offline session;
+  nothing to join, before Start and in a session without Internet;
 - Start checks the Wi-Fi state (up to 5 seconds) and refuses a network
   session that needs Wi-Fi off (add-on missing), saying why;
 - a network session with the add-on needs Wi-Fi on anyway; if airplane
@@ -462,8 +545,8 @@ Not set in v0:
 
 - Location and nearby-device permissions set to denied for every app:
   needs a grant per installed app and on every new install (a
-  package-added listener); later work. Location stays off and locked unless
-  Administration, and Bluetooth is off.
+  package-added listener); later work. Location stays off and locked in
+  every session, and Bluetooth is off unless Administration.
 - Hiding or suspending the Magisk app in user 0 outside a maintenance
   mode: the weekly "Install to inactive slot" update needs the app, and
   that maintenance mode does not exist yet (later work).
@@ -527,6 +610,93 @@ They are lost at a restart, so Welcome keeps a marker in its
 device-protected storage while the hook is on; the hook then survives
 restarts until `0` is seen. Set it **before** `dpm set-device-owner`:
 becoming the device owner already switches debugging off.
+
+## SIM, cellular radio and VoLTE (WEL8)
+
+What the Phone parts show, and how Welcome learns it (`CellWord.kt`,
+`PhoneTexts.kt`). Public APIs only, none of them needing a permission
+(read in AOSP `android16-release`, and again in `android17-release` for
+OS1, where they stay public and permission-free; each call is wrapped
+against `UnsupportedOperationException` and `SecurityException`).
+`READ_PHONE_STATE`, which Welcome already holds for "Return to call"
+(WEL7), is not needed by any of them, and nothing here sets the radio or
+mobile data: a device owner may not (they are not in its global-settings
+allowlist), so that stays the module's, as root. What Welcome reads:
+
+- **The SIM's state per slot**: `TelephonyManager.getSimState(slot)` for
+  `0 until activeModemCount` (API 26 and 30): absent, locked (PIN), blocked
+  (PUK), locked to another network, unlocked, not ready, disabled for good,
+  card error, restricted, not known. The no-argument `getSimState()` is not
+  used: without a default subscription it reads "unknown" whenever a slot
+  holds a card.
+- **The cellular radio**: Welcome may not ask for the radio's power (radio
+  power events need `READ_PRIVILEGED_PHONE_STATE`, `isRadioOn` is a system
+  API), so it combines three things (`RadioRule`): a call in progress or
+  Quick power off's wait after one (on); its own service-state listener
+  (`TelephonyCallback.ServiceStateListener`, API 31, registered with
+  `INCLUDE_LOCATION_DATA_NONE`, API 33, so no cell identity, operator or
+  location ever reaches it; anything but `STATE_POWER_OFF` is on, IMS over
+  Wi-Fi included: the carrier can reach the phone then); and the module's
+  word (`module_cell`, at most 10 minutes old). Off only when something
+  says off and nothing says on; "Not known" otherwise, and every text
+  treats "Not known" as possibly on. The listener follows the default
+  subscription it was registered with, so a SIM's change registers it
+  again.
+- **The VoLTE line**: MOD11's IMS reading (`CallWatch.ims()`, 15 minutes)
+  in a Phone-mode session ("Not known yet" until the module's first
+  reading after the switch-on, never "off"); outside Phone mode the module
+  reads no IMS, so the line says "Not checked: Phone is off in this
+  session", not that VoLTE is off. "Ready over
+  Wi-Fi calling" says that Antumbra does not expect it: WEL8 does not
+  switch Wi-Fi calling off (MOD7 will), but the firewall refuses the UDP
+  that Wi-Fi calling needs for every uid but tor's [likely; PH3 and MOD7
+  check].
+- **What your carrier sees**: a plain card, the same on every phone, naming
+  no country or carrier. With the radio on (or not known): the SIM and the
+  name it is registered to, the phone's IMEI (a new Wi-Fi address does not
+  change it), the cell towers and so roughly where you are, who you call
+  and text, when, for how long and what is said in ordinary calls and
+  texts; calls and texts never go through Tor; with mobile data through
+  Tor, only encrypted Tor traffic and that Tor is used (plain bridges do
+  not hide it); with Wi-Fi, that a phone hotspot's carrier sees Tor use.
+  With the radio off: nothing new.
+
+**No identifier is read.** Welcome holds `READ_PHONE_STATE` (granted to
+itself for "Return to call"), and Android lets a device owner holding it
+read the IMEI, the IMSI and the SIM's serial number
+(`DevicePolicyManagerService`, `LegacyPermissionManagerService`). So this
+is a rule of Welcome's own code, checked by `NoIdentifiersTest` over every
+source file (comments taken out): no IMEI, MEID, device ID, IMSI, ICCID,
+card ID, phone, voicemail or call number, group ID, NAI, serial, type
+allocation or manufacturer code, operator, country, carrier ID, service
+state or cell identity is asked for, in the Java form (`getImei`,
+`getSimOperatorName`) or the Kotlin one (`.imei`, `.simOperatorName`); no
+class that lists subscriptions, cells or cards (`SubscriptionManager`,
+`SubscriptionInfo`, `CellInfo`, ...) is named; and a `TelephonyManager` or
+`ServiceState` Welcome holds is used only through an allow-list
+(`activeModemCount`, `getSimState`, `registerTelephonyCallback`,
+`unregisterTelephonyCallback`; `state`). The test seeds each form, and
+Welcome's own uses, to show the scan catches the first and passes the
+second. Welcome holds no location permission. The SIM's
+state and the radio are shown inside Welcome only: never logged, written
+to a file or a property, or handed to another app.
+
+**The SIM PIN.** Welcome cannot type it: `supplyIccLockPin` is a system
+API behind `MODIFY_PHONE_STATE`. When a slot needs its PIN (or PUK),
+SystemUI shows its own full-screen SIM-PIN screen, even with no screen lock
+set, and because Welcome's lock task keeps the keyguard
+(`LOCK_TASK_FEATURE_KEYGUARD`, the price of emergency calls, WEL7) it
+shows over the Welcome screen, so Welcome's own warnings cannot be seen
+while it is up. "About the SIM PIN" therefore words the rule around what
+the person knows at that moment (as `install.md` does): type the PIN only
+after a normal start (nothing updated since a start whose Welcome screen
+showed no warning, no volume key held while it started: Magisk's Safe
+Mode); after an update, start once without the SIM card and check the
+Welcome screen first; if in doubt, do not type it and restart. While the
+add-on is not running, the warning banner says not to type it, and a
+second banner says when a SIM is unlocked anyway. Whether the SIM-PIN
+screen can be left without the PIN (PH4), and the SIM's state with the
+radio off (PH3), are checked on the phone.
 
 ## Emergency calls
 
@@ -799,14 +969,17 @@ $W provision                                   # test hook on, dpm set-device-ow
 $W check-emergency                             # before Start: the emergency dialer opens from the lock task; dials nothing
 $W check-power-menu                            # before Start: the power menu shows its Emergency item (never pressed); menu closed
 $W screenshot welcome.png
-$W start --tor bridges --bridges-file plain-bridges.txt
+$W check-choices --gate off                    # WEL8, before Start: the six attempts; the gate the module told Welcome
+$W start --tor bridges --bridges-file plain-bridges.txt   # --internet wifi|mobile|none, --phone off|calls
 $W expect started=1 tor_mode=bridges bridges=2
 $W check-policies                              # add --admin, --keep-adb, --wifi-locked as they apply
 $W check-addon                                 # Welcome reads antumbra.fw.armed (opens the status screen, scrolls to the row)
+$W check-phone --cell off                      # WEL8: the status screen's session lines, Phone and carrier cards
+$W check-module-cell                           # WEL8 (adb root): the word on the cell radio from root only
 $W screenshot status.png
 $W power-off-tile                              # waits until the boot id changes
 $W wait-welcome 180
-$W start --tor offline --expect-adb-loss       # last: clears the hook; adb goes away at Start
+$W start --internet none --expect-adb-loss     # last: clears the hook; adb goes away at Start
 ```
 
 It finds controls by their resource ids through `uiautomator dump`, taps
@@ -815,7 +988,46 @@ user), `dumpsys user`, `settings`, `cmd wifi` and `getprop`. Without the
 test hook, Welcome switches USB debugging off at provisioning and in every
 session, Administration or not; `start` refuses to run then unless
 `--expect-adb-loss` says that losing adb is the point.
-`ci/test-welcome-adb.sh` runs the script against a fake adb.
+`ci/test-welcome-adb.sh` runs the script against a fake adb, and WEL8's
+`check-choices` and `check-phone` against a fake screen that shows
+Welcome's own texts (from `strings.xml`), scrolls (a fast swipe flings
+on) and dumps what is on screen as Compose's accessibility tree does (a
+card cut off by an edge lists only its texts on screen), and applies
+Welcome's rules to taps, with a switch for each fault the checks must
+catch (an unavailable row enabled, the wrong row checked, Phone rows that
+do not follow mobile data, "offline" on screen, a radio or SIM line that
+disagrees, Tor's rows without Internet, taps that do nothing, a carrier
+card without what the carrier sees, a wrong VoLTE line) and a layout in
+which no page of the scan shows the carrier card whole.
+
+`check-choices --gate off|phone|data` (WEL8) runs before Start. For each
+of the six attempts (Internet Wi-Fi, mobile data, None; Phone off, calls
+and texts; mobile data straight after Phone off, so that it is seen to
+select calls and texts by itself) it taps the Internet row, then the
+Phone row, by their test tags, from the top of the page, as a person
+would, then reads the whole page (slow scrolls, every text and
+description) and checks: which rows are checked; rows the gate does not
+allow disabled, unchecked and giving their reason; Phone off disabled
+with mobile data; Tor's rows exactly when there is Internet; the carrier
+card for the choice with its key statements (with Phone on, that the
+carrier sees the SIM, the IMEI and roughly where you are, and that calls
+never go through Tor; with Phone off, that the radio stays off and what an
+emergency call shows the carrier); the radio line against the registry's `mRadioPowerState` (read
+before and after the page; a change between them skips the comparison);
+the SIM line against `gsm.sim.state`; and no "offline" anywhere. A row or
+card counts only from a dump in which it lies wholly inside the scroll
+view (Compose lists only the on-screen texts of a card or info row cut
+off by an edge, and gives it the bounds of its visible part); one that no
+page shows whole is scrolled wholly into view with slow drags and read
+again. It ends with Wi-Fi and Phone off selected. It only taps rows,
+scrolls and reads. `check-phone [--internet …] --cell off|phone|data`
+reads the status screen the same way (no "offline" there unless the
+session has no Internet and no Phone and the radio reads off; the VoLTE
+line "Not checked" with Phone off; the carrier card's key statements). `check-module-cell` (adb as root)
+sends the word on the cell radio as the shell user (refused), malformed
+as root (refused) and the most careful word as root ("gate off, nothing
+carried out, the radio not known": taken); the module's next word
+replaces it.
 
 `check-emergency` runs before Start, while Welcome holds its lock task. It
 opens the emergency dialer twice, with Welcome's Emergency call button (the
@@ -926,7 +1138,29 @@ here):
   `Binder.getCallingUid()` straight to that one check (a JVM test reads
   the provider's source for it; that the binder gives the caller's uid
   there is checked on the emulator only, `welcome_module_word`, which
-  passed in run 20: the shell's word refused, root's taken)).
+  passed in run 20: the shell's word refused, root's taken)). WEL8
+  (2026-10-20, 74 unit tests in all): the six attempts of the two choices
+  and the five sessions they give, mobile data always with calls and
+  texts, what each gate offers (none, off, phone, data) and Start's check,
+  which only takes choices back; the module's word on the cell radio
+  (exact keys, types and values, uid 0 only and checked before the method
+  or the extras, a malformed word clearing the held one, an unknown method
+  changing neither word, never logged or written); the radio line for
+  every mix of the module's word (on, off, wait, unknown, missing, old,
+  from the future), the listener and a call; all twelve SIM states; the
+  texts for each session, radio state, way to connect and what the add-on
+  carries out: "offline" only without Internet and Phone and with the
+  radio known off, and in exactly one string; mobile data the add-on did
+  not allow never said to be on; the VoLTE line never "off" in Phone mode;
+  the carrier card complete whenever the radio may be on, and for every
+  Phone-on choice; the key statements word for word (Phone on is not
+  anonymous; with mobile data the carrier sees that Tor is used but not
+  what you do; Phone off gets no calls or texts; with the radio on, an
+  emergency call included, the carrier sees the phone, its SIM and roughly
+  where it is); the corrected texts; no number in the new texts; the SIM-unlocked warning
+  only while the add-on is known not to run; Location locked in every
+  session and Wi-Fi only for a Wi-Fi session; `cell` in the row; and no
+  identifier API named in any source file.
 - `ci/welcome-adb.sh` and `ci/test-welcome-adb.sh` pass shellcheck, and the
   fake-adb test passes: bridge lines with `[`, `]`, `+`, `/`, `=` are
   typed, `;`, quotes and `\` refused; the test-hook rule; check-policies
@@ -952,7 +1186,20 @@ here):
   closed and the saved value put back; a value it did not save left
   alone); check-module-word (only "none" and malformed words sent; fails
   when the shell user's or a malformed word is taken, when root's is not,
-  and without adb as root); expect.
+  and without adb as root); expect; WEL8: `start --internet/--phone` and
+  the row's `cell`; `check-choices` at each gate (six attempts, six
+  screenshots, Wi-Fi and Phone off again; what each gate lets the walk
+  choose; a carrier card that no page of the scan shows whole, read once
+  scrolled into view) and each fault it must catch (an unavailable row
+  enabled, the wrong row checked, Phone rows that do not follow mobile
+  data, "offline" on screen, the radio or SIM line disagreeing, Tor's rows
+  without Internet, taps that do nothing, a gate told wrong, a carrier card
+  without what the carrier sees), and that it only taps, scrolls and
+  reads; `check-phone` (on and off radio, "offline" allowed only without
+  Internet and Phone and with the radio off, a wrong VoLTE or Internet
+  line); `check-module-cell` (only the most
+  careful word sent; fails when the shell user's or a malformed word is
+  taken, when root's is not, and without adb as root).
 - `tools/builtin-bridges.sh` and its `--check` against the pinned source.
 - Framework behaviour read in Android 16 sources (android16-release):
   `ACTION_SHUTDOWN` is sent registered-only and deferred for cached
@@ -1029,7 +1276,15 @@ before Start, from the emergency dial pad and from the power menu's item
 (the dial-pad one, and the one that calls at once where the emergency
 affordance is on), "Return to call" bringing it back after Back, Quick power off waiting
 during that call, and the keyguard before Start with a swipe lock or a PIN
-(the phone, PH4).
+(the phone, PH4). For WEL8: the choices at each gate level, the radio and
+SIM lines, the status screen in Phone mode and the word on the cell radio
+from root only (the emulator job's `welcome_choices_gate_*`,
+`welcome_radio_line`, `welcome_phone_status`, `welcome_module_cell`, not
+yet run on CI; how uiautomator reports the texts of the merged choice rows
+is seen there first); the SIM-PIN screen over Welcome and whether it can be
+left without the PIN, the SIM's state with the radio off, IMS and the VoLTE
+line under the firewall, and emergency calls in each combination (the
+phone: PH3, PH4).
 
 ## Open risks
 
@@ -1048,7 +1303,8 @@ during that call, and the keyguard before Start with a swipe lock or a PIN
   add-on is refused (see "Wi-Fi in airplane mode").
 - **Quick power off waits after every call** unless the module's fresh
   word says it was an ordinary call (MOD11), which it says only in a
-  Phone-mode session (WEL8; until then it waits after every call):
+  Phone-mode session (WEL8; the per-phone gate keeps Phone mode off on the
+  phone until PH3, so there it waits after every call):
   Welcome cannot tell calls apart without system permissions, and on
   Android 17 the module cannot either. A call that is still connecting (a few seconds) is not seen
   (after an ordinary call, until the module's next look), and the end of a
@@ -1066,6 +1322,14 @@ during that call, and the keyguard before Start with a swipe lock or a PIN
   settings, and what they start in that task (see "Emergency calls"). The
   same feature lets emergency calls through, so no setting avoids it;
   keeping the cellular radio off before Start (MOD6) does.
+- **Every app can read the SIM's state and whether the phone has
+  service**, without a permission, as Welcome does: an app can tell Phone
+  mode from Phone off, and a SIM from none (threat model).
+- **The SIM-PIN screen covers Welcome** before Start when the SIM is
+  locked; the person must not type the PIN in a start without the add-on.
+  Welcome can only say so.
+- **Location cannot be switched on** in any session until WEL9 brings
+  "off, or on for chosen apps" (WEL8 took it out of Administration).
 - **Quick power off restarts rather than powers off** unless the module
   installs Welcome as a privileged app or implements the power-off request.
 - **Bridges need lyrebird**, which the tor part does not build yet; only

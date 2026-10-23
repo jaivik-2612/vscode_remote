@@ -36,6 +36,7 @@ import org.antumbra.welcome.ui.StatusUi
 /** Screen 2, after Start. Also the "Antumbra" entry in the launcher. */
 class StatusActivity : ComponentActivity() {
     private var check by mutableStateOf<AddOnCheck?>(null)
+    private var phone by mutableStateOf(PhoneStatus())
     private var message by mutableStateOf<String?>(null)
     private var messageIsError by mutableStateOf(false)
 
@@ -57,6 +58,7 @@ class StatusActivity : ComponentActivity() {
                                 canPowerOff = QuickPowerOff.canPowerOff(this@StatusActivity),
                                 message = message,
                                 messageIsError = messageIsError,
+                                phone = phone,
                             ),
                             onOpenWelcome = ::openWelcome,
                             onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
@@ -71,11 +73,13 @@ class StatusActivity : ComponentActivity() {
                 }
             }
         }
-        // Poll the status page every two seconds while the screen is visible.
+        // Poll the status page, the SIM and the cell radio every two
+        // seconds while the screen is visible.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     check = withContext(Dispatchers.IO) { AddOnCheck.run() }
+                    phone = withContext(Dispatchers.IO) { CellWatch.status(this@StatusActivity) }
                     delay(2000)
                 }
             }

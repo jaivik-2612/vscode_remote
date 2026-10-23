@@ -5,9 +5,10 @@ the phone (stage 1 of the design: official LineageOS 23.2 plus Magisk). It
 starts the firewall before Android, starts tor and the DNS filter as their
 own unprivileged users, keeps Wi-Fi's saved networks and the DHCP lease
 memory in RAM, sets fail-safe Android settings, keeps the cellular radio
-off unless the session chose Phone mode (and never switches it off during
-a call), and switches tor's network on only after the Welcome screen's
-Start, the way the person chose there.
+off unless the session chose Phone mode and this phone's Phone-mode gate
+allows it (and never switches it off during a call), and switches tor's
+network on only after the Welcome screen's Start, the way the person chose
+there.
 It follows the shared contract (`antumbra/android/docs`); the module ID is
 `antumbra`, installed at `/data/adb/modules/antumbra`.
 
@@ -180,11 +181,25 @@ the person may set by hand for tor.
    just before the switch-off. After each look the module tells Welcome,
    and Welcome alone, what the calls of the last 5 minutes were (below,
    "The module's word to Welcome: the last calls"; outside Phone mode
-   every call reads `unknown`), and then checks the ports again (step 8).
+   every call reads `unknown`). At every turn it also reads this phone's
+   Phone-mode gate (below, "The Phone-mode gate") and, when the gate, what
+   it carries out or the radio changed, and every 5 minutes, tells
+   Welcome (below, "The module's word to Welcome: the cell radio"); a turn
+   that looked or told checks the ports again at once (step 8).
 7. **Welcome's Start**: every 2 seconds for the first 3 minutes after the
    framework answers, then every 5,
    `content query --user 0 --uri content://org.antumbra.welcome.state/session
-   --projection started:tor_mode:mac:session_id`. The first row with
+   --projection started:tor_mode:mac:session_id:cell`. A Welcome from
+   before WEL8 answers `java.lang.IllegalArgumentException: Unknown column:
+   cell` on standard error (and nothing on standard output): while Welcome
+   is the device owner, that Welcome process's row is read without the
+   column, logged once, its sessions keep the cell radio off, and the gate
+   told to Welcome is `off` meanwhile. Before Start, a row with another
+   `session_id` (a new Welcome process, an updated Welcome perhaps) is
+   asked again with the column. Any other answer
+   without a row (Welcome not up yet, a Java start that failed) is still
+   waiting, so a passing failure never makes a Phone session keep the radio
+   off. The first row with
    `started=1` and valid values counts only while Welcome is the device
    owner (`cmd device_policy list-owners` shows
    `admin=org.antumbra.welcome/…,DeviceOwner` for user 0; below). It is
@@ -202,13 +217,20 @@ the person may set by hand for tor.
      `bin/lyrebird`; without lyrebird in the module they are refused.
    - `mac=keep`: `non_persistent_mac_randomization_force_enabled=0` (the
      boot default is 1: a new MAC address for every connection);
-   - the cell radio: `session_cell` in `service.sh` gives the session's
-     choice, `off` or `phone` (calls and texts). Welcome's row has no such
-     column yet; WEL8 adds `cell` to the shared contract and changes only
-     that function. Until then every session is `off`. With `phone`, the
-     radio is switched on at Start and never before (decision D12): mobile
-     data off for every SIM first, then Android's airplane-mode path
-     (`enable` and `disable`, or only `disable` when airplane mode is on).
+   - the cell radio: `session_cell` in `service.sh` reads the row's `cell`
+     (WEL8): `off`, `phone` (calls and texts) or `data` (mobile data
+     through Tor, which comes with calls and texts); anything else, and
+     `data` with `offline`, is an invalid row (still waiting). The gate in
+     force at Start is kept with it (`state/module/session` gets `cell=`
+     and `gate=`), and the module carries out the lowest of the choice, the
+     gate at Start and the gate now (below). With `phone` or `data` carried
+     out, the radio is switched on at Start and never before (decision
+     D12): mobile data off for every SIM first, then Android's
+     airplane-mode path (`enable` and `disable`, or only `disable` when
+     airplane mode is on). With `data`, mobile data then comes on for the
+     default data SIM (`cmd phone data enable`) once the radio reads on and
+     the firewall is live. In every other session mobile data is switched
+     off again whenever a look finds it stored on.
 
    The network is switched on only while the firewall is live and no
    other uid holds a service port; otherwise it is tried again at every
@@ -255,7 +277,8 @@ deletes itself and its data. While Android runs, the module's `service.sh`
 is stopped first (its cell radio watch would write the radio's values
 again; it checks that the recorded process ID is that script), and the
 script is run at once; tor, the filter and the firewall stay until the
-restart. It also deletes the early arm script. Saved Wi-Fi networks are not
+restart. It also deletes the early arm script and the Phone-mode gate
+(`/data/adb/antumbra-cell`). Saved Wi-Fi networks are not
 restored: there are none on flash. Mobile data stays off for each SIM
 Android knew (the per-SIM values are not recorded); switch it on in
 Settings. `enable_cellular_on_boot`, `mobile_data_always_on` and
@@ -275,11 +298,16 @@ power-off.
 | `run/` | 2950:2950, 0751 | tor's control socket and cookie; `status.json` (0644) |
 | `state/` | root, 0711 | `fw-exempt.conf`, `fw-relays.conf` (not written in v0) |
 | `state/tor/` | 2950:2950, 0700 | tor's DataDirectory |
-| `state/module/` | root, 0700 | process IDs, the session (`session`, 0600: session ID, tor mode, MAC, cell radio) and its bridges, the firewall's lock and hash (`fw/`) |
+| `state/module/` | root, 0700 | process IDs, the session (`session`, 0600: session ID, tor mode, MAC, cell radio chosen, the Phone-mode gate at Start) and its bridges, the firewall's lock and hash (`fw/`) |
 | `lists/` | root, 0755 | updated block list and DoH list (none in v0: the module's copies in `MODDIR/lists` are used) |
 | `log/` | root, 0755 | `module.log`, `firewall.log`, `dnsfilter.log`, `tor.stderr`, `tor.log` (2950, 0600) |
 
 Logs never contain bridge lines or addresses.
+
+Outside the tmpfs, on flash: `/data/adb/antumbra-cell` (root, 0600), the
+Phone-mode gate (below, "The Phone-mode gate"), written only by the
+install's PH3 step (or CI as root on the emulator), never by the module,
+and deleted by `uninstall.sh`; as installed it does not exist.
 
 ### status.json
 
@@ -436,8 +464,14 @@ keys already in Settings.Global and the IDs in
 `content://telephony/siminfo`), and runs `cmd phone data disable` for the
 default data SIM now; again at shutdown, after every switch-on of the cell
 radio, whenever a SIM's state changes (`gsm.sim.state`), and before the
-module itself switches the radio on (Phone mode). The person may switch
-mobile data on after Start; it then goes through Tor like everything else.
+module itself switches the radio on (Phone mode). Mobile data is a
+choice made at Start (Welcome's Internet: mobile data through Tor, where
+the gate allows it; WEL8): in such a session the module switches it on
+for the default data SIM over the live firewall, and again after each of
+its own off writes; in every other session a look that does not read the
+radio off and finds `mobile_data` or a `mobile_data<subId>` stored 1 (the
+person in Settings, an app allowed to, a new SIM's default) switches it
+off again (`settings list global`, native: no Java start).
 On the emulator too (until the cell radio work it was left alone there):
 CI switches its simulated mobile data off itself, and a start without the
 module must find it stored off. A SIM Android has never seen has no
@@ -446,9 +480,10 @@ default true): gaps.
 
 ### The cell radio: off from power-on
 
-The cellular radio stays off unless the session chose Phone mode (WEL8,
-not built yet; until then every session keeps it off), and in Phone mode
-it comes on at Start only (decision D12). Android 16 sources read for
+The cellular radio stays off unless the session chose Phone mode at
+Start (WEL8: calls and texts, or mobile data, which comes with them) and
+this phone's gate allows it (below, "The Phone-mode gate"; no phone as
+installed), and in Phone mode it comes on at Start only (decision D12). Android 16 sources read for
 this (`android16-release`, and the same places on `android16-qpr2-release`,
 which LineageOS 23.2 is): `ServiceStateTracker`, `PhoneGlobals`,
 `RadioOnHelper`, `TelephonyConnectionService`, `EmergencyStateTracker`,
@@ -537,7 +572,8 @@ else. The dumps go through pipes only: the registry prints the incoming
 number. The module's log names the hold (`held: call`, `callback`,
 `recent`, `unknown`); `status.json` never does.
 
-**Phone mode** (`session_cell`, the one place WEL8 changes): before Start
+**Phone mode** (`cell_effective` = `phone` or `data`: the session's
+choice, from `session_cell`, as far as the gate allows): before Start
 the radio is off whatever the choice; at Start, mobile data off for every
 SIM, then the switch-on above; afterwards airplane mode switched on by the
 person is left alone, and if the phone process restarts outside a hold
@@ -546,7 +582,106 @@ module switches it on again, with the same holds (during a hold it reads
 1 and the radio stays on). With mobile data off, Android still allows
 the IMS and emergency bearers and SUPL during an emergency call or
 callback mode (`DataNetworkController`); whether the carrier's IMS
-registers so is PH3's.
+registers so is PH3's. A mobile-data session (`data`) adds one step
+(`cell_data_step`): once the switch-on is done, the last look read the
+radio on, the firewall is live and the fail-safe holds no radio,
+`cmd phone data enable` for the default data SIM, logged once ("mobile
+data on"); after each of the module's own mobile-data-off writes (a radio
+switch-on, a SIM's change) it comes on again. It is not a radio-off step:
+no hold applies and it never waits for one. The person switching mobile
+data off in Settings is respected until the module's next own write. A
+gate lowered from `data` to `phone` during the session switches mobile
+data off at once and keeps the radio on; lowered to `off`, the radio goes
+off after the holds. Either way the lower gate holds until the next start,
+even if the file says more again.
+
+### The Phone-mode gate (WEL8)
+
+PH3 is the gate for Phone mode on the phone ("Phone mode is enabled only
+for A, or for B after FW6 passes"), and the SIM's mobile data through Tor
+(FW9, CI12) waits for PH3. So the module carries out a session's Phone
+choice only as far as a per-phone gate allows: the root-only file
+`/data/adb/antumbra-cell`, a regular file (not a link) of root's that
+neither group nor others may write, whose first line is exactly `phone`
+or `data`. Anything else, or no file, is `off`; `/data/adb` is root's
+alone, so no app can write it (the precedent is `/data/adb/antumbra-force`).
+
+- **As installed, on every phone: no file, `off`.** Every session keeps
+  the radio and mobile data off whatever Welcome's row says, and Welcome
+  shows calls and texts and mobile data as "Not available yet", with the
+  reason. Nothing in the module or Welcome writes the file.
+- **The install's PH3 step** writes `phone` by hand (`install.md`), keeps
+  it only for outcome A, or B once FW6 passes, and deletes it for C.
+- **`data` counts on the emulator only** until FW9 and CI12 have passed:
+  on a phone (`is_emulator` false) the module reads a `data` file as
+  `phone` while `CELL_DATA_ON_PHONE` is 0, and a later queue item sets
+  it to 1. Until then no phone switches mobile data on for a session,
+  whatever the file says.
+- **CI's emulator** writes the same file as root (`off`, `phone`, `data`
+  in turn; `ci/emulator-antumbra.sh`), exactly as the install would; the
+  e2e sandbox writes it in its own `/data/adb`. There is no build flag,
+  property or test hook: the zip CI tests is the zip a release ships, and
+  a release does exactly this (no file: off; `phone`: calls and texts;
+  `data`: calls and texts on a phone, mobile data too on the emulator).
+- It is read at every turn (a `stat` and a `read`, no Java start), and a
+  change is logged once ("cell: Phone-mode gate now phone"). The gate in
+  force at Start is kept for the session, and after Start it can only go
+  down: a gate lowered during a session takes effect at once (the radio off
+  with every hold above) and holds for the rest of the session (logged
+  once); a gate raised during a session changes nothing until the next
+  start, so the radio never comes on in the middle of a session started
+  with it refused, or after the gate was taken away.
+- It survives module updates (the PH3 outcome belongs to the phone and
+  its SIM, not to a release); `uninstall.sh` deletes it.
+- **Rejected:** a `settings.conf` line (those are Settings.Global values,
+  readable by every app and restored by `uninstall.sh`); a property
+  (every app reads them, and the shell can set `debug.` ones); a Welcome
+  debug flag (a release Welcome would differ from the tested one, and
+  Welcome cannot hold the radio anyway); a file in the module's directory
+  (replaced at every update).
+
+Emergency calls get nothing new in any session: no call or SMS
+restriction (`DISALLOW_OUTGOING_CALLS` and `DISALLOW_SMS` are never set),
+and no radio step but MOD6's airplane mode with its holds, which the
+emergency path undoes. Wi-Fi calling stays as Android has it until MOD7:
+WEL8 does not switch it off, and outside Phone mode every call still
+reads `unknown` (MOD11's gap below stays true).
+
+### The module's word to Welcome: the cell radio (WEL8)
+
+So that Welcome offers only what the module will carry out, and can say
+whether the cellular radio is on (Welcome may not ask for the radio's
+power: that needs a privileged permission), root tells Welcome's provider,
+while Welcome is the device owner:
+
+```sh
+content call --user 0 --uri content://org.antumbra.welcome.state --method module_cell \
+    --extra v:i:1 --extra gate:s:phone --extra cell:s:none --extra radio:s:off --extra at:l:1234
+# Result: Bundle[{v=1}]
+```
+
+`gate` is the gate now (`off`, `phone`, `data`; `off` while the module
+reads an older Welcome's row without the `cell` column), `cell` what the module
+carries out (`none` before it read a Start, then `off`, `phone` or
+`data`), `radio` the registry's `mRadioPowerState` at the last look (`on`,
+`off`, `wait` for unavailable, `unknown`) and `at` that look's time since
+boot (0 before the first look). Exactly these five, with these types:
+anything else is malformed, and Welcome then forgets the word it held
+(the safe side: no Phone choices, the radio "Not known"). Told when the
+gate, the cell or the radio changed (the first turn included), when
+Welcome's process started again before Start (a new `session_id`), and
+every 5 minutes, so that Welcome can tell a live reading from an old one
+(it trusts a word for 10 minutes). While Welcome does not take it, it is
+tried again after 30 s, then after twice as long each time, up to 5
+minutes (a Welcome from before WEL8 answers "Unknown method"); the refusal
+and the recovery are logged once each. Taken from uid 0 only, like the
+word on the calls; nothing of it goes into `status.json`, a property, a
+file or the log (the log names the gate and the session's cell choice, as
+it names "cell radio off", never the word). It is a separate method, so
+MOD11's word is unchanged. Cost: one `content call` (a Java start, up to
+10 s, then the port check again) per change and per 5 minutes, about 12
+an hour when nothing changes, plus `cmd device_policy list-owners`
+(native) before each.
 
 ### The module's word to Welcome: the last calls (MOD11)
 
@@ -558,13 +693,15 @@ after any call. Root can read Telecom's own record of each call, so after
 each look the module tells Welcome what the calls of the last 5 minutes
 were, and Quick power off skips its 5-minute wait only after a call the
 module positively knows was not an emergency call. Everything else waits
-as before. That can only be known in a Phone-mode session (WEL8): outside
-it the cell radio is off by design, so a carrier call there is an
+as before. That can only be known in a Phone-mode session (WEL8, as far
+as the phone's gate allows it: `cell_effective` `phone` or `data`):
+outside it the cell radio is off by design, so a carrier call there is an
 emergency call, a Wi-Fi call (until MOD7 switches Wi-Fi calling off) or
 follows a switch-on by something else, which the module cannot tell apart,
-and every call reads `unknown`. Until WEL8 every session is outside Phone
-mode, so the word is never `ordinary` and Quick power off waits after every
-call, exactly as before MOD11.
+and every call reads `unknown`. On a phone without the gate (every phone
+until PH3) every session is outside Phone mode, so the word is never
+`ordinary` and Quick power off waits after every call, exactly as before
+MOD11.
 
 **Where the answer comes from.** Telecom's call analytics, in the
 `dumpsys telecom` the holds already read (sources: `Call.java`,
@@ -720,8 +857,9 @@ service `PhoneGlobals` starts): `mImsMmTelRegistrationState = 2` with the
 Registration Log's last `handleImsRegistered ... imsTransportType=WWAN`
 (`cell`) or `=WLAN` (`wifi`), else `registered`; 0 or 1 `none`; anything
 else `unknown`. No `cmd phone` command reports it, and the public API
-needs a privileged permission. Outside Phone mode `off`. Until WEL8 every
-session is `off`, so this part runs in unit tests only.
+needs a privileged permission. Outside Phone mode `off`. Welcome shows
+it as the VoLTE line in a Phone-mode session; the e2e `phone` scenario
+reads it from a stand-in dump, and on a phone it waits for the gate.
 
 **Records.** In `service.sh`'s memory (RAM, root): the times of the last
 look that saw an emergency sign and of the last doubt (renewed by each
@@ -973,7 +1111,43 @@ Welcome and then checks the ports, one line after the other; `ims_state`
 `ImsPhone` block, the service missing, empty input) and `ims_step` (only
 in Phone mode after Start and the switch-on, never during a hold, at most
 every 300 s, unknown when unreadable), and the IMS reading going with the
-word. Under `sh`, dash, busybox and mksh (`MKSH=` names Android's).
+word. And WEL8: `cell_gate_owner_ok` itself on this host's files (root's
+with each mode, group or others able to write, another owner, no file);
+`cell_gate` (no file, `phone` with and without a newline, `data` on a
+phone and on the emulator, the first line only; off for `PHONE`, `Phone`,
+`phone data`, spaces, CR, empty lines, `off`, `calls`, a link, a
+directory, another owner); `install.md`'s three commands for the gate
+(write, check, delete) run through a stand-in `adb shell`, which joins
+its arguments as the real one does, a phone shell that cannot reach
+`/data/adb` and a stand-in `su -c` that can: the file written 0600 saying
+`phone` and read as the gate, then deleted, while the form with the
+redirection outside `su`'s one argument writes nothing; `cell_effective` for all 27 mixes of the
+choice, the gate at Start and the gate now; the watch turn by turn per
+session: calls and texts without the gate (the radio never on; the gate
+raised during the session changes nothing), with it (on at Start only;
+the gate removed: off at the next look, or 5 minutes after a call; the
+gate removed, then written again: still off for the session),
+mobile data (on only after the switch-on with the radio read on, the
+firewall live and no fail-safe, once; again after a SIM's change, not held
+by a call, and after airplane mode off by the person; the gate lowered to
+`phone`: off at once, the radio kept on), mobile data switched on in
+Settings in sessions without it (off again, logged; nothing read while
+the radio reads off), MOD11's `ordinary` in a mobile-data session and IMS
+off once the gate is taken away; `cell_offer_tell` turn by turn (the exact
+arguments; the first turn; every 300 s; a new session ID; a gate change,
+`data` on a phone read as `phone`; Start; the radio on; `off` while
+Welcome's row is read without the `cell` column; nothing while Welcome is
+not the device owner; a refusal tried again after 30, 60, 120,
+240 and then every 300 s, logged once, the recovery logged once, no word
+in the log; `status_write` holding none of it); `session_cell` and
+`session_read` cut out of `service.sh` (each value, `data` with
+`offline` refused, the row after another line on standard error, an
+older Welcome's `Unknown column: cell` read without the column only from
+the device owner and logged once, its row with a new `session_id` before
+Start asked again with the column, the gate told as `off` meanwhile, any
+other answer still waiting, the choice and the gate latched and written to
+the root-only record). Under
+`sh`, dash, busybox and mksh (`MKSH=` names Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
 real firewall, tor, DNS filter and `antumbra-run`, without Android. Each
@@ -987,7 +1161,11 @@ and `cmd` play Telecom (with Analytics entries in Android 16's layout), the
 telephony registry and airplane mode (with the phone process's part:
 `cell_on`, `enable_cellular_on_boot`, the radio) from files the test
 writes; the stand-in for `content` also plays Welcome's provider taking
-the module's word (`content call`, recorded), or refusing it (counted); a
+the module's two words (`content call`, recorded), or refusing them
+(counted), or, with `welcome-old`, playing a Welcome from before WEL8 (no
+`cell` column: "Unknown column: cell" on standard error; `module_cell`:
+"Unknown method"); `cmd phone data enable` sets the default data SIM's
+`mobile_data<subId>`, and the phone process's dump comes from a file; a
 copy of `sleep` named `com.android.phone` stands in for the phone process
 (toybox `pidof` finds it by name; the test restarts it); and a file
 bound over `/proc/uptime` (rewritten
@@ -1008,21 +1186,26 @@ closed while tor is offline; other UDP refused; no Settings before the
 framework is up, all of them after (the cell radio's among them, and
 `enable_cellular_on_boot=0` already at installation; each key recorded
 once); in every scenario
-the list narrowed to the cell radio, `cell=off` in the session record, and
-no switch-on by the module; the module's word to Welcome (MOD11) told
-through the provider only, with its six fields and nothing else, never
-`ordinary` (no scenario is in Phone mode, so every call reads `unknown`),
-and never in `status.json`, a file or the module's log (one `none` in
-scenarios without a call); and per scenario:
+the list narrowed to the cell radio, the session's `cell=` and `gate=` in
+the session record, outside `phone` and `data` no switch-on of the radio
+or mobile data by the module and no gate file appearing; the module's
+word to Welcome (MOD11) told through the provider only, with its six
+fields and nothing else, never `ordinary` outside the `phone` scenario
+(outside Phone mode every call reads `unknown`), and never in
+`status.json`, a file or the module's log (one `none` in scenarios
+without a call); the word on the cell radio (WEL8) with its five fields
+only, never in `status.json` or the log; and per scenario:
 
 | Scenario | Shell | Checks |
 |---|---|---|
-| `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
-| `direct` | mksh, LineageOS hotdog properties | mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
-| `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script is deleted |
+| `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; the word on the cell radio before Start (`gate off`, `cell none`) and after it (`cell off`); a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
+| `direct` | mksh, LineageOS hotdog properties | a Welcome from before WEL8: Start read without the `cell` column, logged once, the radio off; `module_cell` refused, logged once, tried again less and less often, never taken; mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
+| `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; calls and texts chosen without the gate (every phone as installed): logged, the word says `cell off`, the radio never on; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; the gate written during the session: seen, nothing switched; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script and the gate are deleted |
 | `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; during an active call on the cell radio, iptables broken → firewall `open`, property removed, Wi-Fi and mobile data off at once, status says the rest follows (not why); no airplane mode and no Bluetooth off during the call or 270 s after it; 5 minutes after it both, status says so; repaired → live; shutdown → `cell_on 1` and `airplane_mode_on 0` stored, no airplane-mode command |
 | `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
 | `cell` | busybox, LineageOS hotdog properties | the cell radio switched on by something else and off again by the module, after each hold, each shown held after the clock is moved on and released 5 minutes after it ends: a switch-on with airplane mode off (an emergency text, or the emergency path); airplane mode switched off by the person (mobile data off again at once); a ringing, an active and a held call; callback mode from the property, and for calls and texts from the registry; an unreadable state; a call seen only by Telecom's call counter; an emergency call seen only by its entry; `enable_cellular_on_boot` stored 1 while a hold lasts and written 0 before the switch-off; the module's word at each step: `none` at the first turn, `unknown` for a switch-on by something else, an unreadable state, Telecom's dump cut before its newest entry right after an ordinary call, and every call (a ringing, active and held call, a call seen only by the counter, a VoIP call with no earlier doubt: outside Phone mode, never `ordinary`), `emergency` with its end for callback mode and the emergency calls (read again at the next look), then exactly one `none` 5 minutes after the look after the end; the cut dump refused (logged as unreadable, then readable again with the whole dump); the stand-in phone process restarted: `unknown`, one `none` 5 minutes later, and with the radio on, a restart 200 s after the switch-on holds nothing (off 5 minutes after the switch-on); Welcome refusing an emergency word: logged, tried again at the next looks, and taken again; Welcome refusing another word: tried once, not again after each look, taken again at the first try 300 s later; shutdown during a call leaves airplane mode as it is |
+| `phone` | mksh, LineageOS hotdog properties | WEL8's calls and texts with no Internet, the gate file saying `data` (read as `phone` on a phone until FW9 and CI12): the word says so before Start; nothing switched before Start (D12); at Start the record says `cell=phone gate=phone`, mobile data off, then airplane mode enable and disable, the radio on, the word `cell phone radio on`; IMS read from a stand-in phone-process dump (`ims=cell`, the VoLTE line); an ordinary call reads `ordinary` (MOD11 in Phone mode, the first e2e coverage of it) and stays so after it ends, holding nothing; mobile data switched on "in Settings": off again at the next look, logged; the gate removed right after the call: held 5 minutes after the call, then off, IMS `off` again; the gate written again in the same session: the word says `cell off`, and after airplane mode off by the person the radio goes off again after the hold (the lower gate holds until the next start); shutdown stores the radio and mobile data off |
+| `data` | busybox | WEL8's mobile data through Tor on the emulator (gate `data`): an offline row asking for mobile data refused (still waiting); tor directly with `cell=data`: the radio on at Start, then `cmd phone data enable` after the switch-on's own mobile data off, over the live firewall, the default SIM's `mobile_data1=1`, tor's network on, the word `cell data radio on`; airplane mode on and off by the person: mobile data off, then on again; the gate lowered to `phone`: mobile data off at once, the radio kept on, not switched on again, the word `cell phone`; shutdown stores mobile data off and does not switch it on again |
 
 ```sh
 sudo tests/e2e-host.sh --tor-bin WORK/x86_64/tor-hostcheck \
@@ -1049,12 +1232,12 @@ as above, `tests/build-test-tools.sh` (cached by its pins), and
 `sudo tests/e2e-host.sh` with tor's `tor-hostcheck` and the filter's
 x86_64 binary from the earlier jobs.
 
-The sandbox cannot enter Phone mode (`session_cell` says `off`, and
-production code has no test hook), and outside it every call reads
-`unknown` anyway: an `ordinary` word, the second reading of each call
-(Telecom's call list printed before its entry), a call kept in scope
-while its entry is open and it is not listed, and a later call renewing
-an earlier sign or doubt are shown by the unit tests only.
+The sandbox enters Phone mode only in `phone` and `data`, through the
+same gate file a phone has (production code has no test hook): the second
+reading of each call (Telecom's call list printed before its entry), a
+call kept in scope while its entry is open and it is not listed, and a
+later call renewing an earlier sign or doubt are shown by the unit tests
+only.
 
 What these tests cannot show is Android: SELinux, netd, Magisk's timing,
 Welcome, Wi-Fi and the overlay. The emulator job covers part of that; the
@@ -1193,17 +1376,46 @@ phone the rest.
   switches the radio on it stays on until the next start. OS1 needs
   another call counter there, such as the event log's `CallTC@<n>`
   descriptions under `Historical Events:` plus the listed calls.
+- **Phone mode (WEL8) has run only in the sandbox and, from its first run
+  on, on the emulator** (calls and texts, the gate written as root). On a
+  phone it waits for the gate, which PH3 writes; until then nothing on
+  the phone switches the radio or mobile data on for a session. Not seen
+  on a device yet: IMS registering under the firewall, the VoLTE line's
+  readings, `cmd phone data enable` on the hotdog's two slots, the APN's
+  protocol and tor over mobile data (PH3, FW9, CI12). On Android 17 (OS1)
+  the registry's radio line was read in the source again; `cmd phone data
+  enable` was not.
+- A mobile-data session that ends in a crash or a power loss leaves the
+  default SIM's `mobile_data<subId>=1` stored: the next start has the
+  radio off from power-on and the module writes 0 once the framework
+  answers, but a start without the module would connect that SIM once
+  something switches the radio on (design section 7.3). Reachable only
+  where the gate allows `data`: the emulator, until FW9 and CI12.
+- In a mobile-data session only the default data SIM's mobile data is
+  switched on, and the module does not check the other SIM's: one the
+  person switches on there stays on until the session ends (its traffic,
+  like everything else's, is held to tor by the firewall).
+- Mobile data switched on in a session without it is switched off at the
+  next look, so for up to 10 s (60 s while the radio reads off: then it
+  cannot connect anyway); the firewall holds that traffic to tor
+  meanwhile.
+- The gate is read at every turn, but a raised gate counts only from the
+  next start, and Welcome learns a change at the module's next word (the
+  next turn): a choice offered before Start can still be refused at Start
+  (Welcome checks again, and says so), never carried out above the gate.
 
 **The module's word to Welcome (MOD11)**
-- Nothing relaxes until WEL8's Phone mode: outside it every call reads
-  `unknown` (the cell radio is off there, so a carrier call is an
-  emergency call, a Wi-Fi call or follows a switch-on by something else,
-  and the dump cannot tell a carrier call from a VoIP call at every
-  moment), and Quick power off waits after every call, as before MOD11.
-  Before Phone mode ships, WEL8 (or PH3) must check on the phone that the
-  phone process is found (`phone=yes`; the emulator job checks it from its
-  next run on, and has not printed it yet), and that a real call's entry
-  (`endTime`, `isEmergency`) and the IMS word read as expected.
+- Nothing relaxes outside Phone mode, which the gate keeps off on every
+  phone until PH3: outside it every call reads `unknown` (the cell radio
+  is off there, so a carrier call is an emergency call, a Wi-Fi call or
+  follows a switch-on by something else, and the dump cannot tell a
+  carrier call from a VoIP call at every moment), and Quick power off
+  waits after every call, as before MOD11. Wi-Fi calling stays on until
+  MOD7 (WEL8 does not switch it off); this gap stays true with it. Before
+  the gate is written on the phone, PH3 must check there that the phone
+  process is found (`phone=yes`; the emulator job read it in run 22), and
+  that a real call's entry (`endTime`, `isEmergency`) and the IMS word
+  read as expected.
 - A call Telecom drops before listing it (no account to place it) keeps
   `endTime: 0`: in Phone mode the word then stays `unknown` while Telecom
   keeps that entry (its last 100 calls), so Quick power off waits after
@@ -1307,6 +1519,15 @@ phone the rest.
   try every 5 minutes (12 an hour), and at once for an emergency word or a
   word of another kind. Each look also starts one `toybox pidof` and reads
   one `/proc` file (the phone process).
+- The word on the cell radio (WEL8's `module_cell`) is one more
+  `cmd device_policy list-owners` and `content call` (a Java start) at
+  each change of the gate, the cell or the radio and every 5 minutes as a
+  heartbeat: about 12 an hour when nothing changes (with the radio
+  switched on and off by MOD6, a few more). While Welcome refuses it, a
+  try after 30, 60, 120 and 240 s, then every 5 minutes. The gate costs a
+  `stat` and a `read` per turn, the check that mobile data stays off one
+  native `settings list global` per look while the radio does not read
+  off (every 10 s); no Java start.
 - `uninstall.sh` restores the values recorded at installation, even if
   the person changed one of those keys since.
 - API 36 only: LineageOS 24 (Android 17) needs a new release (or

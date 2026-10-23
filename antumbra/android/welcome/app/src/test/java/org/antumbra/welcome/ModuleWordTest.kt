@@ -253,13 +253,15 @@ class ModuleWordTest {
         assertEquals("module_word", ModuleWord.METHOD)
         // The provider's call hands the binder's own uid straight to receive (tested above), and does
         // nothing before it. Only the emulator (welcome_module_word) checks the uid through binder.
+        // Since WEL8 it goes through ModuleCalls.receive, which checks the uid
+        // before it looks at the method (CellWordTest).
         val provider = File("src/main/java/org/antumbra/welcome/StateProvider.kt").readText()
         val call = Regex(
             """override fun call\(method: String, arg: String\?, extras: Bundle\?\): Bundle \{\s*""" +
-                """ModuleWord\.receive\(Binder\.getCallingUid\(\), method, arg, \{""",
+                """ModuleCalls\.receive\(Binder\.getCallingUid\(\), method, arg, \{""",
         )
         assertTrue(call.containsMatchIn(provider))
-        assertEquals(1, Regex("""ModuleWord\.receive\(""").findAll(provider).count())
+        assertEquals(1, Regex("""\.receive\(""").findAll(provider).count())
         assertFalse(provider.contains("isAllowedWriter"))
         // The word is never logged.
         listOf("ModuleWord.kt", "StateProvider.kt", "EmergencyCall.kt").forEach {

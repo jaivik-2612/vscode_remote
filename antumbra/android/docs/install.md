@@ -288,6 +288,62 @@ v31.0, the version Antumbra has read and tested against, not the newest.
    `adb exec-out su -c 'cat /data/adb/antumbra/log/module.log' > module.log`
    (Magisk asks on the phone whether to grant the shell root).
 
+**Phone mode stays shut until PH3 (WEL8).** As installed, the Welcome
+screen shows *Calls and texts* and *Mobile data, through Tor* as "Not
+available yet", and the module keeps the cellular radio and mobile data
+off in every session, whatever is chosen: the per-phone gate, the
+root-only file `/data/adb/antumbra-cell`, does not exist. Only PH3 opens
+it:
+
+- For PH3's measurement (with the SIM PIN-locked, D3), write it as root
+  while adb still answers: here, before section 8, or in the install
+  sitting with the testOnly build's hook. The module reads it at its next
+  turn; a session started before that keeps the radio off until the next
+  start. Type each command as it stands: the outer double quotes hand the
+  whole line to the phone, and the single quotes hand it to `su` as one
+  command, so that root writes the file. (Without them the phone's shell,
+  which is not root, would try to write the file itself, fail, and never
+  run `su`.)
+
+  ```sh
+  adb shell "su -c 'echo phone > /data/adb/antumbra-cell && chmod 0600 /data/adb/antumbra-cell'"
+  adb shell "su -c 'ls -l /data/adb/antumbra-cell; cat /data/adb/antumbra-cell'"
+  ```
+
+  The second command must show `-rw-------`, `root root` and `phone`.
+- Keep it only for outcome A, or B once FW6 passes, and only if MOD11's
+  checks in PH3 read as expected. Otherwise delete it
+  (`adb shell "su -c 'rm -f /data/adb/antumbra-cell'"`); without adb, take
+  the SIM out, remove the module in the Magisk app (its removal deletes
+  the gate), restart and install the module again. A gate deleted during
+  a session holds for the rest of it: written again, it counts from the
+  next start.
+- Never write `data` on the phone: mobile data through Tor waits for FW9
+  and CI12, and until a release says otherwise the module reads `data` as
+  `phone` on a phone anyway.
+
+**The SIM PIN.** Android asks for it at each start on its own screen,
+which comes up over the Welcome screen; Welcome cannot type it, and its
+red warning that the add-on is not running cannot be seen behind that
+screen. So decide from what you know at that moment. Type the PIN only
+after a start you know to be normal: nothing (Antumbra, LineageOS or
+Magisk) was updated since the last start whose Welcome screen showed no
+red warning, and you did not hold a volume key while the phone started
+(that is Magisk's Safe Mode, which starts it without the add-on and its
+firewall). Otherwise do not type it: if you need help, use only the PIN
+screen's emergency call button, and restart the phone.
+
+- After an update, make the first start without the SIM card: with no SIM
+  there is no PIN screen, and the Welcome screen shows whether the add-on
+  runs. If it shows no red warning, power off, put the SIM card back and
+  start again: that start counts as normal.
+- If the PIN screen lets you back to the Welcome screen without the PIN,
+  check first that it shows no red warning. Whether it can be left on this
+  phone is not known yet: PH3 and PH4 record it here, and this text
+  follows.
+
+DOC4 rewrites the rest of this guide's SIM text.
+
 ## 8. Welcome as device owner
 
 The phone must have no account at this point (`dpm` refuses otherwise).

@@ -277,6 +277,13 @@ object CallWatch {
     /** The IMS registration the module last read, for WEL8's VoLTE line; UNKNOWN when missing or old. */
     fun ims(): ImsState = words.ims(SystemClock.elapsedRealtime())
 
+    /**
+     * A call is in progress, or one ended less than 5 minutes ago (the
+     * module keeps the radio as it is then): WEL8's radio line says On.
+     */
+    fun callOrAfter(context: Context): Boolean =
+        inCall(context) || record.waitLeftMs(SystemClock.elapsedRealtime()) > 0
+
     /** Why Quick power off must wait now, for the person; null when it may go ahead. */
     fun holdMessage(context: Context): String? {
         val now = SystemClock.elapsedRealtime()

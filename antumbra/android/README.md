@@ -37,10 +37,17 @@ work queue is `docs/queue.md`.
   renewals by Android's network stack aside). Nothing goes out until the
   Welcome screen's Start. This holds while the Antumbra layer runs; see
   "What it is not" for a phone that starts without it.
-- **A Welcome screen at every start**, as in Tails: connect to Tor directly,
-  through bridges, or stay offline; a new Wi-Fi hardware address;
-  Administration (off). Persistent Storage and the Unsafe Browser are shown
-  but come later.
+- **A Welcome screen at every start**, as in Tails: Internet (Wi-Fi,
+  mobile data through Tor, or none); Tor directly or through bridges;
+  Phone (off, or calls and texts, which are not anonymous and never go
+  through Tor); a new Wi-Fi hardware address; Administration (off).
+  Mobile data and calls are offered only once the phone has passed its
+  checks (a per-phone gate that no phone has as installed; mobile data on
+  the emulator only, for now), with the reason shown until then. Welcome
+  shows the SIM's state, the cellular radio, the VoLTE line and what the
+  carrier sees, and says to type the SIM PIN only once the firewall is on
+  (it cannot type it itself). Persistent Storage and the Unsafe Browser
+  are shown but come later.
 - **Trackers blocked by the system.** A small DNS filter between the system's
   resolver and Tor's answers "does not exist" for tracker domains. Most apps
   cannot get around it; `docs/design.md` (section 6) lists what it cannot
@@ -206,11 +213,14 @@ cancels a run still going. In order:
      by itself.
    - **ANTUMBRA:** the module zip installed and started as Magisk would at
      boot (the emulator is rooted with `adb root`, not Magisk), Welcome as
-     device owner (its debug build's test hook keeps adb), a default
-     session (Administration off) started with "Start Antumbra", the phone
-     on Wi-Fi only, tor's bootstrap, a tracker test, LAN and loopback probes
-     as root and as an app, and the firewall put back to its armed state
-     with the network up.
+     device owner (its debug build's test hook keeps adb), every
+     combination of the Welcome screen's Internet and Phone choices walked
+     at each level of the Phone-mode gate (written as root, as the install
+     writes it), then a default session (Administration off; Internet
+     Wi-Fi, Phone: calls and texts, so the emulated radio stays on with
+     mobile data off) started with "Start Antumbra", tor's bootstrap, a
+     tracker test, LAN and loopback probes as root and as an app, and the
+     firewall put back to its armed state with the network up.
 
    The leak analyser classifies every packet the emulated phone sent: Tor
    relay or directory, configured bridge, link-level (ARP, DHCP), or LEAK.

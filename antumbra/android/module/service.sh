@@ -28,13 +28,20 @@
 #      (enable_cellular_on_boot is kept at 1 while that hold lasts); after
 #      each look, the module's word on the calls of the last 5 minutes
 #      (emergency, ordinary, unknown or none) to Welcome alone, through its
-#      provider as root, while Welcome is the device owner (MOD11);
+#      provider as root, while Welcome is the device owner (MOD11); and the
+#      module's word on the cell radio (this phone's Phone-mode gate, what
+#      the module carries out, the radio as it read it; WEL8's module_cell),
+#      so that Welcome offers only what the gate allows;
 #   7. wait for the Welcome screen's Start (started=1 in its provider, and
 #      Welcome the device owner): offline keeps tor's network off; direct
 #      and bridges set the bridges, if any, and DisableNetwork 0 over tor's
 #      control socket, once the firewall is live and no other uid holds a
-#      service port; a session in Phone mode (WEL8; none yet) has the cell
-#      radio switched on at Start, mobile data off first;
+#      service port; a session that chose Phone (cell=phone) or mobile data
+#      (cell=data) has the cell radio switched on at Start, mobile data off
+#      first, as far as the gate in /data/adb/antumbra-cell allows (none
+#      allows it as installed); in a mobile-data session mobile data then
+#      comes on over the live firewall; in every other session it is kept
+#      off;
 #   8. then, until shutdown: at every turn, check who holds 9040, 9053,
 #      5335 and 5380 and go back to the armed state while another uid
 #      does; restart tor or the filter if they stop; check the firewall
@@ -70,9 +77,17 @@ S_STARTED=0
 SES_MODE=
 SES_MAC=
 SES_KIND=
-# off, or phone (calls and texts: the cell radio on after Start, mobile data
-# off); session_cell decides it.
+# The session's choice for the cell radio: off, phone (calls and texts: the
+# radio on after Start, mobile data off) or data (also mobile data on);
+# session_cell reads it. The gate in force at Start (SES_GATE) and the gate
+# now cap what is carried out (lib/antumbra.sh, cell_effective).
 SES_CELL=off
+SES_GATE=off
+# 1 once a row showed that this Welcome has no cell column (an older one),
+# and that Welcome process's session_id (session_row): a new one before
+# Start has its row read with the cell column again.
+WELCOME_OLD=0
+WELCOME_OLD_SID=
 # pending: the network is to be opened when tor and the firewall are ready;
 # open: opened (or nothing to do: offline); failed: this session's bridges
 # cannot work.
@@ -227,30 +242,85 @@ nap() {
 	done
 }
 
-# session_cell ROW: the session's choice for the cell radio: "off", or
-# "phone" (calls and texts: the radio on after Start, mobile data off).
-# Welcome's row has no such column yet: WEL8 adds "cell" to the shared
-# contract (design section 3, Welcome's StateProvider, session_read's
-# projection and the e2e tests, changed together) and reads it here, with
-# a check of its value. Until then every session keeps the cell radio off.
-# This is the only place that decides it.
-session_cell() { echo off; }
+# session_cell ROW: the session's choice for the cell radio, from the row's
+# cell column (shared contract, design section 3): "off", "phone" (calls
+# and texts: the radio on after Start, mobile data off) or "data" (also
+# mobile data on, through Tor). Anything else, and "data" in an offline
+# session (mobile data is an Internet), is refused (returns 1): the row is
+# invalid and the module keeps waiting. This is the only place that reads
+# it; the gate (cell_gate) decides how much of it is carried out.
+session_cell() {
+	_sc_c=$(row_get "$1" cell)
+	case $_sc_c in off | phone | data) ;; *) return 1 ;; esac
+	if [ "$_sc_c" = data ] && [ "$(row_get "$1" tor_mode)" = offline ]; then
+		return 1
+	fi
+	echo "$_sc_c"
+}
+
+# session_row: Welcome's row into _sr_row (not in a subshell: it sets what
+# it learns): with the cell column, or without it while this Welcome
+# process has none (WELCOME_OLD, latched with its session_id in
+# WELCOME_OLD_SID). Such a row with another session_id is a new Welcome
+# process, perhaps an updated Welcome: its row is asked again with the
+# column, in the same turn. Returns 1 when there is no row to read yet.
+session_row() {
+	if [ "$WELCOME_OLD" = 1 ]; then
+		_sr_row=$(welcome_query started:tor_mode:mac:session_id) || return 1
+		_sr_sid=$(row_get "$_sr_row" session_id)
+		# Latched without a session ID (its first row could not be read):
+		# this is that process's.
+		[ -n "$WELCOME_OLD_SID" ] || WELCOME_OLD_SID=$_sr_sid
+		if [ -z "$_sr_sid" ] || [ "$_sr_sid" = "$WELCOME_OLD_SID" ]; then
+			return 0
+		fi
+		WELCOME_OLD=0
+		log "welcome: Welcome started again (a new session); its row is read with the cell column again"
+	fi
+	_sr_row=$(welcome_row)
+	case $? in
+	0) return 0 ;;
+	2)
+		# Only Welcome's own answer (as the device owner) counts.
+		welcome_is_owner || return 1
+		WELCOME_OLD=1
+		log "welcome: this Welcome has no cell column (an older one); its sessions keep the cell radio off"
+		_sr_row=$(welcome_query started:tor_mode:mac:session_id) || return 1
+		WELCOME_OLD_SID=$(row_get "$_sr_row" session_id)
+		return 0
+		;;
+	esac
+	return 1
+}
 
 # session_read: read Welcome's row. Returns 0 once started=1 has been read
 # with valid values from Welcome as the device owner, and keeps that
 # session (SES_*) for the rest of the boot: Welcome starts a new, unstarted
 # session if its process dies, and that must not change what was chosen.
+# A Welcome without the cell column (from before WEL8) answers "Unknown
+# column: cell": its row is read without it, and its sessions keep the
+# cell radio off. That holds for that Welcome process only: before Start, a
+# new session_id (a new Welcome process, an updated Welcome perhaps) has
+# its row read with the cell column again.
 session_read() {
-	_sr_row=$(welcome_query started:tor_mode:mac:session_id) || return 1
+	session_row || return 1
+	# Before Start a new session_id means a new Welcome process, which
+	# holds no word from the module yet (cell_offer_tell).
+	_sr_sid=$(row_get "$_sr_row" session_id)
+	[ -z "$_sr_sid" ] || WELCOME_SID=$_sr_sid
 	[ "$(row_get "$_sr_row" started)" = 1 ] || return 1
 	_sr_mode=$(row_get "$_sr_row" tor_mode)
 	_sr_mac=$(row_get "$_sr_row" mac)
-	_sr_sid=$(row_get "$_sr_row" session_id)
 	_sr_bad=
 	case $_sr_mode in direct | bridges | offline) ;; *) _sr_bad=tor_mode ;; esac
 	case $_sr_mac in new | keep) ;; *) _sr_bad=mac ;; esac
 	case $_sr_sid in '' | *[!0-9a-f]*) _sr_bad=session_id ;; esac
 	[ "${#_sr_sid}" -ge 8 ] && [ "${#_sr_sid}" -le 64 ] || _sr_bad=session_id
+	if [ "$WELCOME_OLD" = 1 ]; then
+		_sr_cell=off
+	else
+		_sr_cell=$(session_cell "$_sr_row") || _sr_bad=cell
+	fi
 	if [ -n "$_sr_bad" ]; then
 		log "welcome: the row has an invalid $_sr_bad; still waiting"
 		return 1
@@ -286,14 +356,23 @@ session_read() {
 	fi
 	SES_MODE=$_sr_mode
 	SES_MAC=$_sr_mac
-	SES_CELL=$(session_cell "$_sr_row")
+	SES_CELL=$_sr_cell
+	# The gate in force at Start is kept for the session, and can only go
+	# down from here: a gate lowered later holds until the next start, a
+	# gate raised later changes nothing until then (cell_gate_step,
+	# cell_effective).
+	SES_GATE=$(cell_gate)
+	CELL_GATE=$SES_GATE
 	S_STARTED=1
 	# The session record stays in the root-only state directory; status.json,
 	# which every app can read, says only that a session started.
-	printf 'session_id=%s\ntor_mode=%s\nmac=%s\ncell=%s\n' "$_sr_sid" "$SES_MODE" "$SES_MAC" "$SES_CELL" \
-		>"$PRIV/session"
+	printf 'session_id=%s\ntor_mode=%s\nmac=%s\ncell=%s\ngate=%s\n' "$_sr_sid" "$SES_MODE" "$SES_MAC" "$SES_CELL" \
+		"$SES_GATE" >"$PRIV/session"
 	chmod 0600 "$PRIV/session"
-	log "welcome: session started (tor $SES_MODE, MAC $SES_MAC, cell radio $SES_CELL)"
+	log "welcome: session started (tor $SES_MODE, MAC $SES_MAC, cell radio $SES_CELL, gate $SES_GATE)"
+	if [ "$(cell_rank "$SES_CELL")" -gt "$(cell_rank "$SES_GATE")" ]; then
+		log "cell: the session chose $SES_CELL; this phone's gate allows $SES_GATE, so the module carries out $(cell_effective)"
+	fi
 	return 0
 }
 
@@ -514,15 +593,17 @@ while :; do
 	# is open: after Start has been read, so that a Phone-mode session's
 	# switch-on follows it in the same turn. It ends when Android begins to
 	# shut down (shutdown_check has stored what the next start needs). After
-	# a look the module gives Welcome its word on the last calls (MOD11). A
-	# turn in which it looked (two dumps, up to 8 s) and told Welcome the
-	# word (up to 10 s) checks the ports again at once, so that neither is
-	# added to the next turn's wait (cell_tell tells only in a turn that
-	# looked).
+	# a look the module gives Welcome its word on the last calls (MOD11),
+	# then, when it changed and every 5 minutes, its word on the cell radio
+	# (WEL8). A turn in which it looked (two dumps, up to 8 s) or told
+	# Welcome a word (up to 10 s each) checks the ports again at once, so
+	# that none of it is added to the next turn's wait (cell_tell tells only
+	# in a turn that looked).
 	if [ "$SETTINGS_DONE" = 1 ] && [ "$SHUTDOWN_DONE" = 0 ]; then
 		cell_step "$NOW"
 		cell_tell "$NOW"
-		[ "$CELL_LOOKED" = "$NOW" ] && ports_check
+		cell_offer_tell "$NOW"
+		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ]; } && ports_check
 	fi
 
 	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64

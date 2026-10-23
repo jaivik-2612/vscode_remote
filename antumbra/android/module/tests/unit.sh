@@ -43,6 +43,7 @@ MODDIR=$MODULE
 . "$MODULE/lib/antumbra.sh"
 LOGDIR=$(mktemp -d)
 trap 'rm -rf "$LOGDIR"' EXIT
+REAL_TB=$TB
 
 fails=0
 # The phone process as phone_proc reports it, "PID:START" ("-": not
@@ -61,6 +62,40 @@ bad() {
 expect() { # DESCRIPTION EXPECTED ACTUAL
 	if [ "$2" = "$3" ]; then ok "$1"; else bad "$1: expected [$2], got [$3]"; fi
 }
+
+# --- cell_gate_owner_ok: the gate's owner and mode (the real check, with this
+# host's stat in place of Android's toybox) -----------------------------------
+go() { (TB=; cell_gate_owner_ok "$1") && echo yes || echo no; }
+gf=$LOGDIR/gate-owner
+printf 'phone\n' >"$gf"
+if [ "$(id -u)" = 0 ]; then
+	for m in 600 400 644 640 604 4755; do
+		chmod "$m" "$gf"
+		expect "cell_gate_owner_ok: root's, mode $m" yes "$(go "$gf")"
+	done
+	for m in 620 602 660 606 666 670 607 2777; do
+		chmod "$m" "$gf"
+		expect "cell_gate_owner_ok: root's, mode $m (group or others may write)" no "$(go "$gf")"
+	done
+	chmod 600 "$gf"
+	chown 1:0 "$gf"
+	expect "cell_gate_owner_ok: another owner" no "$(go "$gf")"
+else
+	chmod 600 "$gf"
+	expect "cell_gate_owner_ok: not root's (this user's)" no "$(go "$gf")"
+fi
+expect "cell_gate_owner_ok: no file" no "$(go "$LOGDIR/none")"
+expect "cell_gate_owner_ok: Android's toybox is the module's stat" "/system/bin/toybox" "$REAL_TB"
+
+# The gate for every test below: a file the tests write, with the owner
+# check replaced (FAKE_GATE_OWNER=bad: another owner, or group or others
+# may write). Until the WEL8 tests near the end, it allows Phone mode, so
+# that the tests of Phone mode (SES_CELL=phone) find it allowed.
+CELL_GATE_FILE=$LOGDIR/antumbra-cell
+cell_gate_owner_ok() { [ "${FAKE_GATE_OWNER:-ok}" = ok ]; }
+CELL_EMULATOR=0
+printf 'phone\n' >"$CELL_GATE_FILE"
+CELL_GATE=phone SES_GATE=phone CELL_GATE_SEEN=phone
 
 # --- ipv4_port ---------------------------------------------------------------
 for a in 1.2.3.4:443 255.255.255.255:65535 10.0.0.1:1; do
@@ -1170,7 +1205,14 @@ phone_restart() {
 		FAKE_RADIO=1
 	fi
 }
-mobile_data_off() { echo "mobile data off" >>"$STEPS"; }
+# As the real one does, it marks that mobile data is no longer the
+# module's on (cell_data_step).
+mobile_data_off() {
+	echo "mobile data off" >>"$STEPS"
+	CELL_DATA_ON=0
+}
+mobile_data_on() { echo "data enable" >>"$STEPS"; }
+settings_list() { cat "$G"; }
 framework_ready() { [ -z "${FAKE_NO_SETTINGS-}" ]; }
 wifi_off() { echo "wifi off" >>"$STEPS"; }
 bluetooth_off() { echo "bluetooth off" >>"$STEPS"; }
@@ -2020,15 +2062,17 @@ S_STARTED=0 SES_CELL=off
 # exactly PATTERN (a fixed string, the indentation included).
 line_of() { grep -n -x -F "$1" "$MODULE/service.sh" | sed 's/:.*//'; }
 # shellcheck disable=SC2016 # lines of service.sh, not expanded here
-r="$(line_of '		cell_step "$NOW"') $(line_of '		cell_tell "$NOW"') $(line_of '		[ "$CELL_LOOKED" = "$NOW" ] && ports_check')"
+r="$(line_of '		cell_step "$NOW"') $(line_of '		cell_tell "$NOW"') $(line_of '		cell_offer_tell "$NOW"')"
+# shellcheck disable=SC2016 # a line of service.sh, not expanded here
+r="$r $(line_of '		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ]; } && ports_check')"
 case $r in
-[0-9]*' '[0-9]*' '[0-9]*)
-	# shellcheck disable=SC2086 # three line numbers
+[0-9]*' '[0-9]*' '[0-9]*' '[0-9]*)
+	# shellcheck disable=SC2086 # four line numbers
 	set -- $r
-	step_check "service.sh: look, word, then the port check, one after the other ($r)" \
-		test "$2" = $(($1 + 1)) -a "$3" = $(($2 + 1))
+	step_check "service.sh: look, word, word on the cell radio, then the port check, one after the other ($r)" \
+		test "$2" = $(($1 + 1)) -a "$3" = $(($2 + 1)) -a "$4" = $(($3 + 1))
 	;;
-*) bad "service.sh: look, word, then the port check: lines not found ($r)" ;;
+*) bad "service.sh: look, words, then the port check: lines not found ($r)" ;;
 esac
 
 
@@ -2233,6 +2277,620 @@ CELL_IMS=wifi CELL_IMS_AT=1615 CELL_LOOKED=1620
 cell_tell 1620
 expect "tell: Phone mode: at once when the reading changes" "$(told none 0 wifi 1615)" "$(last_word)"
 CELL_IMS=off CELL_IMS_AT=0 S_STARTED=0 SES_CELL=off
+
+# --- WEL8: the Phone-mode gate --------------------------------------------------------
+# cell_gate reads the gate file (CELL_GATE_FILE, the tests' own) with the
+# owner check replaced (FAKE_GATE_OWNER).
+gate_of() {
+	printf '%b' "$1" >"$CELL_GATE_FILE"
+	cell_gate
+}
+rm -f "$CELL_GATE_FILE"
+expect "cell_gate: no file (as installed): off" off "$(cell_gate)"
+CELL_EMULATOR=0
+expect "cell_gate: phone" phone "$(gate_of 'phone\n')"
+expect "cell_gate: phone without a newline" phone "$(gate_of 'phone')"
+expect "cell_gate: data on a phone: phone (until FW9 and CI12)" phone "$(gate_of 'data\n')"
+expect "cell_gate: data on a phone with CELL_DATA_ON_PHONE=1: data" data "$(CELL_DATA_ON_PHONE=1; gate_of 'data\n')"
+CELL_EMULATOR=1
+expect "cell_gate: data on the emulator" data "$(gate_of 'data\n')"
+expect "cell_gate: the first line only" data "$(gate_of 'data\nphone\n')"
+for c in 'PHONE\n' 'Phone\n' 'phone data\n' 'phone \n' ' phone\n' '\n' '' 'phone\r\n' 'off\n' 'calls\n' \
+	'\nphone\n' 'phone\tx\n' 'dat\n' 'datas\n'; do
+	expect "cell_gate: only the exact words count: [$c]" off "$(gate_of "$c")"
+done
+printf 'phone\n' >"$CELL_GATE_FILE"
+expect "cell_gate: another owner, or group or others may write: off" off "$(FAKE_GATE_OWNER=bad cell_gate)"
+mv "$CELL_GATE_FILE" "$LOGDIR/gate-target"
+ln -s "$LOGDIR/gate-target" "$CELL_GATE_FILE"
+expect "cell_gate: a link: off" off "$(cell_gate)"
+rm -f "$CELL_GATE_FILE"
+mkdir "$CELL_GATE_FILE"
+expect "cell_gate: a directory: off" off "$(cell_gate)"
+rmdir "$CELL_GATE_FILE"
+expect "cell_gate: the file is the contract's" /data/adb/antumbra-cell \
+	"$(sed -n 's/^CELL_GATE_FILE=//p' "$MODULE/lib/antumbra.sh")"
+
+# install.md's commands for the gate, as adb and su carry them out. 'adb
+# shell' joins its arguments with spaces and quotes nothing (as ssh does);
+# the phone's shell, as the shell user, parses that line, and a
+# redirection in it runs there, before su, where /data/adb cannot be
+# written. Played here: each documented line runs in this shell with a
+# stand-in adb that keeps the joined line; that line runs in a shell to
+# which /data/adb does not exist (the shell user cannot create or read
+# anything in it); the stand-in su joins its arguments after -c, as
+# Magisk's does, and runs them where /data/adb exists (root). A command
+# that would fail on the phone fails here too (the control: the form the
+# guide gave first).
+AS=$LOGDIR/adbsim
+mkdir -p "$AS/bin" "$AS/root/data/adb"
+cat >"$AS/bin/adb" <<'FAKE'
+#!/bin/sh
+[ "$1" = shell ] || exit 2
+shift
+printf '%s\n' "$*" >"$AS_LINE"
+FAKE
+cat >"$AS/bin/su" <<'FAKE'
+#!/bin/sh
+[ "$1" = -c ] || exit 2
+shift
+echo "su -c $*" >>"$AS_SU_LOG"
+exec /bin/sh -c "$(printf '%s\n' "$*" | sed "s|$AS_SHELL|$AS_ROOT|g")"
+FAKE
+chmod +x "$AS/bin/adb" "$AS/bin/su"
+# as_phone LINE: LINE typed on the host; prints what the phone's shell
+# prints (and its errors). Both run in /bin/sh: busybox's own sh would run
+# its su applet rather than the stand-in.
+as_phone() {
+	rm -f "$AS/line"
+	env AS_LINE="$AS/line" PATH="$AS/bin:$PATH" /bin/sh -c "$1" || return 1
+	[ -s "$AS/line" ] || return 1
+	env AS_SHELL="$AS/shell" AS_ROOT="$AS/root" AS_SU_LOG="$AS/su.log" PATH="$AS/bin:$PATH" \
+		/bin/sh -c "$(sed "s|/data/adb|$AS/shell/data/adb|g" "$AS/line")" 2>&1
+}
+# gate_shown: the check command shows the file 0600, saying phone.
+gate_shown() {
+	_gs=$(as_phone "$(gate_cmd 'ls -l')")
+	printf '%s\n' "$_gs" | grep -q '^-rw------- ' && printf '%s\n' "$_gs" | grep -q -x phone
+}
+INSTALL_MD=$MODULE/../docs/install.md
+# shellcheck disable=SC2016 # Markdown's backticks, not the shell's
+gate_cmds=$(sed -n -e 's/^ *\(adb shell .*antumbra-cell.*\)$/\1/p' \
+	-e 's/.*`\(adb shell [^`]*antumbra-cell[^`]*\)`.*/\1/p' "$INSTALL_MD")
+gate_cmd() { printf '%s\n' "$gate_cmds" | grep -F -- "$1"; }
+expect "install.md: three commands for the gate (write, check, delete)" "3 1 1 1" \
+	"$(printf '%s\n' "$gate_cmds" | grep -c .) $(gate_cmd '> /data/adb/antumbra-cell' | grep -c .) \
+$(gate_cmd 'ls -l' | grep -c .) $(gate_cmd 'rm -f' | grep -c .)"
+: >"$AS/su.log"
+as_phone "$(gate_cmd '> /data/adb/antumbra-cell')" >"$AS/out" 2>&1
+expect "install.md: the gate written as root, 0600, saying phone" "600 phone" \
+	"$(stat -c %a "$AS/root/data/adb/antumbra-cell" 2>/dev/null) $(cat "$AS/root/data/adb/antumbra-cell" 2>/dev/null)"
+expect "install.md: ... read as the gate" phone "$(CELL_GATE_FILE=$AS/root/data/adb/antumbra-cell cell_gate)"
+step_check "install.md: ... the redirection ran in su" grep -q -F "su -c echo phone > " "$AS/su.log"
+step_check "install.md: the check shows the file's mode and its word" gate_shown
+as_phone "$(gate_cmd 'rm -f')" >/dev/null 2>&1
+step_check "install.md: the gate deleted" test ! -e "$AS/root/data/adb/antumbra-cell"
+# shellcheck disable=SC2016 # the guide's first form, as typed on the host
+as_phone 'adb shell su -c "printf '\''phone\n'\'' > /data/adb/antumbra-cell && chmod 0600 /data/adb/antumbra-cell"' >/dev/null 2>&1
+step_check "install.md control: a redirection outside su's one argument writes nothing" \
+	test ! -e "$AS/root/data/adb/antumbra-cell"
+expect "cell_gate: mobile data through Tor is the emulator's only, until FW9 and CI12" 0 \
+	"$(sed -n 's/^CELL_DATA_ON_PHONE=//p' "$MODULE/lib/antumbra.sh")"
+CELL_EMULATOR=0
+
+# cell_effective: the lowest of the choice, the gate at Start and the gate now.
+S_STARTED=0 SES_CELL=data SES_GATE=data CELL_GATE=data
+expect "cell_effective: before Start: none" none "$(cell_effective)"
+S_STARTED=1
+for c in off phone data; do
+	for g0 in off phone data; do
+		for g in off phone data; do
+			e=$c
+			[ "$(cell_rank "$g0")" -ge "$(cell_rank "$e")" ] || e=$g0
+			[ "$(cell_rank "$g")" -ge "$(cell_rank "$e")" ] || e=$g
+			expect "cell_effective: choice $c, gate at Start $g0, gate now $g" "$e" \
+				"$(SES_CELL=$c SES_GATE=$g0 CELL_GATE=$g cell_effective)"
+		done
+	done
+done
+expect "cell_effective: a gate raised during the session changes nothing" off \
+	"$(SES_CELL=phone SES_GATE=off CELL_GATE=data cell_effective)"
+expect "cell_effective: a gate lowered during the session counts at once" phone \
+	"$(SES_CELL=data SES_GATE=data CELL_GATE=phone cell_effective)"
+expect "cell_rank: anything else is off" 0 "$(cell_rank Phone)"
+S_STARTED=0 SES_CELL=off SES_GATE=phone CELL_GATE=phone
+
+# --- WEL8: the cell radio and mobile data per session, turn by turn ---------------------
+# wel8_reset GATE CHOICE: a start with the radio off since power-on, the
+# gate file saying GATE ("-": no file), the session's choice CHOICE (not
+# started yet), the firewall live, nothing told to Welcome yet.
+wel8_reset() {
+	watch_reset
+	if [ "$1" = - ]; then rm -f "$CELL_GATE_FILE"; else printf '%s\n' "$1" >"$CELL_GATE_FILE"; fi
+	FAKE_GATE_OWNER=ok CELL_GATE=off CELL_GATE_SEEN='' SES_GATE=off SES_CELL=$2 S_FW_STATE=live CELL_DATA_ON=0
+	CELL_OFFER='' CELL_OFFER_AT='' CELL_OFFER_SID='' CELL_OFFER_BAD=0 CELL_OFFER_BAD_AT=0 CELL_OFFER_TOLD=''
+	WELCOME_SID=0123456789abcdef
+}
+# wel8_start: the session starts as session_read starts it (the gate in
+# force latched).
+wel8_start() {
+	SES_GATE=$(cell_gate)
+	CELL_GATE=$SES_GATE
+	S_STARTED=1
+}
+count() { grep -c -x -F "$1" "$STEPS"; }
+# before_last A B: the last step A came before the last step B.
+before_last() {
+	_bl_a=$(grep -n -x -F "$1" "$STEPS" | tail -n 1 | cut -d: -f1)
+	_bl_b=$(grep -n -x -F "$2" "$STEPS" | tail -n 1 | cut -d: -f1)
+	[ -n "$_bl_a" ] && [ -n "$_bl_b" ] && [ "$_bl_a" -lt "$_bl_b" ]
+}
+
+# 1. Calls and texts chosen, no gate (every phone as installed): the radio
+# stays off, before and after Start.
+wel8_reset - phone
+run_for 60
+wel8_start
+run_for 600 10
+step_check "gate off: Phone chosen: the radio never switched on" did_not "airplane disable"
+step_check "gate off: Phone chosen: logged" said "this phone's Phone-mode gate: off"
+step_check "gate off: not Phone mode" eval '! cell_phone_mode'
+expect "gate off: ims off" "off 0" "$CELL_IMS $CELL_IMS_AT"
+
+# 2. The gate raised during a session started without it: nothing changes
+# until the next start.
+printf 'phone\n' >"$CELL_GATE_FILE"
+run_for 600 10
+step_check "gate raised during the session: logged" said "Phone-mode gate now phone"
+step_check "gate raised during the session: the radio still off" did_not "airplane disable"
+
+# 3. Calls and texts with the gate: switched on at Start only (D12).
+wel8_reset phone phone
+run_for 60
+step_check "gate phone: nothing before Start (D12)" did_not "airplane disable"
+wel8_start
+turn 2
+step_check "gate phone: switched on at Start" did "airplane disable"
+run_for 60 10
+step_check "gate phone: Phone mode" cell_phone_mode
+step_check "gate phone: mobile data never switched on" did_not "data enable"
+# The gate taken away during the session, no call: off at the next look.
+: >"$STEPS"
+rm -f "$CELL_GATE_FILE"
+run_for 20 10
+step_check "gate removed during a Phone session, no call: the radio off" did "airplane enable"
+step_check "gate removed: no longer Phone mode" eval '! cell_phone_mode'
+step_check "gate removed: logged" said "Phone-mode gate now off"
+step_check "gate removed: the session keeps it: logged" said "the Phone-mode gate went down to off; it stays so for this session"
+# The gate written again in the same session: the lower gate holds until
+# the next start, also when airplane mode then reads off with the radio
+# off (as after a phone-process restart), where Phone mode would switch
+# the radio on.
+: >"$STEPS"
+: >"$LOGDIR/module.log"
+printf 'phone\n' >"$CELL_GATE_FILE"
+run_for 30 10
+step_check "gate removed, then written again: seen" said "Phone-mode gate now phone"
+expect "gate removed, then written again: the session keeps off (gate, carried out, wanted)" "off off off" \
+	"$SES_GATE $(cell_effective) $(cell_want)"
+step_check "gate removed, then written again: not Phone mode" eval '! cell_phone_mode'
+fake_set airplane_mode_on 0
+fake_set cell_on 1
+FAKE_RADIO=0
+run_for 600 10
+step_check "gate removed, then written again: the radio never switched on again" did_not "airplane disable"
+expect "gate removed, then written again: no second lowering logged" 0 \
+	"$(grep -c 'it stays so for this session' "$LOGDIR/module.log")"
+# The same after a call: held for 5 minutes after it.
+wel8_reset phone phone
+run_for 40
+wel8_start
+run_for 60 10
+FAKE_CALLS=ACTIVE FAKE_HISTORY=1 FAKE_PHONE0='2 0 1 0 0 0'
+run_for 30 10
+FAKE_CALLS='' FAKE_PHONE0=$I
+run_for 10 10
+: >"$STEPS"
+rm -f "$CELL_GATE_FILE"
+run_for 280 10
+step_check "gate removed right after a call: held (5 minutes after the call)" did_not "airplane enable"
+step_check "gate removed right after a call: ... logged" said "held: recent"
+run_for 30 10
+step_check "gate removed right after a call: off 5 minutes after it" did "airplane enable"
+
+# 4. Mobile data through Tor (the emulator: the gate may say data).
+CELL_EMULATOR=1
+wel8_reset data data
+run_for 60
+step_check "data: nothing before Start" eval 'did_not "airplane disable" && did_not "data enable"'
+wel8_start
+turn 2
+step_check "data: the radio switched on at Start" did "airplane disable"
+step_check "data: mobile data not yet (the radio not read on yet)" did_not "data enable"
+turn 2
+step_check "data: mobile data on once the radio reads on" did "data enable"
+step_check "data: ... after the switch-on" before "airplane disable" "data enable"
+step_check "data: ... and after the switch-on's own mobile data off" before_last "mobile data off" "data enable"
+step_check "data: logged" said "mobile data on (the session's Internet is mobile data)"
+run_for 120 10
+expect "data: once" 1 "$(count "data enable")"
+step_check "data: Phone mode (calls and texts come with it)" cell_phone_mode
+# A SIM's state changes: mobile data off for every SIM, then on again for
+# the session; not held by a call.
+FAKE_CALLS=ACTIVE FAKE_HISTORY=1 FAKE_PHONE0='2 0 1 0 0 0'
+run_for 20 10
+: >"$STEPS"
+PROPS='gsm.sim.state=LOADED,ABSENT'
+run_for 20 10
+step_check "data: a SIM change: mobile data off, then on again (a call does not hold it)" \
+	before "mobile data off" "data enable"
+FAKE_CALLS='' FAKE_PHONE0=$I
+# The person switches airplane mode on, then off: the radio and mobile data
+# come back.
+run_for 10 10
+: >"$STEPS"
+fake_set airplane_mode_on 1
+fake_set cell_on 2
+FAKE_RADIO=0
+run_for 30 10
+step_check "data: airplane mode on by the person: left alone" eval 'did_not "airplane disable" && did_not "data enable"'
+fake_set airplane_mode_on 0
+fake_set cell_on 1
+fake_set enable_cellular_on_boot 1
+FAKE_RADIO=1
+run_for 30 10
+step_check "data: airplane mode off again: mobile data off, then on again" before_last "mobile data off" "data enable"
+# The gate lowered to phone: mobile data off at once, the radio stays on.
+: >"$STEPS"
+printf 'phone\n' >"$CELL_GATE_FILE"
+turn 2
+step_check "data, the gate lowered to phone: mobile data off at once" did "mobile data off"
+step_check "data, the gate lowered to phone: logged" said "mobile data off (this phone's gate no longer allows it)"
+run_for 400 10
+step_check "data, the gate lowered to phone: the radio stays on, mobile data stays off" eval \
+	'did_not "airplane enable" && did_not "data enable"'
+step_check "data, the gate lowered to phone: still Phone mode" cell_phone_mode
+# Written back to data in the same session: mobile data stays off until
+# the next start.
+: >"$STEPS"
+printf 'data\n' >"$CELL_GATE_FILE"
+run_for 60 10
+step_check "data, the gate lowered to phone, then data again: mobile data stays off" did_not "data enable"
+expect "data, the gate lowered to phone, then data again: phone carried out" "phone phone" "$SES_GATE $(cell_effective)"
+
+# Not before the firewall is live; never while the fail-safe holds the radios.
+wel8_reset data data
+run_for 40
+S_FW_STATE=armed
+wel8_start
+run_for 60 10
+step_check "data: not while the firewall is not live" did_not "data enable"
+S_FW_STATE=live
+run_for 10 10
+step_check "data: ... on once it is live" did "data enable"
+wel8_reset data data
+run_for 40
+wel8_start
+RADIOS=switched
+run_for 60 10
+step_check "data: never once the fail-safe switched the radios off" did_not "data enable"
+RADIOS=''
+CELL_EMULATOR=0
+
+# 5. Mobile data kept off in every session that did not choose it.
+wel8_reset phone phone
+run_for 40
+wel8_start
+run_for 60 10
+: >"$STEPS"
+fake_set mobile_data1 1
+run_for 10 10
+step_check "Phone session: mobile data switched on in Settings: off again" did "mobile data off"
+step_check "Phone session: ... logged" said "mobile data was switched on; off again"
+fake_set mobile_data1 0
+: >"$STEPS"
+run_for 60 10
+step_check "Phone session: nothing more once it is off" did_not "mobile data off"
+wel8_reset phone off
+FAKE_RADIO=1
+run_for 20 10
+: >"$STEPS"
+fake_set mobile_data 1
+run_for 10 10
+step_check "before Start, the radio on by something else: mobile data off again" did "mobile data off"
+fake_set mobile_data 0
+wel8_reset - off
+run_for 40
+wel8_start
+run_for 60 10
+fake_set mobile_data2 1
+: >"$STEPS"
+run_for 120 10
+step_check "Phone off, the radio read off: nothing read or written" did_not "mobile data off"
+fake_set mobile_data2 0
+
+# 6. MOD11's "ordinary" in a mobile-data session (Phone mode), and IMS.
+CELL_EMULATOR=1
+wel8_reset data data
+TELL=1
+: >"$WORDS"
+run_for 40
+wel8_start
+run_for 60 10
+FAKE_CALLS=ACTIVE FAKE_HISTORY='1:open' FAKE_PHONE0='2 0 1 0 0 0'
+run_for 40 10
+expect "data session: an ordinary call reads ordinary (Phone mode)" ordinary "$(last_kind)"
+FAKE_CALLS='' FAKE_HISTORY=1 FAKE_PHONE0=$I
+run_for 20 10
+expect "data session: the call ended: ordinary" ordinary "$(last_kind)"
+printf 'off\n' >"$CELL_GATE_FILE"
+run_for 10 10
+step_check "data session, the gate taken away: not Phone mode" eval '! cell_phone_mode'
+expect "data session, the gate taken away: IMS off" "off 0" "$CELL_IMS $CELL_IMS_AT"
+TELL=0
+CELL_EMULATOR=0
+
+# --- WEL8: the module's word on the cell radio (module_cell) ------------------------------
+CELLS=$LOGDIR/cells
+FAKE_CELL_ANSWER=$OK_ANSWER
+cell_send() {
+	echo "$*" >>"$CELLS"
+	[ -z "$FAKE_CELL_ANSWER" ] || printf '%s\n' "$FAKE_CELL_ANSWER"
+	return 0
+}
+cells_n() { if [ -s "$CELLS" ]; then grep -c . "$CELLS"; else echo 0; fi; }
+last_cell() { tail -n 1 "$CELLS"; }
+cell_args() { echo "--extra v:i:1 --extra gate:s:$1 --extra cell:s:$2 --extra radio:s:$3 --extra at:l:$4"; }
+# offer_for SECONDS: turns 10 s apart, each followed by the word on the
+# cell radio, as in service.sh's loop.
+offer_for() {
+	_of_end=$((NOW + $1))
+	while [ "$NOW" -lt "$_of_end" ]; do
+		turn 10
+		cell_offer_tell "$NOW"
+	done
+}
+wel8_reset phone phone
+: >"$CELLS"
+turn 0
+cell_offer_tell "$NOW"
+expect "module_cell: the first turn: the gate, nothing carried out yet, the radio as looked at" \
+	"$(cell_args phone none off 1000)" "$(last_cell)"
+expect "module_cell: ... the try noted for the port check" 1000 "$CELL_OFFER_TOLD"
+offer_for 290
+expect "module_cell: nothing more while nothing changes" 1 "$(cells_n)"
+offer_for 10
+expect "module_cell: again every 300 s, with the last look's time" "2 $(cell_args phone none off "$CELL_LOOKED")" \
+	"$(cells_n) $(last_cell)"
+WELCOME_SID=fedcba9876543210
+offer_for 10
+expect "module_cell: Welcome's process started again (a new session ID): told again" 3 "$(cells_n)"
+printf 'data\n' >"$CELL_GATE_FILE"
+offer_for 10
+expect "module_cell: data on a phone is still phone: nothing new" 3 "$(cells_n)"
+CELL_EMULATOR=1
+offer_for 10
+expect "module_cell: the gate changed: told" "$(cell_args data none off "$CELL_LOOKED")" "$(last_cell)"
+CELL_EMULATOR=0
+printf 'phone\n' >"$CELL_GATE_FILE"
+offer_for 10
+wel8_start
+n=$(cells_n)
+offer_for 10
+expect "module_cell: at Start: what the module carries out" "phone" \
+	"$(last_cell | sed -n 's/.*cell:s:\([a-z]*\) .*/\1/p')"
+offer_for 20
+no_at() { sed 's/ --extra at:l:[0-9]*$//'; }
+expect "module_cell: the radio read on after the switch-on: told" "$(cell_args phone phone on 0 | no_at)" \
+	"$(last_cell | no_at)"
+step_check "module_cell: one word per change" test "$(cells_n)" -le $((n + 3))
+FAKE_OWNER=0
+n=$(cells_n)
+rm -f "$CELL_GATE_FILE"
+offer_for 400
+expect "module_cell: never while Welcome is not the device owner" "$n" "$(cells_n)"
+FAKE_OWNER=1
+offer_for 10
+expect "module_cell: ... told once it is (the gate gone: the radio off)" "$(cell_args off off off "$CELL_LOOKED")" \
+	"$(last_cell)"
+# Welcome refuses it (a Welcome from before WEL8: "Unknown method").
+: >"$LOGDIR/module.log"
+FAKE_CELL_ANSWER=''
+printf 'phone\n' >"$CELL_GATE_FILE"
+n=$(cells_n)
+offer_for 10
+expect "module_cell: Welcome refuses it: tried" $((n + 1)) "$(cells_n)"
+# Again after 30 s, then after twice as long each time, up to 300 s.
+k=1
+for wait in 30 60 120 240 300 300; do
+	offer_for $((wait - 10))
+	expect "module_cell: Welcome refuses it: not again before $wait s" $((n + k)) "$(cells_n)"
+	offer_for 10
+	k=$((k + 1))
+	expect "module_cell: Welcome refuses it: tried again after $wait s" $((n + k)) "$(cells_n)"
+done
+expect "module_cell: the refusal logged once" 1 "$(grep -c 'did not take the module.s word on the cell radio' "$LOGDIR/module.log")"
+FAKE_CELL_ANSWER=$OK_ANSWER
+offer_for 310
+expect "module_cell: taken again: logged once" 1 "$(grep -c "takes the module's word on the cell radio again" "$LOGDIR/module.log")"
+step_check "module_cell: the log names no word" test -z "$(grep -E 'gate:s|cell:s|radio:s|at:l' "$LOGDIR/module.log")"
+# While the module reads Welcome's row without the cell column (an older
+# Welcome, WELCOME_OLD), it carries out nothing above off for it: the gate
+# told is off, whatever the file says; the real gate again once the row is
+# read with the column.
+last_gate() { last_cell | sed -n 's/.*gate:s:\([a-z]*\) .*/\1/p'; }
+wel8_reset phone off
+: >"$CELLS"
+offer_for 10
+expect "module_cell: the gate file says phone: told phone" phone "$(last_gate)"
+WELCOME_OLD=1
+offer_for 10
+expect "module_cell: Welcome's row read without the cell column: the gate told is off" off "$(last_gate)"
+offer_for 300
+step_check "module_cell: ... and stays off while it is" test -z "$(grep -v -F 'gate:s:off' "$CELLS" | sed 1d)"
+WELCOME_OLD=0
+offer_for 10
+expect "module_cell: the row read with the column again: the gate told is phone" phone "$(last_gate)"
+step_check "module_cell: status.json holds nothing of it" test -z "$(sed -n '/^status_write() {$/,/^}$/p' \
+	"$MODULE/lib/antumbra.sh" | grep -E 'GATE|SES_CELL|CL_RADIO|CELL_|SIM|sim')"
+expect "module_cell: the method and the provider" "module_cell content://org.antumbra.welcome.state" \
+	"$CELL_OFFER_METHOD $WORD_URI"
+
+# --- WEL8: session_read and session_cell (service.sh, cut out of it) ------------------------
+eval "$(sed -n '/^session_cell() {$/,/^}$/p' "$MODULE/service.sh")"
+eval "$(sed -n '/^session_row() {$/,/^}$/p' "$MODULE/service.sh")"
+eval "$(sed -n '/^session_read() {$/,/^}$/p' "$MODULE/service.sh")"
+PRIV=$LOGDIR/priv
+mkdir -p "$PRIV"
+SID=0123456789abcdef0123456789abcdef
+# FAKE_ROW_OUT: what 'content query' prints (output and error) for the new
+# projection; FAKE_OLD_ROW: its row for the old one.
+welcome_row() { printf '%s\n' "$FAKE_ROW_OUT" | welcome_row_pick; }
+welcome_query() {
+	echo "query $1" >>"$STEPS"
+	[ -n "$FAKE_OLD_ROW" ] || return 1
+	printf '%s\n' "$FAKE_OLD_ROW"
+}
+row_of() { echo "Row: 0 started=$1, tor_mode=$2, mac=new, session_id=$SID, cell=$3"; }
+# shellcheck disable=SC2016 # a stack trace, as the tool prints it
+UNKNOWN_CELL='Error while accessing provider:org.antumbra.welcome.state
+java.lang.IllegalArgumentException: Unknown column: cell
+	at org.antumbra.welcome.StateRow.columns(StateProvider.kt:96)
+	at android.content.ContentProvider$Transport.query(ContentProvider.java:285)'
+sr_reset() {
+	# shellcheck disable=SC2034 # read by session_read
+	S_STARTED=0 WELCOME_OLD=0 WELCOME_OLD_SID='' SES_CELL=off SES_GATE=off FAKE_OLD_ROW='' P_WELCOME='' FAKE_OWNER=1
+	: >"$LOGDIR/module.log"
+	: >"$STEPS"
+	rm -f "$PRIV/session"
+}
+sr() { if session_read >/dev/null 2>&1; then echo started; else echo waiting; fi; }
+expect "session_cell: off" off "$(session_cell "$(row_of 1 direct off)")"
+expect "session_cell: phone" phone "$(session_cell "$(row_of 1 offline phone)")"
+expect "session_cell: data" data "$(session_cell "$(row_of 1 bridges data)")"
+for c in '' Phone 'phone ' calls none; do
+	if session_cell "$(row_of 1 direct "$c")" >/dev/null; then bad "session_cell: took [$c]"; else ok "session_cell: refuses [$c]"; fi
+done
+if session_cell "$(row_of 1 offline data)" >/dev/null; then bad "session_cell: took data with offline"; else
+	ok "session_cell: refuses data in an offline session"
+fi
+expect "welcome_row_pick: a row (after a line on standard error)" "$(row_of 0 offline off)" \
+	"$(printf 'WARNING: linker: something\n%s\n' "$(row_of 0 offline off)" | welcome_row_pick)"
+expect "welcome_row_pick: an older Welcome" 2 "$(printf '%s\n' "$UNKNOWN_CELL" | welcome_row_pick; echo $?)"
+expect "welcome_row_pick: nothing" 1 "$(printf '' | welcome_row_pick; echo $?)"
+for e in 'Error while accessing provider:org.antumbra.welcome.state' \
+	'java.lang.IllegalArgumentException: Unknown column: cellular' \
+	'java.lang.SecurityException: uid 2000 may not read the Antumbra session' 'No result found.'; do
+	expect "welcome_row_pick: [$e]: still waiting" 1 "$(printf '%s\n' "$e" | welcome_row_pick; echo $?)"
+done
+sr_reset
+printf 'phone\n' >"$CELL_GATE_FILE"
+FAKE_ROW_OUT=$(row_of 0 offline off)
+WELCOME_SID=''
+expect "session_read: not started: waiting" waiting "$(sr)"
+session_read >/dev/null 2>&1
+expect "session_read: before Start the session ID is noted (a new Welcome process)" "$SID" "$WELCOME_SID"
+FAKE_ROW_OUT=$(row_of 1 direct phone)
+session_read >/dev/null 2>&1
+expect "session_read: Phone with the gate: the choice and the gate latched" "1 phone phone" \
+	"$S_STARTED $SES_CELL $SES_GATE"
+expect "session_read: the root-only record has the cell and the gate" \
+	"session_id=$SID tor_mode=direct mac=new cell=phone gate=phone" "$(tr '\n' ' ' <"$PRIV/session" | sed 's/ $//')"
+step_check "session_read: logged" said "session started (tor direct, MAC new, cell radio phone, gate phone)"
+sr_reset
+rm -f "$CELL_GATE_FILE"
+FAKE_ROW_OUT=$(row_of 1 offline phone)
+session_read >/dev/null 2>&1
+expect "session_read: Phone without the gate: the choice kept, the gate off" "1 phone off off" \
+	"$S_STARTED $SES_CELL $SES_GATE $(cell_effective)"
+step_check "session_read: ... logged" said "the session chose phone; this phone's gate allows off, so the module carries out off"
+for c in Phone '' calls; do
+	sr_reset
+	FAKE_ROW_OUT=$(row_of 1 direct "$c")
+	expect "session_read: cell [$c]: still waiting" waiting "$(sr)"
+	session_read >/dev/null 2>&1
+	step_check "session_read: cell [$c]: logged" said "the row has an invalid cell; still waiting"
+done
+sr_reset
+FAKE_ROW_OUT=$(row_of 1 offline data)
+expect "session_read: data in an offline session: still waiting" waiting "$(sr)"
+# An older Welcome: read without the cell column; the radio stays off.
+sr_reset
+printf 'phone\n' >"$CELL_GATE_FILE"
+FAKE_ROW_OUT=$UNKNOWN_CELL
+FAKE_OLD_ROW="Row: 0 started=1, tor_mode=direct, mac=new, session_id=$SID"
+session_read >/dev/null 2>&1
+expect "session_read: an older Welcome: started, cell off" "1 off 1" "$S_STARTED $SES_CELL $WELCOME_OLD"
+step_check "session_read: an older Welcome: logged" said "this Welcome has no cell column (an older one)"
+step_check "session_read: an older Welcome: the old columns asked" did "query started:tor_mode:mac:session_id"
+S_STARTED=0
+session_read >/dev/null 2>&1
+expect "session_read: an older Welcome: logged once" 1 "$(grep -c 'has no cell column' "$LOGDIR/module.log")"
+# Before Start, the same Welcome process is read without the column; a new
+# one (a new session ID: an updated Welcome perhaps) with it again.
+sr_reset
+FAKE_ROW_OUT=$UNKNOWN_CELL
+FAKE_OLD_ROW="Row: 0 started=0, tor_mode=offline, mac=new, session_id=$SID"
+session_read >/dev/null 2>&1
+expect "session_read: an older Welcome before Start: latched with its session" "0 1 $SID" \
+	"$S_STARTED $WELCOME_OLD $WELCOME_OLD_SID"
+: >"$STEPS"
+session_read >/dev/null 2>&1
+step_check "session_read: the same Welcome process: still read without the column" did "query started:tor_mode:mac:session_id"
+expect "session_read: the same Welcome process: still an older one, logged once" "1 1" \
+	"$WELCOME_OLD $(grep -c 'has no cell column' "$LOGDIR/module.log")"
+SID_OLD=$SID
+SID=fedcba9876543210fedcba9876543210
+FAKE_OLD_ROW="Row: 0 started=1, tor_mode=direct, mac=new, session_id=$SID"
+FAKE_ROW_OUT=$(row_of 1 direct phone)
+session_read >/dev/null 2>&1
+expect "session_read: a new Welcome process with the column: read with it, Phone kept" "1 0 phone phone" \
+	"$S_STARTED $WELCOME_OLD $SES_CELL $SES_GATE"
+step_check "session_read: ... logged" said "Welcome started again (a new session); its row is read with the cell column again"
+expect "session_read: ... its session ID noted" "$SID" "$WELCOME_SID"
+# A new process of an older Welcome again: latched again, with its session.
+sr_reset
+SID=$SID_OLD
+FAKE_ROW_OUT=$UNKNOWN_CELL
+FAKE_OLD_ROW="Row: 0 started=0, tor_mode=offline, mac=new, session_id=$SID"
+session_read >/dev/null 2>&1
+SID=fedcba9876543210fedcba9876543210
+FAKE_OLD_ROW="Row: 0 started=0, tor_mode=offline, mac=new, session_id=$SID"
+session_read >/dev/null 2>&1
+expect "session_read: a new process of an older Welcome: latched again with its session" "1 $SID" \
+	"$WELCOME_OLD $WELCOME_OLD_SID"
+SID=$SID_OLD
+# Latched while its row without the column could not be read: the next row
+# is that process's, not a new one (latched and logged once).
+sr_reset
+FAKE_ROW_OUT=$UNKNOWN_CELL
+FAKE_OLD_ROW=''
+session_read >/dev/null 2>&1
+FAKE_OLD_ROW="Row: 0 started=0, tor_mode=offline, mac=new, session_id=$SID"
+session_read >/dev/null 2>&1
+expect "session_read: latched before its first row was read: that process's, logged once" "1 $SID 1" \
+	"$WELCOME_OLD $WELCOME_OLD_SID $(grep -c 'has no cell column' "$LOGDIR/module.log")"
+# The same answer from a provider while Welcome is not the device owner:
+# not taken for an older Welcome.
+sr_reset
+FAKE_ROW_OUT=$UNKNOWN_CELL
+FAKE_OLD_ROW="Row: 0 started=1, tor_mode=direct, mac=new, session_id=$SID"
+FAKE_OWNER=0
+expect "session_read: 'Unknown column' while Welcome is not the device owner: waiting" waiting "$(sr)"
+# Not in a subshell, so that what it sets can be seen.
+session_read >/dev/null 2>&1
+expect "session_read: ... not taken for an older Welcome" "0 0" "$S_STARTED $WELCOME_OLD"
+FAKE_OWNER=1
+# A passing failure (no answer at all) is not an older Welcome.
+sr_reset
+FAKE_ROW_OUT=''
+expect "session_read: no answer: waiting" waiting "$(sr)"
+session_read >/dev/null 2>&1
+expect "session_read: no answer: not an older Welcome" "0 0" "$S_STARTED $WELCOME_OLD"
+step_check "session_read: no answer: the old columns not asked" did_not "query started:tor_mode:mac:session_id"
+sr_reset
+S_STARTED=0 SES_CELL=off SES_GATE=phone CELL_GATE=phone
+printf 'phone\n' >"$CELL_GATE_FILE"
 
 echo "  $fails failed"
 [ "$fails" -eq 0 ]

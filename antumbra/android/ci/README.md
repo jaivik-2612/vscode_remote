@@ -160,7 +160,8 @@ that the captures must show traffic from the phone.
    mobile data off again, narrows airplane mode's radio list to the cell
    radio 30 seconds later, and about 5 minutes after this step switches
    the emulated radio off with airplane mode, which Wi-Fi then does not
-   follow (`module/README.md`, "The cell radio").
+   follow (`module/README.md`, "The cell radio"). The run's session
+   switches it on again at Start (Phone: calls and texts, step 6).
 5. The Welcome APK; the debug build's test hook
    `setprop debug.antumbra.keep_adb 1` (honoured only by debuggable or
    testOnly builds; Welcome then leaves USB debugging on; `welcome/README.md`,
@@ -194,12 +195,48 @@ that the captures must show traffic from the phone.
    The menu is closed and the long-press setting put back, also after a
    failure, when the run calls `clear-power-menu-test` again and brings
    Welcome back (`welcome_power_menu_recover`). A warning, not a failure,
-   until it has passed on CI once. Then the choices, tapped where
-   `uiautomator dump` shows them (by the test tags in
-   `welcome/README.md`, else by their text): Tor directly, new
-   Wi-Fi address, **Administration off** (the default session a user gets),
-   Unsafe Browser off; then "Start Antumbra". adb must still answer; the
-   provider row must say `started=1`, `tor_mode=direct` and `admin=0`.
+   until it has passed on CI once.
+   Then WEL8's two choices at Start, walked at each level of the
+   Phone-mode gate: the run writes the root-only file
+   `/data/adb/antumbra-cell` as root (`cell_gate`: removed for `off`;
+   `phone`, then `data`, written whole, root's, 0600), exactly as the
+   install's PH3 step writes it on the phone (there is no build flag or
+   test hook: the module zip and the APK are a release's), waits until
+   Welcome shows the row the gate opens (or keeps closed) enabled as it
+   should, and runs `welcome-adb.sh check-choices --gate off|phone|data`:
+   the six attempts (Internet Wi-Fi, mobile data, None; Phone off, calls
+   and texts; mobile data straight after Phone off, so that it is seen to
+   select calls and texts), each tapped by its test tag as a person would,
+   from the top of the page, then the whole page read with slow scrolls (a
+   row or card counts only from a dump that shows it whole: Compose lists
+   only the on-screen texts of a card cut off by an edge, so one cut off on
+   every page is scrolled wholly into view and read again; which rows are
+   checked, which disabled with their reason, Tor's rows only with
+   Internet, the carrier card with its key statements, the radio line
+   against the registry, the SIM line against `gsm.sim.state`, no
+   "offline" anywhere),
+   checks `welcome_choices_gate_off`, `_phone` and `_data`, and
+   `welcome_radio_line` from what the walk read; a screenshot per gate and
+   one per attempt at `data` (`screenshots/antumbra-choices/`, in the
+   artifact, not on the Daily page). The walk is bounded (7 minutes a
+   gate, no gate begun after 15 minutes; a gate cut short is a warning),
+   so that a slow screen cannot make the step run out of time. Nothing is
+   dialled, and no emergency number is set. Then the choices for the run,
+   with the gate at `phone` (as the install leaves it after PH3's outcome
+   A), whatever the walk left selected: each row by its test tag alone
+   (`ui_choose`: never by its text, which another row's detail may hold:
+   "Wi-Fi" is also in None's), from the top of the page, and read back
+   checked, with a second try: Internet Wi-Fi and Tor directly (the run
+   stops if either cannot be chosen), **Phone: calls and texts**
+   (`welcome_phone_start`; Phone off if Welcome does not offer it within
+   60 s or the row does not read checked, a warning, so the leak test never
+   stops for a WEL8 check; if the row after Start says otherwise, the
+   checks after Start follow the row), new Wi-Fi address, **Administration off**
+   (the default session a user gets), Unsafe Browser off; then "Start
+   Antumbra". adb must still answer; the provider row must say
+   `started=1`, `tor_mode=direct` and `admin=0`, and `provider_cell` its
+   `cell`. The leak test then judges the setup the owner uses daily: the
+   emulated radio on for the whole session, mobile data off.
 7. Wi-Fi joined as a person would (`cmd wifi connect-network AndroidWifi
    open`, once Welcome has switched Wi-Fi on); Wi-Fi must become the
    default network (the `Transports:` of `dumpsys connectivity`'s default
@@ -225,7 +262,22 @@ that the captures must show traffic from the phone.
    had dumpsys's "Broken pipe" line there; run 21, af748d0, printed exactly
    `telecom=0 0 - - 0; registry=0 0 on; ims=none`); then a warning unless
    the rest is exactly `; phone=yes`, until the phone part has passed on CI
-   once (then that fails too).
+   once (then that fails too). Then WEL8 after Start: `cell_phone_mode`
+   (as root: the session record says `cell=phone gate=phone`, the module's
+   log has its Phone-mode switch-on, the registry reads the radio on, and
+   no `mobile_data` key is 1), `welcome_phone_status` (`welcome-adb.sh
+   check-phone`: the status screen's Internet, Tor and Phone lines, the
+   Phone card's SIM, radio and VoLTE lines, the carrier card for the radio
+   read, no "offline" while the radio is on or not known; screenshot
+   `status-phone`), then `welcome_module_cell` (`check-module-cell`: the
+   word on the cell radio refused from the shell user and malformed from
+   root, the most careful word taken from root; the module's next word
+   replaces it). Every WEL8 check is a warning until it has passed on CI
+   once (`choices_level`, which `tests/test_ci.py` checks), so the job
+   cannot go red from a new step alone; the status screens of the other
+   four sessions, a PIN- or PUK-locked SIM, two slots and IMS registration
+   are the JVM tests' (one Start per boot, and the emulated SIM is
+   unlocked and reports no IMS).
 8. Wait (15 minutes at most) for `module.tor.bootstrap` = 100 in the
    filter's `/status` (through `adb forward`), or "Bootstrapped 100%" in
    `tor.log`. Screenshot of the status screen.

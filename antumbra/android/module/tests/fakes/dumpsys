@@ -5,7 +5,10 @@
 # telephony.registry prints the "last known state" part: one block per
 # phone (/antumbra-test/phones of them; /antumbra-test/registry.<n> when the
 # tests wrote one, idle otherwise) and mRadioPowerState from
-# /antumbra-test/radio. Every call is logged to /antumbra-test/dumpsys.log.
+# /antumbra-test/radio. 'dumpsys activity service
+# com.android.phone/com.android.phone.TelephonyDebugService' (the phone
+# process's own dump, with the IMS registration) prints /antumbra-test/ims
+# when the test wrote one. Every call is logged to /antumbra-test/dumpsys.log.
 # Before the framework is up, and while /antumbra-test/dumpsys-broken
 # exists, it answers as for a missing service.
 T=/antumbra-test
@@ -16,6 +19,13 @@ if [ ! -f $T/framework-up ] || [ -e $T/dumpsys-broken ]; then
 	exit 1
 fi
 case ${1-} in
+activity)
+	if [ "$*" = 'activity service com.android.phone/com.android.phone.TelephonyDebugService' ] && [ -f $T/ims ]; then
+		cat $T/ims
+	else
+		echo 'No services match: com.android.phone/com.android.phone.TelephonyDebugService'
+	fi
+	;;
 telecom)
 	cat $T/telecom
 	;;

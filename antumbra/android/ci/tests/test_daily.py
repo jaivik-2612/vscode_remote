@@ -566,6 +566,15 @@ class DailyTest(unittest.TestCase):
                          "The power menu check on the Welcome screen did not go as expected "
                          "(nothing in the power menu was pressed, nothing dialled)")
         self.assertEqual(daily.plain_check("tracker_blocked:x.net", "ok"), "Tracker blocked: x.net")
+        # WEL8's checks, in plain words (none falls back to the check's name).
+        for name in ("welcome_choices_gate_off", "welcome_choices_gate_phone", "welcome_choices_gate_data",
+                     "welcome_radio_line", "welcome_phone_start", "provider_cell", "cell_phone_mode",
+                     "welcome_phone_status", "welcome_module_cell"):
+            for status in ("ok", "warn"):
+                self.assertNotIn("_", daily.plain_check(name, status), name)
+                self.assertFalse(daily.plain_check(name, status).startswith("Not as expected: "), name)
+        self.assertEqual(daily.plain_check("welcome_phone_start", "warn"),
+                         "Welcome did not offer calls and texts, so the session was started with Phone off")
 
     def test_odd_shapes_do_not_crash(self):
         def mutate(name, fn):

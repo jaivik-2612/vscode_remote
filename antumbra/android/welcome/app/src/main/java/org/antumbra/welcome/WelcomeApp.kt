@@ -27,5 +27,8 @@ class WelcomeApp : Application() {
         // Quick power off waits during and after a call; for that, the process
         // follows the calls from its start (the same lifetime as above).
         CallWatch.start(this)
+        // The radio line and the SIM's state (WEL8): a service-state
+        // listener that needs no permission and gets no location.
+        CellWatch.start(this)
     }
 }

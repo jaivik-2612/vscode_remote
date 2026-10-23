@@ -538,6 +538,32 @@ welcome_query() {
 	/system/bin/content query --user 0 --uri "$PROVIDER_URI" --projection "$1" 2>/dev/null
 }
 
+# welcome_row: Welcome's row with the columns session_read reads
+# (WELCOME_COLUMNS, the cell column last). Prints the row and returns 0;
+# returns 2, printing nothing, when Welcome answered that it has no "cell"
+# column (a Welcome from before WEL8: 'content' prints the provider's
+# "IllegalArgumentException: Unknown column: cell" on standard error and
+# exits 0); returns 1 for any other answer without a row (Welcome not
+# started yet, a Java start that failed): the module then keeps waiting,
+# so a passing failure never makes a Phone-mode session keep the radio off.
+WELCOME_COLUMNS=started:tor_mode:mac:session_id:cell
+welcome_row() {
+	/system/bin/content query --user 0 --uri "$PROVIDER_URI" --projection "$WELCOME_COLUMNS" 2>&1 | welcome_row_pick
+}
+
+# welcome_row_pick: welcome_row's answer from what 'content' printed
+# (standard output and error, on standard input).
+welcome_row_pick() {
+	_wr=$(cat)
+	_wr_row=$(printf '%s\n' "$_wr" | sed -n '/^Row: 0 /{p;q;}')
+	if [ -n "$_wr_row" ]; then
+		printf '%s\n' "$_wr_row"
+		return 0
+	fi
+	printf '%s\n' "$_wr" | tr -d '\r' | grep -q -x 'java.lang.IllegalArgumentException: Unknown column: cell' && return 2
+	return 1
+}
+
 # welcome_is_owner: true if Welcome (org.antumbra.welcome) is the device
 # owner. Any app could declare the provider's authority while Welcome is
 # not installed (before it is installed, or if it were ever removed) and
@@ -590,6 +616,9 @@ settings_apply() {
 	done <"$SETTINGS_CONF"
 }
 
+# settings_list: every Settings.Global value, "KEY=VALUE" per line.
+settings_list() { /system/bin/settings list global 2>/dev/null; }
+
 # setting_get KEY: print a Settings.Global value (empty when unset).
 # Returns 1 if the settings provider does not answer.
 setting_get() {
@@ -613,7 +642,7 @@ setting_get() {
 # well.
 mobile_data_off() {
 	_md_ids=$({
-		/system/bin/settings list global 2>/dev/null | sed -n 's/^mobile_data\([0-9][0-9]*\)=.*/\1/p'
+		settings_list | sed -n 's/^mobile_data\([0-9][0-9]*\)=.*/\1/p'
 		/system/bin/content query --uri content://telephony/siminfo --projection _id 2>/dev/null |
 			sed -n 's/^Row: [0-9]* _id=\([0-9][0-9]*\)$/\1/p'
 	} | sort -u)
@@ -621,8 +650,17 @@ mobile_data_off() {
 		settings_put "mobile_data$_md_id" 0
 	done
 	/system/bin/cmd phone data disable >/dev/null 2>&1
+	# A session whose Internet is mobile data switches it on again
+	# (cell_data_step).
+	CELL_DATA_ON=0
 	return 0
 }
+
+# mobile_data_on: mobile data on for the default data SIM ('cmd phone data
+# enable': the person's switch in Settings, as Android stores it). Only for
+# a session whose Internet is mobile data, over a live firewall
+# (cell_data_step).
+mobile_data_on() { /system/bin/cmd phone data enable >/dev/null 2>&1; }
 
 # wifi_off, bluetooth_off: switch them off now (root may do so in any
 # state, airplane mode included).
@@ -647,9 +685,9 @@ framework_ready() {
 
 # --- The cell radio ------------------------------------------------------------------
 #
-# The cell radio stays off unless the session chose Phone mode (WEL8; until
-# then every session keeps it off). It is off from power-on because of
-# three stored values: enable_cellular_on_boot=0 (settings.conf), airplane
+# The cell radio stays off unless the session chose Phone mode at Start and
+# this phone's gate allows it (WEL8; "Phone mode and the gate", below). It
+# is off from power-on because of three stored values: enable_cellular_on_boot=0 (settings.conf), airplane
 # mode off and cell_on=1. The phone process reads enable_cellular_on_boot
 # once, when it starts, and keeps the radio off ("off by the user"); this
 # holds on a start without the module too. Airplane mode is never left on
@@ -716,13 +754,40 @@ framework_ready() {
 # not running, when Telecom's own emergency check can fail; Android 17) or
 # "none" (nothing in the last 5 minutes). Welcome skips its wait only for
 # a fresh "ordinary" word that covers the call it saw end; everything else
-# waits as before, and "emergency" can only make it wait longer. Until
-# WEL8 every session is outside Phone mode, so the word is never
-# "ordinary". The word goes to Welcome alone: root calls Welcome's
+# waits as before, and "emergency" can only make it wait longer. Outside
+# Phone mode (cell_phone_mode: the radio on by the session's choice and
+# the gate) the word is never "ordinary". The word goes to Welcome alone: root calls Welcome's
 # provider (only uid 0 may), never status.json or a property, which every
 # app can read. The module keeps the times of the last emergency sign and
 # of the last doubt until 5 minutes after the last call that followed
 # them, then forgets them, and its log never names a word.
+#
+# Phone mode and the gate (WEL8). Welcome's row says what the session
+# chose at Start: cell = off, phone (calls and texts: the radio on, mobile
+# data off) or data (the radio on and mobile data on, its traffic held to
+# tor by the firewall like any other). What the module carries out is the
+# lowest of that choice, the gate in force at Start and the gate now
+# (cell_effective). After Start a gate can only go down: a gate lowered
+# during a session takes effect at once (the radio off with every hold
+# above; mobile data off at once) and holds for the rest of the session
+# (cell_gate_step), and a gate raised during a session changes nothing
+# until the next start, so the radio never comes on in the middle of a
+# session started with it refused, or after the gate was taken away.
+# The radio comes on at Start only, never before (decision D12). The gate
+# is the root-only file /data/adb/antumbra-cell (cell_gate): no file, as
+# installed, is "off", and every session keeps the radio off whatever
+# Welcome's row says. The install's PH3 step writes "phone" for the
+# measurement and keeps it only as PH3 decides (outcome A, or B once FW6
+# passes); CI's emulator writes it as root, the same way. "data" counts
+# only on the emulator until FW9 and CI12 have passed (CELL_DATA_ON_PHONE,
+# which a later queue item sets): on the phone the gate goes no higher
+# than "phone", whatever the file says. Nothing else turns the gate on:
+# no property, no setting, no build flag; the zip CI tests is the zip a
+# release ships. The module tells Welcome the gate, what it carries out and
+# the radio as it last read it (module_cell, cell_offer_tell), so that
+# Welcome offers only what the module will do; Welcome cannot raise it.
+# Emergency calls get nothing new in any case: no call or SMS restriction,
+# and no radio step but airplane mode, which the emergency path undoes.
 
 # Seconds the radio stays as it is after a call (Android's callback mode
 # lasts 300000 ms; Welcome's CallWatch waits as long).
@@ -748,6 +813,21 @@ CELL_IMS_EVERY=300
 # Seconds between tries while Welcome does not take the word (a Welcome
 # without module_word answers "Result: null" every time).
 WORD_RETRY=300
+# The Phone-mode gate (WEL8): a root-only file (cell_gate).
+CELL_GATE_FILE=/data/adb/antumbra-cell
+# 1 lets the gate say "data" on a phone. 0 until FW9 (the SIM's mobile data
+# through Tor) and CI12 (an emulator run over the emulated radio) have
+# passed: until then mobile data through Tor is carried out on the emulator
+# only, and a phone's gate stops at "phone".
+CELL_DATA_ON_PHONE=0
+# Welcome's provider takes the module's word on the cell radio
+# (module_cell) from uid 0 only; seconds between words when nothing
+# changes, so that Welcome can tell a live reading from an old one.
+CELL_OFFER_METHOD=module_cell
+CELL_OFFER_EVERY=300
+# Seconds from a first refusal of it to the next try; doubled at each
+# refusal after that, up to CELL_OFFER_EVERY.
+CELL_OFFER_RETRY=30
 
 # What the cell radio's watch keeps (service.sh's loop; cell_step).
 CELL_AIR=          # airplane_mode_on as last read: 1, 0, or empty (unread)
@@ -797,10 +877,32 @@ CL_LIVE=
 CL_XN=
 CL_ALONE=0
 CL_PHONE=-
-# The session's choice ("off" or "phone"; service.sh's session_cell) and
-# the fail-safe's state (service.sh's RADIOS) are read from service.sh.
+# The session's choice ("off", "phone" or "data"; service.sh's
+# session_cell), the gate in force at Start (SES_GATE, service.sh's
+# session_read) and the fail-safe's state (service.sh's RADIOS) are read
+# from service.sh.
 SES_CELL=${SES_CELL:-off}
+SES_GATE=${SES_GATE:-off}
 RADIOS=${RADIOS:-}
+CELL_GATE=off      # the gate now, as cell_gate_step last read it
+CELL_GATE_SEEN=    # the gate last logged (empty: not read yet)
+CELL_DATA_ON=0     # 1 once the module switched mobile data on (a data session); 0 after any mobile_data_off
+CELL_EMULATOR=     # 1 on the emulator, 0 on a phone (empty: not asked yet)
+# The module's word on the cell radio to Welcome (module_cell; cell_offer_tell).
+CELL_OFFER=        # the last word Welcome took, "GATE CELL RADIO AT" (empty: none yet)
+CELL_OFFER_AT=     # uptime when Welcome took it
+CELL_OFFER_SID=    # Welcome's session_id then (WELCOME_SID)
+CELL_OFFER_BAD=0   # 1 while Welcome does not take it (logged once)
+CELL_OFFER_BAD_AT=0
+CELL_OFFER_WAIT=30 # seconds from a refusal to the next try (CELL_OFFER_RETRY doubling, up to CELL_OFFER_EVERY)
+CELL_OFFER_TOLD=   # uptime of the last try (service.sh checks the ports again after it)
+# Welcome's session_id at the last read of its row (session_read): before
+# Start a new one means Welcome's process started again, and lost the word.
+WELCOME_SID=${WELCOME_SID:-}
+# 1 while the module reads Welcome's row without the cell column (an older
+# Welcome; service.sh's session_read): its sessions keep the cell radio
+# off, so the gate told to Welcome is "off" meanwhile (cell_offer_tell).
+WELCOME_OLD=${WELCOME_OLD:-0}
 # The cell radio's current problem, for status.json (service.sh).
 # shellcheck disable=SC2034 # read by service.sh
 P_CELL=
@@ -1235,10 +1337,102 @@ phone_proc() {
 	echo "$_pp:$1"
 }
 
-# cell_phone_mode: true in a Phone-mode session once the module's switch-on
-# is done and the fail-safe holds no radio: the only time the cell radio is
-# on on purpose. Otherwise it is off by design (before Start, outside Phone
-# mode, before the switch-on). Telephony refuses an ordinary call while the
+# cell_gate_owner_ok FILE: FILE belongs to root and neither its group nor
+# others may write it. (The unit tests replace this one check.)
+cell_gate_owner_ok() {
+	_go=$($TB stat -c '%u %a' "$1" 2>/dev/null) || return 1
+	case $_go in '0 '*) ;; *) return 1 ;; esac
+	_go=${_go#0 }
+	case $_go in '' | *[!0-7]*) return 1 ;; esac
+	# The last two octal digits are the group's and the others': neither
+	# may include write (2).
+	case $_go in *[2367][0-7] | *[2367]) return 1 ;; esac
+	return 0
+}
+
+# cell_emulator: true on the Android emulator (asked once; read-only
+# properties set at boot).
+cell_emulator() {
+	if [ -z "$CELL_EMULATOR" ]; then
+		CELL_EMULATOR=0
+		is_emulator && CELL_EMULATOR=1
+	fi
+	[ "$CELL_EMULATOR" = 1 ]
+}
+
+# cell_gate: print the Phone-mode gate in force on this phone now: "off",
+# "phone" or "data". It is "phone" or "data" only when CELL_GATE_FILE is a
+# regular file (not a link) that belongs to root, that neither group nor
+# others may write, and whose first line is exactly that word; anything
+# else, or no file, is "off". /data/adb is root's alone (0711 since
+# post-fs-data.sh, 0700 as Magisk makes it), so no app can write the file.
+# "data" counts only on the emulator unless CELL_DATA_ON_PHONE is 1; on a
+# phone it is "phone" until then.
+cell_gate() {
+	_cg=off
+	if [ -f "$CELL_GATE_FILE" ] && [ ! -L "$CELL_GATE_FILE" ] && cell_gate_owner_ok "$CELL_GATE_FILE"; then
+		case $(read_value "$CELL_GATE_FILE") in
+		phone) _cg=phone ;;
+		data) _cg=data ;;
+		esac
+	fi
+	if [ "$_cg" = data ] && [ "$CELL_DATA_ON_PHONE" != 1 ] && ! cell_emulator; then
+		_cg=phone
+	fi
+	echo "$_cg"
+}
+
+# cell_rank LEVEL: 0 for off (and anything else), 1 for phone, 2 for data.
+cell_rank() {
+	case $1 in
+	phone) echo 1 ;;
+	data) echo 2 ;;
+	*) echo 0 ;;
+	esac
+}
+
+# cell_effective: what the module carries out for the cell radio: "none"
+# before Start; then the lowest of the session's choice (SES_CELL), the
+# gate at Start (SES_GATE) and the gate now (CELL_GATE), in the order off,
+# phone, data.
+cell_effective() {
+	if [ "${S_STARTED:-0}" != 1 ]; then
+		echo none
+		return 0
+	fi
+	_ce=$SES_CELL
+	[ "$(cell_rank "$SES_GATE")" -ge "$(cell_rank "$_ce")" ] || _ce=$SES_GATE
+	[ "$(cell_rank "$CELL_GATE")" -ge "$(cell_rank "$_ce")" ] || _ce=$CELL_GATE
+	case $_ce in phone | data) echo "$_ce" ;; *) echo off ;; esac
+}
+
+# cell_gate_step: read the gate at every turn (a stat and a read, no Java
+# start); a change is logged once. After Start a gate can only go down: a
+# gate lowered during a session takes effect through cell_effective, and
+# SES_GATE takes it, so that it holds for the rest of the session (logged
+# once); raised again, it counts only from the next start.
+cell_gate_step() {
+	# Asked here, outside cell_gate's subshell, so that it is asked once.
+	cell_emulator || :
+	CELL_GATE=$(cell_gate)
+	if [ "${S_STARTED:-0}" = 1 ] && [ "$(cell_rank "$CELL_GATE")" -lt "$(cell_rank "$SES_GATE")" ]; then
+		SES_GATE=$CELL_GATE
+		log "cell: the Phone-mode gate went down to $SES_GATE; it stays so for this session, until the next start"
+	fi
+	[ "$CELL_GATE" != "$CELL_GATE_SEEN" ] || return 0
+	if [ -z "$CELL_GATE_SEEN" ]; then
+		log "cell: this phone's Phone-mode gate: $CELL_GATE"
+	else
+		log "cell: Phone-mode gate now $CELL_GATE"
+	fi
+	CELL_GATE_SEEN=$CELL_GATE
+}
+
+# cell_phone_mode: true in a Phone-mode session (cell_effective "phone" or
+# "data") once the module's switch-on is done and the fail-safe holds no
+# radio: the only time the cell radio is on on purpose. Otherwise it is off
+# by design (before Start, outside Phone mode, a gate that does not allow
+# it, before the switch-on). Telephony refuses an ordinary call while the
 # phone's voice service reads powered off (TelephonyConnectionService:
 # POWER_OFF; an emergency number switches the radio on), but that state
 # counts IMS registered over Wi-Fi as in service (GsmCdmaPhone's
@@ -1246,7 +1440,8 @@ phone_proc() {
 # Wi-Fi call (until MOD7 switches Wi-Fi calling off) or follows a switch-on
 # by something else: the module cannot tell which.
 cell_phone_mode() {
-	[ "${S_STARTED:-0}" = 1 ] && [ "$SES_CELL" = phone ] && [ -z "$RADIOS" ] && [ "$CELL_ON_DONE" = 1 ]
+	case $(cell_effective) in phone | data) ;; *) return 1 ;; esac
+	[ -z "$RADIOS" ] && [ "$CELL_ON_DONE" = 1 ]
 }
 
 # cell_look: one look at the call state, the radio and the phone process
@@ -1483,19 +1678,21 @@ cell_boot_value() {
 }
 
 # cell_want: what the cell radio should be: "failsafe" while the fail-safe
-# waits to switch it off; "on" in a Phone-mode session (after Start only,
-# decision D12), "leave" there once the fail-safe has switched the radios
-# off (the person decides from then on); "off" otherwise.
+# waits to switch it off; "on" in a Phone-mode session (cell_effective
+# "phone" or "data": after Start only, decision D12, and only as far as
+# the gate allows), "leave" there once the fail-safe has switched the
+# radios off (the person decides from then on); "off" otherwise.
 cell_want() {
 	case $RADIOS in wanted | waiting)
 		echo failsafe
 		return 0
 		;;
 	esac
-	if [ "${S_STARTED:-0}" = 1 ] && [ "$SES_CELL" = phone ]; then
+	case $(cell_effective) in phone | data)
 		if [ -z "$RADIOS" ]; then echo on; else echo leave; fi
 		return 0
-	fi
+		;;
+	esac
 	echo off
 }
 
@@ -1652,6 +1849,46 @@ cell_update() {
 	fi
 }
 
+# cell_data_step NOW: mobile data for the session's Internet (WEL8). In a
+# session whose Internet is mobile data (cell_effective "data"): on for
+# the default data SIM (mobile_data_on), once the module's switch-on is
+# done, the last look read the radio on, the firewall is live and the
+# fail-safe holds no radio; again after each of the module's own
+# mobile-data-off writes (a radio switch-on, a SIM change: CELL_DATA_ON
+# back to 0). Not a radio step: no hold applies, and it never waits for
+# one. The person switching mobile data off in Settings is respected until
+# the module's next own write. In every other session: off at once if the
+# module had switched it on (the gate was lowered), and off again whenever
+# a look that did not read the radio off finds it stored on
+# (cell_data_check): Internet is a choice made at Start.
+cell_data_step() {
+	if [ "$(cell_effective)" = data ]; then
+		[ "$CELL_DATA_ON" = 0 ] || return 0
+		[ "$CELL_ON_DONE" = 1 ] && [ "$CL_RADIO" = on ] && [ "${S_FW_STATE:-}" = live ] && [ -z "$RADIOS" ] ||
+			return 0
+		mobile_data_on || return 0
+		CELL_DATA_ON=1
+		log "cell: mobile data on (the session's Internet is mobile data)"
+		return 0
+	fi
+	if [ "$CELL_DATA_ON" = 1 ]; then
+		mobile_data_off
+		log "cell: mobile data off (this phone's gate no longer allows it)"
+	fi
+	[ "$CELL_LOOKED" = "$1" ] && [ "$CL_RADIO" != off ] || return 0
+	cell_data_check
+}
+
+# cell_data_check: mobile data stored on for any SIM (mobile_data or
+# mobile_data<subId> = 1: the person in Settings, an app allowed to, a new
+# SIM's default) is switched off again. 'settings' is native (no Java
+# start), so this is cheap.
+cell_data_check() {
+	settings_list | grep -q -E '^mobile_data[0-9]*=1$' || return 0
+	mobile_data_off
+	log "cell: mobile data was switched on; off again (this session's Internet is not mobile data)"
+}
+
 # cell_step NOW: one turn of the cell radio's watch (service.sh, at every
 # turn once the framework has answered).
 cell_step() {
@@ -1659,6 +1896,7 @@ cell_step() {
 	# The module's files are gone (Magisk itself uninstalled while this
 	# loop still runs): the stored values are uninstall.sh's from now on.
 	[ -f "$SETTINGS_CONF" ] || return 0
+	cell_gate_step
 	# Without the time since boot every step is held (cell_hold); once it
 	# can be read again, the 5 minutes start from then.
 	if [ "$_cs_now" -le 0 ]; then
@@ -1810,6 +2048,7 @@ cell_step() {
 	else
 		P_CELL=
 	fi
+	cell_data_step "$_cs_now"
 	ims_step "$_cs_now"
 	cell_forget "$_cs_now"
 }
@@ -1902,6 +2141,99 @@ cell_tell() {
 	fi
 }
 
+# --- The module's word on the cell radio to Welcome (WEL8) ---------------------------
+#
+# Root calls Welcome's provider, as for the word on the calls:
+#   content call --user 0 --uri content://org.antumbra.welcome.state \
+#     --method module_cell --extra v:i:1 --extra gate:s:GATE \
+#     --extra cell:s:CELL --extra radio:s:RADIO --extra at:l:AT
+# GATE is this phone's gate now (cell_gate: off, phone, data); CELL what
+# the module carries out (cell_effective: none before Start, then off,
+# phone or data); RADIO the radio at the last look (on, off, wait for
+# unavailable, unknown) and AT that look's time since boot (0 before the
+# first look). Welcome offers Phone and mobile data only as far as GATE
+# allows, and shows RADIO as the cellular radio's line. Welcome takes it
+# from uid 0 only and keeps it in memory; nothing of it goes into a file,
+# status.json, a property or the log (none of it is about calls, but every
+# app can read status.json and properties, and the SIM's state and the
+# radio are the person's business).
+
+# cell_send EXTRA...: 'content call' to Welcome's provider with the
+# module_cell method; prints what the tool prints on standard output.
+# Bounded at 10 s.
+cell_send() {
+	$TB timeout 10 /system/bin/content call --user 0 --uri "$WORD_URI" --method "$CELL_OFFER_METHOD" "$@" 2>/dev/null
+}
+
+# cell_offer_tell NOW: tell Welcome the gate, what the module carries out
+# and the radio as the last look read it: when any of them changed (the
+# first turn included), when Welcome's process started again before Start
+# (its session_id changed: the new process holds no word), and every
+# CELL_OFFER_EVERY seconds, so that Welcome can tell a live reading from an
+# old one. While Welcome does not take it, again after 30 s, then after
+# twice as long each time, up to CELL_OFFER_EVERY: a passing failure (a
+# Java start that took longer than 10 s) costs half a minute, a Welcome
+# from before WEL8 (it answers "Unknown method") one try every 5 minutes.
+# The refusal and the recovery are logged once each, never the word. Only
+# while Welcome is the device owner. The gate told is "off" while the
+# module reads Welcome's row without the cell column (WELCOME_OLD): it
+# carries out nothing above off for such a Welcome's sessions, so a newer
+# Welcome must not offer more until the module reads its row with the
+# column. Sets CELL_OFFER_TOLD to NOW when it tried (service.sh then checks
+# the ports again).
+cell_offer_tell() {
+	_co_now=$1
+	_co_gate=$CELL_GATE
+	[ "$WELCOME_OLD" != 1 ] || _co_gate=off
+	_co_cell=$(cell_effective)
+	_co_at=${CELL_LOOKED:-0}
+	case $_co_at in '' | *[!0-9]*) _co_at=0 ;; esac
+	# Only the four words Welcome takes: anything else reads "unknown".
+	_co_radio=$CL_RADIO
+	case $_co_radio in on | off | wait) ;; *) _co_radio=unknown ;; esac
+	_co_new="$_co_gate $_co_cell $_co_radio $_co_at"
+	_co_go=0
+	if [ "$CELL_OFFER_BAD" = 1 ]; then
+		if [ "$_co_now" -lt "$CELL_OFFER_BAD_AT" ] || [ $((_co_now - CELL_OFFER_BAD_AT)) -ge "$CELL_OFFER_WAIT" ]; then
+			_co_go=1
+		fi
+	else
+		# A new look alone (AT) is no change: the word goes again when its
+		# gate, cell or radio changed.
+		[ "${_co_new% *}" = "${CELL_OFFER% *}" ] || _co_go=1
+		[ "$WELCOME_SID" = "$CELL_OFFER_SID" ] || _co_go=1
+		if [ -z "$CELL_OFFER_AT" ] || [ "$_co_now" -lt "$CELL_OFFER_AT" ] ||
+			[ $((_co_now - CELL_OFFER_AT)) -ge "$CELL_OFFER_EVERY" ]; then
+			_co_go=1
+		fi
+	fi
+	[ "$_co_go" = 1 ] || return 0
+	welcome_is_owner || return 0
+	# shellcheck disable=SC2034 # read by service.sh
+	CELL_OFFER_TOLD=$_co_now
+	_co_out=$(cell_send --extra v:i:1 --extra "gate:s:$_co_gate" --extra "cell:s:$_co_cell" \
+		--extra "radio:s:$_co_radio" --extra "at:l:$_co_at")
+	if [ "$_co_out" = 'Result: Bundle[{v=1}]' ]; then
+		CELL_OFFER=$_co_new
+		CELL_OFFER_AT=$_co_now
+		CELL_OFFER_SID=$WELCOME_SID
+		if [ "$CELL_OFFER_BAD" = 1 ]; then
+			CELL_OFFER_BAD=0
+			log "cell: Welcome takes the module's word on the cell radio again"
+		fi
+	else
+		CELL_OFFER_BAD_AT=$_co_now
+		if [ "$CELL_OFFER_BAD" = 1 ]; then
+			CELL_OFFER_WAIT=$((CELL_OFFER_WAIT * 2))
+			[ "$CELL_OFFER_WAIT" -le "$CELL_OFFER_EVERY" ] || CELL_OFFER_WAIT=$CELL_OFFER_EVERY
+		else
+			CELL_OFFER_BAD=1
+			CELL_OFFER_WAIT=$CELL_OFFER_RETRY
+			log "cell: Welcome did not take the module's word on the cell radio (an older Welcome?); it offers no Phone mode then"
+		fi
+	fi
+}
+
 # ims_dump: the phone process's own dump (TelephonyDebugService, which
 # PhoneGlobals starts with the phone process), bounded at 8 s. It is large
 # (every phone, local logs): read through a pipe only.
@@ -1980,14 +2312,17 @@ ims_state() {
 # module's switch-on is done, with the radio on and nothing holding it (no
 # heavy dump of the phone process during a call, callback mode or the 5
 # minutes after), at most every CELL_IMS_EVERY seconds; an unreadable dump
-# gives "unknown". Outside Phone mode "off". (Dormant until WEL8:
-# session_cell says "off" today.)
+# gives "unknown". Outside Phone mode (cell_effective neither "phone" nor
+# "data": before Start, Phone off, or a gate that does not allow it) "off".
 ims_step() {
-	if [ "${S_STARTED:-0}" != 1 ] || [ "$SES_CELL" != phone ]; then
+	case $(cell_effective) in
+	phone | data) ;;
+	*)
 		CELL_IMS=off
 		CELL_IMS_AT=0
 		return 0
-	fi
+		;;
+	esac
 	[ "$CELL_LOOKED" = "$1" ] && [ "$CELL_ON_DONE" = 1 ] && [ "$CL_RADIO" = on ] || return 0
 	[ "$1" -ge "$CELL_IMS_NEXT" ] || return 0
 	! cell_hold "$1" >/dev/null || return 0

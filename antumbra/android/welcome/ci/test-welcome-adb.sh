@@ -8,6 +8,13 @@
 # check-module-word. No device or emulator needed.
 #
 #   ci/test-welcome-adb.sh        exit status 0 when every case passed
+#
+# WEL8's check-choices and check-phone run against a fake screen
+# (fakeui.py, below) that draws the Welcome and status screens from a state
+# file with Welcome's own texts (strings.xml), scrolls as Compose's
+# accessibility tree shows a page (cards cut off by an edge list only the
+# texts on screen), and applies taps by Welcome's own rules, with switches
+# for each fault the checks must catch.
 
 set -euo pipefail
 
@@ -24,6 +31,14 @@ set -u
 d=$FAKE_DIR
 [ "${1:-}" = -s ] && shift 2
 printf '%s\n' "$*" >>"$d/log"
+# WEL8: the fake screen, while its state file exists.
+if [ -f "$d/ui-state.json" ]; then
+    case "$*" in
+        "exec-out cat "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" dump ;;
+        "shell input tap "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" tap "$4" "$5" ;;
+        "shell input swipe "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" swipe "$4" "$5" "$6" "$7" "${8:-300}" ;;
+    esac
+fi
 case "$*" in
     "shell uiautomator dump "*) exit 0 ;;
     # With $d/screen, what is in front changes: am start opens the status
@@ -52,8 +67,25 @@ case "$*" in
         printf '%s\n' "  ResumedActivity: ActivityRecord{1f u0 $r t7}" '' 'ActivityTaskSupervisor state:' \
             '  LockTaskController:' "    mLockTaskModeState=$(cat "$d/lock")" ;;
     "shell dumpsys telephony.registry")
-        if [ "$(cat "$d/calls")" = none ]; then echo "Can't find service: telephony.registry"; exit 0; fi
-        printf '%s\n' 'last known state:' 'Phone Id=0' "  mCallState=$(cat "$d/calls")" ;;
+        if [ "$(cat "$d/calls" 2>/dev/null)" = none ]; then echo "Can't find service: telephony.registry"; exit 0; fi
+        printf '%s\n' 'last known state:' 'Phone Id=0' "  mCallState=$(cat "$d/calls" 2>/dev/null || echo 0)" \
+            "  mRadioPowerState=$(cat "$d/radio" 2>/dev/null || echo 1)" ;;
+    "shell getprop gsm.sim.state") cat "$d/simstate" 2>/dev/null || echo LOADED,ABSENT ;;
+    # WEL8's check-module-cell, as check-module-word's.
+    "shell su 2000 content call --user 0 --uri content://org.antumbra.welcome.state --method module_cell "*)
+        if [ -f "$d/cellshelltakes" ]; then echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.SecurityException: uid 2000 may not call module_cell'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_cell --extra v:i:2 "*)
+        if [ -f "$d/cellmalformedtaken" ]; then echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.IllegalArgumentException: Malformed word'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_cell --extra v:i:1 --extra gate:s:off --extra cell:s:none --extra radio:s:unknown --extra at:l:0")
+        if [ -f "$d/cellrootrefused" ]; then echo 'Error while accessing provider:org.antumbra.welcome.state'; else
+            echo 'Result: Bundle[{v=1}]'
+        fi ;;
     "shell am start -n com.android.phone/.EmergencyDialer -a android.intent.action.DIAL_EMERGENCY")
         if [ "$(cat "$d/refuse" 2>/dev/null)" = am ]; then echo "Error: Activity not started"; exit 0; fi
         if [ -f "$d/droplock" ]; then echo NONE >"$d/lock"; fi
@@ -125,9 +157,14 @@ case "$*" in
     "shell cmd wifi status") echo "Wifi is disabled" ;;
     "shell dumpsys user") cat "$d/restrictions" ;;
     "shell content query --uri content://org.antumbra.welcome.state/session --projection bridges")
-        printf 'Row: 0 bridges=192.0.2.7:9001 0123456789ABCDEF0123456789ABCDEF01234567\n[2001:db8::1]:443\n' ;;
+        # Bridge lines only in a bridges session (the default here).
+        if [ "$(cat "$d/tormode" 2>/dev/null || echo bridges)" != bridges ]; then echo 'Row: 0 bridges='; else
+            printf 'Row: 0 bridges=192.0.2.7:9001 0123456789ABCDEF0123456789ABCDEF01234567\n[2001:db8::1]:443\n'
+        fi ;;
+    "shell content query --uri content://org.antumbra.welcome.state/session --projection cell")
+        echo "Row: 0 cell=$(cat "$d/cell" 2>/dev/null || echo off)" ;;
     "shell content query --uri content://org.antumbra.welcome.state/session --projection "*)
-        echo "Row: 0 started=1, tor_mode=bridges, mac=new, admin=1, unsafe_browser=0, persistent=0, session_id=5f0c" ;;
+        echo "Row: 0 started=1, tor_mode=$(cat "$d/tormode" 2>/dev/null || echo bridges), mac=new, admin=1, unsafe_browser=0, persistent=0, session_id=5f0c" ;;
     *) echo "fake adb: unexpected: $*" >&2; exit 1 ;;
 esac
 FAKE
@@ -138,8 +175,8 @@ node() { printf '<node resource-id="%s" text="%s" checked="%s" bounds="[0,%d][10
 {
     echo '<?xml version="1.0"?><hierarchy>'
     y=0
-    for id in start_button tor_direct tor_bridges tor_offline bridges_custom bridges_text switch_admin \
-        switch_unsafe_browser status_title poweroff_button emergency_call; do
+    for id in start_button internet_wifi internet_mobile internet_none tor_direct tor_bridges bridges_custom \
+        bridges_text phone_off phone_calls switch_admin switch_unsafe_browser status_title poweroff_button emergency_call; do
         node "$id" false "" $y
         y=$((y + 100))
     done
@@ -581,6 +618,396 @@ done
 
 # 6. expect counts bridge lines.
 "$script" expect started=1 bridges=2 unsafe_browser=0 2>"$work/err" && pass "expect" || bad "expect: $(cat "$work/err")"
+
+# 9. WEL8: start with the two choices; cell in the row.
+echo 1 >"$work/hook"
+: >"$work/log"
+echo phone >"$work/cell"
+echo offline >"$work/tormode"
+if "$script" start --internet none --phone calls --admin 2>"$work/err"; then
+    grep -q 'provider row: cell=phone' "$work/err" && grep -q '^shell input tap ' "$work/log" &&
+        pass "start --internet none --phone calls: cell=phone in the row" || bad "start, WEL8: $(cat "$work/err")"
+else
+    bad "start --internet none --phone calls: $(cat "$work/err")"
+fi
+echo off >"$work/cell"
+if "$script" start --internet none --phone calls --admin 2>"$work/err"; then bad "start passed with the wrong cell"; else
+    grep -q "cell is 'off', expected 'phone'" "$work/err" && pass "start: a wrong cell fails" || bad "start, wrong cell: $(cat "$work/err")"
+fi
+rm -f "${work:?}/cell" "${work:?}/tormode"
+if "$script" start --internet mobile --phone off 2>"$work/err"; then bad "start took mobile data with Phone off"; else
+    grep -q 'mobile data comes with calls and texts' "$work/err" && pass "start: mobile data without calls refused" ||
+        bad "start, mobile without calls: $(cat "$work/err")"
+fi
+
+# 10. WEL8: check-choices and check-phone against the fake screen, with
+#     Welcome's own texts. The fake screen settles at once, so the pauses
+#     welcome-adb.sh makes for a device's are skipped here (a sleep that
+#     returns at once, for this section only).
+export FAKE_STRINGS=$here/../app/src/main/res/values/strings.xml
+mkdir "$work/nosleep"
+printf '#!/bin/sh\nexit 0\n' >"$work/nosleep/sleep"
+chmod +x "$work/nosleep/sleep"
+PATH_BEFORE_UI=$PATH
+export PATH="$work/nosleep:$PATH"
+cat >"$work/fakeui.py" <<'FAKEUI'
+# The Welcome and status screens of a fake device, drawn from a state file
+# (JSON: screen, gate, internet, phone, cell, radio, sim, offset, and
+# "bugs": the faults the checks must catch) with Welcome's own texts
+# (strings.xml, FAKE_STRINGS), the way uiautomator dumps Compose's
+# accessibility tree: a scroll view from y=100 to y=1900 holding the rows
+# (40 px plus 110 px per text, at the state's scroll offset) and the pinned
+# buttons below it. Every node has the bounds of its visible part. A row
+# that merges its children (a radio or switch row) lists them all while
+# any part of it is on screen; a card or an info row lists only the
+# children on screen, so a card cut off by an edge shows only some of its
+# texts. "tap X Y" applies Welcome's rules to the control at Y; "swipe
+# X1 Y1 X2 Y2 MS" scrolls the page by Y1 - Y2, half as far again for a
+# fast swipe (under 500 ms: a fling). With the bug "cutcard" a spacer puts
+# the carrier card, where it is tall enough (Phone on), where a scan from
+# the top, in steps of a slow swipe (960 px), finds it cut off on every
+# page; each dump that cuts the card off is counted in FAKE_DIR/cut-served.
+import json, os, re, sys
+from xml.sax.saxutils import quoteattr
+
+path, what = sys.argv[1], sys.argv[2]
+st = json.load(open(path))
+bugs = set(st.get("bugs", []))
+rank = {"off": 0, "phone": 1, "data": 2}
+g = rank[st["gate"]]
+cell = "data" if st["internet"] == "mobile" else ("phone" if st["phone"] else "off")
+VT, VB, W, TEXT_H, PAD, STEP = 100, 1900, 1080, 110, 40, 960
+
+S = {}
+xml = open(os.environ["FAKE_STRINGS"], encoding="utf-8").read()
+for m in re.finditer(r'<string name="([a-z0-9_]+)">([^<]*)</string>', xml):
+    S[m.group(1)] = (m.group(2).replace("\\'", "'").replace('\\"', '"')
+                     .replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+SEES = [S[k] for k in ("carrier_sees_sim", "carrier_sees_imei", "carrier_sees_cells", "carrier_sees_calls",
+                       "carrier_no_tor_calls")]
+
+
+def data_lines(internet):
+    if internet == "mobile":
+        return [S["carrier_data_tor"]]
+    return [S["carrier_data_off"]] + ([S["carrier_hotspot"]] if internet == "wifi" else [])
+
+
+def row(rid, texts, merges, checked=False, enabled=True, height=None):
+    return {"id": rid, "texts": texts, "merges": merges, "checked": checked, "enabled": enabled,
+            "h": height if height is not None else 40 + TEXT_H * len(texts)}
+
+
+def welcome_rows(pad):
+    mobile_ok = g >= 2 or "mobile_enabled" in bugs
+    calls_ok = g >= 1 or "calls_enabled" in bugs
+    i = st["internet"]
+    r = [row("", [S["welcome_title"], S["welcome_intro"]], False)]
+    r.append(row("internet_wifi", [S["internet_wifi"], S["internet_wifi_detail"]], True, i == "wifi"))
+    r.append(row("internet_mobile", [S["internet_mobile"],
+                                     S["internet_mobile_detail"] if mobile_ok else S["internet_mobile_unavailable"]],
+                 True, i == "mobile", mobile_ok))
+    r.append(row("internet_none", [S["internet_none"], S["internet_none_detail"]], True, i == "none"))
+    if i != "none" or "tor_always" in bugs:
+        r.append(row("tor_direct", [S["tor_direct"], S["tor_direct_detail"]], True, True))
+        r.append(row("tor_bridges", [S["tor_bridges"], S["tor_bridges_detail"]], True))
+    r.append(row("sim_status_1", [S["row_sim"], st["sim"]], False))
+    radio = st["radio"]
+    if "radio_wrong" in bugs:
+        radio = "Off" if radio == "On" else "On"
+    r.append(row("radio_status", [S["row_radio"], radio], False))
+    off_checked, calls_checked = cell == "off", cell != "off"
+    if "wrong_checked" in bugs:
+        off_checked, calls_checked = calls_checked, off_checked
+    if "calls_follow_phone" in bugs:
+        # The Phone rows follow the person's own choice, not mobile data's.
+        off_checked, calls_checked = not st["phone"], st["phone"]
+    r.append(row("phone_off", [S["phone_off"], S["phone_off_mobile"] if i == "mobile" else S["phone_off_detail"]],
+                 True, off_checked, i != "mobile"))
+    r.append(row("phone_calls", [S["phone_calls"], S["phone_calls_detail"] if calls_ok else S["phone_calls_unavailable"]],
+                 True, calls_checked, calls_ok))
+    if pad:
+        r.append(row("", [], False, height=pad))
+    if cell == "off":
+        card = [S["carrier_choice_off"]] + ([S["carrier_hotspot"]] if i == "wifi" else [])
+    elif "card_wrong" in bugs and i == "none":
+        card = [S["carrier_choice_on"]] + data_lines(i)
+    else:
+        card = [S["carrier_choice_on"]] + SEES + data_lines(i)
+    r.append(row("card_carrier_choice", [S["card_carrier"]] + card, False))
+    if "offline_text" in bugs:
+        r.append(row("", ["Stay offline"], False))
+    r.append(row("switch_mac", [S["mac_title"], S["mac_on"]], True, True))
+    r.append(row("switch_admin", [S["admin_title"], S["admin_detail"]], True))
+    r.append(row("switch_unsafe_browser", [S["unsafe_title"], S["unsafe_detail"]], True, False, False))
+    r.append(row("", [S["section_storage"], S["section_additional"]], False, height=700))
+    return r
+
+
+def status_rows():
+    i, c, radio = st["internet"], st["cell"], st["radio"]
+    if "offline_text" in bugs:
+        mode = "Offline: no Internet, and the cellular radio is off."
+    elif i == "none":
+        mode = {"Off": S["status_mode_none_radio_off"] if c == "off" else S["status_mode_none_radio_off_phone"],
+                "On": S["status_mode_none_radio_on"]}.get(radio, S["status_mode_none_radio_unknown"])
+    else:
+        mode = S["status_mode_direct_mobile" if i == "mobile" else "status_mode_direct_wifi"]
+    ims = S["ims_off"] if c == "off" else S["ims_unknown"]
+    if "volte_wrong" in bugs:
+        ims = S["ims_registered"] if c == "off" else S["ims_off"]
+    if radio == "Off":
+        card = [S["carrier_now_off"]] + ([S["carrier_hotspot"]] if i == "wifi" else [])
+    else:
+        card = [S["carrier_now_on" if radio == "On" else "carrier_now_unknown"]] + SEES + data_lines(i)
+    names = {"wifi": S["value_wifi"], "mobile": S["value_mobile"], "none": S["value_none"]}
+    return [
+        row("status_title", [S["status_title"]], False),
+        row("status_mode", [mode], False),
+        row("sim_status_1", [S["row_sim"], st["sim"]], False),
+        row("radio_status", [S["row_radio"], radio], False),
+        row("ims_status", [S["row_ims"], ims], False),
+        row("card_carrier", [S["card_carrier"]] + card, False),
+        row("row_internet", [S["row_internet"], names[i]], False),
+        row("row_tor", [S["row_tor"], S["value_tor_unused"] if i == "none" else S["value_direct"]], False),
+        row("row_phone", [S["row_phone"], S["value_off"] if c == "off" else S["value_calls"]], False),
+    ]
+
+
+def place(rows):
+    """Each row with its content top and bottom; the content's height."""
+    y, out = PAD, []
+    for r in rows:
+        out.append((r, y, y + r["h"]))
+        y += r["h"]
+    return out, y + PAD
+
+
+def max_offset(content):
+    return max(0, content - (VB - VT))
+
+
+def cut_pad():
+    """The spacer that has a scan from the top find the card cut off on every page."""
+    for pad in range(40, 3000, 10):
+        placed, content = place(welcome_rows(pad))
+        top, bottom = next((VT + a, VT + b) for r, a, b in placed if r["id"] == "card_carrier_choice")
+        off, offs = 0, []
+        while True:
+            offs.append(off)
+            if off >= max_offset(content):
+                break
+            off = min(off + STEP, max_offset(content))
+        if all(not (VT < top - o and bottom - o < VB) for o in offs):
+            return pad
+    return 0
+
+
+def screen():
+    if st.get("screen") == "status":
+        return status_rows(), [("poweroff_button", [S["power_off_now"]], 1950, 2250)]
+    pad = cut_pad() if "cutcard" in bugs else 0
+    return welcome_rows(pad), [("emergency_call", [S["emergency_call"]], 1950, 2250),
+                               ("start_button", [S["start"]], 1950, 2250)]
+
+
+rows, pinned = screen()
+placed, content = place(rows)
+off = min(max(st.get("offset", 0), 0), max_offset(content))
+
+
+def visible():
+    for r, a, b in placed:
+        t, bot = VT + a - off, VT + b - off
+        if bot > VT and t < VB:
+            yield r, t, bot
+
+
+if what == "dump":
+    out = ['<?xml version="1.0"?><hierarchy>', '<node resource-id="" scrollable="true" bounds="[0,%d][%d,%d]">' % (VT, W, VB)]
+    for r, t, bot in visible():
+        vt, vb = max(t, VT), min(bot, VB)
+        kids = []
+        for k, text in enumerate(r["texts"]):
+            kt, kb = t + 20 + TEXT_H * k, t + 20 + TEXT_H * (k + 1)
+            if not r["merges"] and (kb <= VT or kt >= VB):
+                continue
+            kids.append('<node text=%s bounds="[0,%d][%d,%d]" />' % (quoteattr(text), min(max(kt, vt), vb), W,
+                                                                     max(min(kb, vb), vt)))
+        if r["id"] == "card_carrier_choice" and (t < VT or bot > VB):
+            with open(os.path.join(os.environ["FAKE_DIR"], "cut-served"), "a") as f:
+                f.write("cut\n")
+        out.append('<node resource-id=%s checked="%s" enabled="%s" bounds="[0,%d][%d,%d]">%s</node>' % (
+            quoteattr(r["id"]), str(r["checked"]).lower(), str(r["enabled"]).lower(), vt, W, vb, "".join(kids)))
+    out.append("</node>")
+    for k, (rid, texts, t, bot) in enumerate(pinned):
+        x0 = 0 if len(pinned) == 1 else k * W // 2
+        x1 = W if len(pinned) == 1 else (k + 1) * W // 2
+        out.append('<node resource-id=%s checked="false" enabled="true" bounds="[%d,%d][%d,%d]"><node text=%s bounds="[%d,%d][%d,%d]" /></node>' % (
+            quoteattr(rid), x0, t, x1, bot, quoteattr(texts[0]), x0, t, x1, bot))
+    out.append("</hierarchy>")
+    print("".join(out))
+elif what == "tap":
+    x, y = int(sys.argv[3]), int(sys.argv[4])
+    hit = None
+    if y >= VB:
+        for k, (rid, _, t, bot) in enumerate(pinned):
+            if t <= y < bot and (len(pinned) == 1 or k * W // 2 <= x < (k + 1) * W // 2):
+                hit = {"id": rid, "enabled": True}
+    elif y >= VT:
+        hit = next((r for r, t, bot in visible() if max(t, VT) <= y < min(bot, VB)), None)
+    if hit and hit["enabled"]:
+        rid = hit["id"]
+        if rid.startswith("internet_") and "taps_ignored" not in bugs:
+            st["internet"] = rid[len("internet_"):]
+        elif rid == "phone_off":
+            st["phone"] = False
+        elif rid == "phone_calls":
+            st["phone"] = True
+elif what == "swipe":
+    y1, y2, ms = int(sys.argv[4]), int(sys.argv[6]), int(sys.argv[7]) if len(sys.argv) > 7 else 300
+    st["offset"] = min(max(off + int((y1 - y2) * (1.5 if ms < 500 else 1.0)), 0), max_offset(content))
+if what in ("tap", "swipe"):
+    with open(path, "w") as f:
+        json.dump(st, f)
+FAKEUI
+ui() { # STATE-JSON: the fake screen's state
+    printf '%s\n' "$1" >"$work/ui-state.json"
+    echo 1 >"$work/radio"
+    echo LOADED,ABSENT >"$work/simstate"
+    rm -f "$work/cut-served"
+    : >"$work/log"
+}
+welcome_ui() { # GATE [BUGS...]
+    local g=$1 b=''
+    shift
+    [ $# -eq 0 ] || b=$(printf '"%s",' "$@")
+    ui "{\"screen\": \"welcome\", \"gate\": \"$g\", \"internet\": \"wifi\", \"phone\": false, \"radio\": \"On\", \"sim\": \"Unlocked\", \"bugs\": [${b%,}]}"
+}
+for g in off phone data; do
+    welcome_ui "$g"
+    mkdir -p "$work/shots-$g"
+    if "$script" check-choices --gate "$g" --shots "$work/shots-$g" 2>"$work/err"; then
+        [ "$(grep -c "gate $g: [a-z]*+[a-z]*: ok:" "$work/err")" = 6 ] &&
+            [ "$(find "$work/shots-$g" -name 'welcome-choice-*.png' | wc -l)" = 6 ] &&
+            grep -q '"internet": "wifi"' "$work/ui-state.json" && grep -q '"phone": false' "$work/ui-state.json" &&
+            pass "check-choices --gate $g: six attempts, six screenshots, Wi-Fi and Phone off again" ||
+            bad "check-choices --gate $g: $(cat "$work/err")"
+    else
+        bad "check-choices --gate $g failed: $(cat "$work/err")"
+    fi
+done
+# What each gate lets the walk choose (the fake screen applies Welcome's
+# rules): mobile data straight after Phone off selects calls and texts.
+welcome_ui data
+"$script" check-choices --gate data 2>"$work/err"
+grep -q 'gate data: mobile+off: ok: internet mobile, phone calls' "$work/err" &&
+    grep -q 'gate data: none+calls: ok: internet none, phone calls, tor hidden' "$work/err" &&
+    [ "$(grep -n 'gate data: wifi+off: ok: internet wifi, phone off' "$work/err" | cut -d: -f1)" -lt \
+        "$(grep -n 'gate data: mobile+off: ok' "$work/err" | cut -d: -f1)" ] &&
+    pass "check-choices --gate data: mobile data right after Phone off keeps calls; no Tor rows without Internet" ||
+    bad "check-choices, data walk: $(cat "$work/err")"
+welcome_ui off
+"$script" check-choices --gate off 2>"$work/err"
+grep -q 'gate off: mobile+calls: ok: internet wifi, phone off' "$work/err" &&
+    pass "check-choices --gate off: the refused rows change nothing" || bad "check-choices, off walk: $(cat "$work/err")"
+# A carrier card that no page of the scan shows whole (cut off by an edge,
+# Compose lists only its texts on screen): read again once scrolled wholly
+# into view, never from a cut-off page.
+for g in phone data; do
+    welcome_ui "$g" cutcard
+    if "$script" check-choices --gate "$g" 2>"$work/err"; then
+        grep -q 'card_carrier_choice is cut off by an edge on every page of the scan' "$work/err" && [ -s "$work/cut-served" ] &&
+            pass "check-choices --gate $g: a card cut off on every page is read whole once in view" ||
+            bad "check-choices, cut-off card at $g: did not take the cut-off path: $(cat "$work/err")"
+    else
+        bad "check-choices with a card cut off on every page ($g): $(cat "$work/err")"
+    fi
+done
+# Each fault the checks must catch.
+for case_ in "phone mobile_enabled" "off calls_enabled" "data wrong_checked" "data offline_text" "data radio_wrong" "phone tor_always" \
+    "data taps_ignored" "data sim" "told-data checked-as-phone" "data calls_follow_phone" "phone card_wrong"; do
+    # shellcheck disable=SC2086 # two words
+    set -- $case_
+    gate=$1
+    case $2 in
+        checked-as-phone) welcome_ui data; gate=phone; want='internet_mobile: enabled is true, expected false' ;;
+        sim) welcome_ui data; echo PIN_REQUIRED >"$work/simstate"; want='the SIM line says' ;;
+        *)
+            welcome_ui "$1" "$2"
+            case $2 in
+                mobile_enabled) want='internet_mobile: enabled is true' ;;
+                calls_enabled) want='phone_calls: enabled is true, expected false' ;;
+                wrong_checked) want='phone_off: checked is' ;;
+                offline_text) want='a text says "offline"' ;;
+                radio_wrong) want='the radio line says' ;;
+                tor_always) want="Tor's rows are shown without Internet" ;;
+                taps_ignored) want='internet_mobile: checked is false, expected true' ;;
+                calls_follow_phone) want='gate data: mobile+off: FAILED: phone_off: checked is true, expected false' ;;
+                card_wrong) want="card_carrier_choice does not say 'roughly where you are'" ;;
+            esac
+            ;;
+    esac
+    if "$script" check-choices --gate "$gate" 2>"$work/err"; then bad "check-choices passed with $case_"; else
+        grep -qF "$want" "$work/err" && pass "check-choices fails with $case_" || bad "check-choices with $case_: $(cat "$work/err")"
+    fi
+done
+# Nothing that could dial, and no setting written.
+if grep -Eq 'input text|KEYCODE_(CALL|ENDCALL|[0-9])|settings put|cmd phone|am start' "$work/log"; then
+    bad "check-choices sent something it should not: $(cat "$work/log")"
+else
+    pass "check-choices only taps, scrolls, dumps and reads"
+fi
+status_ui() { # INTERNET CELL RADIO [BUGS...]
+    local i=$1 c=$2 r=$3 b=''
+    shift 3
+    [ $# -eq 0 ] || b=$(printf '"%s",' "$@")
+    ui "{\"screen\": \"status\", \"gate\": \"phone\", \"internet\": \"$i\", \"phone\": true, \"cell\": \"$c\", \"radio\": \"$r\", \"sim\": \"Unlocked\", \"bugs\": [${b%,}]}"
+    case $r in On) echo 1 ;; Off) echo 0 ;; *) echo 2 ;; esac >"$work/radio"
+}
+status_ui wifi phone On
+"$script" check-phone --internet wifi --cell phone 2>"$work/err" && grep -q 'VoLTE Not known yet' "$work/err" &&
+    pass "check-phone: Wi-Fi with calls and texts, the radio on" || bad "check-phone: $(cat "$work/err")"
+status_ui none off Off
+"$script" check-phone --internet none --cell off 2>"$work/err" &&
+    pass "check-phone: no Internet, Phone off, the radio off: Offline said, and allowed" || bad "check-phone, offline: $(cat "$work/err")"
+status_ui none phone Off
+"$script" check-phone --internet none --cell phone 2>"$work/err" &&
+    pass "check-phone: no Internet, calls and texts, the radio off for now: no Offline" || bad "check-phone, none+calls: $(cat "$work/err")"
+for case_ in "wifi phone On offline_text" "none off On offline_text" "none phone Off offline_text" "wifi off On volte_wrong" \
+    "wifi phone On volte_wrong"; do
+    # shellcheck disable=SC2086 # four words
+    set -- $case_
+    status_ui "$@"
+    if "$script" check-phone --internet "$1" --cell "$2" 2>"$work/err"; then bad "check-phone passed with $case_"; else
+        pass "check-phone fails with $case_ ($(tail -n 1 "$work/err" | cut -c1-120))"
+    fi
+done
+status_ui wifi phone On
+if "$script" check-phone --internet mobile --cell phone 2>"$work/err"; then bad "check-phone passed the wrong Internet"; else
+    grep -q "row_internet does not say 'Internet | Mobile data'" "$work/err" && pass "check-phone: the wrong Internet line fails" ||
+        bad "check-phone, wrong Internet: $(cat "$work/err")"
+fi
+rm -f "${work:?}/ui-state.json"
+export PATH="$PATH_BEFORE_UI"
+
+# 11. WEL8: check-module-cell, as check-module-word.
+: >"$work/log"
+if "$script" check-module-cell 2>"$work/err"; then
+    [ "$(grep -c 'method module_cell' "$work/log")" = 3 ] &&
+        ! grep 'method module_cell --extra v:i:1' "$work/log" | grep -qv 'gate:s:off --extra cell:s:none --extra radio:s:unknown' &&
+        pass "check-module-cell: only root's word is taken, and only the most careful word is sent" ||
+        bad "check-module-cell sent other words: $(cat "$work/log")"
+else
+    bad "check-module-cell: $(cat "$work/err")"
+fi
+for case_ in cellshelltakes cellmalformedtaken cellrootrefused uid; do
+    if [ "$case_" = uid ]; then echo 2000 >"$work/uid"; else touch "$work/$case_"; fi
+    if "$script" check-module-cell 2>"$work/err"; then bad "check-module-cell passed with $case_"; else
+        pass "check-module-cell fails with $case_ ($(tail -n 1 "$work/err"))"
+    fi
+    rm -f "${work:?}/${case_:?}" "${work:?}/uid"
+done
 
 [ "$fail" = 0 ] || exit 1
 echo "all welcome-adb.sh cases passed"

@@ -30,15 +30,29 @@
     <string name="welcome_title">Welcome to Antumbra</string>
     <string name="welcome_intro">These choices last until you restart the phone. Until you start, the network stays closed.</string>
     <string name="warning_not_owner">Welcome is not the device owner, so it cannot apply Antumbra\'s protections. Set it up with adb first (see the README).</string>
-    <string name="warning_no_addon">The Antumbra add-on is not running (its firewall has not reported in). Nothing else protects the network, so Wi-Fi will stay off for this session.</string>
+    <string name="warning_no_addon">The Antumbra add-on is not running (its firewall has not reported in). Nothing else protects the network, so Wi-Fi stays off and Phone is not available in this session. If Android asks for the SIM PIN, do not type it: restart the phone.</string>
+    <!-- WEL8: a SIM unlocked (its PIN typed) while the add-on is not running. -->
+    <string name="warning_sim_unlocked_no_addon">The SIM card is unlocked, but the Antumbra add-on is not running, so its firewall does not hold the SIM\'s mobile data to Tor. Restart the phone.</string>
+
+    <!-- Internet (WEL8). Mobile data needs the cellular radio, and while it
+         is on the carrier delivers calls and texts, so Mobile data comes
+         with Phone: calls and texts. -->
+    <string name="section_internet">Internet</string>
+    <string name="internet_wifi">Wi-Fi</string>
+    <string name="internet_wifi_detail">Through Tor. Wi-Fi comes on when you start; then choose a network.</string>
+    <string name="internet_mobile">Mobile data, through Tor</string>
+    <string name="internet_mobile_detail">Through Tor, over your SIM card\'s mobile data. Your carrier sees that you use Tor, but not what you do. Mobile data needs the cellular radio, so calls and texts come with it.</string>
+    <string name="internet_mobile_unavailable">Not available yet: mobile data through Tor needs checks on this phone first.</string>
+    <string name="internet_none">None</string>
+    <string name="internet_none_detail">No Internet in this session. Wi-Fi and mobile data stay off, and Tor does not connect.</string>
+    <!-- Phone mode or mobile data while the add-on has not said what this phone allows. -->
+    <string name="cell_no_word">Not available: the Antumbra add-on has not said that this phone allows it.</string>
 
     <string name="section_tor">Tor</string>
     <string name="tor_direct">Connect to Tor directly</string>
     <string name="tor_direct_detail">The usual choice. The network can see that you use Tor, but not what you do.</string>
     <string name="tor_bridges">Connect through bridges</string>
-    <string name="tor_bridges_detail">Hides from the network that you use Tor. Use it where Tor is blocked or watched.</string>
-    <string name="tor_offline">Stay offline</string>
-    <string name="tor_offline_detail">No network for this session. Wi-Fi stays off.</string>
+    <string name="tor_bridges_detail">For places where Tor is blocked. The plain bridges that work here for now do not hide that you use Tor.</string>
     <string name="bridges_builtin">Built-in bridges (obfs4)</string>
     <string name="bridges_builtin_detail">The same bridges as in Tor Browser. They are blocked in some countries.</string>
     <string name="bridges_builtin_unavailable">Not available yet: these obfs4 bridges need a part (lyrebird) that this version of Antumbra does not include.</string>
@@ -47,10 +61,66 @@
     <string name="bridges_field_label">Bridge lines, one per line</string>
     <string name="bridges_field_help">Plain bridges (address:port and fingerprint). obfs4, webtunnel and meek_lite come later; Snowflake does not work here.</string>
 
+    <!-- Phone (WEL8): calls and texts over the cellular radio, never through Tor. -->
+    <string name="section_phone">Phone</string>
+    <string name="phone_off">Off</string>
+    <string name="phone_off_detail">The cellular radio stays off, so calls and texts cannot reach this phone. Android still switches the radio on for an emergency call.</string>
+    <string name="phone_off_mobile">Not possible with mobile data: mobile data needs the cellular radio, and while it is on, calls and texts reach this phone.</string>
+    <string name="phone_calls">Calls and texts</string>
+    <string name="phone_calls_detail">The cellular radio comes on when you start. Not anonymous: your carrier sees your SIM card, this phone and roughly where you are. Calls and texts do not go through Tor.</string>
+    <string name="phone_calls_unavailable">Not available yet: Phone needs checks on this phone first. Until then the cellular radio stays off.</string>
+
+    <!-- The SIM card and the cellular radio, on both screens. -->
+    <string name="row_sim">SIM card</string>
+    <string name="row_sim_n">SIM card %1$d</string>
+    <string name="sim_absent">None in the phone</string>
+    <string name="sim_pin">Locked: needs its PIN</string>
+    <string name="sim_puk">Blocked: needs its PUK code</string>
+    <string name="sim_network_locked">Locked to another network</string>
+    <string name="sim_ready">Unlocked</string>
+    <string name="sim_not_ready">Not ready</string>
+    <string name="sim_perm_disabled">Disabled for good</string>
+    <string name="sim_error">Not working (card error)</string>
+    <string name="sim_restricted">Restricted by the card</string>
+    <string name="sim_unknown">Not known yet</string>
+    <string name="row_radio">Cellular radio</string>
+    <string name="radio_on">On</string>
+    <string name="radio_off">Off</string>
+    <string name="radio_unknown">Not known</string>
+    <!-- Welcome cannot enter a SIM PIN (supplyIccLockPin is a system API):
+         Android's own SIM-PIN screen asks for it. -->
+    <string name="sim_pin_title">About the SIM PIN</string>
+    <string name="sim_pin_help">Keep the SIM card locked with a PIN. At each start Android asks for it on its own screen, which can cover this one: Welcome cannot type it for you, and its warnings cannot be seen then. Type the PIN only after a normal start: nothing was updated since a start whose Welcome screen showed no warning, and you held no volume key while the phone started (that starts it without Antumbra\'s firewall). After an update, start once without the SIM card and check this screen first. If in doubt, do not type the PIN: restart the phone. Emergency calls may work without the PIN.</string>
+    <string name="sim_puk_help">The SIM card is blocked after too many wrong PINs. Android asks for its PUK code on its own screen. Too many wrong PUK codes disable the card for good.</string>
+    <string name="row_ims">Calls and texts (VoLTE)</string>
+    <string name="ims_cell">Ready, over the cellular network</string>
+    <string name="ims_registered">Ready</string>
+    <string name="ims_wifi">Ready over Wi-Fi calling. Antumbra does not expect this: its firewall should stop Wi-Fi calling.</string>
+    <string name="ims_none">Not connected for calls yet. On a network without 2G or 3G, calls and texts need VoLTE (calls over 4G).</string>
+    <string name="ims_unknown">Not known yet</string>
+    <string name="ims_off">Not checked: Phone is off in this session</string>
+
+    <!-- What your carrier sees: a plain, honest card, naming no country or carrier. -->
+    <string name="card_carrier">What your carrier sees</string>
+    <string name="carrier_choice_off">With Phone off, the cellular radio stays off, and your carrier gets nothing new from this phone. Android switches the radio on for an emergency call; your carrier then sees this phone, its SIM card and roughly where you are, as for any call.</string>
+    <string name="carrier_choice_on">With Phone on, the cellular radio is on from Start. While it is on, your carrier sees:</string>
+    <string name="carrier_now_off">The cellular radio is off. Your carrier gets nothing new from this phone now. It keeps what it saw while the radio was on.</string>
+    <string name="carrier_now_on">The cellular radio is on. While it is, your carrier sees:</string>
+    <string name="carrier_now_unknown">Welcome does not know yet whether the cellular radio is on. While it is on, your carrier sees:</string>
+    <string name="carrier_sees_sim">• your SIM card, and the name it is registered to</string>
+    <string name="carrier_sees_imei">• this phone\'s identity (its IMEI); a new Wi-Fi address does not change it</string>
+    <string name="carrier_sees_cells">• the cell towers the phone uses, and so roughly where you are, all the time</string>
+    <string name="carrier_sees_calls">• who you call and text, when and for how long, and what you say in ordinary calls and texts</string>
+    <string name="carrier_no_tor_calls">Calls and texts never go through Tor. Antumbra cannot hide them.</string>
+    <string name="carrier_data_tor">Mobile data goes through Tor: your carrier sees only encrypted Tor traffic, and that you use Tor.</string>
+    <string name="carrier_data_bridges">Mobile data goes through Tor, over bridges. Plain bridges do not hide that you use Tor.</string>
+    <string name="carrier_data_off">Mobile data is off: your Internet traffic does not pass through your carrier.</string>
+    <string name="carrier_hotspot">If your Wi-Fi is another phone\'s hotspot, that phone\'s carrier sees that you use Tor.</string>
+
     <string name="section_network">Network</string>
     <string name="mac_title">New Wi-Fi hardware address</string>
-    <string name="mac_on">A random MAC address for this session, so networks cannot recognise the phone.</string>
-    <string name="mac_off">Networks can recognise this phone from earlier sessions.</string>
+    <string name="mac_on">A random Wi-Fi address for this session, so Wi-Fi networks cannot recognise the phone by it. It does not change the phone\'s IMEI or the SIM card\'s identity (IMSI): your carrier sees both whenever the cellular radio is on.</string>
+    <string name="mac_off">Wi-Fi networks can recognise this phone from earlier sessions.</string>
 
     <string name="section_storage">Persistent Storage</string>
     <string name="persistent_title">Persistent Storage</string>
@@ -58,14 +128,15 @@
 
     <string name="section_additional">Additional settings</string>
     <string name="admin_title">Administration</string>
-    <string name="admin_detail">Allows installing apps from outside the Antumbra store, Bluetooth, and turning Location on, until you restart the phone. USB debugging stays off. Off by default, as in Tails.</string>
+    <string name="admin_detail">Allows installing apps from outside the Antumbra store, and Bluetooth, until you restart the phone. Location stays off, and so does USB debugging. Off by default, as in Tails.</string>
     <string name="unsafe_title">Unsafe Browser</string>
     <string name="unsafe_detail">Coming later. For signing in to hotel or café Wi-Fi, without Tor.</string>
 
     <string name="start">Start Antumbra</string>
     <string name="starting">Starting…</string>
     <string name="start_refused_not_owner">Antumbra cannot start: Welcome is not the device owner, so none of its protections are in place. Set it up with adb first (see the README).</string>
-    <string name="start_refused_policies">Antumbra cannot connect safely: some protections could not be applied (%1$s). Choose Stay offline, or restart the phone and try again.</string>
+    <string name="start_refused_policies">Antumbra cannot connect safely: some protections could not be applied (%1$s). Choose Internet: None, or restart the phone and try again.</string>
+    <string name="start_refused_cell">The add-on does not offer this choice on this phone any more. Choose again.</string>
     <string name="start_refused_latched">A session from this start-up is still running in the add-on. Restart the phone to start a new one.</string>
 
     <!-- Bridge errors -->
@@ -88,18 +159,30 @@
     <string name="status_open_welcome">Open the Welcome screen</string>
     <string name="status_lost_title">A session is running, but Welcome no longer knows its choices.</string>
     <string name="status_lost">Welcome was restarted after Start. The add-on keeps the choices made at Start until you restart the phone; to choose again, restart the phone.</string>
-    <string name="status_mode_direct">Connecting to Tor directly.</string>
-    <plurals name="status_mode_bridges">
-        <item quantity="one">Connecting to Tor through %1$d bridge.</item>
-        <item quantity="other">Connecting to Tor through %1$d bridges.</item>
+    <string name="status_mode_direct_wifi">Connecting to Tor directly, over Wi-Fi.</string>
+    <string name="status_mode_direct_mobile">Connecting to Tor directly, over mobile data.</string>
+    <plurals name="status_mode_bridges_wifi">
+        <item quantity="one">Connecting to Tor through %1$d bridge, over Wi-Fi.</item>
+        <item quantity="other">Connecting to Tor through %1$d bridges, over Wi-Fi.</item>
     </plurals>
-    <string name="status_mode_offline">Offline. Tor stays disconnected and Wi-Fi stays off until you restart.</string>
+    <plurals name="status_mode_bridges_mobile">
+        <item quantity="one">Connecting to Tor through %1$d bridge, over mobile data.</item>
+        <item quantity="other">Connecting to Tor through %1$d bridges, over mobile data.</item>
+    </plurals>
+    <!-- The only text that says "offline": chosen only when the session
+         has no Internet and no Phone, and the cellular radio is known to be
+         off. With Phone on, the radio comes back on without a restart. -->
+    <string name="status_mode_none_radio_off">Offline: no Internet, and the cellular radio is off, until you restart the phone.</string>
+    <string name="status_mode_none_radio_off_phone">No Internet until you restart the phone: Tor does not connect, and Wi-Fi stays off. The cellular radio is off for now; calls and texts reach this phone again when it comes back on.</string>
+    <string name="status_mode_mobile_refused">No Internet: the add-on did not allow mobile data on this phone, so Tor does not connect, and Wi-Fi stays off.</string>
+    <string name="status_mode_none_radio_on">No Internet until you restart the phone: Tor does not connect, and Wi-Fi stays off. The cellular radio is on.</string>
+    <string name="status_mode_none_radio_unknown">No Internet until you restart the phone: Tor does not connect, and Wi-Fi stays off.</string>
 
     <string name="card_tor">Tor</string>
     <string name="tor_connected">Connected to the Tor network</string>
     <string name="tor_progress">Connecting: %1$d%%</string>
     <string name="tor_waiting">Waiting for Tor to start…</string>
-    <string name="tor_offline_state">Tor is not connecting: offline session.</string>
+    <string name="tor_no_internet">Tor does not connect: this session has no Internet.</string>
     <string name="tor_no_module_status">The add-on has not reported Tor\'s progress yet.</string>
     <string name="tor_error">The add-on says: %1$s</string>
     <string name="addon_not_answering">The Antumbra add-on is not answering, so Tor\'s progress is unknown.</string>
@@ -112,15 +195,24 @@
     <string name="filter_no_list">No block list is loaded.</string>
     <string name="filter_unreachable">The tracker filter is not answering.</string>
 
+    <string name="card_phone">Phone</string>
+
     <string name="card_session">This session</string>
+    <string name="row_internet">Internet</string>
     <string name="row_tor">Tor</string>
+    <string name="row_phone">Phone</string>
     <string name="row_mac">Wi-Fi address</string>
     <string name="row_admin">Administration</string>
     <string name="row_unsafe">Unsafe Browser</string>
     <string name="row_firewall">Firewall</string>
     <string name="value_direct">Direct</string>
     <string name="value_bridges">Bridges</string>
-    <string name="value_offline">Offline</string>
+    <string name="value_tor_unused">Not used</string>
+    <string name="value_wifi">Wi-Fi</string>
+    <string name="value_mobile">Mobile data</string>
+    <string name="value_none">None</string>
+    <string name="value_calls">Calls and texts</string>
+    <string name="value_cell_refused">Off: the add-on did not allow it on this phone</string>
     <string name="value_new">New</string>
     <string name="value_keep">Not changed</string>
     <string name="value_on">On</string>

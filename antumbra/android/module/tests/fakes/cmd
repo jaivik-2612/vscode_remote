@@ -10,7 +10,9 @@
 # off (cell_on 2, enable_cellular_on_boot 0, /antumbra-test/radio 0), and
 # "disable", with cell_on 2, switches it on (cell_on 1,
 # enable_cellular_on_boot 1, radio 1). Without an argument it prints
-# enabled or disabled.
+# enabled or disabled. 'cmd phone data enable|disable' sets the default
+# data SIM's mobile data (the first subscription in
+# /antumbra-test/siminfo), as the person's switch in Settings.
 T=/antumbra-test
 [ -f $T/framework-up ] || { echo "cmd: Can't find service: $1" >&2; exit 20; }
 echo "$*" >>"${FAKE_CMD_LOG:-$T/cmd.log}"
@@ -61,6 +63,12 @@ case "$*" in
 		put cell_on 1
 		put enable_cellular_on_boot 1
 		echo 1 >$T/radio
+	fi
+	;;
+'phone data enable' | 'phone data disable')
+	sub=$(head -n 1 $T/siminfo 2>/dev/null)
+	if [ -n "$sub" ]; then
+		if [ "$3" = enable ]; then put "mobile_data$sub" 1; else put "mobile_data$sub" 0; fi
 	fi
 	;;
 esac

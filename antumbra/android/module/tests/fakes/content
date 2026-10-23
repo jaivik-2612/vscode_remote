@@ -11,7 +11,14 @@
 # appended as one line to /antumbra-test/welcome.words, and it prints
 # "Result: Bundle[{v=1}]"; with /antumbra-test/welcome-refuses it prints a
 # refusal on standard error and exits 0, as the real tool does, and
-# appends one line (no extras) to /antumbra-test/welcome.refused.
+# appends one line (no extras) to /antumbra-test/welcome.refused. And
+#   content call ... --method module_cell --extra K:T:V...
+# (WEL8) likewise, into /antumbra-test/welcome.cells. With
+# /antumbra-test/welcome-old it plays a Welcome from before WEL8: a
+# projection naming "cell" gets the provider's "Unknown column: cell" on
+# standard error and nothing on standard output (exit 0), and module_cell
+# "Unknown method" (one line appended to /antumbra-test/welcome.cells-refused,
+# with the module's clock, /proc/uptime, in whole seconds).
 T=/antumbra-test
 [ -f $T/framework-up ] || { echo "Error while accessing provider" >&2; exit 1; }
 what=${1-}
@@ -26,6 +33,17 @@ while [ $# -gt 0 ]; do
 	esac
 done
 if [ "$what" = call ]; then
+	if [ "$uri" = content://org.antumbra.welcome.state ] && [ "$method" = module_cell ]; then
+		if [ -e $T/welcome-old ]; then
+			echo "refused $(cut -d. -f1 /proc/uptime)" >>$T/welcome.cells-refused
+			echo "Error while accessing provider:org.antumbra.welcome.state" >&2
+			echo "java.lang.IllegalArgumentException: Unknown method: module_cell" >&2
+			exit 0
+		fi
+		echo "$extras" >>$T/welcome.cells
+		echo 'Result: Bundle[{v=1}]'
+		exit 0
+	fi
 	if [ "$uri" != content://org.antumbra.welcome.state ] || [ "$method" != module_word ]; then
 		echo "Error while accessing provider:${uri#content://}" >&2
 		exit 0
@@ -58,6 +76,15 @@ content://org.antumbra.welcome.state/session) ;;
 *) exit 1 ;;
 esac
 [ -f $T/welcome ] || { echo "Error while accessing provider:org.antumbra.welcome.state" >&2; exit 1; }
+if [ -e $T/welcome-old ]; then
+	case :$proj: in *:cell:*)
+		echo "Error while accessing provider:org.antumbra.welcome.state" >&2
+		echo "java.lang.IllegalArgumentException: Unknown column: cell" >&2
+		echo "	at org.antumbra.welcome.StateRow.columns(StateProvider.kt:96)" >&2
+		exit 0
+		;;
+	esac
+fi
 out='Row: 0 '
 sep=
 old=$IFS

@@ -5,7 +5,8 @@
 # (the CI emulator job has its own driver, antumbra/android/ci/
 # emulator-antumbra.sh, with the same test tags, and calls this script only
 # for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb',
-# 'check-addon' and 'check-module-word'). It
+# 'check-addon', 'check-module-word', 'check-choices', 'check-phone' and
+# 'check-module-cell'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -26,7 +27,10 @@
 #   wait-welcome [SECONDS]    Wait until the Start button is on screen (default 60).
 #   start [OPTIONS]           Make the choices on screen and press Start, then wait
 #                             for the status screen and check the provider's row.
-#       --tor direct|bridges|offline   Default: direct.
+#       --internet wifi|mobile|none    Default: wifi. mobile needs the Phone-mode gate
+#                                      "data" (the emulator only, until FW9 and CI12).
+#       --phone off|calls              Default: off. calls needs the gate "phone" or "data".
+#       --tor direct|bridges|offline   Default: direct. offline is --internet none.
 #       --bridges-file FILE            With --tor bridges: type these lines (plain
 #                                      bridges; v0 refuses obfs4, webtunnel, meek_lite).
 #       --keep-mac --admin
@@ -71,6 +75,33 @@
 #   clear-power-menu-test     Undo what check-power-menu may leave: the power menu closed
 #                             (Back, then the screen off and on), power_button_long_press as
 #                             it was. Checks both.
+#   check-choices --gate off|phone|data [--shots DIR]
+#                             WEL8, before Start, Welcome in front: the six attempts of
+#                             the two choices (Internet wifi, mobile, none; Phone off,
+#                             calls; mobile data straight after Phone off), each tapped
+#                             by its test tag as a person would, then the whole page
+#                             read (a row or card only from a dump that shows it whole,
+#                             scrolled into view if no page does): which rows are
+#                             checked; rows the gate does not allow disabled, unchecked,
+#                             with their reason; Tor's rows exactly when there is
+#                             Internet; the "What your carrier sees" card for the choice,
+#                             with its key statements; the radio line against the
+#                             registry's mRadioPowerState; the SIM line against
+#                             gsm.sim.state; no "offline" anywhere. --gate: the gate Welcome should have
+#                             been told (the emulator writes /data/adb/antumbra-cell as
+#                             root first). Ends with Wi-Fi and Phone off selected.
+#                             --shots: a screenshot per attempt, DIR/welcome-choice-I-P.png.
+#   check-phone [--internet wifi|mobile|none] --cell off|phone|data
+#                             WEL8, after Start: the status screen's session lines, its
+#                             Phone card (SIM, radio, VoLTE) and carrier card, read from the
+#                             whole page; no "offline" unless there is no Internet, no
+#                             Phone and the radio reads off.
+#   check-module-cell         WEL8, with adb as root: Welcome's provider takes the module's
+#                             word on the cell radio (module_cell) from root only: refused
+#                             from the shell user (SecurityException), refused malformed
+#                             from root, taken from root. The word sent can only make
+#                             Welcome more careful ("gate off, nothing carried out, the
+#                             radio not known"); the module's next word replaces it.
 #   check-module-word         MOD11, with adb as root ('adb root'): Welcome's provider
 #                             takes the module's word from root only. Sent as the shell
 #                             user (uid 2000, through su) a word is refused with a
@@ -99,6 +130,12 @@ URI=content://org.antumbra.welcome.state/session
 # changes nothing: "none" (Quick power off waits as without a word).
 WORD_URI=content://org.antumbra.welcome.state
 WORD_NONE=(--extra v:i:1 --extra calls:s:none --extra at:l:0 --extra until:l:0 --extra ims:s:off --extra ims_at:l:0)
+# WEL8: the module's word on the cell radio, the most careful one.
+CELL_CAREFUL=(--extra v:i:1 --extra gate:s:off --extra cell:s:none --extra radio:s:unknown --extra at:l:0)
+# The reasons Welcome gives for a choice it does not offer (strings.xml).
+MOBILE_REASON='Not available yet: mobile data through Tor needs checks on this phone first.'
+CALLS_REASON='Not available yet: Phone needs checks on this phone first.'
+OFF_REASON='Not possible with mobile data'
 UI_DUMP=/data/local/tmp/antumbra-welcome-ui.xml
 HOOK=debug.antumbra.keep_adb
 # Where check-power-menu keeps power_button_long_press's earlier value
@@ -122,9 +159,9 @@ dump_ui() {
     a exec-out cat "$UI_DUMP"
 }
 
-# Prints "x y checked" for the node whose resource-id is $1 (from the XML
-# on stdin), or nothing. Compose test tags appear as resource ids because
-# the app sets testTagsAsResourceId.
+# Prints "x y checked enabled" for the node whose resource-id is $1 (from
+# the XML on stdin), or nothing. Compose test tags appear as resource ids
+# because the app sets testTagsAsResourceId.
 find_node() {
     python3 -I -c '
 import sys, xml.etree.ElementTree as ET
@@ -137,7 +174,7 @@ for n in root.iter("node"):
     if n.get("resource-id") == want:
         b = n.get("bounds", "").replace("][", ",").strip("[]").split(",")
         x1, y1, x2, y2 = (int(v) for v in b)
-        print((x1 + x2) // 2, (y1 + y2) // 2, n.get("checked", "false"))
+        print((x1 + x2) // 2, (y1 + y2) // 2, n.get("checked", "false"), n.get("enabled", "true"))
         break
 ' "$1"
 }
@@ -164,7 +201,7 @@ screen_size() {
 }
 
 # Finds $1 on screen, scrolling down (then up) through the page if needed.
-# Prints "x y checked".
+# Prints "x y checked enabled".
 locate() {
     local id=$1 node w h i
     read -r w h < <(screen_size)
@@ -181,16 +218,226 @@ locate() {
 }
 
 tap() {
-    local x y checked
-    read -r x y checked < <(locate "$1") || die "control '$1' not found on screen"
+    local x y _checked _enabled
+    read -r x y _checked _enabled < <(locate "$1") || die "control '$1' not found on screen"
     a shell input tap "$x" "$y"
 }
 
 # Sets the switch $1 to $2 (true/false).
 set_switch() {
-    local x y checked
-    read -r x y checked < <(locate "$1") || die "switch '$1' not found on screen"
+    local x y checked _enabled
+    read -r x y checked _enabled < <(locate "$1") || die "switch '$1' not found on screen"
     [ "$checked" = "$2" ] || a shell input tap "$x" "$y"
+}
+
+# Scrolls to the top of the page.
+to_top() {
+    local w h
+    read -r w h < <(screen_size)
+    for _ in 1 2 3 4 5 6 7 8; do a shell input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 150; done
+}
+
+# scan_page FILE: the whole page, from the top down: a dump, then a slow
+# scroll (so that it does not fling past what lies between two dumps),
+# until a dump shows nothing new (uiautomator lists only what is on
+# screen). The dumps go into FILE, separated by "<!-- page -->" lines.
+scan_page() {
+    local file=$1 w h prev='' cur
+    read -r w h < <(screen_size)
+    to_top
+    : >"$file"
+    for _ in $(seq 1 12); do
+        cur=$(dump_ui || true)
+        [ "$cur" != "$prev" ] || break
+        printf '%s\n<!-- page -->\n' "$cur" >>"$file"
+        prev=$cur
+        a shell input swipe $((w / 2)) $((h * 7 / 10)) $((w / 2)) $((h * 3 / 10)) 1000
+    done
+}
+
+# The rule for reading a node from a dump (NODE_PY, below): Compose lists
+# the children of a node that does not merge them (a card, an info row)
+# only as far as they are on screen, and gives the node the bounds of its
+# visible part. So a node's text counts only from a dump in which its
+# bounds lie wholly inside its scroll view's, never touching an edge, or
+# outside any scroll view (pinned). node_pick FILE|- ID prints
+# "checked enabled<TAB>text" of the first such occurrence (its text: its
+# own and everything inside it, joined by " | "), from a scan's dumps or a
+# dump on standard input ("-"); fails with 2 when ID is only ever cut off
+# by an edge, 1 when no dump has it. With MOVE=1 and a dump on standard
+# input it prints, for a node cut off, "move DY TOP BOTTOM<TAB>..." instead
+# and fails with 3: how far to scroll the page up (DY < 0: down) to bring
+# it wholly into view, or "tall<TAB>..." when it is taller than the view.
+NODE_PY='
+import os, re, sys, xml.etree.ElementTree as ET
+src, want, move, margin = sys.argv[1], sys.argv[2], os.environ.get("MOVE") == "1", 60
+docs = (sys.stdin.read() if src == "-" else open(src, encoding="utf-8").read()).split("<!-- page -->")
+def box(n):
+    m = re.match(r"^\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]$", n.get("bounds", ""))
+    return tuple(int(v) for v in m.groups()) if m else None
+seen = False
+for doc in docs:
+    try:
+        root = ET.fromstring(doc.strip())
+    except ET.ParseError:
+        continue
+    parent = {c: p for p in root.iter() for c in p}
+    for n in root.iter("node"):
+        if n.get("resource-id") != want or box(n) is None:
+            continue
+        seen = True
+        text = " | ".join(x for x in (m.get("text", "") for m in n.iter("node")) if x)
+        line = n.get("checked", "false") + " " + n.get("enabled", "true") + "\t" + text
+        a = parent.get(n)
+        while a is not None and a.get("scrollable") != "true":
+            a = parent.get(a)
+        if a is None or box(a) is None:
+            print(line)
+            sys.exit(0)
+        top, bottom, vt, vb = box(n)[1], box(n)[3], box(a)[1], box(a)[3]
+        if vt < top and bottom < vb:
+            print(line)
+            sys.exit(0)
+        if move:
+            if top > vt and top - (vt + margin) > 0:
+                print("move %d %d %d\t%s" % (top - (vt + margin), top, bottom, line))
+            elif bottom < vb and bottom - (vb - margin) < 0:
+                print("move %d %d %d\t%s" % (bottom - (vb - margin), top, bottom, line))
+            else:
+                print("tall\t" + line)
+            sys.exit(3)
+        break
+sys.exit(2 if seen else 1)
+'
+node_pick() { python3 -I -c "$NODE_PY" "$@"; }
+
+# scan_get FILE ID: node_pick from a scan's dumps.
+scan_get() { node_pick "$1" "$2"; }
+
+# view_row ID: "checked enabled<TAB>text" of node ID from a dump of the
+# screen now in which it lies wholly inside its scroll view, scrolling it
+# there with slow drags (looking for it as locate does while it is not on
+# screen). A page that no longer moves is at its end: the node is whole
+# there. Fails when it cannot be shown whole.
+view_row() {
+    local id=$1 w h out rc prev='' head dy y1 i
+    read -r w h < <(screen_size)
+    for i in $(seq 1 10); do
+        rc=0
+        out=$(dump_ui | MOVE=1 node_pick - "$id") || rc=$?
+        if [ "$rc" = 0 ]; then printf '%s\n' "$out"; return 0; fi
+        [ "$rc" = 3 ] || out=absent
+        case $out in
+            tall*) return 1 ;;
+            move*)
+                head=${out%%	*}
+                if [ "$head" = "$prev" ]; then printf '%s\n' "${out#*	}"; return 0; fi
+                prev=$head
+                read -r _ dy _ <<<"$head"
+                [ "$dy" -le $((h / 2)) ] || dy=$((h / 2))
+                [ "$dy" -ge $((-h / 2)) ] || dy=$((-h / 2))
+                if [ "$dy" -gt 0 ]; then y1=$((h * 7 / 10)); else y1=$((h * 3 / 10)); fi
+                a shell input swipe $((w / 2)) "$y1" $((w / 2)) $((y1 - dy)) 1000
+                sleep 1   # what is left of the scroll settles
+                ;;
+            *)
+                if [ "$i" -le 5 ]; then
+                    a shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 3 / 10)) 300
+                else
+                    a shell input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 300
+                fi
+                ;;
+        esac
+    done
+    return 1
+}
+
+# scan_has FILE ID: a dump in the scan has node ID, whole or cut off.
+scan_has() {
+    local rc=0
+    node_pick "$1" "$2" >/dev/null || rc=$?
+    [ "$rc" = 0 ] || [ "$rc" = 2 ]
+}
+
+# row_read FILE ID: node ID's "checked enabled<TAB>text", from the scan
+# when a dump there has it whole, else from the screen once view_row has
+# scrolled it wholly into view. Fails when it is not on the page, or never
+# whole.
+row_read() {
+    local rc=0
+    scan_get "$1" "$2" || rc=$?
+    case $rc in
+        0) return 0 ;;
+        2) say "$2 is cut off by an edge on every page of the scan; reading it again once it is wholly on screen"
+            view_row "$2" ;;
+        *) return 1 ;;
+    esac
+}
+
+# scan_texts FILE: every text and content description in a scan, one per line.
+scan_texts() {
+    python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+for doc in open(sys.argv[1], encoding="utf-8").read().split("<!-- page -->"):
+    try:
+        root = ET.fromstring(doc.strip())
+    except ET.ParseError:
+        continue
+    for n in root.iter("node"):
+        for k in ("text", "content-desc"):
+            if n.get(k):
+                print(n.get(k))
+' "$1"
+}
+
+# The cellular radio as the telephony registry says it now
+# (mRadioPowerState: 0 off, 1 on, 2 unavailable), in Welcome's words; "?"
+# when it cannot be read.
+registry_radio() {
+    case $(sh_ dumpsys telephony.registry | sed -n 's/^ *mRadioPowerState=//p' | head -n 1) in
+        0) echo Off ;;
+        1) echo On ;;
+        2) echo 'Not known' ;;
+        *) echo '?' ;;
+    esac
+}
+
+# The first SIM slot's state as gsm.sim.state says it, in Welcome's words;
+# "?" for a state without a fixed text.
+sim_text() {
+    case $(sh_ getprop gsm.sim.state | cut -d, -f1) in
+        LOADED | READY) echo Unlocked ;;
+        ABSENT) echo 'None in the phone' ;;
+        PIN_REQUIRED) echo 'Locked: needs its PIN' ;;
+        PUK_REQUIRED) echo 'Blocked: needs its PUK code' ;;
+        NETWORK_LOCKED) echo 'Locked to another network' ;;
+        *) echo '?' ;;
+    esac
+}
+
+# check_lines FILE [offline-ok]: in a scan, the radio line against the
+# registry (read before the scan into radio_before and after it: a change
+# in between skips the comparison), the SIM line against gsm.sim.state,
+# and no "offline" anywhere (unless offline-ok). Adds to problems, and
+# puts what it read in lines_read (not a subshell: problems must stay).
+radio_before=
+lines_read=
+check_lines() {
+    local file=$1 allow=${2:-} line after sim want
+    line=$(row_read "$file" radio_status | cut -f2) || line='(none)'
+    after=$(registry_radio)
+    if [ "$radio_before" = "$after" ] && [ "$after" != '?' ]; then
+        case $line in *"| $after") ;; *) problems+=("the radio line says '$line', the registry $after") ;; esac
+    fi
+    sim=$(row_read "$file" sim_status_1 | cut -f2) || sim='(none)'
+    want=$(sim_text)
+    if [ "$want" != '?' ]; then
+        case $sim in *"| $want") ;; *) problems+=("the SIM line says '$sim', gsm.sim.state $(sh_ getprop gsm.sim.state)") ;; esac
+    fi
+    if [ "$allow" != offline-ok ] && scan_texts "$file" | grep -qi offline; then
+        problems+=("a text says \"offline\": $(scan_texts "$file" | grep -i offline | head -n 1)")
+    fi
+    lines_read="radio ${line##*| } (registry $after), SIM ${sim##*| }"
 }
 
 wait_for() {
@@ -215,6 +462,10 @@ hook_on() { [ "$(sh_ getprop "$HOOK")" = 1 ]; }
 
 row() {
     sh_ content query --uri "$URI" --projection started:tor_mode:mac:admin:unsafe_browser:persistent:session_id
+}
+
+row_cell() {
+    sh_ content query --uri "$URI" --projection cell | sed -n 's/^Row: 0 cell=//p'
 }
 
 bridge_count() {
@@ -245,9 +496,11 @@ cmd_expect() {
 }
 
 cmd_start() {
-    local tor=direct file="" keep_mac=false admin=false expect_loss=false
+    local tor=direct file="" keep_mac=false admin=false expect_loss=false internet=wifi phone=off
     while [ $# -gt 0 ]; do
         case "$1" in
+            --internet) internet=$2; shift ;;
+            --phone) phone=$2; shift ;;
             --tor) tor=$2; shift ;;
             --bridges-file) file=$2; shift ;;
             --builtin-bridges) die "start: the built-in (obfs4) bridges need lyrebird and are disabled in v0; use --bridges-file with plain bridges" ;;
@@ -260,13 +513,19 @@ cmd_start() {
         shift
     done
     case "$tor" in direct|bridges|offline) ;; *) die "start: --tor must be direct, bridges or offline" ;; esac
+    case "$internet" in wifi|mobile|none) ;; *) die "start: --internet must be wifi, mobile or none" ;; esac
+    case "$phone" in off|calls) ;; *) die "start: --phone must be off or calls" ;; esac
+    if [ "$tor" = offline ]; then internet=none; fi
+    if [ "$internet" = none ]; then tor=offline; fi
+    if [ "$internet" = mobile ] && [ "$phone" = off ]; then die "start: mobile data comes with calls and texts (--phone calls)"; fi
     if [ "$tor" = bridges ] && [ -z "$file" ]; then die "start: --tor bridges needs --bridges-file"; fi
     if [ "$expect_loss" = false ] && ! hook_on; then
         die "the test hook $HOOK is not set: Start would switch USB debugging off and adb would disconnect; run 'provision' (debug build), or add --expect-adb-loss"
     fi
 
     wait_for start_button 60
-    tap "tor_$tor"
+    tap "internet_$internet"
+    if [ "$tor" != offline ]; then tap "tor_$tor"; fi
     if [ "$tor" = bridges ]; then
         [ -r "$file" ] || die "cannot read $file"
         tap bridges_custom
@@ -280,6 +539,7 @@ cmd_start() {
         done < "$file"
         a shell input keyevent KEYCODE_BACK   # close the keyboard
     fi
+    tap "phone_$phone"
     set_switch switch_mac "$([ "$keep_mac" = true ] && echo false || echo true)"
     set_switch switch_admin "$admin"
     # Without the hook, Welcome switches debugging off at Start.
@@ -303,6 +563,12 @@ cmd_start() {
         "admin=$([ "$admin" = true ] && echo 1 || echo 0)" unsafe_browser=0 persistent=0)
     if [ "$tor" != bridges ]; then expect+=(bridges=0); fi
     cmd_expect "${expect[@]}"
+    local want_cell=off got
+    [ "$phone" = off ] || want_cell=phone
+    [ "$internet" != mobile ] || want_cell=data
+    got=$(row_cell)
+    [ "$got" = "$want_cell" ] || die "cell is '$got', expected '$want_cell'"
+    say "provider row: cell=$got"
 }
 
 # Prints user 0's effective restrictions, one per line, from 'dumpsys user'
@@ -347,9 +613,11 @@ cmd_check_policies() {
         restriction "$key" yes
     done
     if [ "${sdk:-0}" -ge 35 ]; then restriction no_near_field_communication_radio yes; fi
-    for key in no_install_unknown_sources_globally no_bluetooth no_config_location; do
+    for key in no_install_unknown_sources_globally no_bluetooth; do
         restriction "$key" "$([ "$admin" = true ] && echo no || echo yes)"
     done
+    # Location stays off in every session (WEL8): Administration no longer lifts it.
+    restriction no_config_location yes
     # Debugging stays off in every session, Administration included; only
     # the debug-build test hook keeps it.
     restriction no_debugging_features "$([ "$keep_adb" = true ] && echo no || echo yes)"
@@ -739,6 +1007,236 @@ cmd_check_module_word() {
     say "root's word taken: $out"
 }
 
+# --- WEL8: the two choices at Start, the Phone card, the module's word on the cell radio ---
+
+# gate_rank off|phone|data: 0, 1, 2.
+gate_rank() { case $1 in phone) echo 1 ;; data) echo 2 ;; *) echo 0 ;; esac; }
+
+# expect_row FILE ID CHECKED ENABLED [TEXT]: in a scan, the row ID is
+# (not) checked and (not) enabled, and its text holds TEXT; adds to
+# problems otherwise. "-" for CHECKED or ENABLED: not compared.
+expect_row() {
+    local got state text
+    got=$(row_read "$1" "$2") || { problems+=("no row $2 wholly on the page"); return 0; }
+    state=${got%%	*}
+    text=${got#*	}
+    if [ "$3" != - ] && [ "${state%% *}" != "$3" ]; then problems+=("$2: checked is ${state%% *}, expected $3"); fi
+    if [ "$4" != - ] && [ "${state#* }" != "$4" ]; then problems+=("$2: enabled is ${state#* }, expected $4"); fi
+    if [ -n "${5:-}" ]; then
+        case $text in *"$5"*) ;; *) problems+=("$2 does not say '$5': $text") ;; esac
+    fi
+}
+
+# expect_says WHAT TEXT WANT...: TEXT (a row's or a card's, as row_read
+# gave it) holds each WANT; adds to problems otherwise. "!WANT": does not
+# hold it.
+expect_says() {
+    local what=$1 text=$2 w
+    shift 2
+    for w in "$@"; do
+        case $w in
+            '!'*) case $text in *"${w#!}"*) problems+=("$what says '${w#!}', which it must not: $text") ;; esac ;;
+            *) case $text in *"$w"*) ;; *) problems+=("$what does not say '$w': $text") ;; esac ;;
+        esac
+    done
+}
+
+# The "What your carrier sees" card's key statements (strings.xml): with
+# the radio on, the SIM, the phone and roughly where you are, and calls
+# never through Tor; with Phone off, the radio off, and what an emergency
+# call shows the carrier all the same.
+CARD_SEES=('your carrier sees:' 'your SIM card' '(its IMEI)' 'roughly where you are' 'never go through Tor')
+CARD_OFF=('With Phone off, the cellular radio stays off' 'emergency call; your carrier then sees this phone, its SIM card and roughly where you are' '!your carrier sees:')
+
+# WEL8, before Start: the six attempts of the two choices, as a person
+# makes them (Internet first, then Phone), checked against what Welcome
+# must do with the gate the module told it. Welcome's rules, played here
+# too: an Internet or Phone row the gate does not allow cannot be chosen
+# (its tap does nothing); Phone off cannot be chosen with mobile data,
+# which comes with calls and texts. Mobile data comes straight after an
+# attempt with Phone off, so that the walk sees it select calls and texts
+# by itself. Each attempt starts from the top of the page.
+cmd_check_choices() {
+    local gate='' shots='' g internet=wifi phone=off i p eff scan summary fail=0 attempt r card rows
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --gate) gate=$2; shift ;;
+            --shots) shots=$2; shift ;;
+            *) die "check-choices: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $gate in off|phone|data) ;; *) die "usage: check-choices --gate off|phone|data [--shots DIR]" ;; esac
+    g=$(gate_rank "$gate")
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    wait_for start_button 60
+    scan=$(mktemp)
+    # shellcheck disable=SC2064 # the file's name now
+    trap "rm -f '$scan'" RETURN
+    # Start from the defaults: Wi-Fi, Phone off.
+    to_top
+    tap internet_wifi
+    tap phone_off
+    for attempt in wifi:off mobile:off mobile:calls wifi:calls none:off none:calls; do
+        i=${attempt%%:*}
+        p=${attempt#*:}
+        problems=()
+        to_top
+        tap "internet_$i"
+        if [ "$i" != mobile ] || [ "$g" -ge 2 ]; then internet=$i; fi
+        tap "phone_$p"
+        case $p in
+            off) [ "$internet" = mobile ] || phone=off ;;
+            calls) [ "$g" -lt 1 ] || phone=calls ;;
+        esac
+        eff=$phone
+        [ "$internet" != mobile ] || eff=calls
+        [ -z "$shots" ] || a exec-out screencap -p >"$shots/welcome-choice-$i-$p.png" || true
+        # Welcome reads its state every 3 s; then the whole page.
+        sleep 1
+        radio_before=$(registry_radio)
+        scan_page "$scan"
+        for r in wifi mobile none; do
+            expect_row "$scan" "internet_$r" "$([ "$r" = "$internet" ] && echo true || echo false)" -
+        done
+        if [ "$g" -ge 2 ]; then
+            expect_row "$scan" internet_mobile - true
+        else
+            expect_row "$scan" internet_mobile false false "$MOBILE_REASON"
+        fi
+        expect_row "$scan" phone_off "$([ "$eff" = off ] && echo true || echo false)" \
+            "$([ "$internet" = mobile ] && echo false || echo true)" "$([ "$internet" = mobile ] && echo "$OFF_REASON")"
+        if [ "$g" -ge 1 ]; then
+            expect_row "$scan" phone_calls "$([ "$eff" = calls ] && echo true || echo false)" true
+        else
+            expect_row "$scan" phone_calls false false "$CALLS_REASON"
+        fi
+        if [ "$internet" = none ]; then
+            ! scan_has "$scan" tor_direct || problems+=("Tor's rows are shown without Internet")
+        else
+            scan_has "$scan" tor_direct || problems+=("Tor's rows are missing with Internet $internet")
+        fi
+        # The carrier card, read once (wholly on screen) for all its statements.
+        if card=$(row_read "$scan" card_carrier_choice | cut -f2); then
+            if [ "$eff" = calls ]; then
+                expect_says card_carrier_choice "$card" 'With Phone on, the cellular radio is on from Start.' "${CARD_SEES[@]}" \
+                    "$([ "$internet" = mobile ] && echo 'Mobile data goes through Tor' || echo 'Mobile data is off')"
+            else
+                expect_says card_carrier_choice "$card" "${CARD_OFF[@]}"
+            fi
+        else
+            problems+=("no card_carrier_choice wholly on the page")
+        fi
+        check_lines "$scan"
+        summary=$lines_read
+        rows="internet $internet, phone $eff, tor $([ "$internet" = none ] && echo hidden || echo shown)"
+        if [ "${#problems[@]}" -eq 0 ]; then
+            say "gate $gate: $i+$p: ok: $rows; $summary"
+        else
+            say "gate $gate: $i+$p: FAILED: ${problems[*]}"
+            fail=1
+        fi
+    done
+    to_top
+    tap internet_wifi
+    tap phone_off
+    [ "$fail" = 0 ] || die "check-choices --gate $gate failed (see above)"
+    say "check-choices --gate $gate: the six attempts as expected; Wi-Fi and Phone off selected again"
+}
+
+# WEL8, after Start: the status screen's session lines, Phone card and
+# carrier card, for the session's Internet and cell choice.
+cmd_check_phone() {
+    local internet=wifi cell='' scan line want radio summary card
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --internet) internet=$2; shift ;;
+            --cell) cell=$2; shift ;;
+            *) die "check-phone: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $cell in off|phone|data) ;; *) die "usage: check-phone [--internet wifi|mobile|none] --cell off|phone|data" ;; esac
+    case $internet in wifi|mobile|none) ;; *) die "check-phone: --internet must be wifi, mobile or none" ;; esac
+    a shell input keyevent KEYCODE_WAKEUP
+    if [ -z "$(dump_ui | find_node poweroff_button)" ]; then
+        a shell am start -n "$PKG/.StatusActivity" >/dev/null
+        sleep 2
+    fi
+    wait_for status_title 30
+    scan=$(mktemp)
+    # shellcheck disable=SC2064 # the file's name now
+    trap "rm -f '$scan'" RETURN
+    problems=()
+    sleep 2
+    radio_before=$(registry_radio)
+    scan_page "$scan"
+    case $internet in wifi) want=Wi-Fi ;; mobile) want='Mobile data' ;; none) want=None ;; esac
+    expect_row "$scan" row_internet - - "Internet | $want"
+    expect_row "$scan" row_tor - - "$([ "$internet" = none ] && echo 'Tor | Not used' || echo 'Tor | ')"
+    expect_row "$scan" row_phone - - "$([ "$cell" = off ] && echo 'Phone | Off' || echo 'Phone | Calls and texts')"
+    line=$(row_read "$scan" ims_status | cut -f2) || line=
+    if [ "$cell" = off ]; then
+        case $line in *'| Not checked: Phone is off in this session') ;; *) problems+=("the VoLTE line is not 'Not checked: Phone is off in this session': $line") ;; esac
+    else
+        case $line in
+            *'| Ready, over the cellular network' | *'| Ready' | *'| Ready over Wi-Fi calling'* | *'| Not connected for calls yet'* | *'| Not known yet') ;;
+            *) problems+=("the VoLTE line is not one of its readings: $line") ;;
+        esac
+    fi
+    radio=$(row_read "$scan" radio_status | cut -f2) || radio=
+    if card=$(row_read "$scan" card_carrier | cut -f2); then
+        case $radio in
+            *'| On') expect_says card_carrier "$card" 'The cellular radio is on.' "${CARD_SEES[@]}" ;;
+            *'| Off') expect_says card_carrier "$card" 'The cellular radio is off.' '!your carrier sees:' ;;
+            *) expect_says card_carrier "$card" 'does not know yet whether the cellular radio is on' "${CARD_SEES[@]}" ;;
+        esac
+    else
+        problems+=("no card_carrier wholly on the page")
+    fi
+    # "Offline" only without Internet and Phone, with the radio off.
+    if [ "$internet" = none ] && [ "$cell" = off ] && [ "${radio##*| }" = Off ]; then
+        check_lines "$scan" offline-ok
+    else
+        check_lines "$scan"
+    fi
+    summary=$lines_read
+    to_top
+    [ "${#problems[@]}" -eq 0 ] || die "check-phone: ${problems[*]}"
+    say "check-phone: Internet $want, cell $cell: session lines, Phone card and carrier card as expected; $summary; VoLTE ${line##*| }"
+}
+
+# cell_call [PREFIX...] -- EXTRA...: 'content call' with the module_cell
+# method, as word_call does for module_word.
+cell_call() {
+    local prefix=()
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do prefix+=("$1"); shift; done
+    shift
+    sh_ "${prefix[@]}" content call --user 0 --uri "$WORD_URI" --method module_cell "$@" 2>&1 || true
+}
+
+cmd_check_module_cell() {
+    local out
+    [ "$(sh_ id -u)" = 0 ] || die "check-module-cell needs adb as root ('adb root')"
+    sh_ dpm list-owners | grep -q "$PKG" || die "Welcome is not the device owner"
+    out=$(cell_call su 2000 -- "${CELL_CAREFUL[@]}")
+    case $out in
+        *'Result:'*) die "the shell user (uid 2000) gave Welcome a word on the cell radio: $out" ;;
+        *SecurityException*) say "the shell user's word on the cell radio refused (SecurityException)" ;;
+        *) die "the shell user's word on the cell radio was not refused as expected: $out" ;;
+    esac
+    out=$(cell_call -- --extra v:i:2 --extra gate:s:off --extra cell:s:none --extra radio:s:unknown --extra at:l:0)
+    case $out in
+        *'Result:'*) die "root's malformed word on the cell radio was taken: $out" ;;
+        *IllegalArgumentException*) say "root's malformed word on the cell radio refused" ;;
+        *) die "root's malformed word on the cell radio was not refused as expected: $out" ;;
+    esac
+    out=$(cell_call -- "${CELL_CAREFUL[@]}")
+    [ "$out" = 'Result: Bundle[{v=1}]' ] || die "root's word on the cell radio was not taken: $out"
+    say "root's word on the cell radio taken: $out"
+}
+
 cmd_power_off_tile() {
     local before after end
     before=$(sh_ cat /proc/sys/kernel/random/boot_id)
@@ -757,7 +1255,7 @@ cmd_power_off_tile() {
     die "the device did not restart within 240 s of Quick power off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,79p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,118p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -790,6 +1288,9 @@ case "$command" in
     check-emergency) cmd_check_emergency "$@" ;;
     check-power-menu) cmd_check_power_menu "$@" ;;
     check-module-word) cmd_check_module_word ;;
+    check-choices) cmd_check_choices "$@" ;;
+    check-phone) cmd_check_phone "$@" ;;
+    check-module-cell) cmd_check_module_cell ;;
     clear-power-menu-test) clear_power_menu_test || die "the power menu is not closed or power_button_long_press is not as it was" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"

@@ -22,7 +22,8 @@
 # on in Settings. The cell radio comes back at the next start (or when
 # airplane mode is switched on and off): enable_cellular_on_boot and
 # airplane_mode_radios are among the values put back. It also deletes the
-# early arm script in /data/adb/post-fs-data.d.
+# early arm script in /data/adb/post-fs-data.d and the Phone-mode gate
+# (/data/adb/antumbra-cell, written by the install's PH3 step; WEL8).
 
 umask 022
 MODDIR=${0%/*}
@@ -97,5 +98,5 @@ fi
 if ! grep -q ' /data/adb/antumbra ' /proc/mounts 2>/dev/null; then
 	rmdir /data/adb/antumbra 2>/dev/null
 fi
-rm -f /data/adb/antumbra-force /data/adb/post-fs-data.d/antumbra-arm.sh
+rm -f /data/adb/antumbra-force /data/adb/antumbra-cell /data/adb/post-fs-data.d/antumbra-arm.sh
 exit 0

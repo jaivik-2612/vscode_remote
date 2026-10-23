@@ -84,12 +84,22 @@ class WelcomeActivity : ComponentActivity() {
         // The home screen: Back goes nowhere.
         onBackPressedDispatcher.addCallback(this) { }
 
-        // Check the add-on and the device owner while the screen is visible.
+        // Check the add-on, the device owner, the SIM and the cell radio
+        // while the screen is visible. A choice the add-on no longer allows
+        // (its gate lowered, the add-on gone) is taken back, never the
+        // other way round.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     val present = withContext(Dispatchers.IO) { AddOnCheck.run() }.present
-                    WelcomeModel.ui = WelcomeModel.ui.copy(addOnPresent = present, notDeviceOwner = !policies.isDeviceOwner)
+                    val phone = withContext(Dispatchers.IO) { CellWatch.status(this@WelcomeActivity) }
+                    val ui = WelcomeModel.ui
+                    WelcomeModel.ui = ui.copy(
+                        addOnPresent = present,
+                        notDeviceOwner = !policies.isDeviceOwner,
+                        phone = phone,
+                        choices = if (ui.starting) ui.choices else PhoneChoices.fit(ui.choices, phone, present),
+                    )
                     delay(3000)
                 }
             }
@@ -99,7 +109,7 @@ class WelcomeActivity : ComponentActivity() {
         lifecycleScope.launch {
             snapshotFlow {
                 val c = WelcomeModel.ui.choices
-                c.torMode == TorMode.BRIDGES && c.bridgeSource == BridgeSource.CUSTOM && c.bridgeText.isNotBlank()
+                c.wireTorMode == TorMode.BRIDGES && c.bridgeSource == BridgeSource.CUSTOM && c.bridgeText.isNotBlank()
             }.collect { secure ->
                 if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -134,7 +144,7 @@ class WelcomeActivity : ComponentActivity() {
         // The Unsafe Browser does not exist yet (W11): never report it on.
         val choices = ui.choices.copy(unsafeBrowser = false)
         val bridges: List<String> = when {
-            choices.torMode != TorMode.BRIDGES -> emptyList()
+            choices.wireTorMode != TorMode.BRIDGES -> emptyList()
             else -> when (val r = bridgeLines(this, choices)) {
                 is Bridges.Result.Ok -> r.lines
                 is Bridges.Result.Error -> {
@@ -159,10 +169,12 @@ class WelcomeActivity : ComponentActivity() {
     }
 
     /**
-     * Start: refused unless Welcome is the device owner; a network session
-     * is also refused when a protective policy failed (only an offline
-     * session can start then), and every Start is refused once the module
-     * holds a session from this boot.
+     * Start: refused unless Welcome is the device owner; a session with
+     * Internet is also refused when a protective policy failed (only a
+     * session without Internet can start then); a Phone or mobile-data
+     * choice the add-on no longer allows is refused (nothing is written);
+     * and every Start is refused once the module holds a session from this
+     * boot.
      */
     private suspend fun startSession(choices: Choices, bridges: List<String>) {
         val policies = Policies(this)
@@ -173,6 +185,12 @@ class WelcomeActivity : ComponentActivity() {
         val check = withContext(Dispatchers.IO) { AddOnCheck.run() }
         if (check.sessionLatched) {
             refuse(getString(R.string.start_refused_latched))
+            return
+        }
+        val phone = withContext(Dispatchers.IO) { CellWatch.status(this@WelcomeActivity) }
+        if (!PhoneChoices.allows(choices, phone, check.present)) {
+            WelcomeModel.ui = WelcomeModel.ui.copy(choices = PhoneChoices.fit(choices, phone, check.present), phone = phone)
+            refuse(getString(R.string.start_refused_cell))
             return
         }
         // Policies first: the module opens the network as soon as the

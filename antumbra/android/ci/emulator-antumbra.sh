@@ -44,11 +44,24 @@
 #      press on power, an item labelled Emergency found in it while the
 #      emergency affordance is off (so it is the item that opens the dial
 #      pad), never pressed; the menu closed and the long-press setting put
-#      back; a warning until it has passed on CI once. Then the choices,
-#      tapped where uiautomator finds them: Tor directly, new Wi-Fi address on,
+#      back; a warning until it has passed on CI once. Then WEL8's two
+#      choices at Start, walked at each level of the Phone-mode gate (the
+#      root-only file /data/adb/antumbra-cell, written as root as the
+#      install's PH3 step writes it on the phone: none, "phone", "data"):
+#      welcome-adb.sh check-choices taps the six attempts (Internet Wi-Fi,
+#      mobile data, none; Phone off, calls and texts) and reads the whole
+#      page after each (checks welcome_choices_gate_off, _phone, _data, and
+#      welcome_radio_line; warnings until they have passed on CI once). Then
+#      the choices for the run, the gate at "phone", each row found by its
+#      test tag alone (never by a text, which another row's detail may
+#      hold) from the top of the page and read back checked: Internet
+#      Wi-Fi and Tor directly (the run stops if they cannot be chosen),
+#      Phone: calls and texts (the radio on all run, mobile data off; Phone
+#      off if Welcome does not offer it within 60 s, welcome_phone_start, a
+#      warning; the provider's row after Start says which), new Wi-Fi address on,
 #      Administration OFF (the default session), Unsafe Browser off. Then
 #      "Start Antumbra". adb must still answer; the provider row must say
-#      started=1 and tor_mode=direct.
+#      started=1, tor_mode=direct and its cell.
 #   7. Wi-Fi joined as a person would ('cmd wifi connect-network AndroidWifi
 #      open'); Wi-Fi must become the default network. Welcome's policies and
 #      its status screen are checked with welcome/ci/welcome-adb.sh. Then
@@ -59,7 +72,12 @@
 #      phone process (their output only, numbers and words, leaves the
 #      device; compared with what the emulator should show: a failure for
 #      the parts that passed in run 21, a warning for the phone process
-#      until it has passed on CI once).
+#      until it has passed on CI once). Then WEL8 after Start: the module
+#      carries out Phone mode (cell_phone_mode: its session record, its
+#      log, the radio on, mobile data off), the status screen's Phone and
+#      carrier cards (welcome-adb.sh check-phone), and Welcome's provider
+#      takes the module's word on the cell radio from root only
+#      (check-module-cell); warnings until they have passed on CI once.
 #   8. Wait for tor to bootstrap (the DNS filter's /status, else tor.log).
 #   9. Tracker test: names on the block list asked of the filter directly
 #      (DNS over TCP to 127.0.0.1:5335 through adb forward) and through
@@ -247,6 +265,164 @@ module_parsers_level() {
 	fi
 }
 
+# --- WEL8: the Phone-mode gate and the two choices at Start -----------------------
+#
+# cell_gate off|phone|data: the Phone-mode gate, as the install's PH3 step
+# writes it on the phone: the root-only file /data/adb/antumbra-cell
+# (0600), or none for off. The module reads it at every turn and tells
+# Welcome (module_cell). Nothing else turns Phone mode on: the module zip
+# and the Welcome APK are the ones a release ships; this file is the
+# phone's, and the emulator is wiped at every run.
+cell_gate() {
+	case $1 in
+	off) ash 'rm -f /data/adb/antumbra-cell' >/dev/null ;;
+	phone | data)
+		ash "printf '%s\\n' $1 >/data/adb/antumbra-cell.new && chmod 0600 /data/adb/antumbra-cell.new && chown 0:0 /data/adb/antumbra-cell.new && mv -f /data/adb/antumbra-cell.new /data/adb/antumbra-cell" >/dev/null
+		;;
+	*) return 1 ;;
+	esac
+	event cell_gate "$1"
+}
+
+# ui_enabled_is ID true|false SECONDS: wait until the row ID (scrolled to)
+# shows enabled as wanted: Welcome reads the module's word every 3 s, and
+# the module tells it at its next turn after the gate changed.
+ui_enabled_is() {
+	local id=$1 want=$2 end=$((SECONDS + $3)) _x _y _c e
+	while [ $SECONDS -lt $end ]; do
+		read -r _x _y _c e < <(ui_locate "$id") || e=
+		[ "$e" = "$want" ] && return 0
+		sleep 3
+	done
+	return 1
+}
+
+# choices_level NAME: the check's level: warn until it has passed on CI
+# once (then fail), as welcome_power_menu_emergency was.
+choices_level() { echo warn; }
+
+# ui_top: back to the top of the page (fast swipes down; no dump).
+ui_top() {
+	local w h
+	read -r w h < <(screen_size)
+	w=${w:-1080} h=${h:-2400}
+	for _ in 1 2 3 4 5 6; do
+		ash "input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 150" >/dev/null
+	done
+	sleep 1
+}
+
+# ui_choose ID: choose the radio row ID by its test tag alone, from the top
+# of the page, and read it back checked; a second try if it does not read
+# so. Never by its text: another row's detail may hold it ("Wi-Fi" is in
+# None's, whose tap chooses None).
+ui_choose() {
+	local id=$1 try x y c _e
+	for try in 1 2; do
+		ui_top
+		read -r x y c _e < <(ui_locate "$id") || continue
+		[ -n "${x:-}" ] || continue
+		if [ "$c" != true ]; then
+			ash "input tap $x $y" >/dev/null
+			sleep 1
+			read -r x y c _e < <(ui_find "$id") || c=
+		fi
+		if [ "$c" = true ]; then
+			say "chose $id (try $try)"
+			return 0
+		fi
+	done
+	say "could not choose $id"
+	return 1
+}
+
+# welcome_choices: before Start, every combination of the two choices at
+# each level of the gate (welcome-adb.sh check-choices), with screenshots.
+# The walk ends with Wi-Fi and Phone off selected. It is bounded (7 minutes
+# a gate, and no gate begun after 15 minutes), so that a slow screen cannot
+# make the step run out of time: the leak test never stops for it.
+WALK_GATE_S=420
+WALK_BUDGET_S=900
+welcome_choices() {
+	local gate log row want t0=$SECONDS
+	for gate in off phone data; do
+		log=$LOGS/$SCEN-welcome-choices-$gate.txt
+		if [ $((SECONDS - t0)) -ge "$WALK_BUDGET_S" ]; then
+			check "welcome_choices_gate_$gate" "$(choices_level)" "not walked: the walk's $WALK_BUDGET_S s were used up"
+			continue
+		fi
+		cell_gate "$gate"
+		case $gate in
+		off) row=phone_calls want=false ;;
+		phone) row=phone_calls want=true ;;
+		data) row=internet_mobile want=true ;;
+		esac
+		if ! ui_enabled_is "$row" "$want" 60; then
+			check "welcome_choices_gate_$gate" "$(choices_level)" "$row did not show enabled=$want within 60 s of the gate $gate"
+			screenshot "welcome-choices-gate-$gate-failed"
+			continue
+		fi
+		# A screenshot of every attempt at "data", where all six can be made.
+		local shots=()
+		if [ "$gate" = data ]; then
+			mkdir -p "$SHOTS/$SCEN-choices"
+			shots=(--shots "$SHOTS/$SCEN-choices")
+		fi
+		if timeout "$WALK_GATE_S" bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-choices --gate "$gate" "${shots[@]}" \
+			>"$log" 2>&1; then
+			check "welcome_choices_gate_$gate" ok "$(tail -n 1 "$log")"
+		else
+			check "welcome_choices_gate_$gate" "$(choices_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+			screenshot "welcome-choices-gate-$gate-failed"
+		fi
+		# The radio line as each attempt read it against the registry.
+		if grep -q 'the radio line says' "$log"; then
+			check welcome_radio_line "$(choices_level)" "gate $gate: $(grep -m 1 -o 'the radio line says[^;]*' "$log")"
+		elif grep -q ': ok: ' "$log"; then
+			check welcome_radio_line ok "gate $gate: $(grep -m 1 -o 'radio [^,]*([^)]*)' "$log")"
+		fi
+		screenshot "welcome-choices-gate-$gate"
+	done
+}
+
+# WEL8 after Start: the module carries out Phone mode (as root: its session
+# record, its log, the registry's radio, mobile data off) when the session
+# chose calls and texts; then the status screen's Phone and carrier cards,
+# and the module's word on the cell radio from root only.
+phone_checks() {
+	local log rec radio data
+	if [ "$PHONE_CHOICE" = calls ]; then
+		rec=$(ash "cat $RT/state/module/session" | tr '\n' ' ')
+		radio=$(ash 'dumpsys telephony.registry' | sed -n 's/^ *mRadioPowerState=//p' | head -n 1)
+		data=$(ash 'settings list global' | grep -E '^mobile_data[0-9]*=' | tr '\n' ' ')
+		if printf '%s' "$rec" | grep -q 'cell=phone gate=phone' &&
+			ash "grep -q -E 'Phone mode: (the cell radio on|the radio is already on)' $RT/log/module.log" &&
+			[ "$radio" = 1 ] && ! printf '%s' "$data" | grep -q '=1'; then
+			check cell_phone_mode ok "session record: $rec; radio $radio; $data"
+		else
+			check cell_phone_mode "$(choices_level)" "session record: $rec; radio ${radio:-?}; $data"
+		fi
+	fi
+	log=$LOGS/$SCEN-welcome-phone.txt
+	if timeout 300 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-phone --internet wifi \
+		--cell "$([ "$PHONE_CHOICE" = calls ] && echo phone || echo off)" >"$log" 2>&1; then
+		check welcome_phone_status ok "$(tail -n 1 "$log")"
+	else
+		check welcome_phone_status "$(choices_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	fi
+	screenshot status-phone
+	log=$LOGS/$SCEN-welcome-module-cell.txt
+	if timeout 120 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-module-cell >"$log" 2>&1; then
+		check welcome_module_cell ok "$(tail -n 1 "$log")"
+	else
+		check welcome_module_cell "$(choices_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	fi
+}
+
+# The session's Phone choice for the run: calls (the radio on all run,
+# mobile data off), or off when Welcome did not offer it (welcome_start).
+PHONE_CHOICE=off
+
 welcome_start() {
 	ui_wait start_button 120 'Start Antumbra' || {
 		screenshot welcome-missing
@@ -256,7 +432,23 @@ welcome_start() {
 	screenshot welcome-1
 	welcome_emergency
 	welcome_power_menu
-	ui_tap tor_direct 'Connect to Tor directly' || abort welcome_choice "'Connect to Tor directly' not found"
+	welcome_choices
+	# The run's session: Wi-Fi, Tor directly, calls and texts with the gate
+	# at "phone" (as the install leaves it after PH3's outcome A). Each row
+	# by its test tag alone and read back checked, whatever the walk left
+	# selected. Internet and Tor are the run's own: it stops without them.
+	# Phone is WEL8's: off then, with a warning, never a stop.
+	cell_gate phone
+	ui_choose internet_wifi || abort welcome_choice "Internet: Wi-Fi (internet_wifi) could not be chosen by its test tag"
+	if ui_enabled_is phone_calls true 60 && ui_choose phone_calls; then
+		PHONE_CHOICE=calls
+		check welcome_phone_start ok "Phone: calls and texts"
+	elif ui_choose phone_off; then
+		check welcome_phone_start "$(choices_level)" "Welcome did not offer calls and texts within 60 s of the gate phone, or the row did not read checked; the run starts with Phone off"
+	else
+		check welcome_phone_start "$(choices_level)" "neither Phone row could be chosen; the provider's row after Start says which the run has"
+	fi
+	ui_choose tor_direct || abort welcome_choice "Connect to Tor directly (tor_direct) could not be chosen by its test tag"
 	ui_set_switch switch_mac true 'New Wi-Fi hardware address' || check welcome_mac warn "could not set the Wi-Fi address switch"
 	ui_set_switch switch_unsafe_browser false 'Unsafe Browser' || check welcome_unsafe warn "could not find the Unsafe Browser switch off"
 	# The default session: Administration off. adb survives it only through
@@ -289,6 +481,15 @@ welcome_start() {
 	*admin=1*) check provider_admin fail "the session has Administration on: $row" ;;
 	*) check provider_admin ok "Administration off" ;;
 	esac
+	local cell_now
+	cell_now=$(printf '%s\n' "$row" | sed -n 's/.*[ ,]cell=\([a-z]*\).*/\1/p' | head -n 1)
+	if [ "$cell_now" = "$([ "$PHONE_CHOICE" = calls ] && echo phone || echo off)" ]; then
+		check provider_cell ok "$PHONE_CHOICE"
+	else
+		check provider_cell "$(choices_level)" "the row's cell is not the choice ($PHONE_CHOICE): $row"
+		# The checks after Start judge the session the row says it has.
+		case $cell_now in phone) PHONE_CHOICE=calls ;; *) PHONE_CHOICE=off ;; esac
+	fi
 }
 
 tracker_test() {
@@ -518,6 +719,7 @@ wifi_join
 # shellcheck disable=SC2119 # a default session: check-policies without --admin
 welcome_checks
 module_word
+phone_checks
 if wait_bootstrap; then
 	screenshot status-2-bootstrapped
 	tracker_test

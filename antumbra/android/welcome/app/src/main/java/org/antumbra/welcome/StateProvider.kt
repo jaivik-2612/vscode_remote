@@ -16,9 +16,11 @@ import android.os.Bundle
  * (shell), checked with Binder.getCallingUid(). Every other caller,
  * including other apps, gets a SecurityException.
  *
- * The module's word (MOD11) comes in through [call], method "module_word",
- * from uid 0 only: not even the shell may give it. It is kept in memory
- * ([CallWatch]) and there is no way to read it back.
+ * The module's words come in through [call], from uid 0 only: not even
+ * the shell may give them. Method "module_word" (MOD11) on the last calls,
+ * kept by [CallWatch]; method "module_cell" (WEL8) on the cell radio and
+ * this phone's Phone-mode gate, kept by [CellWatch]. Both stay in memory,
+ * and there is no way to read them back.
  */
 class StateProvider : ContentProvider() {
 
@@ -47,15 +49,15 @@ class StateProvider : ContentProvider() {
     override fun getType(uri: Uri): String = "vnd.android.cursor.item/vnd.org.antumbra.welcome.session"
 
     /**
-     * The module's word on the last calls (MOD11), given by root with
-     * 'content call --method module_word --extra ...'. The binder's uid
-     * goes straight to [ModuleWord.receive], the one check: any other
-     * caller gets a SecurityException before the extras are read; a
-     * malformed word an IllegalArgumentException. Answers only that the
-     * word was taken ({v=1}), never the word.
+     * The module's words, given by root with 'content call --method
+     * module_word|module_cell --extra ...'. The binder's uid goes straight
+     * to [ModuleCalls.receive], the one check: any other caller gets a
+     * SecurityException before the method or the extras are looked at; an
+     * unknown method or a malformed word an IllegalArgumentException.
+     * Answers only that the word was taken ({v=1}), never the word.
      */
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
-        ModuleWord.receive(Binder.getCallingUid(), method, arg, { extrasOf(extras) }) { CallWatch.take(it) }
+        ModuleCalls.receive(Binder.getCallingUid(), method, arg, { extrasOf(extras) }, CallWatch::take, CellWatch::take)
         return Bundle().apply { putInt("v", ModuleWord.VERSION) }
     }
 
@@ -81,8 +83,10 @@ object StateRow {
     const val AUTHORITY = "org.antumbra.welcome.state"
     const val PATH = "session"
 
-    /** The contract's columns, in this order. */
-    val COLUMNS = listOf("started", "tor_mode", "bridges", "mac", "admin", "unsafe_browser", "persistent", "session_id")
+    /** The contract's columns, in this order (cell since WEL8, last). */
+    val COLUMNS = listOf(
+        "started", "tor_mode", "bridges", "mac", "admin", "unsafe_browser", "persistent", "session_id", "cell",
+    )
 
     private const val ROOT_UID = 0
     private const val SHELL_UID = 2000
@@ -99,7 +103,8 @@ object StateRow {
 
     /**
      * Column values. Integers are 0 or 1; bridges holds one bridge line per
-     * line, separated by '\n' and empty when tor_mode is not bridges.
+     * line, separated by '\n' and empty when tor_mode is not bridges; cell
+     * is off, phone or data (off before Start).
      */
     fun values(s: SessionState): Map<String, Any> = mapOf(
         "started" to s.started.int,
@@ -110,6 +115,7 @@ object StateRow {
         "unsafe_browser" to s.unsafeBrowser.int,
         "persistent" to s.persistent.int,
         "session_id" to s.sessionId,
+        "cell" to s.cell.wire,
     )
 
     private val Boolean.int: Int get() = if (this) 1 else 0

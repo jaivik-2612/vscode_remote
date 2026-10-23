@@ -48,10 +48,10 @@ class Policies(private val context: Context) {
     /**
      * The state before Start, and the base of every session:
      * - the restrictions in [ALWAYS] (no safe-mode boot, no tethering, no
-     *   Wi-Fi Direct, no private-DNS change, no NFC on Android 15 and
-     *   later);
-     * - the restrictions in [UNLESS_ADMIN] and Location off, which only an
-     *   Administration Start lifts, until the next shutdown or boot;
+     *   Wi-Fi Direct, no private-DNS change, Location off and locked, no
+     *   NFC on Android 15 and later);
+     * - the restrictions in [UNLESS_ADMIN], which only an Administration
+     *   Start lifts, until the next shutdown or boot;
      * - USB debugging off: DISALLOW_DEBUGGING_FEATURES and the adb settings
      *   reset, in every session (the debug-build test hook aside, [TestHook]);
      * - no automatic time or time zone, and the time zone set to UTC;
@@ -117,17 +117,20 @@ class Policies(private val context: Context) {
     /**
      * At Start, in this order:
      * 1. [applyBaseline] again, and Wi-Fi locked off (and checked to be off)
-     *    unless the session uses the network and the add-on is present;
-     * 2. if the session uses the network and a protective policy failed,
-     *    stop here: nothing is loosened and the caller refuses the session;
+     *    unless the session's Internet is Wi-Fi and the add-on is present
+     *    (a mobile-data session has Wi-Fi off too: its Internet is the
+     *    SIM's, which the module switches on);
+     * 2. if the session has Internet (Wi-Fi or mobile data) and a
+     *    protective policy failed, stop here: nothing is loosened and the
+     *    caller refuses the session;
      * 3. Administration lifts [UNLESS_ADMIN];
-     * 4. Wi-Fi is unlocked and switched on for a network session with the
+     * 4. Wi-Fi is unlocked and switched on for a Wi-Fi session with the
      *    add-on.
      */
     fun applyAtStart(choices: Choices, addOnPresent: Boolean): StartPolicies {
         val failures = ArrayList(applyBaseline())
-        val network = choices.torMode != TorMode.OFFLINE
-        val wifiAllowed = network && addOnPresent
+        val network = choices.internet != Internet.NONE
+        val wifiAllowed = wifiAllowed(choices, addOnPresent)
         if (!wifiAllowed) {
             failures += lockWifiOff(waitMs = WIFI_WAIT_MS)
             failures += forgetWifiNetworks()
@@ -161,8 +164,8 @@ class Policies(private val context: Context) {
      * Wi-Fi off and locked: DISALLOW_CHANGE_WIFI_STATE (the user cannot
      * switch it on; a device owner still can), DISALLOW_CONFIG_WIFI and
      * DISALLOW_ADD_WIFI_CONFIG (no network can be added or changed). Used
-     * before Start, at shutdown, in offline sessions, and when the add-on
-     * is missing.
+     * before Start, at shutdown, in sessions whose Internet is not Wi-Fi,
+     * and when the add-on is missing.
      *
      * In airplane mode Android lets only Settings switch Wi-Fi
      * (WifiServiceImpl.setWifiEnabled), so a Wi-Fi switched on by hand in
@@ -263,6 +266,10 @@ class Policies(private val context: Context) {
         /** NFC radio off (UserManager.DISALLOW_NEAR_FIELD_COMMUNICATION_RADIO, API 35). */
         private const val DISALLOW_NFC_RADIO = "no_near_field_communication_radio"
 
+        /** Wi-Fi is unlocked and switched on only for a Wi-Fi session with the add-on. */
+        fun wifiAllowed(choices: Choices, addOnPresent: Boolean): Boolean =
+            choices.internet == Internet.WIFI && addOnPresent
+
         val ALWAYS = listOf(
             // Android's safe mode starts without third-party code, and
             // Magisk loads no module in it.
@@ -275,6 +282,12 @@ class Policies(private val context: Context) {
             // The module sets private DNS off; a DNS-over-TLS host set by
             // the user would go around the tracker filter.
             UserManager.DISALLOW_CONFIG_PRIVATE_DNS,
+            // Location stays off in every session (WEL8): Administration
+            // no longer lifts it, and until WEL9 ("off, or on for chosen
+            // apps") nothing switches it on. Sessions without
+            // Administration already had it so; emergency calls are as
+            // before (the restriction blocks no call).
+            UserManager.DISALLOW_CONFIG_LOCATION,
         )
 
         /** [ALWAYS], plus the NFC radio off where Android has that restriction (15 and later). */
@@ -287,8 +300,6 @@ class Policies(private val context: Context) {
             UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY,
             // Bluetooth tethering and nearby-device scans; off by default.
             UserManager.DISALLOW_BLUETOOTH,
-            // Turning Location on.
-            UserManager.DISALLOW_CONFIG_LOCATION,
         )
 
         /** Wi-Fi off and nothing to join: set before Start, lifted only by a network Start with the add-on. */
