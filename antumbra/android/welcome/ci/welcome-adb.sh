@@ -1220,6 +1220,10 @@ cmd_check_phone() {
         a shell am start -n "$PKG/.StatusActivity" >/dev/null
         sleep 2
     fi
+    # The page may still be scrolled down (the position check before this
+    # one ends at the emergency card), and uiautomator lists only what is
+    # on screen.
+    to_top
     wait_for status_title 30
     scan=$(mktemp)
     # shellcheck disable=SC2064 # the file's name now

@@ -573,6 +573,30 @@ quiet_network() {
 	else
 		check airplane_mode warn "Android still had a network ($(default_network)); packets near the arm cutoff may count as leaks"
 	fi
+	# On the phone the module arms at post-fs-data, before any interface is
+	# up; here it arms a running system, which takes about two seconds
+	# (IPv4, then IPv6). The kernel keeps sending IPv6 router solicitations
+	# on an interface no router answers (dummy0), with growing gaps (RFC
+	# 7559), and run 24 had one land inside those two seconds. They stop
+	# here, before the arm, as they would never start on the phone; after
+	# the arm the firewall drops them and the module switches IPv6 off.
+	# shellcheck disable=SC2016 # expanded by the device's shell
+	ash 'for f in /proc/sys/net/ipv6/conf/*/router_solicitations; do echo 0 >"$f"; done' >/dev/null 2>&1
+	if ash 'cat /proc/sys/net/ipv6/conf/*/router_solicitations' | grep -qv '^0$'; then
+		check ipv6_quiet warn "IPv6 router solicitations could not be stopped on every interface"
+	else
+		check ipv6_quiet ok "IPv6 router solicitations stopped before the arm"
+	fi
+	# Location off, as on a phone in use (Welcome switches it off after every
+	# use); the emulator image starts with it on, and since WEL10 Welcome
+	# waits 5 minutes after its own start before switching off a Location
+	# it found on (a call may have just ended).
+	ash 'cmd location set-location-enabled false' >/dev/null 2>&1
+	if [ "$(ash 'settings get secure location_mode')" = 0 ]; then
+		check location_off ok "Location off before Welcome is installed"
+	else
+		check location_off warn "Location is still on (location_mode $(ash 'settings get secure location_mode'))"
+	fi
 	# Let connections that were being torn down finish.
 	sleep 10
 }
