@@ -37,9 +37,74 @@ if [ -f "$d/ui-state.json" ]; then
         "exec-out cat "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" dump ;;
         "shell input tap "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" tap "$4" "$5" ;;
         "shell input swipe "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" swipe "$4" "$5" "$6" "$7" "${8:-300}" ;;
+        # WEL10: the screen leaving during a search; a fix from the test
+        # provider (latitude first) or the emulator's console (longitude first).
+        "shell input keyevent KEYCODE_SLEEP" | "shell input keyevent KEYCODE_HOME") exec python3 -I "$d/fakeui.py" "$d/ui-state.json" leave ;;
+        "shell su 2000 cmd location providers set-test-provider-location gps --location "*)
+            [ -f "$d/testprovider" ] || { echo "java.lang.IllegalArgumentException: provider doesn't exist: gps"; exit 0; }
+            exec python3 -I "$d/fakeui.py" "$d/ui-state.json" fix "${10%,*}" "${10#*,}" "${12:-}" test ;;
+        "emu geo fix "*) exec python3 -I "$d/fakeui.py" "$d/ui-state.json" fix "$5" "$4" "" gnss ;;
     esac
 fi
 case "$*" in
+    # WEL10: Android's emergency numbers ($d/ecc, a print; $d/eccfail: the
+    # print fails), the card's CI hook ($d/hookstates; $d/hookhang: setting a
+    # value hangs), Location's switch ($d/location: 0 off, 3 on), the test
+    # provider ($d/testprovider) and the shell's mock-location op
+    # ($d/appops), and what check-position looks into: Welcome's window,
+    # dumpsys location, its files, its log and the properties (the faults
+    # pos_not_secure, pos_fused, pos_stored, pos_logged and pos_property in
+    # the fake screen's state).
+    "shell cmd phone emergency-number-test-mode -p")
+        if [ -f "$d/eccfail" ]; then echo "Exception: getEmergencyNumberListTestMode: not allowed"; exit 0; fi
+        cat "$d/ecc" 2>/dev/null || echo "[1234, 5678]" ;;
+    "shell cmd phone "*) echo "fake adb: refused: $*" >&2; exit 1 ;;
+    "shell setprop debug.antumbra.emergency_states "*)
+        v=${!#}; [ "$v" = "''" ] && v=''
+        printf '%s' "$v" >"$d/hookstates"
+        # The value is set, then the command hangs: a kill now leaves it set unless the check clears it.
+        if [ -n "$v" ] && [ -f "$d/hookhang" ]; then /bin/sleep 20; fi ;;
+    "shell getprop debug.antumbra.emergency_states") cat "$d/hookstates" 2>/dev/null; echo ;;
+    "shell settings get secure location_mode") cat "$d/location" 2>/dev/null || echo 0 ;;
+    "shell appops set com.android.shell android:mock_location "*) echo "${!#}" >"$d/appops" ;;
+    "shell su 2000 cmd location providers add-test-provider gps")
+        if [ -f "$d/noprovider" ]; then echo "java.lang.SecurityException: uid 2000 does not have android:mock_location"; exit 0; fi
+        touch "$d/testprovider" ;;
+    "shell su 2000 cmd location providers set-test-provider-enabled gps true") exit 0 ;;
+    "shell su 2000 cmd location providers remove-test-provider gps")
+        [ -f "$d/testprovider" ] || { echo "java.lang.IllegalArgumentException: provider doesn't exist: gps"; exit 0; }
+        rm -f "$d/testprovider" ;;
+    "emu geo fix "*) echo OK ;;
+    "shell dumpsys window windows")
+        bugs=$(python3 -I -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("bugs", [])))' "$d/ui-state.json" 2>/dev/null)
+        pos=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pos", "idle"))' "$d/ui-state.json" 2>/dev/null)
+        fl="LAYOUT_IN_SCREEN LAYOUT_INSET_DECOR HARDWARE_ACCELERATED"
+        if [ "$pos" = found ] && [[ " $bugs " != *" pos_not_secure "* ]]; then fl="LAYOUT_IN_SCREEN SECURE HARDWARE_ACCELERATED"; fi
+        printf '%s\n' 'WINDOW MANAGER WINDOWS (dumpsys window windows)' \
+            '  Window #2 Window{2a u0 com.android.systemui/StatusBar}:' '    mAttrs={(0,0)(fillx63) ty=STATUS_BAR fl=NOT_FOCUSABLE SECURE}' \
+            '  Window #3 Window{1f u0 org.antumbra.welcome/org.antumbra.welcome.WelcomeActivity}:' \
+            "    mAttrs={(0,0)(fillxfill) ty=BASE_APPLICATION fl=$fl}" ;;
+    "shell dumpsys location")
+        bugs=$(python3 -I -c 'import json,sys; print(" ".join(json.load(open(sys.argv[1])).get("bugs", [])))' "$d/ui-state.json" 2>/dev/null)
+        pos=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("pos", "idle"))' "$d/ui-state.json" 2>/dev/null)
+        under=gps
+        [[ " $bugs " != *" pos_fused "* ]] || under=fused
+        echo 'Location Manager State:'
+        for p in passive network fused gps; do
+            # The gps provider is the test provider while one is set up.
+            if [ "$p" = gps ] && [ -f "$d/testprovider" ]; then echo "  $p provider [mock]:"; else echo "  $p provider:"; fi
+            echo "    last location=null"
+            if [ "$pos" = looking ] && [ "$p" = "$under" ]; then echo "      Registration[10123/org.antumbra.welcome HIGH_ACCURACY maxUpdates=1]"; fi
+        done ;;
+    "shell grep -rlF -e 10.12345 -e 140.54321 /data/data/org.antumbra.welcome /data/user_de/0/org.antumbra.welcome 2>/dev/null")
+        if grep -q '"pos_stored"' "$d/ui-state.json" 2>/dev/null; then echo /data/user_de/0/org.antumbra.welcome/files/last-position; fi ;;
+    "shell pidof org.antumbra.welcome") echo 4242 ;;
+    "shell logcat -d --pid=4242")
+        echo "10-27 12:00:00.000  4242  4242 I AntumbraPosition: looking"
+        if grep -q '"pos_logged"' "$d/ui-state.json" 2>/dev/null; then echo "10-27 12:00:01.000  4242  4242 I AntumbraPosition: fix 10.12345,-140.54321"; fi ;;
+    "shell getprop")
+        printf '%s\n' '[ro.build.version.sdk]: [36]' '[gsm.sim.state]: [LOADED]'
+        if grep -q '"pos_property"' "$d/ui-state.json" 2>/dev/null; then echo '[debug.last.fix]: [10.12345,-140.54321]'; fi ;;
     "shell uiautomator dump "*) exit 0 ;;
     # With $d/screen, what is in front changes: am start opens the status
     # screen at its top, a swipe scrolls it down to the firewall row, which
@@ -663,7 +728,13 @@ cat >"$work/fakeui.py" <<'FAKEUI'
 # children on screen, so a card cut off by an edge shows only some of its
 # texts. "tap X Y" applies Welcome's rules to the control at Y; "swipe
 # X1 Y1 X2 Y2 MS" scrolls the page by Y1 - Y2, half as far again for a
-# fast swipe (under 500 ms: a fling). With the bug "cutcard" a spacer puts
+# fast swipe (under 500 ms: a fling). WEL10: the emergency card on both
+# screens, by Welcome's rules (the number from the fake print, the state
+# lines from the SIM's slots, the radio row and the VoLTE row, or the CI
+# hook's), and Show my position ("pos": idle, looking, found, stopped;
+# Location's switch in FAKE_DIR/location), with a fault switch in "bugs"
+# for each thing the checks must catch; "leave" is the screen going off or
+# Home, "fix LAT LON ACCURACY test|gnss" a position delivered. With the bug "cutcard" a spacer puts
 # the carrier card, where it is tall enough (Phone on), where a scan from
 # the top, in steps of a slow swipe (960 px), finds it cut off on every
 # page; each dump that cuts the card off is counted in FAKE_DIR/cut-served.
@@ -698,11 +769,144 @@ def row(rid, texts, merges, checked=False, enabled=True, height=None):
             "h": height if height is not None else 40 + TEXT_H * len(texts)}
 
 
+FD = os.environ["FAKE_DIR"]
+
+
+def fd_read(name, default=""):
+    try:
+        return open(os.path.join(FD, name)).read().strip()
+    except OSError:
+        return default
+
+
+def fd_write(name, value):
+    with open(os.path.join(FD, name), "w") as f:
+        f.write(value + "\n")
+
+
+ORDER = ["no_sim", "sim_locked", "sim_unusable", "radio_off", "volte"]
+
+
+def degrees(v, pos, neg):
+    u = int(abs(v) * 100000 + 0.5)
+    return S[neg if v < 0 and u else pos].replace("%1$s", "%d.%05d" % (u // 100000, u % 100000))
+
+
+def signed(v):
+    u = int(abs(v) * 100000 + 0.5)
+    return ("-" if v < 0 and u else "") + "%d.%05d" % (u // 100000, u % 100000)
+
+
+def card_rows(screen_name, radio_shown):
+    """The emergency card's rows, each line its own node, as Welcome shows them."""
+    hook = None if "hook_ignored" in bugs else fd_read("hookstates")
+    words = set(w.strip() for w in (hook or "").split(",") if w.strip())
+    active = bool(words & (set(ORDER) | {"none", "number_none", "number_unreadable"}))
+    if active and "hook_sticks" in bugs:
+        fd_write("hookstuck", hook)
+    elif not active and "hook_sticks" in bugs and fd_read("hookstuck"):
+        words = set(fd_read("hookstuck").split(","))
+        active = True
+    printed = [n for n in fd_read("ecc", "[1234, 5678]").strip("[]").replace(" ", "").split(",") if n]
+    if active:
+        states = [w for w in ORDER if w in words]
+        reading = "unreadable" if "number_unreadable" in words else ("none" if "number_none" in words else None)
+    else:
+        slots = [x for x in fd_read("simstate", "LOADED,ABSENT").split(",") if x]
+        states = []
+        if not slots or any(x in ("LOADED", "READY") for x in slots):
+            pass
+        elif any(x in ("PIN_REQUIRED", "PUK_REQUIRED", "NETWORK_LOCKED") for x in slots):
+            states.append("sim_locked")
+        elif any(x in ("CARD_IO_ERROR", "PERM_DISABLED", "CARD_RESTRICTED") for x in slots):
+            states.append("sim_unusable")
+        elif all(x == "ABSENT" for x in slots):
+            states.append("no_sim")
+        if radio_shown == "Off":
+            states.append("radio_off")
+        ready = any(x in ("LOADED", "READY") for x in slots)
+        if screen_name == "status" and st.get("cell", "off") != "off" and ready and radio_shown != "Off" and st.get("ims") == "none":
+            states.append("volte")
+        if "card_no_radio_line" in bugs:
+            states = [w for w in states if w != "radio_off"]
+        if "card_extra_radio_line" in bugs and "radio_off" not in states:
+            states.append("radio_off")
+        if "card_no_sim_line" in bugs:
+            states = [w for w in states if w not in ("no_sim", "sim_locked", "sim_unusable")]
+        states = [w for w in ORDER if w in states]
+        reading = None
+    # card_several: every number Android printed, as Welcome shows several it
+    # ranks alike (its own line); _foreign adds one Android does not list,
+    # _detail gives them the line for one number.
+    several = any(b.startswith("card_several") for b in bugs)
+    if reading is None:
+        if "card_says_none" in bugs or not printed:
+            reading = "none"
+        elif several:
+            reading = "\u00a0\u00b7 ".join(printed + (["4321"] if "card_several_foreign" in bugs else []))
+        else:
+            reading = "4321" if "card_wrong_number" in bugs else printed[0]
+    else:
+        several = False
+    r = [row("", [S["card_emergency"]], False), row("", [S["emergency_numbers_label" if several else "emergency_number_label"]], False)]
+    if reading not in ("none", "unreadable"):
+        r.append(row("emergency_number_value", [reading], False))
+        r.append(row("emergency_number_text", [S["emergency_number_several" if several and "card_several_detail" not in bugs else "emergency_number_detail"]], False))
+    else:
+        r.append(row("emergency_number_text", [S["emergency_number_" + reading]], False))
+    for k, w in enumerate(states):
+        text = S["emergency_state_" + w]
+        if "card_discouraging" in bugs and k == 0:
+            text = "This phone cannot make an emergency call now."
+        if "hook_text_changed" in bugs and active:
+            text = text.replace("emergency call", "emergency calls")
+        r.append(row("emergency_state_" + w, [text], False))
+    if (states and "card_no_other_phone" not in bugs) or "card_other_alone" in bugs:
+        r.append(row("emergency_other_phone", [S["emergency_other_phone"]], False))
+    pos = st.get("pos", "idle")
+    loc = fd_read("location", "0")
+    if pos == "looking":
+        r.append(row("position_status", [S["position_looking"]], False))
+        r.append(row("position_stop", [S["position_stop"]], True))
+        return r
+    if pos == "found":
+        lat, lon = st["pos_lat"], st["pos_lon"]
+        lat_text = degrees(lat, "position_north", "position_south")
+        if "pos_wrong_hemisphere" in bugs:
+            lat_text = lat_text.replace(" N", " S")
+        r += [row("position_lat_label", [S["position_lat_label"]], False), row("position_lat", [lat_text], False),
+              row("position_lon_label", [S["position_lon_label"]], False),
+              row("position_lon", [degrees(lon, "position_east", "position_west")], False),
+              row("position_map", [S["position_map"].replace("%1$s", signed(lat) + ", " + signed(lon))], False)]
+        if st.get("pos_acc"):
+            r.append(row("position_accuracy", [S["position_accuracy"].replace("%1$d", str(int(float(st["pos_acc"]) + 0.5)))], False))
+        r.append(row("position_age", [S["position_age_now"]], False))
+        if st.get("pos_mock") and "pos_no_mock_line" not in bugs:
+            r.append(row("position_mock", [S["position_mock"]], False))
+    elif pos == "stopped":
+        r.append(row("position_status", [S["position_stopped"]], False))
+    else:
+        r += [row("position_detail", [S["position_detail"]], False), row("position_detail_apps", [S["position_detail_apps"]], False)]
+    if pos in ("found", "stopped"):
+        r.append(row("position_location", [S["position_off_again"] if loc == "0" else S["position_off_retry"]], False))
+    refused = "pos_refused" in bugs
+    if refused:
+        r.append(row("position_refusal", [S["position_refused_call"]], False))
+    if pos == "found":
+        r.append(row("position_hide", [S["position_hide"]], True))
+    r.append(row("position_button", [S["position_button"]], True, False, not refused))
+    return r
+
+
 def welcome_rows(pad):
     mobile_ok = g >= 2 or "mobile_enabled" in bugs
     calls_ok = g >= 1 or "calls_enabled" in bugs
     i = st["internet"]
+    radio = st["radio"]
+    if "radio_wrong" in bugs:
+        radio = "Off" if radio == "On" else "On"
     r = [row("", [S["welcome_title"], S["welcome_intro"]], False)]
+    r += card_rows("welcome", radio)
     r.append(row("internet_wifi", [S["internet_wifi"], S["internet_wifi_detail"]], True, i == "wifi"))
     r.append(row("internet_mobile", [S["internet_mobile"],
                                      S["internet_mobile_detail"] if mobile_ok else S["internet_mobile_unavailable"]],
@@ -712,9 +916,6 @@ def welcome_rows(pad):
         r.append(row("tor_direct", [S["tor_direct"], S["tor_direct_detail"]], True, True))
         r.append(row("tor_bridges", [S["tor_bridges"], S["tor_bridges_detail"]], True))
     r.append(row("sim_status_1", [S["row_sim"], st["sim"]], False))
-    radio = st["radio"]
-    if "radio_wrong" in bugs:
-        radio = "Off" if radio == "On" else "On"
     r.append(row("radio_status", [S["row_radio"], radio], False))
     off_checked, calls_checked = cell == "off", cell != "off"
     if "wrong_checked" in bugs:
@@ -753,7 +954,7 @@ def status_rows():
                 "On": S["status_mode_none_radio_on"]}.get(radio, S["status_mode_none_radio_unknown"])
     else:
         mode = S["status_mode_direct_mobile" if i == "mobile" else "status_mode_direct_wifi"]
-    ims = S["ims_off"] if c == "off" else S["ims_unknown"]
+    ims = S["ims_off"] if c == "off" else (S["ims_none"] if st.get("ims") == "none" else S["ims_unknown"])
     if "volte_wrong" in bugs:
         ims = S["ims_registered"] if c == "off" else S["ims_off"]
     if radio == "Off":
@@ -764,6 +965,7 @@ def status_rows():
     return [
         row("status_title", [S["status_title"]], False),
         row("status_mode", [mode], False),
+    ] + card_rows("status", radio) + [
         row("sim_status_1", [S["row_sim"], st["sim"]], False),
         row("radio_status", [S["row_radio"], radio], False),
         row("ims_status", [S["row_ims"], ims], False),
@@ -864,10 +1066,30 @@ elif what == "tap":
             st["phone"] = False
         elif rid == "phone_calls":
             st["phone"] = True
+        elif rid == "position_button":
+            st["pos"] = "looking"
+            if "pos_no_switch_on" not in bugs:
+                fd_write("location", "3")
+        elif rid == "position_stop":
+            st["pos"] = "stopped"
+            fd_write("location", "0")
+        elif rid == "position_hide" and "pos_hide_ignored" not in bugs:
+            st["pos"] = "idle"
+elif what == "leave":
+    if st.get("pos") == "looking":
+        st["pos"] = "stopped"
+        if "pos_leave_stays_on" not in bugs:
+            fd_write("location", "0")
+elif what == "fix":
+    if st.get("pos") == "looking" and fd_read("location", "0") != "0":
+        st.update(pos="found", pos_lat=float(sys.argv[3]), pos_lon=float(sys.argv[4]), pos_acc=sys.argv[5],
+                  pos_mock=sys.argv[6] == "test")
+        if "pos_stays_on" not in bugs:
+            fd_write("location", "0")
 elif what == "swipe":
     y1, y2, ms = int(sys.argv[4]), int(sys.argv[6]), int(sys.argv[7]) if len(sys.argv) > 7 else 300
     st["offset"] = min(max(off + int((y1 - y2) * (1.5 if ms < 500 else 1.0)), 0), max_offset(content))
-if what in ("tap", "swipe"):
+if what in ("tap", "swipe", "leave", "fix"):
     with open(path, "w") as f:
         json.dump(st, f)
 FAKEUI
@@ -988,6 +1210,193 @@ if "$script" check-phone --internet mobile --cell phone 2>"$work/err"; then bad 
     grep -q "row_internet does not say 'Internet | Mobile data'" "$work/err" && pass "check-phone: the wrong Internet line fails" ||
         bad "check-phone, wrong Internet: $(cat "$work/err")"
 fi
+# 12. WEL10: the emergency card, its CI hook and Show my position, on the
+#     fake screen (which draws the card by Welcome's rules). Each check
+#     passes as it should, and fails with each fault it must catch; none
+#     taps, types or dials anything it should not, and each puts back what
+#     it changed, also after a failure.
+wel10_reset() {
+    rm -f "$work/ecc" "$work/eccfail" "$work/hookstates" "$work/hookhang" "$work/hookstuck" "$work/location" \
+        "$work/testprovider" "$work/noprovider" "$work/appops" "$work/uid"
+    echo 0 >"$work/calls"
+}
+card_ui() { # SCREEN RADIO SIMSTATE IMS [BUGS...]: the Welcome screen before Start, or the status screen in a Phone-mode session
+    local screen=$1 r=$2 sims=$3 ims=$4 b='' sim
+    shift 4
+    [ $# -eq 0 ] || b=$(printf '"%s",' "$@")
+    case ${sims%%,*} in
+        LOADED) sim=Unlocked ;;
+        ABSENT) sim='None in the phone' ;;
+        PIN_REQUIRED) sim='Locked: needs its PIN' ;;
+        *) sim='Not ready' ;;
+    esac
+    wel10_reset
+    if [ "$screen" = welcome ]; then
+        ui "{\"screen\": \"welcome\", \"gate\": \"phone\", \"internet\": \"wifi\", \"phone\": false, \"radio\": \"$r\", \"sim\": \"$sim\", \"bugs\": [${b%,}]}"
+    else
+        ui "{\"screen\": \"status\", \"gate\": \"phone\", \"internet\": \"wifi\", \"phone\": true, \"cell\": \"phone\", \"radio\": \"$r\", \"sim\": \"$sim\", \"ims\": \"$ims\", \"bugs\": [${b%,}]}"
+    fi
+    echo "$sims" >"$work/simstate"
+    case $r in On) echo 1 ;; Off) echo 0 ;; *) echo 2 ;; esac >"$work/radio"
+}
+# Nothing that could dial, no text typed, and Android's list only printed.
+reads_only() {
+    ! grep -Eq 'input tap|input text|KEYCODE_(CALL|ENDCALL|[0-9]|STAR|POUND)|tel:|CALL_EMERGENCY|settings put' "$work/log" &&
+        ! grep 'emergency-number-test-mode' "$work/log" | grep -qvx 'shell cmd phone emergency-number-test-mode -p'
+}
+# check-emergency-card: the cases that must pass, with the lines they must read
+# (after "|", quotes and all; only the words before it are split).
+# shellcheck disable=SC2089
+for case_ in "welcome Off LOADED unknown|state lines 'radio_off'" "welcome Off ABSENT unknown|state lines 'no_sim radio_off'" \
+    "welcome Off PIN_REQUIRED unknown|state lines 'sim_locked radio_off'" "welcome On LOADED unknown|state lines 'none'" \
+    "status On LOADED none|state lines 'volte'" "status Off LOADED none|state lines 'radio_off'" "status On LOADED unknown|state lines 'none'"; do
+    want=${case_#*|}
+    # shellcheck disable=SC2086,SC2090 # four words
+    card_ui ${case_%|*}
+    if "$script" check-emergency-card 2>"$work/err"; then
+        grep -qF "$want" "$work/err" && grep -q 'number 1234 (2 listed by Android)' "$work/err" && reads_only &&
+            pass "check-emergency-card: ${case_%|*}: $want, the number Android's, nothing tapped" ||
+            bad "check-emergency-card ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    else
+        bad "check-emergency-card ${case_%|*} failed: $(cat "$work/err")"
+    fi
+done
+# Several numbers Android ranks alike: each Android's, with their own line.
+card_ui welcome Off ABSENT unknown card_several
+echo '[000, 08, 112]' >"$work/ecc"
+"$script" check-emergency-card 2>"$work/err" && grep -q 'number 000 08 112 (3 listed by Android)' "$work/err" && reads_only &&
+    pass "check-emergency-card: several numbers ranked alike, each Android's, with their line" || bad "check-emergency-card, several: $(cat "$work/err")"
+# Android lists no number: the card says so, and passes.
+card_ui welcome Off LOADED unknown
+echo '[]' >"$work/ecc"
+"$script" check-emergency-card 2>"$work/err" && grep -q 'number none (0 listed by Android)' "$work/err" &&
+    pass "check-emergency-card: no number listed, and the card says so" || bad "check-emergency-card, none listed: $(cat "$work/err")"
+# Each fault it must catch.
+# shellcheck disable=SC2089 # quotes in the messages wanted
+for case_ in "Off LOADED card_wrong_number|is not one Android lists" "Off LOADED card_says_none|the card shows no number" \
+    "Off LOADED card_several_foreign|the card's number 4321 is not one Android lists" \
+    "Off LOADED card_several_detail|the card shows several numbers, but its line is not the one for several" \
+    "Off LOADED card_no_radio_line|state lines ''" "On LOADED card_extra_radio_line|state lines 'radio_off', expected ''" \
+    "Off ABSENT card_no_sim_line|state lines 'radio_off', expected 'no_sim radio_off'" \
+    "Off PIN_REQUIRED card_no_sim_line|expected 'sim_locked radio_off'" "Off LOADED card_no_other_phone|the other-phone line is missing" \
+    "On LOADED card_other_alone|the other-phone line shows without a state line" "Off LOADED card_discouraging|discourages an emergency call" \
+    "Off LOADED eccfail|could not be printed" "Off LOADED notroot|needs adb as root" "Off LOADED hookset|the test hook debug.antumbra.emergency_states is set"; do
+    want=${case_#*|}
+    # shellcheck disable=SC2086,SC2090 # three words
+    set -- ${case_%|*}
+    case $3 in
+        eccfail) card_ui welcome "$1" "$2" unknown; touch "$work/eccfail" ;;
+        notroot) card_ui welcome "$1" "$2" unknown; echo 2000 >"$work/uid" ;;
+        hookset) card_ui welcome "$1" "$2" unknown; printf no_sim >"$work/hookstates" ;;
+        *) card_ui welcome "$1" "$2" unknown "$3" ;;
+    esac
+    if "$script" check-emergency-card 2>"$work/err"; then bad "check-emergency-card passed with $3"; else
+        grep -qF "$want" "$work/err" && reads_only && pass "check-emergency-card fails with $3" ||
+            bad "check-emergency-card with $3: $(cat "$work/err")"
+    fi
+done
+# The status screen's VoLTE line missing in a Phone-mode session with IMS not registered.
+card_ui status On LOADED none card_no_other_phone
+if "$script" check-emergency-card 2>"$work/err"; then bad "check-emergency-card passed without the other-phone line after Start"; else
+    grep -qF 'the other-phone line is missing' "$work/err" && pass "check-emergency-card after Start: the VoLTE line needs the other-phone line" ||
+        bad "check-emergency-card after Start: $(cat "$work/err")"
+fi
+
+# check-emergency-states: each case through the hook, the hook cleared afterwards whatever happens.
+# The property empty, and its last write the clearing one.
+hook_cleared() {
+    [ -z "$(cat "$work/hookstates" 2>/dev/null)" ] &&
+        [ "$(grep '^shell setprop debug.antumbra.emergency_states ' "$work/log" | tail -n 1)" = "shell setprop debug.antumbra.emergency_states ''" ]
+}
+card_ui welcome Off LOADED unknown
+mkdir -p "$work/states"
+if "$script" check-emergency-states --shots "$work/states" 2>"$work/err"; then
+    [ "$(grep -c '^welcome-adb: case [a-z_]*: ok' "$work/err")" = 8 ] &&
+        [ "$(find "$work/states" -name 'emergency-state-*.png' | wc -l)" = 8 ] &&
+        grep -qx 'shell setprop debug.antumbra.emergency_states no_sim,sim_locked,sim_unusable,radio_off,volte' "$work/log" &&
+        grep -qx 'shell setprop debug.antumbra.emergency_states number_unreadable' "$work/log" &&
+        grep -q "case all: ok: lines 'no_sim sim_locked sim_unusable radio_off volte'" "$work/err" &&
+        hook_cleared && reads_only &&
+        pass "check-emergency-states: every state's text, all five, both number lines; the hook cleared and the real lines back" ||
+        bad "check-emergency-states: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-emergency-states failed: $(cat "$work/err")"
+fi
+for case_ in "hook_ignored|a release build ignores debug.antumbra.emergency_states" "hook_text_changed|emergency_state_no_sim says" \
+    "hook_sticks|did not show its real lines again"; do
+    card_ui welcome Off LOADED unknown "${case_%|*}"
+    if "$script" check-emergency-states 2>"$work/err"; then bad "check-emergency-states passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && hook_cleared &&
+            { [ "${case_%|*}" != hook_ignored ] || ! grep -q 'setprop debug.antumbra.emergency_states sim_locked' "$work/log"; } &&
+            pass "check-emergency-states fails with ${case_%|*}, and clears the hook" ||
+            bad "check-emergency-states with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# Killed while the hook is set: still cleared.
+card_ui welcome Off LOADED unknown
+touch "$work/hookhang"
+timeout 6 "$script" check-emergency-states 2>"$work/err" && bad "check-emergency-states was not killed" ||
+    { grep -qx 'shell setprop debug.antumbra.emergency_states no_sim' "$work/log" && [ -z "$(cat "$work/hookstates" 2>/dev/null)" ] &&
+        pass "check-emergency-states clears the hook when it is killed" ||
+        bad "the hook stayed set after a kill: $(cat "$work/hookstates"); $(cat "$work/err")"; }
+
+# check-position: the test provider's fix (and the emulator's receiver) on screen, then nothing left behind.
+undone() { [ ! -e "$work/testprovider" ] && [ "$(cat "$work/appops" 2>/dev/null)" = default ] && grep -q 'remove-test-provider gps' "$work/log"; }
+never_writes() { ! grep -Eq 'settings put|settings delete|set-location-enabled|input text|tel:|KEYCODE_CALL|assisted_gps|pm revoke|pm grant|appops set org.antumbra' "$work/log"; }
+at() { grep -n -m 1 -- "$1" "$work/log" | cut -d: -f1 | grep . || echo 999; }
+for case_ in "welcome test KEYCODE_SLEEP" "status test KEYCODE_HOME" "welcome gnss KEYCODE_SLEEP"; do
+    # shellcheck disable=SC2086 # three words
+    set -- $case_
+    card_ui "$1" Off LOADED none
+    if "$script" check-position --source "$2" --screenshot "$work/looking.png" 2>"$work/err"; then
+        [ "$(cat "$work/location")" = 0 ] && undone && never_writes && grep -qx "shell input keyevent $3" "$work/log" &&
+            grep -q 'secure: yes' "$work/err" && grep -q 'gps only: yes' "$work/err" && grep -q 'Location off within 10 s' "$work/err" &&
+            if [ "$2" = test ]; then
+                [ "$(at 'appops set com.android.shell android:mock_location allow')" -lt "$(at 'add-test-provider gps')" ] &&
+                    grep -q 'set-test-provider-location gps --location 10.12345,-140.54321 --accuracy 5' "$work/log"
+            else
+                grep -qx 'emu geo fix -140.54321 10.12345' "$work/log" && ! grep -q 'add-test-provider' "$work/log"
+            fi &&
+            [ "$(head -c 4 "$work/looking.png" | od -An -c | tr -d ' ')" = '211PNG' ] &&
+            pass "check-position: $1, $2: the position on screen as written, Location off, nothing kept, left with $3" ||
+            bad "check-position $case_: $(cat "$work/err"); log: $(cat "$work/log")"
+    else
+        bad "check-position $case_ failed: $(cat "$work/err")"
+    fi
+done
+for case_ in "pos_no_switch_on|Location did not come on within 15 s" "pos_stays_on|Location stayed on after the position was found" \
+    "pos_leave_stays_on|Location stayed on after leaving the screen" "pos_wrong_hemisphere|the latitude reads '10.12345° S'" \
+    "pos_no_mock_line|no line says the position comes from a test location" "pos_not_secure|is not secure" \
+    "pos_stored|the coordinates are in Welcome's files" "pos_logged|the coordinates are in Welcome's log" \
+    "pos_property|the coordinates are in a property" "pos_fused|not the gps provider's alone: fused" \
+    "pos_hide_ignored|Hide position left the coordinates on screen" "pos_refused|Show my position is not offered" \
+    "noprovider|the test provider could not be set up"; do
+    if [ "${case_%|*}" = noprovider ]; then card_ui welcome Off LOADED none; touch "$work/noprovider"; else card_ui welcome Off LOADED none "${case_%|*}"; fi
+    if "$script" check-position 2>"$work/err"; then bad "check-position passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && [ "$(cat "$work/appops" 2>/dev/null)" = default ] && [ ! -e "$work/testprovider" ] && never_writes &&
+            pass "check-position fails with ${case_%|*}, and undoes the test" ||
+            bad "check-position with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# Refused before anything is changed: a call in progress, Location already on, no root.
+for case_ in "call|a call is in progress; Show my position is not pressed" "locationon|Location is on before the check" "notroot|needs adb as root"; do
+    card_ui welcome Off LOADED none
+    case ${case_%|*} in call) echo 2 >"$work/calls" ;; locationon) echo 3 >"$work/location" ;; notroot) echo 2000 >"$work/uid" ;; esac
+    if "$script" check-position 2>"$work/err"; then bad "check-position passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && ! grep -Eq 'input tap|appops|location providers|emu ' "$work/log" &&
+            pass "check-position refuses and changes nothing (${case_%|*})" || bad "check-position with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# clear-position-test: a search left running is stopped with Welcome's own Stop.
+card_ui welcome Off LOADED none
+python3 -I -c 'import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["pos"]="looking"; json.dump(s, open(p, "w"))' "$work/ui-state.json"
+echo 3 >"$work/location"
+touch "$work/testprovider"
+"$script" clear-position-test 2>"$work/err" && [ "$(cat "$work/location")" = 0 ] && undone && grep -q "stopped with Welcome's Stop" "$work/err" &&
+    never_writes && pass "clear-position-test stops a search with Welcome's Stop and removes the test provider" ||
+    bad "clear-position-test: $(cat "$work/err"); log: $(cat "$work/log")"
+wel10_reset
+
 rm -f "${work:?}/ui-state.json"
 export PATH="$PATH_BEFORE_UI"
 

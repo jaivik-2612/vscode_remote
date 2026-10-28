@@ -35,6 +35,10 @@ class NoIdentifiersTest {
         "getIsimDomain", "getEsn", "getCdmaMdn", "getCdmaMin", "getForbiddenPlmns", "getEquivalentHomePlmns",
         "getManualNetworkSelectionPlmn", "getHandle", "getCallerDisplayName", "getContactDisplayName", "getNumber",
         "requestCellInfoUpdate", "requestNetworkScan",
+        // WEL10: an emergency number's country and network, its URNs; Wi-Fi's
+        // scans and the network joined, which Welcome could read now that it
+        // holds a location permission (Show my position).
+        "getCountryIso", "getMnc", "getEmergencyUrns", "getConnectionInfo", "getScanResults", "startScan",
     )
 
     /** Getter families, matched as prefixes: getSimOperator also covers getSimOperatorName. */
@@ -52,72 +56,45 @@ class NoIdentifiersTest {
         "UiccCardInfo", "UiccSlotInfo", "UiccPortInfo", "EuiccManager", "NetworkScan", "ANDROID_ID", "Build.SERIAL",
     )
 
-    /** Members Welcome may use on a TelephonyManager or a ServiceState it holds. */
+    /**
+     * Members Welcome may use on a TelephonyManager, a ServiceState or an
+     * EmergencyNumber it holds. WEL10 reads Android's emergency-number list,
+     * and of each entry only its digits, categories, routing and sources.
+     */
     private val allowed = mapOf(
-        "TelephonyManager" to setOf("activeModemCount", "getSimState", "registerTelephonyCallback", "unregisterTelephonyCallback"),
+        "TelephonyManager" to setOf(
+            "activeModemCount", "getSimState", "registerTelephonyCallback", "unregisterTelephonyCallback", "emergencyNumberList",
+        ),
         "ServiceState" to setOf("state"),
+        "EmergencyNumber" to setOf("number", "emergencyServiceCategories", "emergencyCallRouting", "emergencyNumberSources"),
     )
 
-    /** Its static constants Welcome may name: the SIM states, the location renouncement, the radio states. */
+    /** Its static constants Welcome may name: the SIM states, the location renouncement, the radio states, the categories, routings and sources. */
     private val allowedStatic = mapOf(
         "TelephonyManager" to Regex("SIM_STATE_[A-Z_]+|INCLUDE_LOCATION_DATA_NONE"),
         "ServiceState" to Regex("STATE_[A-Z_]+"),
+        "EmergencyNumber" to Regex("EMERGENCY_SERVICE_CATEGORY_[A-Z_]+|EMERGENCY_CALL_ROUTING_[A-Z]+|EMERGENCY_NUMBER_SOURCE_[A-Z_]+"),
     )
 
+    /** The names declared as an EmergencyNumber in some code: the only receivers whose .number is allowed. */
+    private fun emergencyNumberHolders(code: String): Set<String> =
+        Regex("\\b(\\w+)\\s*:\\s*EmergencyNumber\\b").findAll(code).map { it.groupValues[1] }.toSet()
+
     /** The code without its comments (strings kept; "//" in a string is not a comment). */
-    private fun withoutComments(src: String): String {
-        val out = StringBuilder(src.length)
-        var i = 0
-        var depth = 0
-        var inString = false
-        var raw = false
-        while (i < src.length) {
-            val c = src[i]
-            val next = if (i + 1 < src.length) src[i + 1] else ' '
-            when {
-                depth > 0 -> {
-                    if (c == '*' && next == '/') { depth--; i += 2; out.append("  "); continue }
-                    if (c == '/' && next == '*') { depth++; i += 2; out.append("  "); continue }
-                    out.append(if (c == '\n') '\n' else ' ')
-                }
-                inString && raw -> {
-                    if (src.startsWith("\"\"\"", i)) { inString = false; out.append("\"\"\""); i += 3; continue }
-                    out.append(c)
-                }
-                inString -> {
-                    if (c == '\\' && i + 1 < src.length) { out.append(c).append(next); i += 2; continue }
-                    if (c == '"' || c == '\n') inString = false
-                    out.append(c)
-                }
-                c == '/' && next == '/' -> {
-                    while (i < src.length && src[i] != '\n') { out.append(' '); i++ }
-                    continue
-                }
-                c == '/' && next == '*' -> { depth = 1; i += 2; out.append("  "); continue }
-                src.startsWith("\"\"\"", i) -> { inString = true; raw = true; out.append("\"\"\""); i += 3; continue }
-                c == '"' -> { inString = true; raw = false; out.append(c) }
-                c == '\'' && i + 2 < src.length && (src[i + 2] == '\'' || (next == '\\' && i + 3 < src.length && src[i + 3] == '\'')) -> {
-                    // A char literal such as '"' or '\'' is not the start of a string.
-                    val len = if (next == '\\') 4 else 3
-                    out.append(src, i, i + len)
-                    i += len
-                    continue
-                }
-                else -> out.append(c)
-            }
-            i++
-        }
-        return out.toString()
-    }
+    private fun withoutComments(src: String): String = SourceScan.withoutComments(src)
 
     /** What the rules find in one source file's text (empty: nothing). */
     private fun violations(name: String, src: String): List<String> {
         val code = withoutComments(src)
         val found = ArrayList<String>()
+        val numbers = emergencyNumberHolders(code)
         for ((list, tail) in listOf(getters to "\\b", families to "\\w*")) {
             for (g in list) {
                 if (Regex("\\b$g$tail").containsMatchIn(code)) found += "$name: $g"
-                if (Regex("(?:\\?\\.|!!\\.|\\.)\\s*${property(g)}$tail").containsMatchIn(code)) found += "$name: .${property(g)}"
+                Regex("(\\w*)\\s*(?:\\?\\.|!!\\.|\\.)\\s*${property(g)}$tail").findAll(code).forEach {
+                    // An EmergencyNumber's digits (WEL10), on a name declared as one, and nothing else's.
+                    if (!(g == "getNumber" && it.groupValues[1] in numbers)) found += "$name: .${property(g)}"
+                }
             }
         }
         for (k in forbiddenClasses) {
@@ -139,6 +116,7 @@ class NoIdentifiersTest {
                     if (m !in members) found += "$name: $h.$m (a $type)"
                 }
                 if (Regex("\\bwith\\s*\\(\\s*$h\\s*\\)").containsMatchIn(code)) found += "$name: with($h) (a $type)"
+                if (Regex("\\$\\{?\\s*$h\\b").containsMatchIn(code)) found += "$name: \\$$h in a string (a $type)"
             }
             // One used straight from getSystemService, without a name.
             Regex("$type::class\\.java\\s*\\)\\s*(?:\\?\\.|!!\\.|\\.)\\s*(\\w+)").findAll(code).forEach {
@@ -158,6 +136,8 @@ class NoIdentifiersTest {
         // The scan does see Welcome's own uses (the allow-list is not empty by accident).
         val cellWord = File("src/main/java/org/antumbra/welcome/CellWord.kt").readText()
         assertTrue(cellWord.contains("tm.getSimState(") && cellWord.contains("tm.activeModemCount"))
+        val numbers = File("src/main/java/org/antumbra/welcome/EmergencyNumbers.kt").readText()
+        assertTrue(numbers.contains("tm.emergencyNumberList") && numbers.contains("n: EmergencyNumber ->") && numbers.contains("n.number"))
     }
 
     /** Each way of asking for an identifier that the rules must catch, in the forms Kotlin and Java allow. */
@@ -186,6 +166,15 @@ class NoIdentifiersTest {
             "fun f(t: TelephonyManager) = with(t) { simState }",
             "val x = TelephonyManager.EXTRA_STATE",
             "fun f(ss: ServiceState) = ss.roaming",
+            // WEL10: an emergency number's country, network and URNs, the
+            // whole entry as a string, a number on anything else, Wi-Fi's scans.
+            "fun f(n: EmergencyNumber) = n.countryIso", "fun f(n: EmergencyNumber) = n.getMnc()",
+            "fun f(n: EmergencyNumber) = n.mnc", "fun f(n: EmergencyNumber) = n.emergencyUrns",
+            "fun f(n: EmergencyNumber) = n.toString()", "fun f(n: EmergencyNumber) = \"\$n\"",
+            "fun f(n: EmergencyNumber) = \"\${n.number}\"", "val x = EmergencyNumber.CREATOR",
+            "fun f(n: EmergencyNumber, e: Other) = e.number", "val x = list.map { it.number }",
+            "val x = wifi.scanResults", "val x = wifi.connectionInfo", "wifi.startScan()", "val x = wifi.getScanResults()",
+            "val x = tm.emergencyNumberList.values.first().first().countryIso",
         )
         for (seed in seeds) {
             val code = if (seed.contains("tm") && !seed.contains("val tm")) tm + seed else seed
@@ -201,6 +190,12 @@ class NoIdentifiersTest {
             fun on(serviceState: ServiceState) { listenerState = serviceState.state }
             val off = ServiceState.STATE_POWER_OFF
             val absent = TelephonyManager.SIM_STATE_ABSENT
+            val lists = tm.emergencyNumberList
+            fun f(n: EmergencyNumber) = Triple(n.number, n.emergencyServiceCategories, n.emergencyCallRouting)
+            fun g(n: EmergencyNumber) = n.emergencyNumberSources
+            val p = EmergencyNumber.EMERGENCY_SERVICE_CATEGORY_POLICE
+            val s = EmergencyNumber.EMERGENCY_NUMBER_SOURCE_DATABASE
+            val r = EmergencyNumber.EMERGENCY_CALL_ROUTING_NORMAL
             // Never tm.getImei() or tm.simOperator: see NoIdentifiersTest.
             /* Nor getLine1Number, /* nested */ nor .iccId. */
             val uri = "content://org.antumbra.welcome.state" // getSubscriberId in a comment after a string
@@ -209,14 +204,28 @@ class NoIdentifiersTest {
         assertEquals(emptyList<String>(), violations("fine", fine))
     }
 
-    /** The listener gets no location: registered with INCLUDE_LOCATION_DATA_NONE, and Welcome holds no location permission. */
+    /**
+     * The listener renounces location: since WEL10 Welcome holds the
+     * location permissions (Show my position), so its service-state listener
+     * must keep registering with INCLUDE_LOCATION_DATA_NONE, the only
+     * registration there is; and no other location or phone permission.
+     */
     @Test
-    fun theListenerGetsNoLocation() {
+    fun theListenerRenouncesLocation() {
+        val all = SourceScan.sources().joinToString("\n") { SourceScan.withoutComments(it.readText()) }
+        assertEquals(1, Regex("\\bregisterTelephonyCallback\\(").findAll(all).count())
         val src = File("src/main/java/org/antumbra/welcome/CellWord.kt").readText()
         assertTrue(src.contains("registerTelephonyCallback(TelephonyManager.INCLUDE_LOCATION_DATA_NONE,"))
         assertEquals(1, Regex("\\bregisterTelephonyCallback\\(").findAll(src).count())
+        // Nor the older listener, which has no way to renounce location.
+        assertTrue(!Regex("\\bPhoneStateListener\\b|\\.listen\\(").containsMatchIn(all))
         val manifest = File("src/main/AndroidManifest.xml").readText()
-        listOf("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "READ_PRIVILEGED_PHONE_STATE", "READ_PHONE_NUMBERS", "READ_SMS")
-            .forEach { assertTrue(it, !manifest.contains(it)) }
+        for (p in listOf("ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION")) {
+            assertTrue(p, manifest.contains("<uses-permission android:name=\"android.permission.$p\" />"))
+        }
+        listOf(
+            "ACCESS_BACKGROUND_LOCATION", "ACCESS_LOCATION_EXTRA_COMMANDS", "ACCESS_MOCK_LOCATION", "READ_PRIVILEGED_PHONE_STATE",
+            "READ_PHONE_NUMBERS", "READ_SMS", "LOCATION_BYPASS", "LOCATION_HARDWARE",
+        ).forEach { assertTrue(it, !manifest.contains(it)) }
     }
 }

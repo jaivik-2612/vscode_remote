@@ -46,8 +46,15 @@ work queue is `docs/queue.md`.
   the emulator only, for now), with the reason shown until then. Welcome
   shows the SIM's state, the cellular radio, the VoLTE line and what the
   carrier sees, and says to type the SIM PIN only once the firewall is on
-  (it cannot type it itself). Persistent Storage and the Unsafe Browser
-  are shown but come later.
+  (it cannot type it itself). An emergency card on the Welcome and status
+  screens shows the general emergency number Android lists (never one
+  written in Antumbra; every one Android ranks alike when none comes from
+  the network, the SIM or Android's database, as with no SIM), lines for
+  no SIM, a locked SIM, the radio off and VoLTE not connected that say this
+  phone can still try and that the other phone can call too, and Show my
+  position: one fix from the satellite receiver, shown in large type and
+  sent nowhere. Persistent Storage and the Unsafe Browser are shown but
+  come later.
 - **Trackers blocked by the system.** A small DNS filter between the system's
   resolver and Tor's answers "does not exist" for tracker domains. Most apps
   cannot get around it; `docs/design.md` (section 6) lists what it cannot
@@ -118,7 +125,7 @@ work queue is `docs/queue.md`.
 | Firewall | `antumbra-fw`: `arm`, `apply`, `status`, `flush` | root, one-shot | `firewall/` |
 | tor | The system tor, built for Android (API 29 and later) from pinned sources with one small Antumbra patch (no `SO_REUSEADDR` on the DNSPort, so no app can share it; `tor/patches/`); TransPort, DNSPort and a control socket, no SOCKS port | uid 2950 | `tor/` |
 | DNS filter | `antumbra-dnsfilter`: the tracker filter in front of tor's DNSPort, and a read-only status page | uid 2951 | `dnsfilter/` |
-| Welcome | The device-owner app: the Welcome screen, the session's policies, the status screen, the Emergency call button, the Quick power off tile | an app in user 0 | `welcome/` |
+| Welcome | The device-owner app: the Welcome screen, the session's policies, the status screen, the Emergency call button and the emergency card (Android's number, state lines, Show my position), the Quick power off tile | an app in user 0 | `welcome/` |
 | Apps | Tor Browser and curated privacy apps from a signed repository | apps | planned (`docs/queue.md`, W9) |
 
 This is Stage 1. Stage 2, if build capacity is approved, moves the same

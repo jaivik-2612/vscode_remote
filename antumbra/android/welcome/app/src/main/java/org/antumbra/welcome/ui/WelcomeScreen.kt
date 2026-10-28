@@ -40,10 +40,12 @@ import org.antumbra.welcome.BridgeSource
 import org.antumbra.welcome.Bridges
 import org.antumbra.welcome.CellLevel
 import org.antumbra.welcome.Choices
+import org.antumbra.welcome.EmergencyUi
 import org.antumbra.welcome.Internet
 import org.antumbra.welcome.PhoneChoices
 import org.antumbra.welcome.PhoneStatus
 import org.antumbra.welcome.PhoneTexts
+import org.antumbra.welcome.PositionUi
 import org.antumbra.welcome.R
 import org.antumbra.welcome.TorMode
 
@@ -63,12 +65,15 @@ data class WelcomeUi(
     val inCall: Boolean = false,
     /** The SIM, the cell radio and what the add-on allows (WEL8). */
     val phone: PhoneStatus = PhoneStatus(),
+    /** The emergency card's number and state lines, and why Show my position would be refused (WEL10). */
+    val emergency: EmergencyUi = EmergencyUi(),
 )
 
 /**
- * Screen 1: the session choices, as Tails' Welcome Screen asks them, and a
- * large "Start Antumbra" button that stays on screen, with "Emergency call"
- * above it, and "Return to call" above that during a call.
+ * Screen 1: the emergency card (WEL10), the session choices, as Tails'
+ * Welcome Screen asks them, and a large "Start Antumbra" button that stays
+ * on screen, with "Emergency call" above it, and "Return to call" above
+ * that during a call.
  */
 @Composable
 fun WelcomeScreen(
@@ -77,6 +82,10 @@ fun WelcomeScreen(
     onStart: () -> Unit,
     onEmergencyCall: () -> Unit,
     onReturnToCall: () -> Unit,
+    position: PositionUi = PositionUi(),
+    onShowPosition: () -> Unit = {},
+    onStopPosition: () -> Unit = {},
+    onHidePosition: () -> Unit = {},
     scrollState: ScrollState = rememberScrollState(),
 ) {
     val c = ui.choices
@@ -121,6 +130,8 @@ fun WelcomeScreen(
                 Spacer(Modifier.height(16.dp))
                 WarningBanner(stringResource(R.string.warning_sim_unlocked_no_addon), tag = "warning_sim_unlocked_no_addon")
             }
+
+            EmergencyCard(ui.emergency, position, onShowPosition, onStopPosition, onHidePosition)
 
             SectionTitle(stringResource(R.string.section_internet))
             RowGroup(Modifier.selectableGroup()) {

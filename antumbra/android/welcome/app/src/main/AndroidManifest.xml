@@ -20,9 +20,22 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <!-- Only for "Return to call" before Start (TelecomManager.showInCallScreen,
-         EmergencyCall.kt). Welcome grants it to itself as the device owner. -->
+    <!-- For "Return to call" before Start (TelecomManager.showInCallScreen,
+         EmergencyCall.kt), and for the emergency card (WEL10): Android's
+         emergency-number list (TelephonyManager.getEmergencyNumberList) and
+         whether a call is in progress (TelecomManager.isInCall). Welcome
+         grants it to itself as the device owner; it reads no identifier
+         with it (NoIdentifiersTest). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Only for "Show my position" (WEL10, Position.kt): one fix from the
+         satellite receiver (GPS_PROVIDER) on request, shown on screen and
+         nowhere else. Welcome grants both to itself as the device owner at
+         the first press and never revokes them (revoking a runtime
+         permission kills the app). COARSE is declared with FINE, as Android
+         requires. Never background location: the fix is taken only while
+         Welcome is on screen. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Granted only if the Antumbra module installs this app as a
          privileged app with a privapp-permissions allowlist entry. Then
          Quick power off powers off; otherwise it can only restart

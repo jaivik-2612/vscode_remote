@@ -1392,5 +1392,199 @@ class Wel8EmulatorTest(unittest.TestCase):
         self.assertTrue(190 <= y < 400, (x, y))
 
 
+class Wel10EmulatorTest(unittest.TestCase):
+    """emulator-antumbra.sh's WEL10 steps: every check a warning until it has
+    passed on CI once, every step bounded so that nothing of WEL10 can fail
+    the run or hold it up, each in its place in the run, a failed step
+    undone, and nothing that dials or writes a location setting."""
+
+    WEL10 = ("wel10_level", "wel10_budget", "wel10_left", "wel10_run", "wel10_undo", "wel10_parts",
+             "welcome_wel10", "filter_queries", "welcome_wel10_session")
+    NAMES = ("welcome_emergency_card", "welcome_emergency_states", "welcome_position", "welcome_position_secure",
+             "welcome_position_gnss_only", "welcome_position_leave", "welcome_position_gnss",
+             "welcome_emergency_card_session", "welcome_position_session", "position_lookups",
+             "position_not_in_status", "welcome_position_recover", "welcome_emergency_card_recover")
+
+    def script(self):
+        return read(os.path.join(CI, "emulator-antumbra.sh"))
+
+    def fn(self, name):
+        text = self.script()
+        start = text.index(name + "() {")
+        end = text.index("\n}\n", start) + 3 if not text[start:].split("\n", 1)[0].endswith("}") else text.index("\n", start) + 1
+        return text[start:end]
+
+    def bash(self, body, *args):
+        return subprocess.run(["bash", "-c", body, "probe"] + list(args), capture_output=True, text=True)
+
+    def test_every_check_warns_until_it_has_passed_once(self):
+        r = self.bash(self.fn("wel10_level") + "wel10_level")
+        self.assertEqual(r.stdout.strip(), "warn")
+        code = "".join(self.fn(f) for f in self.WEL10)
+        for n in self.NAMES:
+            self.assertRegex(code, r'(check|wel10_run) %s\b' % n, n)
+        checks = [l.strip() for l in code.splitlines() if re.search(r'(^|[;{(|&)]\s*)check ', l.strip())]
+        self.assertTrue(len(checks) >= 20)
+        for l in checks:
+            # ok, or the level: never a failure of its own.
+            self.assertRegex(l, r'check "?[a-z_$]+"? (ok|"\$\(wel10_level\)")( |$)', l)
+        for word in ("abort", " fail ", "FAILED=1", "exit "):
+            self.assertNotIn(word, code)
+
+    def test_bounded(self):
+        text = self.script()
+        self.assertIn("WEL10_BEFORE_S=420\nWEL10_AFTER_S=240\n", text)
+        run = self.fn("wel10_run")
+        self.assertIn('timeout -k 20 "$limit" bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" "$@"', run)
+        self.assertIn('[ "$limit" -le "$left" ] || limit=$left', run)
+        # Every call of Welcome's driver in WEL10 is bounded.
+        for f in self.WEL10:
+            for l in self.fn(f).splitlines():
+                if 'bash "$WELCOME_ADB"' in l:
+                    self.assertRegex(l, r'timeout -k \d+ ("\$limit"|\d+) bash "\$WELCOME_ADB"', l)
+        self.assertEqual(self.fn("welcome_wel10").count("wel10_budget"), 1)
+        self.assertEqual(self.fn("welcome_wel10_session").count("wel10_budget"), 1)
+        # timeout's words on fd 3: wel10_run sends the call's output to its log.
+        stubs = ('check() { echo "check $*"; }; timeout() { echo "timeout $*" >&3; return "${RC:-0}"; }; '
+                 'tail() { echo last; }; grep() { echo why; }; WELCOME_ADB=w; ANTUMBRA_SERIAL=s; ')
+        fns = self.fn("wel10_level") + self.fn("wel10_budget") + self.fn("wel10_left") + self.fn("wel10_run")
+        # Less than a minute left: not run at all, its own status (nothing to undo).
+        r = self.bash(stubs + fns + '{ wel10_budget 59; wel10_run n 150 /dev/null check-x; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines(), ["check n warn not run: WEL10's time was used up", "rc=2"])
+        # The limit, cut to what is left of the budget.
+        r = self.bash(stubs + fns + '{ wel10_budget 100; wel10_run n 150 /dev/null check-x --a; echo "rc=$?"; } 3>&1')
+        out = r.stdout.splitlines()
+        self.assertRegex(out[0], r"^timeout -k 20 (100|99) bash w -s s check-x --a$")
+        self.assertEqual(out[1:], ["check n ok last", "rc=0"])
+        r = self.bash(stubs + fns + '{ wel10_budget 400; RC=124 wel10_run n 150 /dev/null check-x; echo "rc=$?"; } 3>&1')
+        out = r.stdout.splitlines()
+        self.assertEqual(out[0], "timeout -k 20 150 bash w -s s check-x")
+        self.assertEqual(out[1:], ["check n warn last;", "rc=1"])
+
+    def test_in_their_place(self):
+        start = self.fn("welcome_start")
+        self.assertLess(start.index("welcome_power_menu"), start.index("welcome_wel10"))
+        self.assertLess(start.index("welcome_wel10"), start.index("welcome_choices"))
+        before = self.fn("welcome_wel10")
+        order = ["check-emergency-card", "check-emergency-states", "check-position --source test", "wel10_parts",
+                 "check-position --source gnss"]
+        self.assertEqual(order, sorted(order, key=before.index))
+        self.assertIn("--shots \"$SHOTS/$SCEN-emergency-states\"", before)
+        checks = self.fn("phone_checks")
+        self.assertLess(checks.index("check-module-cell"), checks.index("welcome_wel10_session"))
+        after = self.fn("welcome_wel10_session")
+        order = ["check-emergency-card", "event position_start", "check-position --source test --leave home",
+                 "event position_end", "position_lookups", "position_not_in_status"]
+        self.assertEqual(order, sorted(order, key=after.index))
+        main = self.script()[self.script().index("\nwelcome_checks\n"):]
+        self.assertLess(main.index("\nphone_checks\n"), main.index("wait_bootstrap"))
+
+    def test_the_bound_with_undos_is_written_down(self):
+        text = self.script()
+        head = text[text.index("# --- WEL10:"):text.index("wel10_level() {")]
+        for words in ("The bound, undos included.", "at most one undo runs past it",
+                      "its budget + 20 s + one undo", "A step not run for lack of time is not undone"):
+            self.assertIn(words, " ".join(head.replace("#", " ").split()), words)
+        undo = self.fn("wel10_undo")
+        # Each adb call of an undo is bounded below ash's default minute.
+        for l in undo.splitlines():
+            if re.search(r'(^|\s)(ash|wake_screen) ', l.strip()):
+                self.assertIn("ASH_TIMEOUT=15 ", l, l)
+
+    def test_a_step_not_run_is_not_undone(self):
+        """wel10_undo with wel10_run's status: 2 (not run for lack of time) does nothing; 1 undoes, with its screenshot."""
+        # What the undo does on fd 3 (its own output goes to the log or nowhere).
+        stubs = ('check() { echo "check $*"; }; screenshot() { echo "screenshot $*"; }; ash() { echo "ash $ASH_TIMEOUT $*" >&3; }; '
+                 'timeout() { echo "timeout $*" >&3; }; wake_screen() { echo "wake $ASH_TIMEOUT"; }; ui_wait() { echo "ui_wait $1"; }; '
+                 'tail() { :; }; WELCOME_ADB=w; ANTUMBRA_SERIAL=s; PKG=p; ')
+        fns = self.fn("wel10_level") + self.fn("wel10_undo")
+        r = self.bash(stubs + fns + '{ wel10_undo welcome /dev/null 2 shot; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines(), ["rc=0"])
+        r = self.bash(stubs + fns + '{ wel10_undo welcome /dev/null 1 shot; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines(), [
+            "screenshot shot", "ash 15 setprop debug.antumbra.emergency_states ''",
+            "timeout -k 10 90 bash w -s s clear-position-test", "wake 15", "ash 15 am start -n p/.WelcomeActivity",
+            "ui_wait start_button", "rc=0"])
+        r = self.bash(stubs + fns + '{ wel10_undo status /dev/null 1; echo "rc=$?"; } 3>&1')
+        self.assertNotIn("screenshot", r.stdout)
+        self.assertIn("ui_wait poweroff_button", r.stdout)
+        # And as the steps call it: wel10_run's status, straight after it.
+        for f in ("welcome_wel10", "welcome_wel10_session"):
+            code = re.sub(r"(\\|\|\|)\n\s*", r"\1 ", self.fn(f))
+            for l in (l for l in code.splitlines() if "wel10_run " in l):
+                self.assertRegex(l, r'\|\| wel10_undo (welcome|status) "\$log" \$\?( [a-z-]+)?$', l)
+        # The whole chain: a step not run leaves no undo behind.
+        run = self.fn("wel10_level") + self.fn("wel10_budget") + self.fn("wel10_left") + self.fn("wel10_run")
+        r = self.bash(stubs + run + self.fn("wel10_undo") + 'wel10_budget 10; wel10_run n 150 /dev/null check-x || wel10_undo welcome /dev/null $? shot')
+        self.assertEqual(r.stdout.splitlines(), ["check n warn not run: WEL10's time was used up"])
+
+    def test_a_step_that_fails_is_undone(self):
+        undo = self.fn("wel10_undo")
+        self.assertIn("ASH_TIMEOUT=15 ash \"setprop debug.antumbra.emergency_states ''\"", undo)
+        self.assertIn('timeout -k 10 90 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-position-test', undo)
+        self.assertIn('ASH_TIMEOUT=15 ash "am start -n $PKG/.WelcomeActivity"', undo)
+        self.assertIn('ASH_TIMEOUT=15 ash "am start -n $PKG/.StatusActivity"', undo)
+        for f in ("welcome_wel10", "welcome_wel10_session"):
+            # Each call, its continuation lines joined: undone when it does not pass.
+            code = re.sub(r"(\\|\|\|)\n\s*", r"\1 ", self.fn(f))
+            calls = [l for l in code.splitlines() if "wel10_run " in l]
+            self.assertEqual(len(calls), 4 if f == "welcome_wel10" else 2, f)
+            for l in calls:
+                self.assertIn("|| ", l, l)
+                self.assertIn("wel10_undo", l, l)
+
+    def test_nothing_dials_or_writes_a_location_setting(self):
+        for f in self.WEL10:
+            code = self.fn(f)
+            for word in ("emergency-number-test-mode", "KEYCODE_CALL", "tel:", "112", "911", "settings put",
+                         "location_mode", "set-location-enabled", "assisted_gps", "pm revoke", "pm grant", "input text"):
+                self.assertNotIn(word, code, f)
+
+    def parts(self, log):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(log)
+        try:
+            r = self.bash('check() { echo "check $*"; }; ' + self.fn("wel10_level") + self.fn("wel10_parts")
+                          + 'wel10_parts "$1"', f.name)
+        finally:
+            os.unlink(f.name)
+        return r.stdout.splitlines()
+
+    def test_the_parts_of_a_position_log(self):
+        ok = ("welcome-adb: gps only: yes (Welcome's request is under the gps provider alone)\n"
+              "welcome-adb: secure: yes\nwelcome-adb: leave (sleep): Location off within 10 s\n")
+        self.assertEqual([l.split(" ", 3)[2] for l in self.parts(ok)], ["ok", "ok", "ok"])
+        bad = "welcome-adb: gps only: no (Welcome's request is under: fused)\nwelcome-adb: secure: no\n" \
+              "welcome-adb: leave (sleep): Location stayed on\n"
+        self.assertEqual([l.split(" ", 3)[2] for l in self.parts(bad)], ["warn", "warn", "warn"])
+        self.assertEqual(self.parts(""), ["check welcome_position_secure warn not reached",
+                                          "check welcome_position_gnss_only warn not reached",
+                                          "check welcome_position_leave warn not reached"])
+        self.assertIn("check welcome_position_gnss_only warn gps only: unreadable",
+                      " ".join(self.parts("welcome-adb: gps only: unreadable (dumpsys location lists none)\n")))
+
+    def session(self, counts, status=""):
+        """welcome_wel10_session with stand-ins: the query counts the filter's log gives in turn."""
+        # The counter in a file: filter_queries runs in a command substitution.
+        stub = ('n=$(mktemp); echo 0 >"$n"; counts=(%s); check() { echo "check $*"; }; event() { :; }; screenshot() { :; }; '
+                'wel10_run() { :; }; wel10_undo() { :; }; wel10_budget() { :; }; wel10_level() { echo warn; }; '
+                'ash() { case $1 in *"grep -c"*) i=$(cat "$n"); echo "${counts[$i]}"; echo $((i + 1)) >"$n" ;; '
+                '*) printf "a.example\\nb.example\\n" ;; esac; }; '
+                'as_tor_cat() { printf "%%s" %s; }; RT=/rt; LOGS=/tmp; SCEN=s; '
+                % (" ".join("'%s'" % c for c in counts), "'" + status + "'"))
+        r = self.bash(stub + self.fn("filter_queries") + self.fn("welcome_wel10_session") + "welcome_wel10_session")
+        return [l for l in r.stdout.splitlines() if l.startswith("check position_")]
+
+    def test_no_name_is_looked_up_while_the_position_is_taken(self):
+        self.assertEqual(self.session(["12", "12"]), [
+            "check position_lookups ok no name looked up while the position was taken",
+            "check position_not_in_status ok the test position is not in the module's status.json"])
+        out = self.session(["12", "14"])
+        self.assertEqual(out[0], "check position_lookups warn 2 lookups while the position was taken: a.example b.example ")
+        self.assertEqual(self.session(["", "3"])[0], "check position_lookups warn the DNS filter's query log could not be read")
+        self.assertEqual(self.session(["1", "1"], '{"x":"10.12345"}')[1],
+                         "check position_not_in_status warn the test position is in the module's status.json")
+
+
 if __name__ == "__main__":
     unittest.main()

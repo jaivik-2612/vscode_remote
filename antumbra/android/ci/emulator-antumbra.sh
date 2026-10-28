@@ -44,7 +44,17 @@
 #      press on power, an item labelled Emergency found in it while the
 #      emergency affordance is off (so it is the item that opens the dial
 #      pad), never pressed; the menu closed and the long-press setting put
-#      back; a warning until it has passed on CI once. Then WEL8's two
+#      back; a warning until it has passed on CI once. Then WEL10's emergency
+#      card (welcome_emergency_card: Android's own number from its list and
+#      the radio-off line, read against the device;
+#      welcome_emergency_states: each state's text through the debug build's
+#      hook debug.antumbra.emergency_states, a screenshot of each) and Show
+#      my position with the shell's test provider (welcome_position: the fix
+#      on screen in large type, Location off after it, nothing kept;
+#      welcome_position_secure, _gnss_only and _leave), then with the
+#      emulator's own receiver if time is left (welcome_position_gnss); 7
+#      minutes for the checks and 2 to undo one that fails, warnings until
+#      they have passed on CI once. Then WEL8's two
 #      choices at Start, walked at each level of the Phone-mode gate (the
 #      root-only file /data/adb/antumbra-cell, written as root as the
 #      install's PH3 step writes it on the phone: none, "phone", "data"):
@@ -78,6 +88,11 @@
 #      carrier cards (welcome-adb.sh check-phone), and Welcome's provider
 #      takes the module's word on the cell radio from root only
 #      (check-module-cell); warnings until they have passed on CI once.
+#      Then WEL10 after Start, 4 minutes at most, warnings: the card on the
+#      status screen (welcome_emergency_card_session: the VoLTE line, the
+#      emulator having no IMS) and Show my position with the network up
+#      (welcome_position_session; position_lookups: no name looked up by the
+#      DNS filter meanwhile; position_not_in_status).
 #   8. Wait for tor to bootstrap (the DNS filter's /status, else tor.log).
 #   9. Tracker test: names on the block list asked of the filter directly
 #      (DNS over TCP to 127.0.0.1:5335 through adb forward) and through
@@ -417,6 +432,189 @@ phone_checks() {
 	else
 		check welcome_module_cell "$(choices_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
 	fi
+	welcome_wel10_session
+}
+
+# --- WEL10: the emergency card and Show my position -------------------------------
+#
+# wel10_level: the level of every WEL10 check: warn until it has passed on
+# CI once (then fail), as choices_level. Nothing of WEL10 can fail the run
+# or hold it up: every step is bounded (WEL10_BEFORE_S before Start,
+# WEL10_AFTER_S after it, each call killed when its time is up), and a step
+# that does not pass is undone (the hook cleared, a search stopped with
+# Welcome's own button, the test provider removed) and Welcome brought back.
+# A step not run for lack of time is not undone (it changed nothing).
+#
+# The bound, undos included. Undos inside the budget use its time. A step
+# starts only with a minute of the budget left and is killed 20 s after
+# the budget's end at the latest; once the budget is used up no step runs
+# and none is undone, so at most one undo runs past it. An undo
+# (wel10_undo) is bounded too: a screenshot 30 s, each adb call 15 s,
+# clear-position-test 100 s, then Welcome's screen waited for 30 s plus
+# one screen read (ui_dump: 3 x 60 s at worst): under a minute normally,
+# 7 minutes if every adb call hangs to its limit. So WEL10 takes at most
+# its budget + 20 s + one undo: under 8.5 minutes before Start and 5.5
+# after it normally, about 14 and 11 if adb hangs throughout.
+wel10_level() { echo warn; }
+WEL10_BEFORE_S=420
+WEL10_AFTER_S=240
+WEL10_END=0
+
+# wel10_budget SECONDS: WEL10's steps from now on may take SECONDS in all.
+wel10_budget() { WEL10_END=$((SECONDS + $1)); }
+
+# wel10_left: seconds left in WEL10's budget (0 when it is used up).
+wel10_left() {
+	local left=$((WEL10_END - SECONDS))
+	[ "$left" -gt 0 ] || left=0
+	echo "$left"
+}
+
+# wel10_run NAME SECONDS LOG ARGS...: welcome-adb.sh ARGS for SECONDS at
+# most, never past the budget (killed 20 s after its time is up), its output
+# in LOG; check NAME ok, or the level with the log's last lines. Not run when
+# less than a minute of the budget is left. Returns 0 when it passed, 1 when
+# it did not (to be undone), 2 when it was not run (nothing to undo).
+wel10_run() {
+	local name=$1 limit=$2 log=$3 left
+	shift 3
+	left=$(wel10_left)
+	if [ "$left" -lt 60 ]; then
+		check "$name" "$(wel10_level)" "not run: WEL10's time was used up"
+		return 2
+	fi
+	[ "$limit" -le "$left" ] || limit=$left
+	if timeout -k 20 "$limit" bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" "$@" >"$log" 2>&1; then
+		check "$name" ok "$(tail -n 1 "$log")"
+		return 0
+	fi
+	check "$name" "$(wel10_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	return 1
+}
+
+# wel10_undo SCREEN LOG STATUS [SHOT]: after a WEL10 check, given
+# wel10_run's STATUS: 2 (not run) changed nothing, so nothing is done.
+# Otherwise a screenshot SHOT if named, the card's hook cleared, a search
+# stopped with Welcome's Stop and the test provider removed
+# (clear-position-test), then Welcome's SCREEN (welcome or status) in front
+# again, as after the emergency dialer check. Bounded (above); warnings.
+wel10_undo() {
+	local screen=$1 log=$2 status=$3 shot=${4:-}
+	[ "$status" != 2 ] || return 0
+	[ -z "$shot" ] || screenshot "$shot"
+	ASH_TIMEOUT=15 ash "setprop debug.antumbra.emergency_states ''" >/dev/null 2>&1
+	timeout -k 10 90 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-position-test >>"$log" 2>&1 ||
+		check welcome_position_recover "$(wel10_level)" "the position test could not be undone: $(tail -n 1 "$log")"
+	ASH_TIMEOUT=15 wake_screen
+	if [ "$screen" = welcome ]; then
+		ASH_TIMEOUT=15 ash "am start -n $PKG/.WelcomeActivity" >/dev/null 2>&1
+		ui_wait start_button 30 'Start Antumbra' ||
+			check welcome_emergency_card_recover "$(wel10_level)" "Welcome did not come back after a WEL10 check"
+	else
+		ASH_TIMEOUT=15 ash "am start -n $PKG/.StatusActivity" >/dev/null 2>&1
+		ui_wait poweroff_button 30 ||
+			check welcome_emergency_card_recover "$(wel10_level)" "the status screen did not come back after a WEL10 check"
+	fi
+}
+
+# wel10_parts LOG: the parts of a check-position log before Start: the
+# window secure, Welcome's request under the gps provider alone, and
+# Location off when the screen went off during a search.
+wel10_parts() {
+	local log=$1 line
+	line=$(grep -m 1 -o 'secure: [a-z]*' "$log" || true)
+	case $line in
+	'secure: yes') check welcome_position_secure ok "the position's window has FLAG_SECURE" ;;
+	'') check welcome_position_secure "$(wel10_level)" "not reached" ;;
+	*) check welcome_position_secure "$(wel10_level)" "$line" ;;
+	esac
+	line=$(grep -m 1 -o 'gps only: .*' "$log" || true)
+	case $line in
+	'gps only: yes'*) check welcome_position_gnss_only ok "$line" ;;
+	'') check welcome_position_gnss_only "$(wel10_level)" "not reached" ;;
+	*) check welcome_position_gnss_only "$(wel10_level)" "$line" ;;
+	esac
+	line=$(grep -m 1 -o 'leave ([a-z]*): .*' "$log" || true)
+	case $line in
+	*'Location off within 10 s'*) check welcome_position_leave ok "$line" ;;
+	'') check welcome_position_leave "$(wel10_level)" "not reached" ;;
+	*) check welcome_position_leave "$(wel10_level)" "$line" ;;
+	esac
+}
+
+# welcome_wel10: before Start (the network closed, the cellular radio off
+# by MOD6), Welcome in its lock task: the emergency card read against the
+# device (Android's own number, the radio line; check-emergency-card reads
+# only); each state's text through the debug build's hook
+# (check-emergency-states, a screenshot of each); Show my position with the
+# shell's test provider (check-position --source test: the fix on screen,
+# Location off after it, nothing kept, the screen off during a second
+# search), then with the emulator's own receiver ('adb emu geo fix') if time
+# is left. Nothing is dialled; no location setting is written but Welcome's
+# own switch, by Welcome.
+welcome_wel10() {
+	local log f
+	wel10_budget "$WEL10_BEFORE_S"
+	log=$LOGS/$SCEN-welcome-emergency-card.txt
+	wel10_run welcome_emergency_card 150 "$log" check-emergency-card \
+		--screenshot "$SHOTS/$SCEN-welcome-emergency-card.png" || wel10_undo welcome "$log" $? welcome-emergency-card-failed
+	mkdir -p "$SHOTS/$SCEN-emergency-states"
+	log=$LOGS/$SCEN-welcome-emergency-states.txt
+	wel10_run welcome_emergency_states 240 "$log" check-emergency-states \
+		--shots "$SHOTS/$SCEN-emergency-states" || wel10_undo welcome "$log" $?
+	log=$LOGS/$SCEN-welcome-position.txt
+	wel10_run welcome_position 180 "$log" check-position --source test \
+		--screenshot "$SHOTS/$SCEN-welcome-position-looking.png" || wel10_undo welcome "$log" $?
+	wel10_parts "$log"
+	log=$LOGS/$SCEN-welcome-position-gnss.txt
+	if [ "$(wel10_left)" -ge 150 ]; then
+		wel10_run welcome_position_gnss 150 "$log" check-position --source gnss --leave none || wel10_undo welcome "$log" $?
+	else
+		check welcome_position_gnss "$(wel10_level)" "not run: less than 150 s of WEL10's time left"
+	fi
+	for f in "$SHOTS/$SCEN-welcome-emergency-card.png" "$SHOTS/$SCEN-welcome-position-looking.png"; do
+		[ -s "$f" ] || rm -f "$f"
+	done
+	screenshot welcome-after-wel10
+}
+
+# filter_queries: how many query lines the DNS filter has logged so far (as root).
+filter_queries() { ash "grep -c ' query \"' $RT/log/dnsfilter.log" 2>/dev/null | tr -cd '0-9'; }
+
+# welcome_wel10_session: after Start, on the status screen, in the run's
+# Phone-mode session (the radio on; the emulator has no IMS, so MOD11's word
+# is "none" and the card shows the VoLTE line): the card read against the
+# device, then Show my position with the network up. Between the events
+# position_start and position_end the DNS filter must log no lookup (any
+# names in a warning: an assistance download would show here), and the test
+# position must not be in the module's status.json (read as tor's uid, as
+# collect_evidence does).
+welcome_wel10_session() {
+	local log n0 n1 names
+	wel10_budget "$WEL10_AFTER_S"
+	log=$LOGS/$SCEN-status-emergency-card.txt
+	wel10_run welcome_emergency_card_session 120 "$log" check-emergency-card ||
+		wel10_undo status "$log" $? status-emergency-card-failed
+	log=$LOGS/$SCEN-status-position.txt
+	n0=$(filter_queries)
+	event position_start
+	wel10_run welcome_position_session 180 "$log" check-position --source test --leave home || wel10_undo status "$log" $?
+	event position_end
+	n1=$(filter_queries)
+	if [ -z "$n0" ] || [ -z "$n1" ]; then
+		check position_lookups "$(wel10_level)" "the DNS filter's query log could not be read"
+	elif [ "$n1" -le "$n0" ]; then
+		check position_lookups ok "no name looked up while the position was taken"
+	else
+		names=$(ash "grep ' query \"' $RT/log/dnsfilter.log | tail -n +$((n0 + 1)) | sed 's/.* query \"\\([^\"]*\\)\".*/\\1/' | sort -u | head -n 10" | tr '\n' ' ')
+		check position_lookups "$(wel10_level)" "$((n1 - n0)) lookups while the position was taken: $names"
+	fi
+	if as_tor_cat "$RT/run/status.json" 2>/dev/null | grep -qF -e 10.12345 -e 140.54321; then
+		check position_not_in_status "$(wel10_level)" "the test position is in the module's status.json"
+	else
+		check position_not_in_status ok "the test position is not in the module's status.json"
+	fi
+	screenshot status-after-wel10
 }
 
 # The session's Phone choice for the run: calls (the radio on all run,
@@ -432,6 +630,7 @@ welcome_start() {
 	screenshot welcome-1
 	welcome_emergency
 	welcome_power_menu
+	welcome_wel10
 	welcome_choices
 	# The run's session: Wi-Fi, Tor directly, calls and texts with the gate
 	# at "phone" (as the install leaves it after PH3's outcome A). Each row

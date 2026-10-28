@@ -4,7 +4,6 @@ package org.antumbra.welcome
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
@@ -75,6 +74,10 @@ class WelcomeActivity : ComponentActivity() {
                             onStart = ::start,
                             onEmergencyCall = ::emergencyCall,
                             onReturnToCall = ::returnToCall,
+                            position = Position.ui,
+                            onShowPosition = { Position.press(this@WelcomeActivity) },
+                            onStopPosition = { Position.stop(this@WelcomeActivity) },
+                            onHidePosition = { Position.hide(this@WelcomeActivity) },
                         )
                     }
                 }
@@ -85,19 +88,22 @@ class WelcomeActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this) { }
 
         // Check the add-on, the device owner, the SIM and the cell radio
-        // while the screen is visible. A choice the add-on no longer allows
-        // (its gate lowered, the add-on gone) is taken back, never the
-        // other way round.
+        // while the screen is visible, and the emergency card's number and
+        // lines (before Start: no Phone mode yet). A choice the add-on no
+        // longer allows (its gate lowered, the add-on gone) is taken back,
+        // never the other way round.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     val present = withContext(Dispatchers.IO) { AddOnCheck.run() }.present
                     val phone = withContext(Dispatchers.IO) { CellWatch.status(this@WelcomeActivity) }
+                    val emergency = withContext(Dispatchers.IO) { EmergencyWatch.read(this@WelcomeActivity, phone, phoneMode = false) }
                     val ui = WelcomeModel.ui
                     WelcomeModel.ui = ui.copy(
                         addOnPresent = present,
                         notDeviceOwner = !policies.isDeviceOwner,
                         phone = phone,
+                        emergency = emergency,
                         choices = if (ui.starting) ui.choices else PhoneChoices.fit(ui.choices, phone, present),
                     )
                     delay(3000)
@@ -105,21 +111,23 @@ class WelcomeActivity : ComponentActivity() {
             }
         }
         // No screenshots and no recents thumbnail while bridge lines typed
-        // by the user are on screen.
+        // by the user, or a position (WEL10), are on screen; the screen
+        // stays on while Show my position looks (WindowRules).
         lifecycleScope.launch {
-            snapshotFlow {
-                val c = WelcomeModel.ui.choices
-                c.wireTorMode == TorMode.BRIDGES && c.bridgeSource == BridgeSource.CUSTOM && c.bridgeText.isNotBlank()
-            }.collect { secure ->
-                if (secure) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                else window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-            }
+            snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices) }
+                .collect { window.setFlags(it, WindowRules.MASK) }
         }
     }
 
     override fun onResume() {
         super.onResume()
         Home.lock(this)
+    }
+
+    /** The screen left (the emergency dial pad, the power menu's choices, the screen off): a search ends, Location goes off when safe. */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Position.leave(this)
     }
 
     /** Opens the emergency dial pad on top of Welcome, inside its locked task. */
@@ -199,6 +207,8 @@ class WelcomeActivity : ComponentActivity() {
         val started = withContext(Dispatchers.IO) {
             synchronized(BootState.lock) {
                 if (Session.current().started) return@synchronized null
+                // A search for the position ends first; the baseline then switches Location off when safe.
+                Position.endForStart(this@WelcomeActivity)
                 val result = policies.applyAtStart(choices, check.present)
                 if (result.refused) return@synchronized result
                 WelcomeModel.policyFailures = result.failed

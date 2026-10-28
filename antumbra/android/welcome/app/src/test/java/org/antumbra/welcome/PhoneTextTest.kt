@@ -313,18 +313,47 @@ class PhoneTextTest {
         assertTrue(texts.getValue("warning_sim_unlocked_no_addon").single().contains("Restart the phone"))
     }
 
-    /** No number that could be dialled, and no country or carrier named, in any WEL8 text. */
+    /** No number that could be dialled, and no country or carrier named, in any WEL8 or WEL10 text. */
     @Test
     fun noNumberAndNoPlace() {
         val wel8 = texts.filterKeys {
             it.startsWith("internet_") || it.startsWith("phone_") || it.startsWith("sim_") || it.startsWith("carrier_") ||
-                it.startsWith("ims_") || it.startsWith("radio_") || it.startsWith("status_mode_") || it.startsWith("cell_")
+                it.startsWith("ims_") || it.startsWith("radio_") || it.startsWith("status_mode_") || it.startsWith("cell_") ||
+                it.startsWith("emergency_state_") || it.startsWith("emergency_number_") || it.startsWith("emergency_numbers_") ||
+                it.startsWith("emergency_other_") || it.startsWith("position_")
         }
         assertTrue(wel8.size > 40)
         wel8.forEach { (name, v) ->
             v.forEach { s ->
                 assertFalse(name, Regex("\\d{2,}").containsMatchIn(s.replace("%1\$d", "").replace("4G", "").replace("2G", "").replace("3G", "")))
             }
+        }
+    }
+
+    /**
+     * No country named in Welcome's code or its tests through a locale: no
+     * Locale constant but ROOT, and language tags only (no region), so a
+     * test that needs a language's number format names the language alone.
+     */
+    @Test
+    fun noLocaleNamesACountry() {
+        val files = listOf("src/main/java", "src/test/java").flatMap { d ->
+            File(d).walkTopDown().filter { it.isFile && it.extension in setOf("kt", "java") }.toList()
+        }
+        assertTrue(files.size > 20)
+        val constant = Regex("\\bLocale\\s*\\.\\s*([A-Z][A-Z_]*)\\b")
+        val withRegion = Regex("\\bLocale\\s*\\(\\s*\"[^\"]*\"\\s*,|forLanguageTag\\s*\\(\\s*\"[A-Za-z]{2,8}[-_][^\"]*\"")
+        for (f in files) {
+            val code = SourceScan.withoutComments(f.readText())
+            constant.findAll(code).forEach { assertEquals("${f.name}: ${it.value}", "ROOT", it.groupValues[1]) }
+            assertFalse(f.name, withRegion.containsMatchIn(code))
+        }
+        // The scan sees a locale constant and a language tag (it is not empty by accident).
+        val position = SourceScan.withoutComments(File("src/test/java/org/antumbra/welcome/PositionTest.kt").readText())
+        assertTrue(constant.containsMatchIn(position) && position.contains("Locale.forLanguageTag(\"de\")"))
+        // Seeds with a made-up region (the constant split, so that this file passes its own scan).
+        for (seed in listOf("Locale" + ".ENGLISH", "Locale" + ".XX", "Locale(\"xx\", \"YY\")", "Locale.forLanguageTag(\"xx-YY\")")) {
+            assertTrue(seed, constant.findAll(seed).any { it.groupValues[1] != "ROOT" } || withRegion.containsMatchIn(seed))
         }
     }
 }

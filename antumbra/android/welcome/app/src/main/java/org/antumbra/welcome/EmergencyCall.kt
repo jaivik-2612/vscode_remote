@@ -2,6 +2,7 @@
 package org.antumbra.welcome
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.admin.DevicePolicyManager
 import android.content.Context
@@ -283,6 +284,29 @@ object CallWatch {
      */
     fun callOrAfter(context: Context): Boolean =
         inCall(context) || record.waitLeftMs(SystemClock.elapsedRealtime()) > 0
+
+    /**
+     * WEL10: Location's switch is never changed while this holds ([PositionMachine]):
+     * Quick power off's hold (a call, emergency callback mode, the wait
+     * after a call, with the module's words), or Telecom saying a call is in
+     * progress, which also sees a call still connecting (the radio being
+     * switched on for an emergency call). Without READ_PHONE_STATE Telecom
+     * answers false without saying so, so that counts as a hold, as does a
+     * Telecom that cannot be asked.
+     */
+    @SuppressLint("MissingPermission") // Checked just before; a refusal counts as a hold.
+    fun locationHold(context: Context): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        val mode = context.getSystemService(AudioManager::class.java)?.mode ?: AudioManager.MODE_NORMAL
+        if (record.hold(CallRecord.isCallMode(mode), inCallbackMode(context), now, words) != null) return true
+        if (context.checkSelfPermission(Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return true
+        val telecom = context.getSystemService(TelecomManager::class.java) ?: return true
+        return try {
+            telecom.isInCall
+        } catch (e: Exception) {
+            true
+        }
+    }
 
     /** Why Quick power off must wait now, for the person; null when it may go ahead. */
     fun holdMessage(context: Context): String? {

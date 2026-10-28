@@ -121,7 +121,7 @@ object BootState {
         } catch (e: Exception) {
             Log.w(TAG, "shutdown: could not restore home", e)
         }
-        val failures = policies.applyBaseline() + policies.lockWifiOff() + policies.forgetWifiNetworks()
+        val failures = policies.applyBaseline(atShutdown = true) + policies.lockWifiOff() + policies.forgetWifiNetworks()
         if (failures.isNotEmpty()) Log.w(TAG, "shutdown: failed: ${failures.joinToString()}")
     }
 }

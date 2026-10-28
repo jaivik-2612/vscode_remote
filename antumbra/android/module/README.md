@@ -167,7 +167,10 @@ the person may set by hand for tor.
    Settings.Global values in `lib/settings.conf`** (among them
    `enable_cellular_on_boot=0` and `mobile_data_always_on=0`), **mobile
    data off** for every SIM Android knows (below), and
-   `cmd wifi set-scan-always-available disabled`. Then, at every turn of
+   `cmd wifi set-scan-always-available disabled`. Welcome's Show my position
+   (WEL10) refuses unless `assisted_gps_enabled` reads 0 and Wi-Fi scanning
+   for location is off, and never writes either: these lines are what lets
+   it run. Then, at every turn of
    the loop, **the cell radio's watch** (below, "The cell radio: off from
    power-on"): airplane mode's radio list is narrowed to the cell radio
    once airplane mode has read off for 30 seconds; whenever something else

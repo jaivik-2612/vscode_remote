@@ -5,8 +5,9 @@
 # (the CI emulator job has its own driver, antumbra/android/ci/
 # emulator-antumbra.sh, with the same test tags, and calls this script only
 # for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb',
-# 'check-addon', 'check-module-word', 'check-choices', 'check-phone' and
-# 'check-module-cell'). It
+# 'check-addon', 'check-module-word', 'check-choices', 'check-phone',
+# 'check-module-cell', 'check-emergency-card', 'check-emergency-states',
+# 'check-position' and 'clear-position-test'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -109,6 +110,61 @@
 #                             a "none" word taken ("Result: Bundle[{v=1}]"). Only
 #                             "none" and malformed words are sent: neither lets Quick
 #                             power off skip a wait.
+#   check-emergency-card [--screenshot FILE.png]
+#                             WEL10, with adb as root, on the Welcome or status screen
+#                             (whichever is in front): the emergency card, line by line
+#                             (a line counts only from a dump that shows it whole). Each
+#                             number it shows (one, or several Android ranks alike, with
+#                             their own line) must be one of Android's ('cmd phone
+#                             emergency-number-test-mode -p', a print, as root), or the
+#                             card says Android lists none exactly when the print has no
+#                             number. Its state lines must match the device and WEL8's rows
+#                             on the same page: the SIM line against gsm.sim.state, the
+#                             radio line exactly when the radio row says Off (that row
+#                             against the registry's mRadioPowerState), the VoLTE line
+#                             exactly when the VoLTE row says "Not connected for calls yet"
+#                             with a SIM unlocked and the radio not off; the other-phone
+#                             line exactly when a state line shows; no text says an
+#                             emergency call cannot be made. The CI hook must be unset.
+#                             Reads only: nothing is tapped, typed or dialled.
+#   check-emergency-states [--shots DIR]
+#                             WEL10, test builds: debug.antumbra.emergency_states set to
+#                             each state alone, then all five, then number_none and
+#                             number_unreadable; each time the card must show exactly
+#                             those lines, with Welcome's texts (strings.xml). The
+#                             property is cleared afterwards whatever happens, and the card
+#                             must show its real lines again. A release build ignores the
+#                             property: the check then fails and says so. --shots: a
+#                             screenshot per case, DIR/emergency-state-CASE.png.
+#   check-position [--source test|gnss] [--screenshot FILE.png] [--wait SECONDS]
+#                  [--leave sleep|home|none]
+#                             WEL10, with adb as root, never during a call: Show my
+#                             position. Location must be off before. Source test (the
+#                             default): mock location allowed for the shell user, then as
+#                             the shell user ('su 2000 cmd location providers'):
+#                             add-test-provider gps, set-test-provider-enabled gps true;
+#                             after the tap, "Looking" and Location on within 15 s, then
+#                             set-test-provider-location gps --location
+#                             10.12345,-140.54321 --accuracy 5 every 2 s until the
+#                             coordinates show (--wait, 60 s). Source gnss: the emulator's
+#                             own receiver, 'adb emu geo fix -140.54321 10.12345'
+#                             (longitude first). Then: "10.12345° N", "140.54321° W", the
+#                             map line, the accuracy (test), the test-location line
+#                             exactly with source test; Location off within 10 s; the
+#                             window secure; Welcome's request under the gps provider only
+#                             (dumpsys location, read while it looks); the coordinates in
+#                             no file under Welcome's data directories, not in its log, in
+#                             no property; Hide removes them. Then a second search, left by
+#                             switching the screen off (--leave sleep, the Welcome screen's
+#                             default) or with Home (--leave home, the status screen's):
+#                             Location off within 10 s. Afterwards, also after a failure
+#                             ('clear-position-test'): a search still shown is stopped with
+#                             its own Stop button, the test provider removed and
+#                             mock_location back to its default. Welcome alone switches
+#                             Location; this command never writes a location setting.
+#   clear-position-test       Undo what check-position may leave: a search stopped with
+#                             Welcome's Stop, the test provider removed, mock_location back
+#                             to default; fails while Location stays on.
 #   screenshot FILE.png       Save the screen.
 #   power-off-tile            Add the Quick power off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
@@ -1237,6 +1293,514 @@ cmd_check_module_cell() {
     say "root's word on the cell radio taken: $out"
 }
 
+# --- WEL10: the emergency card and Show my position ------------------------------
+
+# The CI hook for the card's state lines (test builds only), its words, and
+# where Welcome's own texts are (the checkout this script is in).
+STATES_HOOK=debug.antumbra.emergency_states
+STATE_WORDS=(no_sim sim_locked sim_unusable radio_off volte)
+STRINGS=${WELCOME_STRINGS:-$(cd "$(dirname "$0")" && pwd)/../app/src/main/res/values/strings.xml}
+# The test position: open ocean, no place. The shell takes latitude first,
+# the emulator's console longitude first.
+TEST_LAT=10.12345
+TEST_LON=-140.54321
+# Texts that would discourage an emergency call; no card text may match.
+DISCOURAGING="(cannot|can't|can not|unable to|not possible to) (make|place|call)|no emergency call|do not call"
+
+# str NAME: Welcome's text NAME (strings.xml), as the screen shows it.
+STR_PY='
+import re, sys
+xml = open(sys.argv[1], encoding="utf-8").read()
+m = re.search("<string name=\"" + re.escape(sys.argv[2]) + "\">([^<]*)</string>", xml)
+if not m:
+    sys.exit(1)
+t = m.group(1).replace(chr(92) + chr(39), chr(39)).replace(chr(92) + chr(34), chr(34))
+print(t.replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&"))
+'
+str() { python3 -I -c "$STR_PY" "$STRINGS" "$1" || die "no text $1 in $STRINGS"; }
+
+# front_screen: "welcome" or "status", whichever is in front (10 s at most).
+front_screen() {
+    local xml end=$((SECONDS + 10))
+    while [ $SECONDS -lt $end ]; do
+        xml=$(dump_ui || true)
+        if [ -n "$(find_node start_button <<<"$xml")" ]; then echo welcome; return 0; fi
+        if [ -n "$(find_node poweroff_button <<<"$xml")" ]; then echo status; return 0; fi
+        sleep 2
+    done
+    return 1
+}
+
+# android_numbers: Android's emergency numbers, one per line, from 'cmd phone
+# emergency-number-test-mode -p' (a print of every phone's list, as root; it
+# changes nothing). Fails when the print cannot be read.
+android_numbers() {
+    local out
+    out=$(sh_ cmd phone emergency-number-test-mode -p 2>&1 || true)
+    case $out in
+        '['*']') tr -d '[] ' <<<"$out" | tr ',' '\n' | grep -E '^[0-9*#+]+$' || true ;;
+        *) say "cannot read Android's emergency numbers: $out"; return 1 ;;
+    esac
+}
+
+# sim_expect: the card's SIM line by Welcome's rule, from gsm.sim.state's
+# slots: none (a SIM unlocked), sim_locked, sim_unusable, no_sim (every slot
+# empty), or "?" (a slot starting, or nothing to read: not compared).
+sim_expect() {
+    local s n=0 ready=0 locked=0 unusable=0 absent=0
+    for s in $(sh_ getprop gsm.sim.state | tr ',' ' '); do
+        n=$((n + 1))
+        case $s in
+            LOADED | READY) ready=1 ;;
+            PIN_REQUIRED | PUK_REQUIRED | NETWORK_LOCKED) locked=1 ;;
+            CARD_IO_ERROR | PERM_DISABLED | CARD_RESTRICTED) unusable=1 ;;
+            ABSENT) absent=$((absent + 1)) ;;
+        esac
+    done
+    if [ "$n" = 0 ]; then echo '?'
+    elif [ "$ready" = 1 ]; then echo none
+    elif [ "$locked" = 1 ]; then echo sim_locked
+    elif [ "$unusable" = 1 ]; then echo sim_unusable
+    elif [ "$absent" = "$n" ]; then echo no_sim
+    else echo '?'; fi
+}
+
+# scan_card FILE: like scan_page, but only from the top down to the dump
+# that shows the end of the emergency card (Show my position) whole.
+scan_card() {
+    local file=$1 w h prev='' cur
+    read -r w h < <(screen_size)
+    to_top
+    : >"$file"
+    for _ in $(seq 1 8); do
+        cur=$(dump_ui || true)
+        [ "$cur" != "$prev" ] || break
+        printf '%s\n<!-- page -->\n' "$cur" >>"$file"
+        prev=$cur
+        node_pick - position_button <<<"$cur" >/dev/null 2>&1 && break
+        a shell input swipe $((w / 2)) $((h * 7 / 10)) $((w / 2)) $((h * 3 / 10)) 1000
+    done
+}
+
+# card_read FILE: the card's lines in a scan: card_states (the state words
+# shown, in the card's order), card_other (1 with the other-phone line),
+# card_value (the number or numbers shown, as written, or empty), card_text
+# (the number's line), and card_bad (lines whose text is not Welcome's).
+card_read() {
+    local file=$1 w got
+    card_states='' card_other=0 card_value='' card_text='' card_bad=()
+    for w in "${STATE_WORDS[@]}"; do
+        scan_has "$file" "emergency_state_$w" || continue
+        card_states=$card_states${card_states:+ }$w
+        got=$(row_read "$file" "emergency_state_$w" | cut -f2) || got='(never whole)'
+        [ "$got" = "$(str "emergency_state_$w")" ] || card_bad+=("emergency_state_$w says '$got'")
+    done
+    if scan_has "$file" emergency_other_phone; then
+        card_other=1
+        got=$(row_read "$file" emergency_other_phone | cut -f2) || got='(never whole)'
+        [ "$got" = "$(str emergency_other_phone)" ] || card_bad+=("emergency_other_phone says '$got'")
+    fi
+    card_value=$(row_read "$file" emergency_number_value | cut -f2) || card_value=''
+    card_text=$(row_read "$file" emergency_number_text | cut -f2) || card_text=''
+}
+
+# WEL10: the card's number and lines against the device. Reads only.
+cmd_check_emergency_card() {
+    local shot='' screen scan nums shown want_sim sim_row radio_row ims_row expect=() w radio_off=0 have
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --screenshot) shot=$2; shift ;;
+            *) die "check-emergency-card: unknown option $1" ;;
+        esac
+        shift
+    done
+    [ "$(sh_ id -u)" = 0 ] || die "check-emergency-card needs adb as root ('adb root'): only the shell and root may print Android's emergency numbers"
+    [ -z "$(sh_ getprop "$STATES_HOOK")" ] || die "the test hook $STATES_HOOK is set: the card does not show its real lines (clear it first)"
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    screen=$(front_screen) || die "neither the Welcome nor the status screen is in front"
+    nums=$(android_numbers) || die "Android's emergency numbers could not be printed"
+    scan=$(mktemp)
+    # shellcheck disable=SC2064 # the file's name now
+    trap "rm -f '$scan'" RETURN
+    problems=()
+    sleep 1
+    radio_before=$(registry_radio)
+    scan_page "$scan"
+    card_read "$scan"
+    problems+=("${card_bad[@]}")
+    # The numbers: each one of Android's, with the line for one or for
+    # several; or "lists none" exactly when the print has none.
+    shown=$(tr -c '0-9\n' '\n' <<<"$card_value" | grep . || true)
+    if [ -n "$nums" ]; then
+        if [ -z "$shown" ]; then
+            problems+=("the card shows no number, while Android lists $(tr '\n' ' ' <<<"$nums")(its line: $card_text)")
+        fi
+        for w in $shown; do
+            grep -qxF "$w" <<<"$nums" || problems+=("the card's number $w is not one Android lists ($(tr '\n' ' ' <<<"$nums"))")
+        done
+        if [ "$(grep -c . <<<"$shown")" -gt 1 ]; then
+            [ "$card_text" = "$(str emergency_number_several)" ] || problems+=("the card shows several numbers, but its line is not the one for several: '$card_text'")
+        else
+            [ "$card_text" = "$(str emergency_number_detail)" ] || problems+=("the number's line is not the detail: '$card_text'")
+        fi
+    else
+        [ -z "$card_value" ] || problems+=("the card shows $card_value, while Android lists no number")
+        case $card_text in
+            "$(str emergency_number_none)" | "$(str emergency_number_unreadable)") ;;
+            *) problems+=("Android lists no number, but the card's line says '$card_text'") ;;
+        esac
+    fi
+    # The state lines, from WEL8's rows on the same page and the device.
+    want_sim=$(sim_expect)
+    sim_row=$(row_read "$scan" sim_status_1 | cut -f2) || sim_row=''
+    radio_row=$(row_read "$scan" radio_status | cut -f2) || radio_row=''
+    ims_row=$(row_read "$scan" ims_status | cut -f2) || ims_row=''
+    case $want_sim in no_sim | sim_locked | sim_unusable) expect+=("$want_sim") ;; esac
+    case $radio_row in *"| $(str radio_off)") radio_off=1; expect+=(radio_off) ;; esac
+    case $ims_row in
+        *'| Not connected for calls yet'*)
+            case $sim_row in *"| $(str sim_ready)") [ "$radio_off" = 1 ] || expect+=(volte) ;; esac ;;
+    esac
+    have=$card_states
+    # A SIM still starting: its line is not compared.
+    if [ "$want_sim" = '?' ]; then
+        have=$(tr ' ' '\n' <<<"$have" | grep -vxE 'no_sim|sim_locked|sim_unusable' | tr '\n' ' ' | sed 's/ *$//')
+    fi
+    [ "$have" = "${expect[*]}" ] || problems+=("state lines '$have', expected '${expect[*]}' (SIM $want_sim, ${radio_row:-no radio row}, ${ims_row:-no VoLTE row})")
+    if [ -n "$card_states" ] && [ "$card_other" != 1 ]; then problems+=("the other-phone line is missing"); fi
+    if [ -z "$card_states" ] && [ "$card_other" = 1 ]; then problems+=("the other-phone line shows without a state line"); fi
+    # WEL8's rows against the device (the radio row against the registry, the SIM row against gsm.sim.state).
+    check_lines "$scan" offline-ok
+    if scan_texts "$scan" | grep -qiE "$DISCOURAGING"; then
+        problems+=("a text discourages an emergency call: $(scan_texts "$scan" | grep -iE "$DISCOURAGING" | head -n 1)")
+    fi
+    if [ -n "$shot" ]; then
+        to_top
+        view_row emergency_number_text >/dev/null || true
+        a exec-out screencap -p >"$shot" || true
+    fi
+    to_top
+    [ "${#problems[@]}" -eq 0 ] || die "check-emergency-card ($screen): ${problems[*]}"
+    say "check-emergency-card ($screen): number $([ -n "$shown" ] && tr '\n' ' ' <<<"$shown" | sed 's/ $//' || echo none) ($(grep -c . <<<"$nums" || true) listed by Android), state lines '${card_states:-none}', other phone $([ "$card_other" = 1 ] && echo shown || echo not shown); $lines_read; nothing tapped or dialled"
+}
+
+# hook_set VALUE: the card's CI hook ('' clears it).
+hook_set() {
+    local v=${1:-}
+    [ -n "$v" ] || v="''"
+    a shell setprop "$STATES_HOOK" "$v" >/dev/null
+}
+
+# hook_clear: the hook cleared, and checked to be.
+hook_clear() {
+    hook_set ''
+    [ -z "$(sh_ getprop "$STATES_HOOK")" ] || { say "$STATES_HOOK is still set"; return 1; }
+}
+
+# WEL10, test builds: each state's text on screen through the hook.
+cmd_check_emergency_states() {
+    local shots='' wait=20 scan real case_ value want text end ok fail=0 applied=0 now
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --shots) shots=$2; shift ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-emergency-states: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $wait in '' | *[!0-9]*) die "check-emergency-states: --wait takes a number of seconds" ;; esac
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    front_screen >/dev/null || die "neither the Welcome nor the status screen is in front"
+    scan=$(mktemp)
+    # From here on, whatever happens, the hook is cleared.
+    # shellcheck disable=SC2064 # the file's name now
+    trap "rm -f '$scan'; hook_clear || say 'clear the hook with: adb shell setprop $STATES_HOOK \"\"'" EXIT
+    trap 'exit 1' INT TERM HUP
+    hook_clear || die "the hook could not be cleared before the check"
+    sleep 4
+    scan_card "$scan"
+    card_read "$scan"
+    real="$card_states/$card_other/$card_value/$card_text"
+    for case_ in "${STATE_WORDS[@]}" all number_none number_unreadable; do
+        want=$case_ text=''
+        value=$case_
+        case $case_ in
+            all) value=$(IFS=,; echo "${STATE_WORDS[*]}"); want="${STATE_WORDS[*]}" ;;
+            number_none) want=''; text=$(str emergency_number_none) ;;
+            number_unreadable) want=''; text=$(str emergency_number_unreadable) ;;
+        esac
+        hook_set "$value"
+        ok=0
+        end=$((SECONDS + wait))
+        while :; do
+            sleep 2
+            scan_card "$scan"
+            card_read "$scan"
+            problems=("${card_bad[@]}")
+            [ "$card_states" = "$want" ] || problems+=("state lines '$card_states', expected '$want'")
+            [ "$card_other" = "$([ -n "$want" ] && echo 1 || echo 0)" ] ||
+                problems+=("the other-phone line is $([ "$card_other" = 1 ] && echo shown || echo missing)")
+            if [ -n "$text" ]; then
+                [ "$card_text" = "$text" ] || problems+=("the number's line says '$card_text'")
+                [ -z "$card_value" ] || problems+=("a number is shown ($card_value)")
+            fi
+            if [ "${#problems[@]}" -eq 0 ]; then ok=1; break; fi
+            [ $SECONDS -lt "$end" ] || break
+        done
+        if [ -n "$shots" ]; then
+            to_top
+            view_row emergency_number_text >/dev/null || true
+            a exec-out screencap -p >"$shots/emergency-state-$case_.png" || true
+        fi
+        if [ "$ok" = 1 ]; then
+            applied=1
+            say "case $case_: ok: lines '${card_states:-none}'${text:+, number line as written}"
+        else
+            say "case $case_: FAILED: ${problems[*]}"
+            fail=1
+            # The first case never applied: the build does not read the hook.
+            [ "$applied" = 1 ] || break
+        fi
+    done
+    hook_clear || fail=1
+    end=$((SECONDS + wait))
+    while :; do
+        sleep 2
+        scan_card "$scan"
+        card_read "$scan"
+        now="$card_states/$card_other/$card_value/$card_text"
+        [ "$now" != "$real" ] || break
+        if [ $SECONDS -ge "$end" ]; then say "the card did not show its real lines again: '$now', before '$real'"; fail=1; break; fi
+    done
+    to_top
+    trap - EXIT INT TERM HUP
+    rm -f "$scan"
+    [ "$applied" = 1 ] ||
+        die "Welcome did not show the hook's lines: a release build ignores $STATES_HOOK (only debuggable or testOnly builds read it); the hook is cleared"
+    [ "$fail" = 0 ] || die "check-emergency-states failed (see above); the hook is cleared"
+    say "check-emergency-states: each state's text, all five, and both number lines shown as written; the hook cleared and the card's real lines back"
+}
+
+location_mode() { sh_ settings get secure location_mode; }
+
+# wait_location on|off SECONDS: Location's switch as wanted within SECONDS (read only).
+wait_location() {
+    local end=$((SECONDS + $2)) m
+    while :; do
+        m=$(location_mode)
+        case $1:$m in off:0 | on:[1-9]) return 0 ;; esac
+        [ $SECONDS -lt "$end" ] || return 1
+        sleep 1
+    done
+}
+
+# test_provider ARGS: 'cmd location providers ARGS' as the shell user, whose
+# mock-location app op the test provider needs; prints what it prints.
+test_provider() { sh_ su 2000 cmd location providers "$@" 2>&1 || true; }
+
+# on_screen ID: node ID is on the screen now (one dump, no scrolling).
+on_screen() { dump_ui | find_node "$1" | grep -q .; }
+
+# request_providers: the providers under which 'dumpsys location' lists a
+# registration of Welcome's ("gps", ...), space-separated; empty when it
+# lists none (or the dump's format is not the one read here).
+request_providers() {
+    sh_ dumpsys location | python3 -I -c '
+import re, sys
+cur, seen = None, set()
+for line in sys.stdin:
+    m = re.match(r"^\s*(\w+) provider(?: \[mock\])?:\s*$", line)
+    if m:
+        cur = m.group(1)
+    elif cur and "org.antumbra.welcome" in line:
+        seen.add(cur)
+print(" ".join(sorted(seen)))
+'
+}
+
+# window_secure: "yes" when Welcome's window has FLAG_SECURE ('dumpsys window
+# windows'), "no" when it has not, "unreadable" when no window of Welcome's
+# is listed.
+window_secure() {
+    sh_ dumpsys window windows | python3 -I -c '
+import re, sys
+blocks = re.split(r"\n(?=  Window #)", sys.stdin.read())
+mine = [b for b in blocks if "org.antumbra.welcome/" in b.split("\n", 1)[0]]
+if not mine:
+    print("unreadable")
+elif any(re.search(r"\bfl=[^\n]*\bSECURE\b", b) or "isSecure=true" in b for b in mine):
+    print("yes")
+else:
+    print("no")
+'
+}
+
+# clear-position-test: a search still on screen stopped with its own Stop
+# button, the test provider removed, mock_location back to its default;
+# fails while Location stays on. Idempotent; writes no location setting.
+clear_position_test() {
+    local fail=0 x y _c _e
+    # A search always has Location on: only then is there a Stop to look for.
+    if [ "$(location_mode)" != 0 ] && read -r x y _c _e < <(locate position_stop 2>/dev/null); then
+        a shell input tap "$x" "$y" || true
+        say "a search was still running: stopped with Welcome's Stop"
+    fi
+    test_provider remove-test-provider gps >/dev/null
+    a shell appops set com.android.shell android:mock_location default >/dev/null 2>&1 || true
+    if ! wait_location off 15; then
+        say "Location is still on ($(location_mode)): Welcome did not switch it off"
+        fail=1
+    fi
+    [ "$fail" = 0 ] || return 1
+    say "the test provider is removed, mock_location is back to its default and Location is off"
+}
+
+# WEL10: Show my position, with the test provider or the emulator's receiver.
+cmd_check_position() {
+    local source=test shot='' wait=60 leave='' screen out x y _c en end got lat lon map acc mock loc pid hits
+    local secure providers left='' t0
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --source) source=$2; shift ;;
+            --screenshot) shot=$2; shift ;;
+            --wait) wait=$2; shift ;;
+            --leave) leave=$2; shift ;;
+            *) die "check-position: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $source in test | gnss) ;; *) die "check-position: --source must be test or gnss" ;; esac
+    case $wait in '' | *[!0-9]*) die "check-position: --wait takes a number of seconds" ;; esac
+    case $leave in '' | sleep | home | none) ;; *) die "check-position: --leave must be sleep, home or none" ;; esac
+    # Nothing is changed before these hold.
+    [ "$(sh_ id -u)" = 0 ] || die "check-position needs adb as root ('adb root')"
+    a shell input keyevent KEYCODE_WAKEUP
+    a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+    screen=$(front_screen) || die "neither the Welcome nor the status screen is in front"
+    [ -n "$leave" ] || leave=$([ "$screen" = welcome ] && echo sleep || echo home)
+    calls_idle || die "a call is in progress; Show my position is not pressed"
+    wait_location off 5 || die "Location is on before the check (location_mode $(location_mode)); it must be off"
+    problems=()
+    # From here on, whatever happens, the test is undone.
+    trap 'clear_position_test || say "clear-position-test failed; run it again"' EXIT
+    trap 'exit 1' INT TERM HUP
+    if [ "$source" = test ]; then
+        a shell appops set com.android.shell android:mock_location allow >/dev/null
+        for out in "$(test_provider add-test-provider gps)" "$(test_provider set-test-provider-enabled gps true)"; do
+            case $out in *Exception* | *Error* | *rror:* | *nknown*) die "the test provider could not be set up: $out" ;; esac
+        done
+    else
+        a emu geo fix "$TEST_LON" "$TEST_LAT" >/dev/null || die "'adb emu geo fix' failed (the emulator only)"
+    fi
+    read -r x y _c en < <(locate position_button) || die "no Show my position button on the $screen screen"
+    if [ "$en" != true ]; then
+        die "Show my position is not offered: $(view_row position_refusal | cut -f2)"
+    fi
+    a shell input tap "$x" "$y"
+    t0=$SECONDS
+    end=$((SECONDS + 15))
+    until [ "$(dump_ui | node_text position_status)" = "$(str position_looking)" ]; do
+        [ $SECONDS -lt "$end" ] || die "Welcome did not say it is looking within 15 s: $(view_row position_status | cut -f2)"
+        sleep 1
+    done
+    wait_location on 15 || die "Location did not come on within 15 s of Show my position"
+    say "looking, Location on ($((SECONDS - t0)) s)"
+    [ -z "$shot" ] || a exec-out screencap -p >"$shot" || true
+    # Welcome's request, read while it looks: the gps provider only.
+    providers=$(request_providers || true)
+    case $providers in
+        '') say "gps only: unreadable (dumpsys location lists no request of Welcome's)" ;;
+        gps) say "gps only: yes (Welcome's request is under the gps provider alone)" ;;
+        *) say "gps only: no (Welcome's request is under: $providers)"; problems+=("Welcome's request is not the gps provider's alone: $providers") ;;
+    esac
+    end=$((SECONDS + wait))
+    until on_screen position_lat; do
+        if [ $SECONDS -ge "$end" ]; then
+            on_screen position_lat || locate position_lat >/dev/null ||
+                die "no position on screen within $wait s ($(view_row position_status | cut -f2))"
+            break
+        fi
+        if [ "$source" = test ]; then
+            test_provider set-test-provider-location gps --location "$TEST_LAT,$TEST_LON" --accuracy 5 >/dev/null
+        else
+            a emu geo fix "$TEST_LON" "$TEST_LAT" >/dev/null || true
+        fi
+        sleep 2
+    done
+    say "a position on screen ($((SECONDS - t0)) s after the press)"
+    lat=$(view_row position_lat | cut -f2) || lat=''
+    lon=$(view_row position_lon | cut -f2) || lon=''
+    map=$(view_row position_map | cut -f2) || map=''
+    [ "$lat" = "10.12345° N" ] || problems+=("the latitude reads '$lat', not the test position's")
+    [ "$lon" = "140.54321° W" ] || problems+=("the longitude reads '$lon', not the test position's")
+    [ "$map" = "On a map: $TEST_LAT, $TEST_LON" ] || problems+=("the map line reads '$map'")
+    acc=$(view_row position_accuracy | cut -f2) || acc=''
+    mock=$(view_row position_mock | cut -f2) || mock=''
+    if [ "$source" = test ]; then
+        [ "$acc" = "Accurate to about 5 m." ] || problems+=("the accuracy line reads '$acc'")
+        [ "$mock" = "$(str position_mock)" ] || problems+=("no line says the position comes from a test location")
+    elif [ -n "$mock" ]; then
+        problems+=("the emulator's receiver's position is said to be a test location")
+    fi
+    if wait_location off 10; then
+        loc=$(view_row position_location | cut -f2) || loc=''
+        [ "$loc" = "$(str position_off_again)" ] || problems+=("the card does not say Location is off again: '$loc'")
+    else
+        problems+=("Location stayed on after the position was found")
+    fi
+    secure=$(window_secure || echo unreadable)
+    say "secure: $secure"
+    [ "$secure" != no ] || problems+=("the position's window is not secure (FLAG_SECURE)")
+    # Shown on screen only: in no file of Welcome's, not in its log, in no property.
+    hits=$(sh_ "grep -rlF -e 10.12345 -e 140.54321 /data/data/$PKG /data/user_de/0/$PKG 2>/dev/null" || true)
+    [ -z "$hits" ] || problems+=("the coordinates are in Welcome's files: $hits")
+    pid=$(sh_ pidof "$PKG" || true)
+    if [ -n "$pid" ]; then
+        ! sh_ logcat -d --pid="$pid" | grep -qF -e 10.12345 -e 140.54321 || problems+=("the coordinates are in Welcome's log")
+    else
+        problems+=("Welcome's process was not found")
+    fi
+    ! sh_ getprop | grep -qF -e 10.12345 -e 140.54321 || problems+=("the coordinates are in a property")
+    # Hide.
+    if read -r x y _c _e < <(locate position_hide); then
+        a shell input tap "$x" "$y"
+        sleep 1
+        ! on_screen position_lat || problems+=("Hide position left the coordinates on screen")
+    else
+        problems+=("no Hide position button")
+    fi
+    # A second search, left: Location off within 10 s.
+    if [ "$leave" != none ]; then
+        if read -r x y _c en < <(locate position_button) && [ "$en" = true ]; then
+            a shell input tap "$x" "$y"
+            if wait_location on 15; then
+                if [ "$leave" = sleep ]; then a shell input keyevent KEYCODE_SLEEP; else a shell input keyevent KEYCODE_HOME; fi
+                if wait_location off 10; then left="Location off within 10 s"; else left="Location stayed on"; problems+=("Location stayed on after leaving the screen during a search ($leave)"); fi
+                a shell input keyevent KEYCODE_WAKEUP
+                a shell wm dismiss-keyguard >/dev/null 2>&1 || true
+                [ "$leave" != home ] || a shell am start -n "$PKG/.StatusActivity" >/dev/null
+                sleep 2
+                got=$(view_row position_status | cut -f2) || got=''
+                [ "$got" = "$(str position_stopped)" ] || problems+=("after leaving, the card does not say Stopped: '$got'")
+            else
+                left="Location did not come on"
+                problems+=("Location did not come on for the second search")
+            fi
+        else
+            left="no second search"
+            problems+=("Show my position was not offered again")
+        fi
+        say "leave ($leave): $left"
+    fi
+    to_top
+    trap - EXIT INT TERM HUP
+    clear_position_test || problems+=("the test could not be undone")
+    [ "${#problems[@]}" -eq 0 ] || die "check-position ($source, $screen): ${problems[*]}"
+    say "check-position ($source, $screen): the test position on screen as written, Location off after it, the window secure ($secure), nothing in Welcome's files, log or properties, Hide works; ${left:-not left}"
+}
+
 cmd_power_off_tile() {
     local before after end
     before=$(sh_ cat /proc/sys/kernel/random/boot_id)
@@ -1255,7 +1819,7 @@ cmd_power_off_tile() {
     die "the device did not restart within 240 s of Quick power off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,118p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,173p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -1291,6 +1855,10 @@ case "$command" in
     check-choices) cmd_check_choices "$@" ;;
     check-phone) cmd_check_phone "$@" ;;
     check-module-cell) cmd_check_module_cell ;;
+    check-emergency-card) cmd_check_emergency_card "$@" ;;
+    check-emergency-states) cmd_check_emergency_states "$@" ;;
+    check-position) cmd_check_position "$@" ;;
+    clear-position-test) clear_position_test || die "a search is still running, the test provider is still there, or Location is still on" ;;
     clear-power-menu-test) clear_power_menu_test || die "the power menu is not closed or power_button_long_press is not as it was" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"

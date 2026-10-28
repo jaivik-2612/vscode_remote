@@ -196,6 +196,38 @@ that the captures must show traffic from the phone.
    failure, when the run calls `clear-power-menu-test` again and brings
    Welcome back (`welcome_power_menu_recover`). A warning, not a failure,
    until it has passed on CI once.
+   Then WEL10's emergency card and Show my position, still before Start
+   (the network closed, the emulated radio off): `welcome_emergency_card`
+   (`welcome-adb.sh check-emergency-card`, as root: each number the card
+   shows, one or several Android ranks alike with their own line, must be
+   one of Android's, printed by `cmd phone emergency-number-test-mode -p`,
+   which changes nothing; its lines must match the device: the radio
+   line while the radio row says Off, a SIM line from `gsm.sim.state`, the
+   other-phone line exactly with a state line; it only reads),
+   `welcome_emergency_states` (`check-emergency-states`: the debug build's
+   hook `debug.antumbra.emergency_states` set to each state alone, all five,
+   and the two number words, each time exactly those lines with Welcome's
+   texts, a screenshot of each in `emergency-states/`; the property cleared
+   afterwards whatever happens; a release build ignores it, and the check
+   says so), `welcome_position` (`check-position --source test`: the shell
+   user's test provider, its fix 10.12345, -140.54321 (open ocean) on screen
+   in large type, Location off within 10 s after it, the window
+   `FLAG_SECURE`, the coordinates in none of Welcome's files, its log or a
+   property, Hide; then a second search left by switching the screen off;
+   the test provider removed and `mock_location` back to its default
+   afterwards), whose parts are `welcome_position_secure`,
+   `welcome_position_gnss_only` (Welcome's request under the gps provider
+   alone in `dumpsys location`) and `welcome_position_leave`, and, if time
+   is left, `welcome_position_gnss` (the emulator's own receiver, `adb emu
+   geo fix`). Nothing is dialled and no location setting is written but
+   Welcome's own switch, by Welcome. A budget of seven minutes for these
+   (`WEL10_BEFORE_S`), each call killed when its time is up, a check that
+   fails undone (the hook cleared, a search stopped with Welcome's Stop,
+   the test provider removed) and Welcome brought back, and a check left
+   out for lack of time reported "not run" and not undone. With the undos:
+   at most the budget, 20 s and one undo (under a minute normally, 7 if
+   every adb call hangs to its limit). Warnings until they have passed on
+   CI once (`wel10_level`).
    Then WEL8's two choices at Start, walked at each level of the
    Phone-mode gate: the run writes the root-only file
    `/data/adb/antumbra-cell` as root (`cell_gate`: removed for `off`;
@@ -272,7 +304,16 @@ that the captures must show traffic from the phone.
    `status-phone`), then `welcome_module_cell` (`check-module-cell`: the
    word on the cell radio refused from the shell user and malformed from
    root, the most careful word taken from root; the module's next word
-   replaces it). Every WEL8 check is a warning until it has passed on CI
+   replaces it). Then WEL10 after Start, a budget of four minutes
+   (`WEL10_AFTER_S`, bounded with its undos as before Start), warnings: `welcome_emergency_card_session` (the card
+   on the status screen in the run's Phone-mode session: the radio on, so no
+   radio line, and the VoLTE line, the emulator having no IMS),
+   `welcome_position_session` (Show my position with the network up, left
+   with Home), `position_lookups` (no query line in the DNS filter's log
+   between the events `position_start` and `position_end`; any names in the
+   warning: an assistance download would show here) and
+   `position_not_in_status` (the test position not in the module's
+   `status.json`). Every WEL8 check is a warning until it has passed on CI
    once (`choices_level`, which `tests/test_ci.py` checks), so the job
    cannot go red from a new step alone; the status screens of the other
    four sessions, a PIN- or PUK-locked SIM, two slots and IMS registration

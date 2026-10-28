@@ -15,7 +15,12 @@ policies for the session and hands the choices to the Antumbra module
 through a content provider. After Start it shows Tor's progress and the
 tracker filter's counters, and offers Quick power off, an immediate power-off.
 Both screens have an **Emergency call** button, and emergency calls work
-from the locked Welcome screen before Start (see "Emergency calls").
+from the locked Welcome screen before Start (see "Emergency calls"). Both
+also have an **emergency card** (WEL10): the general emergency number
+Android lists now, lines on the SIM, the radio and VoLTE that say this
+phone can still try and point to the other phone too, and **Show my
+position**, one fix from the satellite receiver shown in large type and
+sent nowhere (see "Emergency card").
 
 Package `org.antumbra.welcome`. Kotlin, Jetpack Compose with Material 3.
 compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
@@ -24,8 +29,8 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 |---|---|
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
-| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, and the texts |
-| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb`, `check-addon`, `check-module-word`, `check-choices`, `check-phone` and `check-module-cell`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
+| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, the emergency card's number, lines, hook and Show my position (WEL10), and the texts |
+| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb`, `check-addon`, `check-module-word`, `check-choices`, `check-phone`, `check-module-cell`, `check-emergency-card`, `check-emergency-states`, `check-position` and `clear-position-test`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
 | `gradlew`, `gradle/wrapper/gradle-wrapper.properties` | The pinned Gradle (see "Building") |
@@ -37,6 +42,9 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 
 1. **Welcome** (`WelcomeActivity`, `ui/WelcomeScreen.kt`). Title "Welcome to
    Antumbra", then:
+   - **Emergency** (WEL10, `ui/EmergencyCard.kt`), under the banners: the
+     emergency number Android lists now, in large digits, the state lines
+     and Show my position (see "Emergency card").
    - **Internet** (WEL8): *Wi-Fi* (default), *Mobile data, through Tor*,
      or *None*. Mobile data is offered only where the module's gate says
      `data` (the emulator, until FW9 and CI12), else shown disabled with
@@ -72,7 +80,8 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
    be typed), when a SIM is unlocked while the add-on is not running, or
    when Welcome is not the device owner.
 2. **Status** (`StatusActivity`, `ui/StatusScreen.kt`), after Start, and the
-   "Antumbra" entry in the launcher: Tor's bootstrap progress and, when the
+   "Antumbra" entry in the launcher: the emergency card (WEL10) under the
+   first line and the banners; Tor's bootstrap progress and, when the
    module gives one, its reason why tor cannot connect; the tracker
    filter's counters (lookups, blocked, domains on the list, list version);
    the **Phone** card (the SIM, the cellular radio, "Calls and texts
@@ -118,7 +127,18 @@ name: `internet_wifi`, `internet_mobile`, `internet_none`, `tor_direct`,
 `tor_progress`, `tor_error`, `card_filter`, `filter_queries`,
 `filter_blocked`, `row_firewall`, `warning_policies`, `warning_wifi_off`,
 `warning_lost`, `open_welcome`, `wifi_settings`, `add_tile`,
-`poweroff_button`, `emergency_call`, `return_to_call`.
+`poweroff_button`, `emergency_call`, `return_to_call`; the emergency card's
+(WEL10, each line its own node): `card_emergency`, `emergency_number_value`,
+`emergency_number_text`, `emergency_state_no_sim`,
+`emergency_state_sim_locked`, `emergency_state_sim_unusable`,
+`emergency_state_radio_off`, `emergency_state_volte`,
+`emergency_other_phone`, `position_detail`, `position_detail_apps`,
+`position_button`, `position_stop`, `position_hide`, `position_status`,
+`position_refusal`, `position_lat_label`, `position_lat`,
+`position_lon_label`, `position_lon`, `position_map`, `position_accuracy`,
+`position_age`, `position_mock`, `position_location`.
+`emergency_number_value` holds one number, or several Android ranks alike
+separated by " · ".
 
 ## Building
 
@@ -506,11 +526,12 @@ Start; only a Start loosens anything (`Policies.kt`).
 | Automatic time off, automatic time zone off, time zone UTC | always | See "Automatic time". |
 | `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY` | unless Administration | No apps from outside the preinstalled store. |
 | `DISALLOW_BLUETOOTH` | unless Administration | Bluetooth tethering and nearby-device scans. |
-| `DISALLOW_CONFIG_LOCATION`, and Location off | always, Administration included (since WEL8; Location switched off before Start and at every Start) | Location, scans and GNSS through Tor still locate you. Until WEL9 ("off, or on for chosen apps") there is no way to switch Location on. |
+| `DISALLOW_CONFIG_LOCATION`, and Location off | always, Administration included (since WEL8; Location switched off before Start and at every Start, through `Position.offWhenSafe`: nothing written while it is already off, and left as it is while a call, emergency callback mode or the 5 minutes after a call hold; at shutdown at once) | Location, scans and GNSS through Tor still locate you. Until WEL9 ("off, or on for chosen apps") nothing switches Location on but Welcome itself, for one satellite fix the person asks for (WEL10, "Emergency card"); the person still cannot switch it. |
 | Wi-Fi locked: `DISALLOW_CHANGE_WIFI_STATE`, `DISALLOW_CONFIG_WIFI`, `DISALLOW_ADD_WIFI_CONFIG`; Wi-Fi off, checked | before Start; sessions whose Internet is not Wi-Fi (None, mobile data); add-on missing | Fail closed: no network without the add-on. A device owner can still switch Wi-Fi (`WifiServiceImpl`, Android 16), except in airplane mode (below). |
 | Wi-Fi lock lifted, Wi-Fi on | Start, Internet Wi-Fi, add-on present | The user then adds a network in Settings. |
 | `POST_NOTIFICATIONS` granted to itself | Start | The session notification. |
-| `READ_PHONE_STATE` granted to itself | before Start (`Home.claim`) | "Return to call" (`TelecomManager.showInCallScreen`; see "Emergency calls"). WEL9's phone-state denial must leave Welcome out. |
+| `READ_PHONE_STATE` granted to itself | before Start (`Home.claim`) | "Return to call" (`TelecomManager.showInCallScreen`; see "Emergency calls"), Android's emergency-number list and `TelecomManager.isInCall` (WEL10). WEL9's phone-state denial must leave Welcome out. |
+| `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` granted to itself | the first press of Show my position (WEL10) | One fix from the GPS provider. Allowed to a device owner set with `dpm set-device-owner` over adb (`canAdminGrantSensorsPermissions`); never revoked, since revoking a runtime permission kills the app and the session it keeps in memory. WEL6's denial must leave Welcome out. |
 
 "Administration" lifts the two "unless Administration" rows from Start
 until the next shutdown; it never turns debugging or Location on. The
@@ -611,6 +632,17 @@ device-protected storage while the hook is on; the hook then survives
 restarts until `0` is seen. Set it **before** `dpm set-device-owner`:
 becoming the device owner already switches debugging off.
 
+WEL10's hook, `debug.antumbra.emergency_states`, is honoured by the same
+builds only (`TestHook.emergencyStates`; any other build reads no property
+and starts no `getprop`): a comma list of `no_sim`, `sim_locked`,
+`sim_unusable`, `radio_off`, `volte`, `number_none`, `number_unreadable`,
+or `none`, unknown words ignored, unset or empty for the real readings. It
+replaces the emergency card's state lines (and, with a `number_` word, its
+number line) and nothing else: not the Phone card, not Start, not what the
+module is told. The CI emulator cannot remove or lock its SIM, so this is
+how each state's text is shown there (`check-emergency-states`, which
+clears the property afterwards whatever happens).
+
 ## SIM, cellular radio and VoLTE (WEL8)
 
 What the Phone parts show, and how Welcome learns it (`CellWord.kt`,
@@ -677,7 +709,12 @@ class that lists subscriptions, cells or cards (`SubscriptionManager`,
 (`activeModemCount`, `getSimState`, `registerTelephonyCallback`,
 `unregisterTelephonyCallback`; `state`). The test seeds each form, and
 Welcome's own uses, to show the scan catches the first and passes the
-second. Welcome holds no location permission. The SIM's
+second. Since WEL10 Welcome holds the location permissions, for Show my
+position alone; the listener still renounces location
+(`INCLUDE_LOCATION_DATA_NONE`, its only registration), and the scan also
+forbids Wi-Fi's scan results and connection info, an emergency number's
+country and network code, and any emergency-number entry turned into a
+string. The SIM's
 state and the radio are shown inside Welcome only: never logged, written
 to a file or a property, or handed to another app.
 
@@ -843,6 +880,110 @@ off is never held: the message says how to switch off on purpose.
 Android's own restart (`DevicePolicyManager.reboot()`) also refuses during
 any call.
 
+## Emergency card (WEL10)
+
+On both screens, under the title and the banners (`ui/EmergencyCard.kt`).
+The pinned **Emergency call** button stays as it is: an empty emergency dial
+pad, nothing pre-filled, no one-tap call.
+
+**The number** (`EmergencyNumbers.kt`). Android's own list,
+`TelephonyManager.getEmergencyNumberList()` (`READ_PHONE_STATE`, which
+Welcome holds), read at run time in the screens' poll and never during a
+call (the last reading stays then). Every subscription's list is merged and
+put in Android's own order (`EmergencyNumber.compareTo`: the source's rank
+first, network > SIM > database > default > modem config, then the digits
+as text). Only *general* numbers count: one whose category is "unspecified"
+or covers police, ambulance and fire together, preferring those Android
+does not place as an ordinary call; digits only, 1 to 8, each once. The
+card shows one number when the first of them comes from the network, the
+SIM or Android's database, or outranks every other one. Otherwise Android
+ranks several alike and orders them only by their digits as text: with no
+SIM and no word from the modem yet (the radio off since power-on, as before
+Start), Android's fallback is 3GPP's list, eight general numbers from no
+source (`EmergencyNumberTracker` 1054-1066, 1118-1132), whose first by text
+is not the general number in most places. Then the card shows every number
+ranked like the first, in Android's order, under "Emergency numbers", with
+one line: a call to any of them is placed as an emergency call from this
+phone (each is in Android's list, so the call goes out as one). Of each
+entry Welcome reads its digits, categories, routing and sources
+(`getEmergencyNumberSources`), never its country, network code or URNs, and
+never logs it. The list is not empty while the phone process runs; when it
+is empty or cannot be read, the card says so and that Emergency call still
+opens the emergency dial pad. No number is written in Welcome's code or
+texts (`EmergencyNumbersTest` scans both). Android 17 (android17-release)
+has the same API and permission.
+
+**The state lines** (`EmergencyTexts.kt`), from WEL8's readings only: no
+SIM, the SIM locked (PIN, PUK, network), the SIM unusable (card error,
+disabled, restricted), the cellular radio off (WEL8's radio rule), and
+"Calls over 4G (VoLTE) are not connected yet" in a Phone-mode session with
+a SIM unlocked, the radio not off and the module's IMS word "none" (Wi-Fi
+calling stays WEL8's own VoLTE line until MOD7). Each says this phone can
+still try: Android switches the radio on for an emergency call and tries
+any network it finds, with or without a usable SIM
+(`TelephonyConnectionService`, `EmergencyCallDomainSelector`). Then, only
+with a state line, "Your other phone can make emergency calls too." No text
+says an emergency call cannot be made (`EmergencyCardTest`). Before Start
+the radio is off (D12, MOD6), so the Welcome screen shows the radio line.
+
+**Show my position** (`Position.kt`). One fix from the satellite receiver,
+on request:
+
+1. Refused, with its reason and nothing changed, unless Welcome is the
+   device owner; no call, emergency callback mode or the 5 minutes after a
+   call hold (Quick power off's hold, plus `TelecomManager.isInCall`, which
+   also sees a call still connecting; looked at again after the permission
+   is granted and after Location comes on, so a call that begins during the
+   press stops it there, Location then left as it is until the hold ends); `assisted_gps_enabled` reads 0 (the
+   module sets it; Welcome only reads it, and never writes it or any other
+   GNSS, SUPL, XTRA or location-provider setting: Android's emergency
+   location may depend on them); no network location provider exists;
+   Wi-Fi scanning for location is off; a GPS provider exists.
+2. `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` granted by the
+   device owner to itself at the first press, never revoked.
+3. Location on with `DevicePolicyManager.setLocationEnabled` (the device
+   owner's switch; `DISALLOW_CONFIG_LOCATION` stays set, so the person still
+   cannot switch it). Android posts its notice that apps can access your
+   location. If Location does not read on within 5 s, the press ends
+   ("Location could not be switched on.") and Welcome looks at the switch
+   again 5 s later, switching it off if it came on after all; the card says
+   "Nothing was changed: Location is off." only once it reads off and was
+   never seen on.
+4. One request to `LocationManager.GPS_PROVIDER` alone (one update, 3
+   minutes), made once the provider has followed the switch (a request on a
+   provider still off is told "off" at once: `LocationProviderManager`).
+   Never the fused, network or passive provider, never a remembered fix.
+5. Location off again at once after the fix, the 3 minutes, Stop, the
+   screen leaving (`onStop`, or the screen going off) or Start; Start also
+   takes a position off the screen. If a call begins during a search, the
+   search stops and Location stays as it is until 5 minutes after the call
+   (the card says so): Welcome never changes Location's switch while a call
+   holds, in case the emergency service needs this phone, and when Location
+   is already off it writes nothing at all. Every other switch-off in
+   Welcome (the baseline at boot, on becoming the device owner and at
+   Start, and a new process finding Location on) follows the same rule;
+   only shutdown switches off at once. A new process does not know the
+   calls before it (the call record is in memory only), so when its first
+   look finds Location on (left on by a process that died during a call's
+   hold), Location stays on for 5 minutes from the process's start, as
+   after a call, and the card says why.
+6. The latitude and longitude in large type (5 decimals, the same digits in
+   every language, "10.12345° N"), a line for a map, the accuracy, the age,
+   and whether it came from a test location. In memory only, for 15 minutes
+   at most or until Hide position; the window is `FLAG_SECURE` meanwhile
+   and the screen stays on while it looks (`WindowRules`, the same for both
+   screens). No copy or share button; nothing
+   in a file, a preference, a property, the provider, a notification, an
+   intent, the log or `status.json` (`PositionTest` scans the sources).
+
+What remains (PH5 on the phone, WEL6, MOD8): while Location is on, apps
+holding a location grant can get the fix, and Android's remembered last
+fix the next time Location is on; the app-ops history records that Welcome
+used location, and when; the GNSS engine keeps its last position; a PSDS
+download Android arms with the first fix of a boot runs at the next network,
+as system traffic, so through Tor after Start, with the known hosts refused
+by name; what the Qualcomm stack asks for is PH5's.
+
 ## Quick power off
 
 The immediate power-off (`QuickPowerOff.kt`): the Quick Settings tile, the
@@ -968,6 +1109,9 @@ $W install app-debug.apk
 $W provision                                   # test hook on, dpm set-device-owner, waits for Start
 $W check-emergency                             # before Start: the emergency dialer opens from the lock task; dials nothing
 $W check-power-menu                            # before Start: the power menu shows its Emergency item (never pressed); menu closed
+$W check-emergency-card                        # WEL10 (adb root): each number the card shows is Android's, its lines match the device; reads only
+$W check-emergency-states --shots shots/       # WEL10 (debug build): each state's text through the hook; the hook cleared after
+$W check-position --source test                # WEL10 (adb root): a test-provider fix on screen, Location off after, nothing kept
 $W screenshot welcome.png
 $W check-choices --gate off                    # WEL8, before Start: the six attempts; the gate the module told Welcome
 $W start --tor bridges --bridges-file plain-bridges.txt   # --internet wifi|mobile|none, --phone off|calls
@@ -1286,6 +1430,50 @@ left without the PIN, the SIM's state with the radio off, IMS and the VoLTE
 line under the firewall, and emergency calls in each combination (the
 phone: PH3, PH4).
 
+WEL10 (2026-10-27, 109 unit tests in all, lint clean; no emulator here):
+the general number picked from Android's entries in Android's order, with
+stand-in numbers only (unspecified, or police, ambulance and fire; a number
+placed as an ordinary call only when no other general one exists; odd and
+long entries skipped; an empty, unreadable or throwing list read as such);
+no digit-only literal in the code and none of 3GPP's defaults as a token;
+the state lines for every SIM mix, radio and IMS reading, in and out of a
+Phone-mode session, the other-phone line exactly with them, no text that
+discourages an emergency call; the hook's words, and that a build that is
+neither debuggable nor testOnly never reads the property; Show my position
+with a fake platform and clock: each refusal in order with nothing
+changed, the whole search, the 3-minute limit to the millisecond, Stop,
+the screen leaving and Start, Location going off elsewhere (and the moment
+the provider takes to follow the switch, which is not an end), a call
+beginning during a search (nothing switched until its hold ends), nothing
+written while Location is already off, shutdown at once, failed switches
+retried every 5 s, the 15-minute display and Hide; the format in four
+languages, rounding and hemispheres; source scans for the GPS provider
+alone, nothing stored, logged or sent, no location setting written but
+Location's switch, no permission of Welcome's own revoked, `FLAG_SECURE`
+and Start's order. `ci/test-welcome-adb.sh` runs `check-emergency-card`,
+`check-emergency-states`, `check-position` and `clear-position-test`
+against a fake screen drawn by Welcome's rules, passing as they should and
+failing with each fault they must catch (a number Android does not list, a
+line missing or extra, a discouraging text, a release build ignoring the
+hook, a changed text, a hook that sticks, Location not switched on, left on
+after the fix or after leaving, a wrong hemisphere, no test-location line,
+a window not secure, the coordinates in a file, the log or a property, a
+request under the fused provider, Hide doing nothing), and undoing what
+they changed, also when killed. Not yet: all of it on a device. The
+emulator job's WEL10 checks (`welcome_emergency_card`,
+`welcome_emergency_states`, `welcome_position` and its parts,
+`welcome_position_gnss`, and after Start `welcome_emergency_card_session`,
+`welcome_position_session`, `position_lookups`, `position_not_in_status`)
+warn until they have passed on CI once: how uiautomator lists the card's
+lines and reads a `FLAG_SECURE` window, the test provider as the shell
+user, `setLocationEnabled(true)` with `DISALLOW_CONFIG_LOCATION` set,
+`onStop` when the screen goes off, `adb emu geo fix`, the `dumpsys
+location` and `dumpsys window` formats, and whether the emulator's GNSS HAL
+asks for assistance data, are seen there first. On the phone (PH4, PH5):
+the list with the radio off and the SIM locked, the card's lines in each
+state, the Qualcomm stack in standalone mode, its time to a fix against the
+3-minute limit, and anything it asks a server for.
+
 ## Open risks
 
 - **The session lives in one process.** The foreground service makes its
@@ -1328,8 +1516,12 @@ phone: PH3, PH4).
 - **The SIM-PIN screen covers Welcome** before Start when the SIM is
   locked; the person must not type the PIN in a start without the add-on.
   Welcome can only say so.
-- **Location cannot be switched on** in any session until WEL9 brings
-  "off, or on for chosen apps" (WEL8 took it out of Administration).
+- **Location cannot be switched on** by the person in any session until
+  WEL9 brings "off, or on for chosen apps" (WEL8 took it out of
+  Administration); only Welcome switches it, for one satellite fix the
+  person asks for (WEL10), and off again. Meanwhile apps holding a location
+  grant could get that fix (WEL6), and the phone's own GNSS stack may ask
+  for assistance data through Tor (PH5).
 - **Quick power off restarts rather than powers off** unless the module
   installs Welcome as a privileged app or implements the power-off request.
 - **Bridges need lyrebird**, which the tor part does not build yet; only

@@ -26,6 +26,69 @@
         <item quantity="other">A call ended a short while ago. If it was an emergency call, the emergency service may call back, so Quick power off waits %1$d more minutes. To switch off now anyway, hold the power button and choose Power off.</item>
     </plurals>
 
+    <!-- WEL10: the emergency card, on the Welcome and status screens
+         (EmergencyNumbers.kt, EmergencyTexts.kt, ui/EmergencyCard.kt). The
+         number is the one Android lists at run time: no text names one, and
+         no text says an emergency call cannot be made. -->
+    <string name="card_emergency">Emergency</string>
+    <string name="emergency_number_label">Emergency number</string>
+    <string name="emergency_number_spoken">Emergency number: %1$s</string>
+    <string name="emergency_number_detail">The general emergency number that Android lists for this phone now. To call it, press Emergency call and type it.</string>
+    <string name="emergency_numbers_label">Emergency numbers</string>
+    <string name="emergency_numbers_spoken">Emergency numbers: %1$s</string>
+    <string name="emergency_number_several">Android lists these general emergency numbers for this phone now, none before the others. A call to any of them is placed as an emergency call from this phone. To call one, press Emergency call and type it.</string>
+    <string name="emergency_number_reading">Reading Android\'s emergency numbers…</string>
+    <string name="emergency_number_none">Android lists no general emergency number now. Emergency call still opens the emergency dial pad, which knows the numbers it can call.</string>
+    <string name="emergency_number_unreadable">Welcome cannot read Android\'s emergency numbers now. Emergency call still opens the emergency dial pad, which knows the numbers it can call.</string>
+    <string name="emergency_state_no_sim">There is no SIM card in this phone. It can still try an emergency call, on any network it finds.</string>
+    <string name="emergency_state_sim_locked">The SIM card is locked. Without unlocking it, this phone can still try an emergency call, on any network it finds.</string>
+    <string name="emergency_state_sim_unusable">The SIM card cannot be used now. This phone can still try an emergency call without it, on any network it finds.</string>
+    <string name="emergency_state_radio_off">The cellular radio is off. Android switches it on for an emergency call, so the call can take a little longer to start.</string>
+    <string name="emergency_state_volte">Calls over 4G (VoLTE) are not connected yet. An emergency call does not wait for that: Android sets up its own emergency connection, on any network it finds.</string>
+    <string name="emergency_other_phone">Your other phone can make emergency calls too.</string>
+
+    <!-- WEL10: Show my position (Position.kt): one fix from the satellite
+         receiver alone, Location on only meanwhile, shown here only. Welcome
+         never changes location assistance or any other location setting
+         but Location's own switch. -->
+    <string name="position_button">Show my position</string>
+    <string name="position_detail">Welcome asks the satellite receiver (GPS) once, never Wi-Fi or cell towers. Location is on only while it looks, for up to 3 minutes. Welcome shows the position on this screen only: it does not save or send it.</string>
+    <string name="position_detail_apps">While Location is on, apps you allowed to use your location could get it too, and Android shows a notice that apps can access your location.</string>
+    <string name="position_looking">Looking for satellites… Go outside or near a window. This can take up to 3 minutes.</string>
+    <string name="position_stop">Stop</string>
+    <string name="position_hide">Hide position</string>
+    <string name="position_lat_label">Latitude</string>
+    <string name="position_lon_label">Longitude</string>
+    <string name="position_north">%1$s° N</string>
+    <string name="position_south">%1$s° S</string>
+    <string name="position_east">%1$s° E</string>
+    <string name="position_west">%1$s° W</string>
+    <string name="position_map">On a map: %1$s</string>
+    <string name="position_accuracy">Accurate to about %1$d m.</string>
+    <string name="position_age_now">Found less than a minute ago.</string>
+    <plurals name="position_age">
+        <item quantity="one">Found %1$d minute ago.</item>
+        <item quantity="other">Found %1$d minutes ago.</item>
+    </plurals>
+    <string name="position_mock">This position comes from a test location, not from the satellites.</string>
+    <string name="position_off_again">Location is off again.</string>
+    <string name="position_off_call">Location stays on while a call is in progress and for 5 minutes after it: Welcome changes nothing then, in case the emergency service needs this phone. Then Welcome switches it off.</string>
+    <string name="position_off_retry">Welcome could not switch Location off yet. It keeps trying.</string>
+    <string name="position_timeout">No position within 3 minutes. Try again outside, away from tall buildings.</string>
+    <string name="position_stopped">Stopped.</string>
+    <string name="position_went_off">Location went off before a position was found.</string>
+    <string name="position_refused_call">Not during a call or in the 5 minutes after one: Welcome then changes nothing, in case the emergency service needs this phone.</string>
+    <string name="position_refused_assisted">Not available: location assistance is on, so the satellite receiver could ask a server where you are. Welcome does not change that setting. The Antumbra add-on switches it off when the phone starts; restart the phone.</string>
+    <string name="position_refused_network">Not available: this phone has a network location service, which asks a server where you are.</string>
+    <string name="position_refused_scanning">Not available: Wi-Fi scanning for location is on. The Antumbra add-on switches it off when the phone starts; restart the phone.</string>
+    <string name="position_refused_owner">Not available: Welcome is not the device owner, so it cannot switch Location on.</string>
+    <string name="position_no_gps">This phone has no satellite receiver that Welcome can use.</string>
+    <string name="position_no_permission">Welcome could not get the permission to use the satellite receiver.</string>
+    <string name="position_failed">Location could not be switched on.</string>
+    <string name="position_unchanged">Nothing was changed: Location is off.</string>
+    <string name="position_off_start">Welcome has just started, so it does not know whether a call ended a moment ago. Location stays on for 5 minutes: Welcome changes nothing then, in case the emergency service needs this phone. Then Welcome switches it off.</string>
+    <string name="position_request_failed">Welcome could not ask the satellite receiver.</string>
+
     <!-- Welcome screen -->
     <string name="welcome_title">Welcome to Antumbra</string>
     <string name="welcome_intro">These choices last until you restart the phone. Until you start, the network stays closed.</string>

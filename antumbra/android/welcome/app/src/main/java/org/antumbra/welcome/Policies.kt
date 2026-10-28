@@ -56,12 +56,23 @@ class Policies(private val context: Context) {
      *   reset, in every session (the debug-build test hook aside, [TestHook]);
      * - no automatic time or time zone, and the time zone set to UTC;
      * - no device name in DHCP requests (Android 15 and later).
+     *
+     * Location goes off through [Position.offWhenSafe] (WEL10): nothing is
+     * written when it is already off, and while a call, emergency callback
+     * mode or the 5 minutes after a call hold, it stays as it is until the
+     * hold ends. Only [atShutdown] switches it off at once.
      */
-    fun applyBaseline(): List<String> {
+    fun applyBaseline(atShutdown: Boolean = false): List<String> {
         val failures = ArrayList<String>()
         for (key in always()) step(failures, key) { dpm.addUserRestriction(admin, key) }
         for (key in UNLESS_ADMIN) step(failures, key) { dpm.addUserRestriction(admin, key) }
-        step(failures, "location") { dpm.setLocationEnabled(admin, false) }
+        step(failures, "location") {
+            if (atShutdown) {
+                check(Position.offNow(context)) { "Location is still on" }
+            } else {
+                check(Position.offWhenSafe(context) != PositionMachine.Off.FAILED) { "Location is still on" }
+            }
+        }
         failures += debugging()
         // Automatic time would ask an NTP server (UDP 123) and the carrier
         // (NITZ) for the time outside Tor; the firewall rejects the NTP
@@ -284,9 +295,12 @@ class Policies(private val context: Context) {
             UserManager.DISALLOW_CONFIG_PRIVATE_DNS,
             // Location stays off in every session (WEL8): Administration
             // no longer lifts it, and until WEL9 ("off, or on for chosen
-            // apps") nothing switches it on. Sessions without
-            // Administration already had it so; emergency calls are as
-            // before (the restriction blocks no call).
+            // apps") nothing switches it on but Welcome itself, for one
+            // satellite fix the person asks for (WEL10, Position.kt; the
+            // device owner's switch is system_server's write, which the
+            // restriction lets through). Sessions without Administration
+            // already had it so; emergency calls are as before (the
+            // restriction blocks no call).
             UserManager.DISALLOW_CONFIG_LOCATION,
         )
 

@@ -575,6 +575,17 @@ class DailyTest(unittest.TestCase):
                 self.assertFalse(daily.plain_check(name, status).startswith("Not as expected: "), name)
         self.assertEqual(daily.plain_check("welcome_phone_start", "warn"),
                          "Welcome did not offer calls and texts, so the session was started with Phone off")
+        # WEL10's checks, in plain words; the card's say nothing was dialled.
+        for name in ("welcome_emergency_card", "welcome_emergency_states", "welcome_position", "welcome_position_secure",
+                     "welcome_position_gnss_only", "welcome_position_leave", "welcome_position_gnss",
+                     "welcome_position_recover", "welcome_emergency_card_recover", "welcome_emergency_card_session",
+                     "welcome_position_session", "position_lookups", "position_not_in_status"):
+            for status in ("ok", "warn"):
+                self.assertNotIn("_", daily.plain_check(name, status), name)
+                self.assertFalse(daily.plain_check(name, status).startswith("Not as expected: "), name)
+        for status in ("ok", "warn"):
+            self.assertIn("(nothing dialled)", daily.plain_check("welcome_emergency_card", status))
+        self.assertEqual(daily.plain_check("position_lookups", "warn"), "Names were looked up while the position was taken")
 
     def test_odd_shapes_do_not_crash(self):
         def mutate(name, fn):

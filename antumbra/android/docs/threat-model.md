@@ -37,7 +37,8 @@ the item in `queue.md`.
 | An app | learns that you made an emergency call or when, or makes Quick power off skip its wait after one | the module (root) tells Welcome alone whether the calls of the last 5 minutes were emergency calls, through Welcome's provider, which takes the word from uid 0 only and has no way to read it back; nothing about calls or IMS goes into `status.json` or a property (every app can read both), a file or the log; `/proc` hides root's command lines from apps. Quick power off skips its wait only after a call the module knows was ordinary (read again after it ended), in a Phone-mode session only, and waits whenever it cannot tell: outside Phone mode every call reads unknown (with the cell radio off, a carrier call there is an emergency call, a Wi-Fi call or follows a switch-on by something else, which the module cannot tell apart) | built (MOD11), unit and sandbox tests; forging as the shell user is checked on the emulator (a failure since run 20). Residual: root can give Welcome any word (root is the module's equal); outside Phone mode an app can see the radio come on (`airplane_mode_on` is readable by every app), which suggests an emergency call or text; it relaxes only in Phone mode (WEL8), which the per-phone gate keeps off on the phone until PH3, and outside it every call reads unknown even with Wi-Fi calling on (until MOD7); in Phone mode, a binder failure between Telecom and a live phone process (Telecom then records an emergency call as not one) is not seen; Android 17 gives the module no record, so Quick power off waits after every call |
 | An app | goes around the tracker filter | DNS to any address is redirected to the filter; DNS over TLS and known DNS-over-HTTPS servers are refused; tor has no SOCKS port | v0. Not covered: DoH servers not on the list, hard-coded addresses, CNAME-cloaked trackers, first-party tracking (`design.md`, section 6) |
 | An app | asks the Wi-Fi firmware to send keepalive packets for it, from the real address, below the firewall | a resource overlay sets the number of keepalive offload slots to 0 | built; untested (GrapheneOS fixed this in its own code in October 2026; LineageOS has not) |
-| An app with location or nearby-device access | locates you through Tor (GNSS, Wi-Fi BSSIDs, scan results, Bluetooth) | Location off and its settings locked in every session (Administration no longer lifts it since WEL8; WEL9 brings per-app location); Bluetooth off; scanning while off disabled; time zone forced to UTC | Bluetooth outside Administration (its loosening lasts until shutdown); location and nearby-device permission grants are not yet set to denied for every app (planned); sensor calibration and other hardware fingerprints are residual |
+| An app with location or nearby-device access | locates you through Tor (GNSS, Wi-Fi BSSIDs, scan results, Bluetooth) | Location off and its settings locked in every session (Administration no longer lifts it since WEL8; WEL9 brings per-app location); Bluetooth off; scanning while off disabled; time zone forced to UTC. Welcome switches Location on only for one satellite fix the person asks for (WEL10, Show my position), for up to 3 minutes, and off again at once; longer only if a call begins meanwhile (Welcome then changes nothing until 5 minutes after it) | Bluetooth outside Administration (its loosening lasts until shutdown); location and nearby-device permission grants are not yet set to denied for every app (planned, WEL6): while Show my position looks, an app holding a location grant can get that fix, and later Android's remembered last fix the next time Location is on; sensor calibration and other hardware fingerprints are residual |
+| The phone's own location stack | asks a server during Show my position (SUPL, XTRA, PSDS), or turns Wi-Fi and cells into a position | Show my position refuses unless location assistance is off (`assisted_gps_enabled=0`, which the module sets and Welcome only reads), no network location provider exists and Wi-Fi scanning for location is off, and asks the GPS provider alone (never the fused, network or passive provider, never a remembered fix); before Start nothing leaves (the firewall); after it any request is system traffic, so it goes into Tor, with the known assistance hosts refused by name. Welcome never writes a GNSS, SUPL, XTRA or location-provider setting: Android's emergency location may depend on them | built (WEL10), unit and source-scan tests; on the emulator `position_lookups` lists any name looked up meanwhile (a warning). Residual: a host not on the filter's list is reached through Tor, anonymously but still a request; Android's PSDS download, armed by the first fix of a boot, runs at the next network; what the Qualcomm stack does is PH5's |
 | An app (no permission) | learns whether the phone has a SIM, whether it is locked, and whether the phone has service (the cellular radio on) | nothing: Android gives every app the SIM's state per slot and the service state without a permission (Welcome reads both the same way, renouncing location, and reads no identifier) | residual: an app can tell Phone mode from Phone off, and a SIM from none; with the radio on it can also read the SIM's country and operator without a permission (DOC4) |
 | An app | links sessions through what it can read (time zone, locale, hardware values) | UTC forced; locale is global and stays | partial |
 | An app that knows you (an account) | identifies you through Tor | out of scope, as in Tails | — |
@@ -228,13 +229,19 @@ What stays, also after W8:
 - Android's user serial counter (how many sessions there have been) and the
   Persistent Storage user's metadata: that it exists, when it was created,
   when it was last unlocked.
-- batterystats and app-ops history; Settings, including the time zone and
-  locale. A session's own Settings changes (MAC "keep", mobile data switched
+- batterystats and app-ops history (which records that Welcome used fine
+  location for Show my position, and when, but not where); Settings,
+  including the time zone and locale. A session's own Settings changes (MAC "keep", mobile data switched
   on) are undone at a clean shutdown only; after a crash or power loss they
   stay until the next boot with the module.
 - Apps installed during a session (`/data/app`).
 - User 0's credential-encrypted Wi-Fi store (networks added in user 0
   without sharing, approved network suggestions, Passpoint configurations).
+- The GNSS engine's last position after Show my position (WEL10), until
+  MOD8 deletes it at session end and AM2 moves `/data/vendor/location` to
+  RAM; system_server keeps the last fix in memory until the phone restarts.
+  Welcome itself keeps the coordinates in memory only, for 15 minutes at
+  most, on screen and nowhere else.
 - Whatever the vendor's services keep under `/data/vendor` that is not on
   the list, `/persist`, `/metadata`, the modem's file system, and the
   gatekeeper's records.
@@ -270,6 +277,14 @@ the phone's own vendor traffic is known only after the install capture.
 
 - It does not make calls or SMS anonymous, and it does not put the modem
   behind the firewall.
+- It does not get in the way of an emergency call. Welcome's emergency card
+  names the number Android lists at run time, never one of its own, and no
+  text says that an emergency call cannot be made: with no SIM, a locked
+  SIM, the radio off or VoLTE not connected it says this phone can still
+  try (Android switches the radio on and tries any network it finds), and
+  that the other phone can call too. Show my position never changes
+  Location's switch during a call or in the 5 minutes after one, and never
+  touches Android's own emergency location.
 - It does not verify its own boot chain, and cannot on this phone.
 - It does not patch the firmware or the kernel beyond what LineageOS ships.
 - It does not hide from the local network that a device uses Tor, and in

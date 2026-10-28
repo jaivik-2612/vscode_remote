@@ -31,12 +31,21 @@ class PoliciesTest {
         assertTrue(StartPolicies(listOf("no_config_tethering"), listOf("no_config_tethering"), wifiNotOn = false).refused)
     }
 
-    /** WEL8: Administration no longer lifts the location restriction; Location stays off in every session. */
+    /**
+     * WEL8: Administration no longer lifts the location restriction;
+     * Location stays off in every session. WEL10: only Welcome switches it
+     * on, for one fix, and the baseline's switch-off waits while a call
+     * holds (Position.offWhenSafe), except at shutdown (PositionTest).
+     */
     @Test
     fun locationIsLockedInEverySession() {
         assertTrue("no_config_location" in Policies.ALWAYS)
         assertFalse("no_config_location" in Policies.UNLESS_ADMIN)
         assertTrue(Policies.UNLESS_ADMIN.containsAll(listOf("no_install_unknown_sources_globally", "no_bluetooth")))
+        val policies = java.io.File("src/main/java/org/antumbra/welcome/Policies.kt").readText()
+        assertTrue(policies.contains("step(failures, \"location\") {"))
+        assertTrue(policies.contains("Position.offWhenSafe(context)"))
+        assertTrue(policies.contains("Position.offNow(context)"))
     }
 
     /** WEL8: Wi-Fi is unlocked and switched on only for Internet = Wi-Fi, with the add-on. */

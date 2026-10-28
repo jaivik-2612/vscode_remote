@@ -36,9 +36,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.text.NumberFormat
 import org.antumbra.welcome.AddOnCheck
+import org.antumbra.welcome.EmergencyUi
 import org.antumbra.welcome.Internet
 import org.antumbra.welcome.PhoneStatus
 import org.antumbra.welcome.PhoneTexts
+import org.antumbra.welcome.PositionUi
 import org.antumbra.welcome.R
 import org.antumbra.welcome.SessionState
 
@@ -56,13 +58,21 @@ data class StatusUi(
     val messageIsError: Boolean = false,
     /** The SIM, the cell radio, what the add-on carries out and the VoLTE line (WEL8). */
     val phone: PhoneStatus = PhoneStatus(),
+    /** The emergency card's number and state lines, and why Show my position would be refused (WEL10). */
+    val emergency: EmergencyUi = EmergencyUi(),
+    /** Show my position's state (WEL10). */
+    val position: PositionUi = PositionUi(),
 )
 
+/** The emergency card's buttons (WEL10). */
+data class PositionActions(val onShow: () -> Unit = {}, val onStop: () -> Unit = {}, val onHide: () -> Unit = {})
+
 /**
- * Screen 2, after Start: Tor's bootstrap progress and the tracker filter's
- * counters, both read from http://127.0.0.1:5380/status, the Phone card
- * (SIM, cellular radio, VoLTE) and what the carrier sees now, the
- * session's choices, "Emergency call" and "Power off now".
+ * Screen 2, after Start: the emergency card (WEL10), Tor's bootstrap
+ * progress and the tracker filter's counters, both read from
+ * http://127.0.0.1:5380/status, the Phone card (SIM, cellular radio, VoLTE)
+ * and what the carrier sees now, the session's choices, "Emergency call"
+ * and "Power off now".
  */
 @Composable
 fun StatusScreen(
@@ -72,6 +82,7 @@ fun StatusScreen(
     onAddTile: () -> Unit,
     onPowerOff: () -> Unit,
     onEmergencyCall: () -> Unit,
+    position: PositionActions = PositionActions(),
     scrollState: ScrollState = rememberScrollState(),
 ) {
     Column(
@@ -88,7 +99,7 @@ fun StatusScreen(
                 .padding(horizontal = 16.dp),
         ) {
             Spacer(Modifier.height(24.dp))
-            if (ui.session.started) Started(ui, onWifiSettings, onAddTile) else NotStarted(ui, onOpenWelcome)
+            if (ui.session.started) Started(ui, onWifiSettings, onAddTile, position) else NotStarted(ui, onOpenWelcome)
             Spacer(Modifier.height(24.dp))
         }
         // "Emergency call" and "Power off now" stay on screen, above the
@@ -128,7 +139,7 @@ private fun NotStarted(ui: StatusUi, onOpenWelcome: () -> Unit) {
 }
 
 @Composable
-private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> Unit) {
+private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> Unit, position: PositionActions) {
     val s = ui.session
     Title(stringResource(R.string.status_title))
     Spacer(Modifier.height(8.dp))
@@ -156,6 +167,7 @@ private fun Started(ui: StatusUi, onWifiSettings: () -> Unit, onAddTile: () -> U
         WarningBanner(stringResource(R.string.wifi_not_on), tag = "warning_wifi_off")
     }
 
+    EmergencyCard(ui.emergency, ui.position, position.onShow, position.onStop, position.onHide)
     Card(stringResource(R.string.card_tor), "card_tor") { TorPart(ui) }
     Card(stringResource(R.string.card_filter), "card_filter") { FilterPart(ui) }
     SectionTitle(stringResource(R.string.card_phone))

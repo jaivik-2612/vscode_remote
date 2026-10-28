@@ -18,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
@@ -30,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.antumbra.welcome.ui.AntumbraTheme
+import org.antumbra.welcome.ui.PositionActions
 import org.antumbra.welcome.ui.StatusScreen
 import org.antumbra.welcome.ui.StatusUi
 
@@ -37,6 +39,7 @@ import org.antumbra.welcome.ui.StatusUi
 class StatusActivity : ComponentActivity() {
     private var check by mutableStateOf<AddOnCheck?>(null)
     private var phone by mutableStateOf(PhoneStatus())
+    private var emergency by mutableStateOf(EmergencyUi())
     private var message by mutableStateOf<String?>(null)
     private var messageIsError by mutableStateOf(false)
 
@@ -59,6 +62,8 @@ class StatusActivity : ComponentActivity() {
                                 message = message,
                                 messageIsError = messageIsError,
                                 phone = phone,
+                                emergency = emergency,
+                                position = Position.ui,
                             ),
                             onOpenWelcome = ::openWelcome,
                             onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
@@ -68,22 +73,45 @@ class StatusActivity : ComponentActivity() {
                                 messageIsError = true
                             },
                             onEmergencyCall = ::emergencyCall,
+                            position = PositionActions(
+                                onShow = { Position.press(this@StatusActivity) },
+                                onStop = { Position.stop(this@StatusActivity) },
+                                onHide = { Position.hide(this@StatusActivity) },
+                            ),
                         )
                     }
                 }
             }
         }
-        // Poll the status page, the SIM and the cell radio every two
-        // seconds while the screen is visible.
+        // Poll the status page, the SIM, the cell radio and the emergency
+        // card every two seconds while the screen is visible. The card's
+        // VoLTE line only in a Phone-mode session.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
                     check = withContext(Dispatchers.IO) { AddOnCheck.run() }
-                    phone = withContext(Dispatchers.IO) { CellWatch.status(this@StatusActivity) }
+                    val p = withContext(Dispatchers.IO) { CellWatch.status(this@StatusActivity) }
+                    phone = p
+                    val s = Session.current()
+                    val phoneMode = s.started && PhoneTexts.phoneMode(s.cell, p.carried)
+                    emergency = withContext(Dispatchers.IO) { EmergencyWatch.read(this@StatusActivity, p, phoneMode) }
                     delay(2000)
                 }
             }
         }
+        // No screenshots and no recents thumbnail while a position is on
+        // screen (WEL10); the screen stays on while one is looked for
+        // (WindowRules).
+        lifecycleScope.launch {
+            snapshotFlow { WindowRules.flags(Position.ui.state) }
+                .collect { window.setFlags(it, WindowRules.MASK) }
+        }
+    }
+
+    /** The screen left: a search ends, Location goes off when safe (not for a rotation). */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Position.leave(this)
     }
 
     private fun openWelcome() {

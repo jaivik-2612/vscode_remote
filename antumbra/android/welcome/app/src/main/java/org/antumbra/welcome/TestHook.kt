@@ -6,10 +6,11 @@ import android.content.pm.ApplicationInfo
 import java.io.File
 
 /**
- * A test hook for CI, honoured only by debuggable or testOnly builds:
- * with it, Welcome leaves USB debugging on in every session, so that CI
- * can drive a session without Administration over adb. A release build
- * never reads it.
+ * Test hooks for CI, honoured only by debuggable or testOnly builds. With
+ * the first, Welcome leaves USB debugging on in every session, so that CI
+ * can drive a session without Administration over adb; the second
+ * ([emergencyStates], WEL10) sets the emergency card's state lines. A
+ * release build reads neither.
  *
  * Set it with 'adb shell setprop debug.antumbra.keep_adb 1' before
  * 'dpm set-device-owner' (debug.* properties may be set by the shell user
@@ -39,4 +40,16 @@ object TestHook {
             else -> marker.exists()
         }
     }
+
+    /** WEL10's hook: the emergency card's state lines, for CI's emulator, which cannot remove or lock its SIM. */
+    const val EMERGENCY_STATES = "debug.antumbra.emergency_states"
+
+    /**
+     * The emergency card's lines from [EMERGENCY_STATES] ([EmergencyHook.parse]),
+     * in a test build only. Any other build reads no property (no getprop is
+     * started) and gets null: the card shows the real readings. Only the
+     * card's state and number lines use it; it is never kept.
+     */
+    fun emergencyStates(context: Context): EmergencyHook? =
+        EmergencyHook.effective(isTestBuild(context)) { SystemProperty.read(EMERGENCY_STATES) }
 }
