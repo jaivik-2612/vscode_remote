@@ -130,6 +130,15 @@ second (measured in the sandbox test).
    and every interface but `lo` (Android uses `::1`). Qualcomm's crash-dump
    mode off: `download_mode=0` in `/sys/module/msm_poweroff/parameters`
    (the hotdog kernel has `CONFIG_QCOM_DLOAD_MODE=y`).
+6. **Wi-Fi calling and video calling off** (MOD7; `ims_off` in
+   `lib/antumbra.sh`): `persist.dbg.wfc_avail_ovr` and
+   `persist.dbg.vt_avail_ovr` to 0, and their per-slot forms (`...0`,
+   `...1`) where they have a value, in memory only (`resetprop -n`, never
+   `-p`), before zygote and so before the phone process starts. The values
+   found are recorded first in `state/module/ims-off.orig` (kept if it
+   exists: the first of the boot) for `uninstall.sh`.
+   `persist.dbg.volte_avail_ovr`, which VoLTE on this phone depends on, is
+   never touched. See "Wi-Fi calling and video calling off" below.
 
 Problems are written to `state/module/problem` and shown in `status.json`.
 
@@ -162,7 +171,15 @@ the person may set by hand for tor.
 5. **IPv6 guard**: NetworkStack switches IPv6 back on for every network it
    brings up. A background loop switches it off again on every interface
    whenever `ip monitor` reports a link or address change, and every 10
-   seconds in any case.
+   seconds in any case. **Wi-Fi calling and video calling** (MOD7): their
+   two force-on properties read in the loop's first turn and every 30
+   seconds, and set to 0 again, in memory only and without a record, if
+   something wrote another value after post-fs-data (stored values are
+   already loaded when `post-fs-data.sh` runs); such a write waits while
+   the cell radio's watch holds its steps (a call, callback mode, the 5
+   minutes after a call, a state it cannot read), so that IMS is not
+   reconfigured during or right after a call. The hold and the write are
+   each logged the first time of the boot.
 6. Once boot has completed and the settings provider answers: **the
    Settings.Global values in `lib/settings.conf`** (among them
    `enable_cellular_on_boot=0` and `mobile_data_always_on=0`), **mobile
@@ -281,7 +298,13 @@ is stopped first (its cell radio watch would write the radio's values
 again; it checks that the recorded process ID is that script), and the
 script is run at once; tor, the filter and the firewall stay until the
 restart. It also deletes the early arm script and the Phone-mode gate
-(`/data/adb/antumbra-cell`). Saved Wi-Fi networks are not
+(`/data/adb/antumbra-cell`). Wi-Fi calling's and video calling's
+properties (MOD7) were never stored: during a boot nothing is needed (the
+module's `post-fs-data.sh` does not run in that boot, so they are
+LineageOS's own), and while Android runs the values `post-fs-data.sh`
+found at this boot's start are put back once `service.sh` is stopped
+(`ims_off_restore`: only the wfc and vt names, values of digits or none;
+none removes the property). Saved Wi-Fi networks are not
 restored: there are none on flash. Mobile data stays off for each SIM
 Android knew (the per-SIM values are not recorded); switch it on in
 Settings. `enable_cellular_on_boot`, `mobile_data_always_on` and
@@ -646,9 +669,9 @@ alone, so no app can write it (the precedent is `/data/adb/antumbra-force`).
 Emergency calls get nothing new in any session: no call or SMS
 restriction (`DISALLOW_OUTGOING_CALLS` and `DISALLOW_SMS` are never set),
 and no radio step but MOD6's airplane mode with its holds, which the
-emergency path undoes. Wi-Fi calling stays as Android has it until MOD7:
-WEL8 does not switch it off, and outside Phone mode every call still
-reads `unknown` (MOD11's gap below stays true).
+emergency path undoes. Wi-Fi calling and video calling are off for the
+whole phone (MOD7, below); outside Phone mode every call still reads
+`unknown` (MOD11's gap below stays true).
 
 ### The module's word to Welcome: the cell radio (WEL8)
 
@@ -699,8 +722,9 @@ module positively knows was not an emergency call. Everything else waits
 as before. That can only be known in a Phone-mode session (WEL8, as far
 as the phone's gate allows it: `cell_effective` `phone` or `data`):
 outside it the cell radio is off by design, so a carrier call there is an
-emergency call, a Wi-Fi call (until MOD7 switches Wi-Fi calling off) or
-follows a switch-on by something else, which the module cannot tell apart,
+emergency call, a Wi-Fi call (MOD7 switches Wi-Fi calling off and the
+firewall stops it, both unverified on the phone) or follows a switch-on
+by something else, which the module cannot tell apart,
 and every call reads `unknown`. On a phone without the gate (every phone
 until PH3) every session is outside Phone mode, so the word is never
 `ordinary` and Quick power off waits after every call, exactly as before
@@ -783,8 +807,9 @@ emergency word's wait. Welcome's texts are unchanged.
 **Wi-Fi calling and VoIP.** Wi-Fi calling is the carrier's IMS over Wi-Fi:
 Telecom's `TelephonyConnectionService`, an entry like any SIM call
 (`isEmergency: true` for an emergency call over Wi-Fi), `MODE_IN_CALL`; it
-is handled like any call (MOD7 switches Wi-Fi calling off). Until then it
-also works with the cell radio off: Telephony refuses an ordinary call
+is handled like any call. MOD7 switches Wi-Fi calling off and the
+firewall stops it, but neither is verified on the phone yet, and where it
+runs it also works with the cell radio off: Telephony refuses an ordinary call
 only while the phone's voice service reads powered off, and IMS registered
 over Wi-Fi counts as in service (`GsmCdmaPhone`'s
 `mergeVoiceServiceStates`), so outside Phone mode a carrier call is not
@@ -923,6 +948,68 @@ offload slots on cellular or Wi-Fi; AOSP's default is 1 and 3, and the
 hotdog tree does not change it). `KeepaliveResourceUtil` accepts 0, so
 every request fails with `ERROR_UNSUPPORTED`. An app cannot replace a
 static overlay with an update.
+
+### Wi-Fi calling and video calling off (MOD7)
+
+Android's `ImsManager` reads `persist.dbg.wfc_avail_ovr`,
+`persist.dbg.vt_avail_ovr` and `persist.dbg.volte_avail_ovr` (and a
+per-slot form, the name followed by the slot, read first) as a force-on
+only: 1 makes the feature available whatever the device and the carrier
+say; 0 or no value leaves it to the device's resources and the carrier
+(`isWfcEnabledByPlatform`, `isVtEnabledByPlatform`, Android 16 and 17
+alike). LineageOS for this phone sets all three to 1 in its build.prop
+(`system_ext.prop`), and its overlays leave `config_device_wfc_ims_available`
+and `config_device_vt_available` at Android's false (the overlay's
+`config_carrier_wfc_ims_available` is a resource `ImsManager` does not
+read). So with wfc and vt at 0 both are unavailable for the whole phone:
+Settings asks the same functions (`ImsMmTelManager.isSupported`) and
+shows no Wi-Fi calling page for the SIM and no Video calling switch, and
+Telephony switches the Wi-Fi voice capability off in the IMS service.
+VoLTE keeps its 1: it depends on it.
+
+The module sets them in memory only (`resetprop -n`) at post-fs-data,
+before the phone process starts. Stored persistent values are already
+loaded then: Android 16's `init.rc` runs `load_persist_props` in its own
+`on post-fs-data`, and Magisk's `on post-fs-data` comes after it. So the
+record holds a stored value, if any, and the 0 replaces it in memory.
+`service.sh` reads them in its first turn and every 30 s and sets 0 again
+only if something wrote another value later, never while the cell
+radio's watch holds (a call, callback mode, the 5 minutes after a call, a
+state it cannot read), and records nothing, so `uninstall.sh` never puts
+back the module's own 0s. Never `resetprop -p`: nothing reaches
+`/data/property`, so a boot without the module (Safe Mode, an update
+without the Magisk step, the module removed) has LineageOS's own Wi-Fi
+calling, and removal needs nothing at boot. One rare case stores the 0s
+all the same: when init cannot read its persistent-property file at a
+later write of any `persist.` property, `WritePersistentProperty` rebuilds
+the file from every `persist.` value in memory, these included
+(`init/persistent_properties.cpp`); a boot without the module then has
+Wi-Fi calling and video calling off too, until `setprop` from a root
+shell stores LineageOS's 1 again.
+
+Cross-SIM calling ("Backup calling", IMS over the other SIM's mobile
+data) goes off with it: Android offers it only while
+`isWfcEnabledByPlatform` holds (`isCrossSimEnabledByPlatform`). It is not
+an emergency path here, and the firewall refuses its tunnel anyway (IKE
+over a cellular network with INTERNET, from a uid other than tor's).
+
+Emergency calls lose nothing. Under Antumbra Wi-Fi calling cannot come up
+at all: the ePDG tunnel needs IKE (UDP 500 and 4500) and ESP over Wi-Fi,
+which the firewall refuses for every uid but tor's, whether the IMS
+client sends from the phone's processor or from the modem through it
+(forwarding is dropped); FW6 never opens a network with INTERNET, and
+Wi-Fi has it. This phone uses Android's older emergency path (AOSP's
+domain selection needs radio HAL 2.1; the hotdog has 1.5), where an
+emergency call goes over Wi-Fi only when IMS is already registered over
+Wi-Fi; otherwise Android switches the radio on and calls over the
+cellular network. The emergency-PDN-over-Wi-Fi path without Wi-Fi calling
+exists only with domain selection, and needs the same tunnel. VoLTE, and
+with it the emergency bearer on LTE, is untouched.
+
+On the CI emulator `prop_set` is `setprop` from adb's root shell, which
+init also stores (the emulator is wiped at every run); the module's
+scripts run there with the framework stopped, so the phone process starts
+after them.
 
 ## Building
 
@@ -1149,7 +1236,18 @@ older Welcome's `Unknown column: cell` read without the column only from
 the device owner and logged once, its row with a new `session_id` before
 Start asked again with the column, the gate told as `off` meanwhile, any
 other answer still waiting, the choice and the gate latched and written to
-the root-only record). Under
+the root-only record). And MOD7: `ims_off` with Magisk's resetprop and
+with setprop (the emulator) on LineageOS's 1s, on none, on per-slot forms
+(volte's untouched), again in the same boot (nothing done, the first
+record kept), after a stored 1 came back, and with a set that does not
+take; `ims_off_restore` (values, none removed, forged record lines naming
+volte or another property, or with another value, skipped); never
+`resetprop -p`, and no module script naming `volte_avail_ovr` outside a
+comment; `service.sh`'s `ims_guard` cut out of it (nothing due, nothing
+done; a 1 written during a call, in callback mode, in the 5 minutes after
+a call or with the call state not read left until the hold ends, the
+hold logged once, then written back with `resetprop -n` and no record;
+no time since boot: left). Under
 `sh`, dash, busybox and mksh (`MKSH=` names Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
@@ -1181,6 +1279,9 @@ checks, among other things: modes despite umask 0; the arm set and that
 root cannot send while armed; the runtime tmpfs, owners and modes; the
 Wi-Fi and lease stores on tmpfs and their flash copies deleted; the
 property equal to the live hash and published only through `resetprop -n`;
+Wi-Fi calling and video calling off after `post-fs-data.sh` (wfc and vt
+0, volte still 1, the values found recorded; under busybox set with
+`resetprop -n`, never `-p`, volte never named);
 tor and the filter with their uids, no capabilities, `no_new_privs` and
 group 3003; `status.json` (without session ID or tor mode) and the
 filter's status page as an app sees them; an app's DNS for a tracker
@@ -1202,8 +1303,8 @@ only, never in `status.json` or the log; and per scenario:
 | Scenario | Shell | Checks |
 |---|---|---|
 | `bridges` | busybox, standalone | plain bridges and the network reach tor (`GETCONF`), tor holds 9040; MAC "keep"; no bridge line in the log; the word on the cell radio before Start (`gate off`, `cell none`) and after it (`cell off`); a restarted Welcome is ignored; tor killed → restarted with the session; filter killed → restarted and blocking; firewall rule deleted → reloaded and property re-published; shutdown → MAC randomization back to 1 |
-| `direct` | mksh, LineageOS hotdog properties | a Welcome from before WEL8: Start read without the `cell` column, logged once, the radio off; `module_cell` refused, logged once, tried again less and less often, never taken; mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1` |
-| `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; calls and texts chosen without the gate (every phone as installed): logged, the word says `cell off`, the radio never on; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; the gate written during the session: seen, nothing switched; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script and the gate are deleted |
+| `direct` | mksh, LineageOS hotdog properties | a Welcome from before WEL8: Start read without the `cell` column, logged once, the radio off; `module_cell` refused, logged once, tried again less and less often, never taken; mobile data off for every SIM (`mobile_data`, `mobile_data1-3`, `cmd phone data disable`); an app (uid 10200) binds `127.0.0.1:9040` before Start → armed, property removed, status names port and uid, another app's TCP not passed on, the squatter accepts nothing, Start does not switch tor's network on; port free → live again, network on, tor holds 9040; `restricted_networking_mode=1`; a 1 written for `persist.dbg.wfc_avail_ovr` after post-fs-data, with no call → 0 again within 45 s, logged, volte untouched, the record still post-fs-data.sh's |
+| `offline` | mksh | an update over a record made before the cell radio work: the old record kept and the three keys it lacked added; calls and texts chosen without the gate (every phone as installed): logged, the word says `cell off`, the radio never on; network stays off; mobile data stored off on the emulator too; an app binds `127.0.0.1:5335` while the filter restarts → armed, status names it, no query reaches it; port free → filter back, live, blocking; the gate written during the session: seen, nothing switched; `uninstall.sh` during boot leaves the restore script; while Android runs it stops `service.sh` and puts the Settings back at once (the first installation's values; the radio list, `enable_cellular_on_boot` and `mobile_data_always_on` included), nothing writes them again, the restore script deletes itself, and the early arm script and the gate are deleted; Wi-Fi calling's properties left alone during boot, put back while Android runs (wfc's 1, vt's none removed, volte untouched) |
 | `pt` | busybox | obfs4 without lyrebird: refused, network off, reason in status; during an active call on the cell radio, iptables broken → firewall `open`, property removed, Wi-Fi and mobile data off at once, status says the rest follows (not why); no airplane mode and no Bluetooth off during the call or 270 s after it; 5 minutes after it both, status says so; repaired → live; shutdown → `cell_on 1` and `airplane_mode_on 0` stored, no airplane-mode command |
 | `badbridges` | mksh | Start while another package is the device owner → ignored, reason in status; with Welcome as device owner, a quote in a bridge line: refused, network off |
 | `cell` | busybox, LineageOS hotdog properties | the cell radio switched on by something else and off again by the module, after each hold, each shown held after the clock is moved on and released 5 minutes after it ends: a switch-on with airplane mode off (an emergency text, or the emergency path); airplane mode switched off by the person (mobile data off again at once); a ringing, an active and a held call; callback mode from the property, and for calls and texts from the registry; an unreadable state; a call seen only by Telecom's call counter; an emergency call seen only by its entry; `enable_cellular_on_boot` stored 1 while a hold lasts and written 0 before the switch-off; the module's word at each step: `none` at the first turn, `unknown` for a switch-on by something else, an unreadable state, Telecom's dump cut before its newest entry right after an ordinary call, and every call (a ringing, active and held call, a call seen only by the counter, a VoIP call with no earlier doubt: outside Phone mode, never `ordinary`), `emergency` with its end for callback mode and the emergency calls (read again at the next look), then exactly one `none` 5 minutes after the look after the end; the cut dump refused (logged as unreadable, then readable again with the whole dump); the stand-in phone process restarted: `unknown`, one `none` 5 minutes later, and with the radio on, a restart 200 s after the switch-on holds nothing (off 5 minutes after the switch-on); Welcome refusing an emergency word: logged, tried again at the next looks, and taken again; Welcome refusing another word: tried once, not again after each look, taken again at the first try 300 s later; shutdown during a call leaves airplane mode as it is |
@@ -1413,8 +1514,10 @@ phone the rest.
   is off there, so a carrier call is an emergency call, a Wi-Fi call or
   follows a switch-on by something else, and the dump cannot tell a
   carrier call from a VoIP call at every moment), and Quick power off
-  waits after every call, as before MOD11. Wi-Fi calling stays on until
-  MOD7 (WEL8 does not switch it off); this gap stays true with it. Before
+  waits after every call, as before MOD11. MOD7 switches Wi-Fi calling
+  off, but the module cannot see that the phone's closed IMS service
+  honours it, so a Wi-Fi call stays one of the calls it cannot tell
+  apart; this gap stays true with MOD7. Before
   the gate is written on the phone, PH3 must check there that the phone
   process is found (`phone=yes`; the emulator job read it in run 22), and
   that a real call's entry (`endTime`, `isEmergency`) and the IMS word
@@ -1502,6 +1605,12 @@ phone the rest.
   the 5-minute rule.
 - Uninstalling leaves the radio off until the next start (or airplane mode
   switched on and off).
+- Wi-Fi calling and video calling off (MOD7) is read from source: that
+  the phone's closed IMS service (Qualcomm's) follows the capability
+  Telephony sets, and that Settings shows neither with the real SIM, is
+  checked on the phone (PH3). On the CI emulator there is no IMS service:
+  its check shows the properties and an empty Wi-Fi calling screen, not
+  the vendor's behaviour.
 
 **Operations**
 - Logs are in RAM: a failed boot's log is gone after the next start.

@@ -42,7 +42,8 @@ object EmergencyTexts {
      * and VoLTE in a Phone-mode session ([phoneMode]) with a SIM unlocked,
      * the radio not off and the module saying IMS is not registered. Wi-Fi
      * calling and a reading not known give no VoLTE line (WEL8's own line
-     * says them; MOD7 is not done).
+     * says them; since MOD7 the module switches Wi-Fi calling off, so a
+     * reading over Wi-Fi means that did not hold).
      */
     fun states(sims: List<SimState>, radio: Radio, ims: ImsState, phoneMode: Boolean): List<EmergencyState> {
         val out = ArrayList<EmergencyState>()

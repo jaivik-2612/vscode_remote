@@ -1,4 +1,5 @@
 #!/system/bin/sh
+# shellcheck source-path=SCRIPTDIR
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Antumbra module: removal.
@@ -24,6 +25,14 @@
 # airplane_mode_radios are among the values put back. It also deletes the
 # early arm script in /data/adb/post-fs-data.d and the Phone-mode gate
 # (/data/adb/antumbra-cell, written by the install's PH3 step; WEL8).
+#
+# Wi-Fi calling and video calling (MOD7): the module set their force-on
+# properties to 0 in memory only, never stored. During a boot nothing is
+# needed (this module's post-fs-data.sh does not run in that boot, so they
+# are LineageOS's own); while Android runs, the values post-fs-data.sh
+# found at this boot's start (its record in the runtime directory) are
+# put back once service.sh is stopped. persist.dbg.volte_avail_ovr was
+# never touched.
 
 umask 022
 MODDIR=${0%/*}
@@ -88,6 +97,11 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
 		;;
 	esac
 	sh "$RESTORE_SCRIPT"
+	if [ -f "$MODDIR/lib/antumbra.sh" ]; then
+		# shellcheck source=lib/antumbra.sh
+		. "$MODDIR/lib/antumbra.sh"
+		ims_off_restore "$IMS_OFF_RECORD"
+	fi
 fi
 
 # The property and the empty mount point on flash. (/data/adb/antumbra is a

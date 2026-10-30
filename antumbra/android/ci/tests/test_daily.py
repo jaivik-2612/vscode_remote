@@ -583,6 +583,15 @@ class DailyTest(unittest.TestCase):
             for status in ("ok", "warn"):
                 self.assertNotIn("_", daily.plain_check(name, status), name)
                 self.assertFalse(daily.plain_check(name, status).startswith("Not as expected: "), name)
+        # MOD7's check, in plain words.
+        for status in ("ok", "warn"):
+            self.assertNotIn("_", daily.plain_check("wifi_calling_off", status))
+            self.assertFalse(daily.plain_check("wifi_calling_off", status).startswith("Not as expected: "))
+        self.assertIn("Wi-Fi calling", daily.plain_check("wifi_calling_off", "warn"))
+        # It says only what the check reads: Settings' Wi-Fi calling screen,
+        # not a video-calling switch it does not look at.
+        self.assertTrue(daily.plain_check("wifi_calling_off", "ok").endswith("Settings offered no Wi-Fi calling"))
+        self.assertNotIn("neither", daily.plain_check("wifi_calling_off", "ok"))
         for status in ("ok", "warn"):
             self.assertIn("(nothing dialled)", daily.plain_check("welcome_emergency_card", status))
         self.assertEqual(daily.plain_check("position_lookups", "warn"), "Names were looked up while the position was taken")

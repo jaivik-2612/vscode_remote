@@ -153,6 +153,21 @@ that the captures must show traffic from the phone.
    `device_clock`). From here tor's STREAM events are recorded
    (`lib/tor-streams.sh`, run on the device as tor's uid 2950 through the
    module's `antumbra-run`: root never opens tor's cookie or socket).
+   Then MOD7, check `wifi_calling_off` (a warning until it has passed on
+   CI once; then make it fail), before Welcome takes the screen and with
+   nothing dialled: `persist.dbg.wfc_avail_ovr` and
+   `persist.dbg.vt_avail_ovr` must read 0 and `persist.dbg.volte_avail_ovr`
+   as it read before the install (the module never touches it; the three
+   are read in step 1); the phone process's own `isWfcEnabledByPlatform`
+   and `isVtEnabledByPlatform` (ImsManager's lines in
+   `TelephonyDebugService`'s dump) must not say `true` (they are printed
+   only while an IMS service is bound, which this emulator has not); and
+   Settings' Wi-Fi calling screen (`android.settings.WIFI_CALLING_SETTINGS`,
+   which lists only the SIMs Wi-Fi calling is available for) must be read
+   and show no "Use Wi-Fi calling" switch (screenshot
+   `settings-wifi-calling`). Without an IMS service the emulator would
+   offer no Wi-Fi calling either way: the check shows the module's
+   properties and Android's answer, not the phone's IMS service (PH3).
 4. Airplane mode off and mobile data off (`svc data disable`): the phone
    has no SIM, so its only network is Wi-Fi, which has no saved network
    (Wi-Fi's store is on an empty tmpfs). Airplane mode off switches the

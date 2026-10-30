@@ -102,7 +102,8 @@ object PhoneTexts {
      * known yet" there while the module has not read it (its word says off
      * until the first reading after the switch-on). Outside Phone mode the
      * module does not read IMS, so the line says it is not checked, not that
-     * it is off (Wi-Fi calling stays possible until MOD7).
+     * it is off (the module switches Wi-Fi calling off, MOD7, but does not
+     * read IMS there to show it).
      */
     fun ims(ims: ImsState, phoneMode: Boolean): Int = if (!phoneMode) R.string.ims_off else when (ims) {
         ImsState.CELL -> R.string.ims_cell

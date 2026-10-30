@@ -25,6 +25,9 @@
 #      a tmpfs: a new MAC address is not linked to the old one by asking
 #      the router for the previous session's IP address.
 #   5. sysctls: IPv6 off, Qualcomm's crash-dump mode off.
+#   6. Wi-Fi calling and video calling off (MOD7): their force-on
+#      properties to 0 in memory only (resetprop -n, never stored), before
+#      zygote and so before the phone process reads them.
 
 # Files and directories are created 0644/0755 whatever umask the caller
 # had (adb's shell on the CI emulator has 0).
@@ -163,6 +166,25 @@ ipv6_sweep
 # it off at run time. It cannot switch off the EDL boot mode.
 if write_value /sys/module/msm_poweroff/parameters/download_mode 0; then
 	log "crash-dump mode off"
+fi
+
+# 6. Wi-Fi calling and video calling off for the whole phone (MOD7; lib's
+# ims_off): persist.dbg.wfc_avail_ovr and persist.dbg.vt_avail_ovr to 0,
+# the values found recorded first in the runtime directory for
+# uninstall.sh. In memory only, so a boot without the module is
+# LineageOS's own. Stored persistent values are already loaded here (init's
+# own 'on post-fs-data' runs load_persist_props, and Magisk's comes after
+# it), so the record holds them and the 0 replaces them; service.sh sets 0
+# again only if something writes a value later.
+# persist.dbg.volte_avail_ovr is never touched.
+_ims=$(ims_off "$IMS_OFF_RECORD")
+_ims_rc=$?
+_ims=$(printf '%s' "$_ims" | tr '\n' ' ')
+_ims=${_ims% }
+if [ "$_ims_rc" = 0 ]; then
+	log "Wi-Fi calling and video calling off${_ims:+ (set to 0: $_ims)}"
+else
+	log "Wi-Fi calling or video calling could not be switched off (tried: $_ims)"
 fi
 
 printf '%s\n' "$PROBLEMS" >"$PRIV/problem" 2>/dev/null

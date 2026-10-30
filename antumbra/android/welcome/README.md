@@ -679,10 +679,10 @@ allowlist), so that stays the module's, as root. What Welcome reads:
   reading after the switch-on, never "off"); outside Phone mode the module
   reads no IMS, so the line says "Not checked: Phone is off in this
   session", not that VoLTE is off. "Ready over
-  Wi-Fi calling" says that Antumbra does not expect it: WEL8 does not
-  switch Wi-Fi calling off (MOD7 will), but the firewall refuses the UDP
-  that Wi-Fi calling needs for every uid but tor's [likely; PH3 and MOD7
-  check].
+  Wi-Fi calling" says that Antumbra does not expect it: the module
+  switches Wi-Fi calling off for the whole phone (MOD7), and the firewall
+  refuses the UDP that Wi-Fi calling needs for every uid but tor's
+  [likely; PH3 checks both]. The text did not change with MOD7.
 - **What your carrier sees**: a plain card, the same on every phone, naming
   no country or carrier. With the radio on (or not known): the SIM and the
   name it is registered to, the phone's IMEI (a new Wi-Fi address does not
@@ -857,7 +857,7 @@ minutes were. It changes one thing only:
 
 | The module's word | Quick power off after a call it saw end |
 |---|---|
-| `ordinary`, at most 30 s old, from a look after that call ended | goes ahead: the module knows every call of the last 5 minutes, that one included, was not an emergency call. The module says it only in a Phone-mode session (WEL8); outside it the cell radio is off, so a carrier call there is an emergency call, a Wi-Fi call (until MOD7) or follows a switch-on by something else, which the module cannot tell apart, and it says `unknown` after every call |
+| `ordinary`, at most 30 s old, from a look after that call ended | goes ahead: the module knows every call of the last 5 minutes, that one included, was not an emergency call. The module says it only in a Phone-mode session (WEL8); outside it the cell radio is off, so a carrier call there is an emergency call, a Wi-Fi call (switched off by MOD7 and stopped by the firewall, both unverified on the phone) or follows a switch-on by something else, which the module cannot tell apart, and it says `unknown` after every call |
 | `emergency` | waits as before, and at least until the word's end (at most 5 minutes after the module's look), even if Welcome saw no call (its process restarted, or an emergency text with callback mode) |
 | `unknown`, `none`, an `ordinary` word that is older or from a look before the end, a malformed or refused word, no word at all (the module not running, Android 17, which no longer keeps that record) | waits exactly as before |
 
@@ -918,7 +918,7 @@ SIM, the SIM locked (PIN, PUK, network), the SIM unusable (card error,
 disabled, restricted), the cellular radio off (WEL8's radio rule), and
 "Calls over 4G (VoLTE) are not connected yet" in a Phone-mode session with
 a SIM unlocked, the radio not off and the module's IMS word "none" (Wi-Fi
-calling stays WEL8's own VoLTE line until MOD7). Each says this phone can
+calling, off since MOD7, stays WEL8's own VoLTE line). Each says this phone can
 still try: Android switches the radio on for an emergency call and tries
 any network it finds, with or without a usable SIM
 (`TelephonyConnectionService`, `EmergencyCallDomainSelector`). Then, only

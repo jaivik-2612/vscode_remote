@@ -139,6 +139,92 @@ prop_clear() {
 	return 0
 }
 
+# --- Wi-Fi calling and video calling off (MOD7) --------------------------------------
+#
+# Android's ImsManager reads these properties as a force-on only: 1, in the
+# per-slot form NAME<slot> or the plain NAME, makes the feature available
+# whatever the device and the carrier say; 0 or no value leaves it to the
+# device's config_device_wfc_ims_available and config_device_vt_available
+# (both false on this phone; LineageOS's overlay sets only the unused
+# config_carrier_wfc_ims_available) and the carrier. LineageOS for this
+# phone sets wfc, vt and volte to 1 in /system_ext/etc/build.prop. The
+# module sets the first two to 0 in memory only (prop_set: resetprop -n,
+# never -p), so nothing reaches /data/property and a boot without the
+# module is LineageOS's own. persist.dbg.volte_avail_ovr, which VoLTE on
+# this phone depends on, is never touched, nor any per-slot form of it.
+IMS_OFF_PROPS='persist.dbg.wfc_avail_ovr persist.dbg.vt_avail_ovr'
+IMS_OFF_SLOTS='0 1'
+# shellcheck disable=SC2034 # used by post-fs-data.sh, service.sh and uninstall.sh
+IMS_OFF_RECORD=$PRIV/ims-off.orig
+
+# ims_off_names: the properties ims_off sets, one per line: the two, and
+# each per-slot form that has a value now.
+ims_off_names() {
+	for _io_p in $IMS_OFF_PROPS; do
+		printf '%s\n' "$_io_p"
+		for _io_s in $IMS_OFF_SLOTS; do
+			[ -z "$(getprop "$_io_p$_io_s" 2>/dev/null)" ] || printf '%s\n' "$_io_p$_io_s"
+		done
+	done
+}
+
+# ims_off_due: print each of ims_off_names that does not read 0; return 1
+# when there is none (ims_off would write nothing).
+ims_off_due() {
+	_io_due=1
+	for _io_p in $(ims_off_names); do
+		[ "$(getprop "$_io_p" 2>/dev/null)" = 0 ] && continue
+		printf '%s\n' "$_io_p"
+		_io_due=0
+	done
+	return "$_io_due"
+}
+
+# ims_off [RECORD]: set each of ims_off_names to 0 where it does not read 0.
+# With RECORD, a file that does not exist yet, first writes NAME=VALUE for
+# each (an empty VALUE: none), what uninstall.sh puts back while Android
+# runs; an existing record is kept (the first of the boot). Only
+# post-fs-data.sh passes RECORD, so a record never holds the module's own
+# 0s. Prints each name it set; returns 1 if one still does not read 0.
+ims_off() {
+	_io_names=$(ims_off_names)
+	if [ -n "${1-}" ] && [ ! -e "$1" ]; then
+		for _io_p in $_io_names; do
+			printf '%s=%s\n' "$_io_p" "$(getprop "$_io_p" 2>/dev/null)"
+		done >"$1.new" && mv -f "$1.new" "$1"
+	fi
+	_io_rc=0
+	for _io_p in $_io_names; do
+		[ "$(getprop "$_io_p" 2>/dev/null)" = 0 ] && continue
+		prop_set "$_io_p" 0 >/dev/null 2>&1
+		printf '%s\n' "$_io_p"
+		[ "$(getprop "$_io_p" 2>/dev/null)" = 0 ] || _io_rc=1
+	done
+	return "$_io_rc"
+}
+
+# ims_off_restore RECORD: put back the values ims_off recorded (none: the
+# property removed). Only the wfc and vt names and their per-slot forms,
+# with a value of digits or none, are taken; any other line is skipped.
+ims_off_restore() {
+	[ -f "$1" ] || return 0
+	while IFS= read -r _io_l || [ -n "$_io_l" ]; do
+		_io_p=${_io_l%%=*}
+		_io_v=${_io_l#*=}
+		case $_io_p in
+		persist.dbg.wfc_avail_ovr | persist.dbg.wfc_avail_ovr[01] | persist.dbg.vt_avail_ovr | persist.dbg.vt_avail_ovr[01]) ;;
+		*) continue ;;
+		esac
+		case $_io_v in *[!0-9]*) continue ;; esac
+		if [ -n "$_io_v" ]; then
+			prop_set "$_io_p" "$_io_v" >/dev/null 2>&1
+		else
+			prop_clear "$_io_p"
+		fi
+	done <"$1"
+	return 0
+}
+
 # --- The firewall ---------------------------------------------------------------
 
 # fw COMMAND: run antumbra-fw (arm, apply, status, flush) with the module's
@@ -747,8 +833,9 @@ framework_ready() {
 # only: every call in that time, at every look, had an entry saying it was
 # not an emergency call, each read again after it ended, and nothing below
 # applies), "unknown" (any call outside Phone mode, where the cell radio is
-# off, so a carrier call there is an emergency call, a Wi-Fi call (until
-# MOD7) or follows a switch-on by something else, which the module cannot
+# off, so a carrier call there is an emergency call, a Wi-Fi call
+# (switched off by MOD7 and stopped by the firewall, both unverified on the
+# phone) or follows a switch-on by something else, which the module cannot
 # tell apart; anything the module cannot read or classify; the radio or
 # airplane mode switched by something else; the phone process restarted or
 # not running, when Telecom's own emergency check can fail; Android 17) or
@@ -1437,8 +1524,9 @@ cell_gate_step() {
 # POWER_OFF; an emergency number switches the radio on), but that state
 # counts IMS registered over Wi-Fi as in service (GsmCdmaPhone's
 # mergeVoiceServiceStates), so a carrier call there is an emergency call, a
-# Wi-Fi call (until MOD7 switches Wi-Fi calling off) or follows a switch-on
-# by something else: the module cannot tell which.
+# Wi-Fi call (switched off by MOD7 and stopped by the firewall, both
+# unverified on the phone) or follows a switch-on by something else: the
+# module cannot tell which.
 cell_phone_mode() {
 	case $(cell_effective) in phone | data) ;; *) return 1 ;; esac
 	[ -z "$RADIOS" ] && [ "$CELL_ON_DONE" = 1 ]

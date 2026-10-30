@@ -30,7 +30,12 @@
 #      packet from install_start on (the arm cutoff is earlier than the real
 #      'arm', never later), and checks the device's clock, read once more
 #      here, against the marker. tor's STREAM events are recorded from here
-#      on.
+#      on. Then MOD7 (check wifi_calling_off, a warning until it has passed
+#      on CI once): persist.dbg.wfc_avail_ovr and persist.dbg.vt_avail_ovr
+#      0, persist.dbg.volte_avail_ovr as before the install, the phone
+#      process's own isWfcEnabledByPlatform and isVtEnabledByPlatform not
+#      true (printed only while an IMS service is bound), and Settings'
+#      Wi-Fi calling screen offering no SIM. Nothing is dialled.
 #   4. Airplane mode off and mobile data off: the phone has no SIM, so its
 #      only network is Wi-Fi, which has no saved network yet.
 #   5. The Welcome APK; the debug build's test hook debug.antumbra.keep_adb=1
@@ -274,6 +279,61 @@ module_parsers_level() {
 	if ! [[ $1 =~ $known ]]; then
 		echo fail
 	elif [ "${BASH_REMATCH[3]}" = '; phone=yes' ]; then
+		echo ok
+	else
+		echo warn
+	fi
+}
+
+# --- MOD7: Wi-Fi calling and video calling off ------------------------------------
+#
+# ims_props: the three IMS force-on properties as "wfc vt volte" ("-" for
+# one with no value).
+ims_props() {
+	ash "for p in wfc vt volte; do v=\$(getprop persist.dbg.\${p}_avail_ovr); printf '%s ' \"\${v:--}\"; done" |
+		sed 's/ *$//'
+}
+
+# wifi_calling_off: MOD7 on the emulator, right after the module's install
+# and before Welcome takes the screen. Nothing is dialled. Read: the three
+# properties after the module's post-fs-data.sh (IMS_PROPS_BEFORE was read
+# before the install); Android's own answer, the phone process's
+# isWfcEnabledByPlatform and isVtEnabledByPlatform lines (ImsManager's
+# dump, printed only while an IMS service is bound: none on this
+# emulator); and Settings' Wi-Fi calling screen, which lists only the SIMs
+# Wi-Fi calling is available for ("Use Wi-Fi calling" is the switch on a
+# SIM's page). wifi_calling_level judges them. A warning until it has
+# passed on CI once (then make it fail).
+wifi_calling_off() {
+	local props platform xml screen
+	props=$(ims_props)
+	platform=$(ASH_TIMEOUT=30 ash 'dumpsys -t 10 activity service com.android.phone/com.android.phone.TelephonyDebugService 2>/dev/null' |
+		grep -o -E 'is(Wfc|Vt)EnabledByPlatform = [a-z]+' | sort -u | tr '\n' ';' | sed 's/;$//')
+	wake_screen
+	ash 'am start -W -a android.settings.WIFI_CALLING_SETTINGS' >/dev/null 2>&1
+	sleep 3
+	xml=$(ui_dump 2>/dev/null)
+	screenshot settings-wifi-calling
+	if ! printf '%s' "$xml" | grep -q 'package="com.android.settings"'; then
+		screen=unread
+	elif printf '%s' "$xml" | grep -q -i 'text="Use Wi-Fi calling"'; then
+		screen=offered
+	else
+		screen=none
+	fi
+	ash 'input keyevent KEYCODE_HOME; am force-stop com.android.settings' >/dev/null 2>&1
+	check wifi_calling_off "$(wifi_calling_level "$IMS_PROPS_BEFORE" "$props" "$platform" "$screen")" \
+		"properties wfc vt volte before the module: $IMS_PROPS_BEFORE, after: $props; Android: ${platform:-no IMS service, nothing printed}; Settings' Wi-Fi calling screen: $screen"
+}
+
+# wifi_calling_level BEFORE AFTER PLATFORM SCREEN: ok when wfc and vt read
+# 0 after the module and volte is as it was before it, the phone process
+# says no "true" (or prints nothing), and Settings' Wi-Fi calling screen was
+# read and offers no SIM; warn otherwise (fail once it has passed on CI).
+wifi_calling_level() {
+	local before_volte=${1##* } after=$2
+	if [[ $after =~ ^0\ 0\ [^\ ]+$ ]] && [ "${after##* }" = "$before_volte" ] &&
+		[[ $3 != *'= true'* ]] && [ "$4" = none ]; then
 		echo ok
 	else
 		echo warn
@@ -904,12 +964,14 @@ wait_device 60
 [ "$(ash 'id -u')" = 0 ] || abort adb_root "adb root did not give a root shell"
 check adb_root ok
 device_info
+IMS_PROPS_BEFORE=$(ims_props)
 WLAN_MAC_BEFORE=$(ash 'cat /sys/class/net/wlan0/address' 2>/dev/null)
 guest_capture_start fail
 clock_marker
 
 quiet_network
 install_module
+wifi_calling_off
 start_stream_recorder
 network_on
 install_welcome

@@ -17,7 +17,10 @@
 #      prefix>';
 #   4. run/status.json;
 #   5. IPv6 off on every interface, again whenever NetworkStack switches it
-#      on;
+#      on; Wi-Fi calling and video calling kept off (MOD7: their force-on
+#      properties read every 30 seconds from the first turn and set to 0
+#      again if something wrote another value, but not during a call,
+#      callback mode or the 5 minutes after a call);
 #   6. once boot has completed: the fail-safe Settings, mobile data off;
 #      then, at every turn, the cell radio's watch (lib/antumbra.sh, "The
 #      cell radio"): enable_cellular_on_boot and mobile_data_always_on 0,
@@ -523,6 +526,48 @@ ipv6_guard </dev/null >/dev/null 2>&1 &
 # every 2 seconds for the first 3 minutes after the framework answers,
 # then every 5 ('content' starts a Java process each time).
 
+# ims_guard NOW: Wi-Fi calling and video calling off (MOD7). post-fs-data.sh
+# set their force-on properties to 0 in memory after Android had loaded
+# its stored persistent properties; this covers a value written later: in
+# the first turn and every 30 seconds (getprop only while they read 0) the
+# 0 is set again, in memory only as before, and without a record (only
+# post-fs-data.sh records, so uninstall.sh never puts back the module's own
+# 0s). A write that is due waits while the cell radio's watch holds its
+# steps (cell_hold: a call, callback mode, the 5 minutes after a call, or a
+# state it cannot read), so that IMS is not reconfigured during or right
+# after a call; it is tried again at every turn until the hold ends. The
+# hold and the write are each logged the first time of the boot only.
+IMS_NEXT=0
+IMS_LOGGED=0
+IMS_HOLD_LOGGED=0
+ims_guard() {
+	[ "$1" -ge "$IMS_NEXT" ] || return 0
+	ims_off_due >/dev/null || {
+		IMS_NEXT=$(($1 + 30))
+		return 0
+	}
+	if _ig_why=$(cell_hold "$1"); then
+		if [ "$IMS_HOLD_LOGGED" = 0 ]; then
+			IMS_HOLD_LOGGED=1
+			log "Wi-Fi calling: setting 0 again waits, held: $_ig_why ($(cell_hold_text "$_ig_why")); logged once per boot"
+		fi
+		return 0
+	fi
+	IMS_NEXT=$(($1 + 30))
+	# shellcheck disable=SC2119 # no record: only post-fs-data.sh records
+	_ig=$(ims_off)
+	_ig_rc=$?
+	[ -z "$_ig" ] && [ "$_ig_rc" = 0 ] && return 0
+	[ "$IMS_LOGGED" = 0 ] || return 0
+	IMS_LOGGED=1
+	_ig=$(printf '%s' "$_ig" | tr '\n' ' ')
+	if [ "$_ig_rc" = 0 ]; then
+		log "Wi-Fi calling and video calling off again (set to 0: ${_ig% }); logged once per boot"
+	else
+		log "Wi-Fi calling or video calling could not be switched off (tried: ${_ig% }); logged once per boot"
+	fi
+}
+
 SETTINGS_DONE=0
 SETTINGS_AT=0
 TOR_FAILS=0
@@ -538,6 +583,7 @@ while :; do
 
 	# 8a. Who holds the service ports, at every turn (ports_check).
 	ports_check
+	ims_guard "$NOW"
 
 	# 8b. The firewall, every 30 seconds (and at once when the ports are
 	# free again). If it is no longer live, the property goes at once, then

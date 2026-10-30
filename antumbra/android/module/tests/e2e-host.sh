@@ -203,10 +203,16 @@ populate() {
 	case $2 in
 	direct | cell | phone)
 		printf 'ro.product.device=hotdog\nro.lineage.device=hotdog\nro.lineage.version=23.2-20261009-NIGHTLY-hotdog\nro.hardware=qcom\n' >"$U/antumbra-test/props"
+		# LineageOS's IMS force-ons (system_ext.prop); MOD7 sets wfc and
+		# vt to 0 and never touches volte.
+		printf 'persist.dbg.volte_avail_ovr=1\npersist.dbg.vt_avail_ovr=1\npersist.dbg.wfc_avail_ovr=1\n' >>"$U/antumbra-test/props"
 		echo 2 >"$U/antumbra-test/phones"
 		;;
 	*)
 		printf 'ro.boot.qemu=1\nro.hardware=ranchu\nro.product.device=emu64x\n' >"$U/antumbra-test/props"
+		# One force-on set, one not (MOD7's record holds a value and a
+		# none), and volte.
+		printf 'persist.dbg.volte_avail_ovr=1\npersist.dbg.wfc_avail_ovr=1\n' >>"$U/antumbra-test/props"
 		echo 1 >"$U/antumbra-test/phones"
 		;;
 	esac

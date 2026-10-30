@@ -436,6 +436,24 @@ ipv6_check "post-fs-data: IPv6 kept on loopback" sysctl_is lo disable_ipv6 0
 ipv6_check "post-fs-data: router advertisements off" sysctl_is d0 accept_ra 0
 check "post-fs-data: no firewall property yet" test -z "$(prop antumbra.fw.armed)"
 check "post-fs-data: no problem recorded" test ! -s $A/state/module/problem -o "$(cat $A/state/module/problem)" = ""
+# MOD7: Wi-Fi calling and video calling off, in memory only, volte_avail_ovr
+# untouched; the values found recorded for uninstall.sh (the phone:
+# LineageOS's 1s; the emulator flavour here: wfc 1, vt none).
+check "post-fs-data: Wi-Fi calling off (persist.dbg.wfc_avail_ovr 0)" test "$(prop persist.dbg.wfc_avail_ovr)" = 0
+check "post-fs-data: video calling off (persist.dbg.vt_avail_ovr 0)" test "$(prop persist.dbg.vt_avail_ovr)" = 0
+check "post-fs-data: persist.dbg.volte_avail_ovr untouched" test "$(prop persist.dbg.volte_avail_ovr)" = 1
+if [ -n "$(prop ro.lineage.version)" ]; then
+	ims_rec=$(printf 'persist.dbg.wfc_avail_ovr=1\npersist.dbg.vt_avail_ovr=1')
+else
+	ims_rec=$(printf 'persist.dbg.wfc_avail_ovr=1\npersist.dbg.vt_avail_ovr=')
+fi
+check "post-fs-data: the values found recorded" test "$(cat $A/state/module/ims-off.orig)" = "$ims_rec"
+check "post-fs-data: Wi-Fi calling logged" grep -q 'Wi-Fi calling and video calling off' $A/log/module.log
+if [ "$SHELLKIND" = busybox ]; then
+	check "post-fs-data: set with resetprop -n" grep -q -x -e '-n persist.dbg.wfc_avail_ovr 0' $T/resetprop.log
+	check "post-fs-data: nothing stored (no resetprop -p), volte never named" \
+		test -z "$(grep -e '-p' -e '-P' -e volte $T/resetprop.log)"
+fi
 
 # --- 3. service.sh, before the framework is up ----------------------------------------
 # The Phone-mode gate, as the install's PH3 step writes it (WEL8): "data"
@@ -587,6 +605,18 @@ direct)
 	done
 	check "phone: mobile data switched off now" grep -q '^phone data disable$' $T/cmd.log
 
+	# MOD7: a 1 written after post-fs-data (stored values are loaded before
+	# post-fs-data.sh runs, so only a later write can bring one back), with
+	# no call holding the cell radio's steps: service.sh sets 0 again within
+	# 30 s, and the record stays post-fs-data.sh's.
+	/system/bin/setprop persist.dbg.wfc_avail_ovr 1
+	check "Wi-Fi calling: a 1 that came back is set to 0 again" \
+		wait_until 45 eval 'test "$(prop persist.dbg.wfc_avail_ovr)" = 0'
+	# The log line follows the write: wait for it too.
+	check "Wi-Fi calling: logged" wait_until 10 grep -q 'Wi-Fi calling and video calling off again' $A/log/module.log
+	check "Wi-Fi calling: volte_avail_ovr still untouched" test "$(prop persist.dbg.volte_avail_ovr)" = 1
+	check "Wi-Fi calling: the record is still post-fs-data.sh's" test "$(cat $A/state/module/ims-off.orig)" = "$ims_rec"
+
 	# An app takes tor's TransPort port while tor's network is off (before
 	# Start): the module goes back to armed, so nothing is redirected to it.
 	squat_bg tcp 9040 60
@@ -685,6 +715,8 @@ offline)
 	run_module_script $MD/uninstall.sh
 	check "uninstall in boot: restore script left in service.d" test -x /data/adb/service.d/antumbra-restore.sh
 	check "uninstall in boot: nothing put back yet" test -z "$(grep '^delete ' $T/settings.log)"
+	check "uninstall in boot: Wi-Fi calling's properties left alone (nothing was stored)" \
+		test "$(prop persist.dbg.wfc_avail_ovr) $(prop persist.dbg.vt_avail_ovr)" = "0 0"
 	# While Android runs (Magisk itself uninstalled): the module's
 	# service.sh, still running, is stopped, and the values are put back
 	# at once; nothing writes them again afterwards. The record is the one
@@ -705,6 +737,9 @@ offline)
 	check "uninstall: the restore script removed itself" test ! -e /data/adb/service.d/antumbra-restore.sh
 	check "uninstall: the early arm script removed" test ! -e /data/adb/post-fs-data.d/antumbra-arm.sh
 	check "uninstall: the Phone-mode gate removed" test ! -e /data/adb/antumbra-cell
+	check "uninstall: Wi-Fi calling's force-on put back as found (1)" test "$(prop persist.dbg.wfc_avail_ovr)" = 1
+	check "uninstall: video calling's, which had none, removed" test -z "$(prop persist.dbg.vt_avail_ovr)"
+	check "uninstall: persist.dbg.volte_avail_ovr untouched" test "$(prop persist.dbg.volte_avail_ovr)" = 1
 	n=$(wc -l <$T/settings.log)
 	sleep 12
 	check "uninstall: nothing writes the values again afterwards" test "$(wc -l <$T/settings.log)" = "$n"

@@ -1032,7 +1032,8 @@ word 110 0 0 - 1 >/dev/null
 wx "word (b): a doubt past its 5 minutes at the next look, which sees a new call: not renewed, ordinary" \
 	"ordinary 0" 420 0 0 o 2
 # android-1 (a): outside Phone mode the cell radio is off by design, so a
-# carrier call there is an emergency call, a Wi-Fi call (until MOD7) or
+# carrier call there is an emergency call, a Wi-Fi call (switched off by
+# MOD7 and stopped by the firewall, both unverified on the phone) or
 # follows a switch-on by something else, which the module cannot tell
 # apart: every call reads unknown.
 for m in 'S_STARTED=0' 'SES_CELL=off' 'RADIOS=waiting' 'RADIOS=switched' 'CELL_ON_DONE=0'; do
@@ -2891,6 +2892,201 @@ step_check "session_read: no answer: the old columns not asked" did_not "query s
 sr_reset
 S_STARTED=0 SES_CELL=off SES_GATE=phone CELL_GATE=phone
 printf 'phone\n' >"$CELL_GATE_FILE"
+
+# --- MOD7: Wi-Fi calling and video calling off (ims_off, ims_off_restore) -------------
+# Stand-ins on PATH: getprop and setprop over a file of NAME=VALUE lines,
+# and Magisk's resetprop (in a directory of its own, left off PATH for the
+# emulator, which has none), which logs its arguments. The real prop_set
+# and prop_clear are used.
+unset -f getprop 2>/dev/null
+PB=$LOGDIR/propbin
+MB=$LOGDIR/magiskbin
+mkdir -p "$PB" "$MB"
+PROPS_FILE=$LOGDIR/props
+RESETPROP_LOG=$LOGDIR/resetprop.log
+export PROPS_FILE RESETPROP_LOG
+# shellcheck disable=SC2016 # the stand-in's lines, expanded when it runs
+printf '%s\n' '#!/bin/sh' \
+	'awk -v n="$1" '\''index($0, n "=") == 1 { v = substr($0, length(n) + 2) } END { print v }'\'' "$PROPS_FILE"' \
+	>"$PB/getprop"
+# shellcheck disable=SC2016 # the stand-in's lines, expanded when it runs
+printf '%s\n' '#!/bin/sh' \
+	'[ "${FAKE_SET_FAILS-}" = 1 ] && exit 1' \
+	'awk -v n="$1" '\''index($0, n "=") != 1'\'' "$PROPS_FILE" >"$PROPS_FILE.new"' \
+	'[ -n "$2" ] && printf '\''%s=%s\n'\'' "$1" "$2" >>"$PROPS_FILE.new"' \
+	'mv -f "$PROPS_FILE.new" "$PROPS_FILE"' \
+	>"$PB/setprop"
+# shellcheck disable=SC2016 # the stand-in's lines, expanded when it runs
+printf '%s\n' '#!/bin/sh' \
+	'echo "$*" >>"$RESETPROP_LOG"' \
+	'del=' \
+	'while :; do' \
+	'	case ${1-} in' \
+	'	-n | -p) shift ;;' \
+	'	-d | --delete) del=1; shift ;;' \
+	'	*) break ;;' \
+	'	esac' \
+	'done' \
+	'[ -n "$del" ] && exec setprop "$1" '\'\''' \
+	'exec setprop "$1" "$2"' \
+	>"$MB/resetprop"
+chmod 0755 "$PB/getprop" "$PB/setprop" "$MB/resetprop"
+OLD_PATH=$PATH
+REC=$LOGDIR/ims-off.orig
+props() {
+	printf '%s\n' "$@" >"$PROPS_FILE"
+	: >"$RESETPROP_LOG"
+	rm -f "$REC"
+}
+pv() { "$PB/getprop" "$1"; }
+oneline() { tr '\n' ' ' | sed 's/ $//'; }
+rlog() { tr '\n' '|' <"$RESETPROP_LOG" | sed 's/|$//'; }
+W=persist.dbg.wfc_avail_ovr
+V=persist.dbg.vt_avail_ovr
+L=persist.dbg.volte_avail_ovr
+
+# On the phone, under Magisk: LineageOS's three 1s from its build.prop.
+PATH=$MB:$PB:$OLD_PATH
+props "$L=1" "$V=1" "$W=1" 'ro.lineage.version=23.2'
+out=$(ims_off "$REC")
+rc=$?
+expect "ims_off (phone): sets wfc and vt" "$W $V" "$(printf '%s\n' "$out" | oneline)"
+expect "ims_off (phone): succeeds" 0 "$rc"
+expect "ims_off (phone): wfc 0, vt 0, volte still 1" "0 0 1" "$(pv $W) $(pv $V) $(pv $L)"
+expect "ims_off (phone): with resetprop -n, in memory only" "-n $W 0|-n $V 0" "$(rlog)"
+expect "ims_off (phone): the values found recorded" "$W=1 $V=1" "$(oneline <"$REC")"
+if grep -q -e ' -p' -e ' -P' -e '^-p' -e '^-P' "$RESETPROP_LOG"; then
+	bad "ims_off: resetprop -p or -P used (stored)"
+else
+	ok "ims_off: nothing stored (no resetprop -p)"
+fi
+if grep -q volte "$RESETPROP_LOG"; then bad "ims_off: volte_avail_ovr touched"; else ok "ims_off: volte_avail_ovr never touched"; fi
+# Again in the same boot: nothing to do, the record kept.
+: >"$RESETPROP_LOG"
+out=$(ims_off "$REC")
+expect "ims_off again: nothing set" "" "$out"
+expect "ims_off again: no resetprop call" 0 "$(wc -l <"$RESETPROP_LOG" | tr -d ' ')"
+# A 1 written after post-fs-data (stored values are loaded before it runs,
+# so only a later write): set again, the first record kept.
+"$PB/setprop" "$W" 1
+out=$(ims_off "$REC")
+expect "ims_off after a stored 1 came back: wfc set again" "$W" "$out"
+expect "ims_off after a stored 1 came back: wfc 0" 0 "$(pv $W)"
+expect "ims_off after a stored 1 came back: the first record kept" "$W=1 $V=1" "$(oneline <"$REC")"
+# The per-slot forms Android reads first (NAME<slot>), where present; never
+# volte's.
+props "$L=1" "$V=1" "$W=1" "${W}0=1" "${V}1=1" "${L}0=1" "${L}1=1"
+out=$(ims_off "$REC")
+expect "ims_off: per-slot forms set too" "$W ${W}0 $V ${V}1" "$(printf '%s\n' "$out" | oneline)"
+expect "ims_off: per-slot wfc0 and vt1 now 0" "0 0" "$(pv ${W}0) $(pv ${V}1)"
+expect "ims_off: per-slot volte forms untouched" "1 1 1" "$(pv $L) $(pv ${L}0) $(pv ${L}1)"
+expect "ims_off: per-slot forms recorded" "$W=1 ${W}0=1 $V=1 ${V}1=1" "$(oneline <"$REC")"
+# A set that does not take: a failure.
+props "$L=1" "$V=1" "$W=1"
+FAKE_SET_FAILS=1
+export FAKE_SET_FAILS
+ims_off "$REC" >/dev/null
+rc=$?
+FAKE_SET_FAILS=
+expect "ims_off: a set that does not take fails" 1 "$rc"
+# Put back (uninstall.sh while Android runs).
+props "$L=1" "$V=0" "$W=0"
+printf '%s\n' "$W=1" "$V=1" >"$REC"
+ims_off_restore "$REC"
+expect "ims_off_restore: wfc and vt back to 1, volte 1" "1 1 1" "$(pv $W) $(pv $V) $(pv $L)"
+expect "ims_off_restore: with resetprop -n" "-n $W 1|-n $V 1" "$(rlog)"
+# None before: removed.
+props "$L=1" "$V=0" "$W=0"
+printf '%s\n' "$W=" "$V=" >"$REC"
+ims_off_restore "$REC"
+expect "ims_off_restore: a property that had no value removed" "||1" "$(pv $W)|$(pv $V)|$(pv $L)"
+# Only the wfc and vt names, digits or nothing: a record line naming volte
+# or another property, or with another value, is skipped.
+props "$L=1" "$V=0" "$W=0" 'persist.sys.x=5'
+printf '%s\n' "$L=0" "${L}0=0" 'persist.sys.x=1' "$W=1;reboot" "${W}2=1" "x$V=1" "$V" >"$REC"
+ims_off_restore "$REC"
+expect "ims_off_restore: forged lines skipped" "0 0 1 5" "$(pv $W) $(pv $V) $(pv $L) $(pv persist.sys.x)"
+expect "ims_off_restore: no property written for them" 0 "$(wc -l <"$RESETPROP_LOG" | tr -d ' ')"
+rm -f "$REC"
+ims_off_restore "$REC"
+expect "ims_off_restore: no record, nothing done" "0 0" "$? $(wc -l <"$RESETPROP_LOG" | tr -d ' ')"
+# On the CI emulator: no resetprop (setprop from adb's root shell), and
+# the image sets none of them.
+PATH=$PB:$OLD_PATH
+props 'ro.boot.qemu=1'
+out=$(ims_off "$REC")
+expect "ims_off (emulator): wfc and vt set with setprop, volte not" "$W $V|0 0|" \
+	"$(printf '%s\n' "$out" | oneline)|$(pv $W) $(pv $V)|$(pv $L)"
+expect "ims_off (emulator): recorded as none" "$W= $V=" "$(oneline <"$REC")"
+ims_off_restore "$REC"
+expect "ims_off_restore (emulator): none again" "|" "$(pv $W)|$(pv $V)"
+PATH=$OLD_PATH
+# service.sh's ims_guard (cut out of it): no record; nothing due, nothing
+# done; a due write waits while the cell radio's watch holds (a call,
+# callback mode, the 5 minutes after a call, a state not read), the hold
+# logged once, and is made at the first turn after the hold ends.
+eval "$(sed -n '/^ims_guard() {$/,/^}$/p' "$MODULE/service.sh")"
+PATH=$MB:$PB:$OLD_PATH
+# The record's place, here: ims_guard must never write it.
+# shellcheck disable=SC2034 # read by ims_guard, cut out of service.sh
+IMS_OFF_RECORD=$REC
+guard_reset() {
+	# shellcheck disable=SC2034 # read by ims_guard, cut out of service.sh
+	IMS_NEXT=0 IMS_LOGGED=0 IMS_HOLD_LOGGED=0
+	CL_CALL=0 CL_CBM=0 CELL_LAST=
+	: >"$LOGDIR/module.log"
+}
+held_n() { grep -c 'Wi-Fi calling: setting 0 again waits' "$LOGDIR/module.log"; }
+props "$L=1" "$V=0" "$W=0"
+guard_reset
+ims_guard 100
+expect "ims_guard: nothing due, nothing written or logged" "0|0" "$(wc -l <"$RESETPROP_LOG" | tr -d ' ')|$(wc -l <"$LOGDIR/module.log" | tr -d ' ')"
+expect "ims_guard: next look in 30 s" 130 "$IMS_NEXT"
+# A 1 written during a call: not written back while the call lasts.
+"$PB/setprop" "$W" 1
+CL_CALL=1
+ims_guard 130
+ims_guard 132
+expect "ims_guard: a 1 written during a call is left while the call lasts" 1 "$(pv $W)"
+expect "ims_guard: the hold logged once" 1 "$(held_n)"
+if grep -q 'held: call (a call is ringing' "$LOGDIR/module.log"; then ok "ims_guard: the hold's reason logged"; else bad "ims_guard: the hold's reason logged"; fi
+# Callback mode, then the 5 minutes after the call, then a state not read.
+CL_CALL=0 CL_CBM=1
+ims_guard 140
+expect "ims_guard: left in callback mode" 1 "$(pv $W)"
+CL_CBM=0 CELL_LAST=140
+ims_guard 300
+ims_guard 439
+expect "ims_guard: left in the 5 minutes after the call" 1 "$(pv $W)"
+CL_CALL=unknown
+ims_guard 500
+expect "ims_guard: left while the call state cannot be read" 1 "$(pv $W)"
+expect "ims_guard: no resetprop call during the hold" 0 "$(wc -l <"$RESETPROP_LOG" | tr -d ' ')"
+expect "ims_guard: still logged once" 1 "$(held_n)"
+# The hold ends: written back at that turn, with resetprop -n, no record.
+CL_CALL=0
+ims_guard 502
+expect "ims_guard: written back once the hold ends" 0 "$(pv $W)"
+expect "ims_guard: with resetprop -n" "-n $W 0" "$(rlog)"
+expect "ims_guard: no record written (only post-fs-data.sh records)" no "$([ -e "$REC" ] && echo yes || echo no)"
+if grep -q 'Wi-Fi calling and video calling off again (set to 0: persist.dbg.wfc_avail_ovr)' "$LOGDIR/module.log"; then
+	ok "ims_guard: the write logged"
+else
+	bad "ims_guard: the write logged"
+fi
+# Without the time since boot (NOW 0) a due write waits too.
+guard_reset
+"$PB/setprop" "$V" 1
+ims_guard 0
+expect "ims_guard: no time since boot: left" 1 "$(pv $V)"
+PATH=$OLD_PATH
+# No module script names volte_avail_ovr outside a comment, or stores a
+# property (resetprop -p or -P).
+v=$(grep -n -E '^[^#]*volte_avail_ovr' "$MODULE"/*.sh "$MODULE"/lib/*.sh \
+	"$MODULE/META-INF/com/google/android/update-binary" 2>/dev/null)
+expect "no module script touches volte_avail_ovr" "" "$v"
+v=$(grep -n -E '^[^#]*resetprop[^#]*[[:space:]]-[a-zA-Z]*[pP]' "$MODULE"/*.sh "$MODULE"/lib/*.sh 2>/dev/null)
+expect "no module script stores a property (resetprop -p)" "" "$v"
 
 echo "  $fails failed"
 [ "$fails" -eq 0 ]

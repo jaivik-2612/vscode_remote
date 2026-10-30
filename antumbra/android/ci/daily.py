@@ -232,6 +232,8 @@ CHECK_WORDS = {
                             "Welcome's check of who may tell it about recent calls did not go as expected"),
     "module_parsers": ("The add-on read the virtual phone's call and IMS state as expected",
                        "The add-on's reading of the virtual phone's call or IMS state was not as expected"),
+    "wifi_calling_off": ("Wi-Fi calling and video calling were off for the whole phone, and Settings offered no Wi-Fi calling",
+                         "Wi-Fi calling or video calling was not shown off for the whole phone"),
     "tor_bootstrap": ("Tor connected", "Tor did not connect"),
     "tracker_blocked": ("Tracker blocked", "Tracker not blocked"),
     "tracker_test": ("The tracker test ran", "The tracker test could not run"),

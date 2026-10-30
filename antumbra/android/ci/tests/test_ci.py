@@ -1182,6 +1182,56 @@ class SummaryTest(TempDir):
         self.assertIn("| 3 | wlan0 |", text)
 
 
+class WifiCallingLevelTest(unittest.TestCase):
+    """emulator-antumbra.sh's wifi_calling_level (MOD7), cut out of the
+    script and run in bash: ok only with wfc and vt at 0, volte as before
+    the module, no "true" from the phone process and Settings' Wi-Fi calling
+    screen read without a SIM's switch; a warning otherwise."""
+
+    def level(self, before, after, platform, screen):
+        text = read(os.path.join(CI, "emulator-antumbra.sh"))
+        start = text.index("wifi_calling_level() {")
+        fn = text[start:text.index("\n}\n", start) + 3]
+        r = subprocess.run(["bash", "-c", fn + 'wifi_calling_level "$@"', "probe", before, after, platform, screen],
+                           capture_output=True, text=True, check=True)
+        return r.stdout.strip()
+
+    def test_ok(self):
+        # The emulator: no value before, no IMS service printing anything.
+        self.assertEqual(self.level("- - -", "0 0 -", "", "none"), "ok")
+        # The phone: LineageOS's 1s; the phone process says false.
+        self.assertEqual(self.level("1 1 1", "0 0 1",
+                                    "isVtEnabledByPlatform = false;isWfcEnabledByPlatform = false", "none"), "ok")
+
+    def test_warn(self):
+        for args in (
+            ("1 1 1", "1 0 1", "", "none"),        # wfc not switched off
+            ("1 1 1", "0 1 1", "", "none"),        # vt not switched off
+            ("1 1 1", "0 0 -", "", "none"),        # volte touched (cleared)
+            ("- - -", "0 0 1", "", "none"),        # volte touched (set)
+            ("1 1 1", "0 0 0", "", "none"),        # volte touched (0)
+            ("- - -", "- 0 -", "", "none"),        # wfc not set at all
+            ("1 1 1", "0 0 1", "isWfcEnabledByPlatform = true", "none"),
+            ("1 1 1", "0 0 1", "isVtEnabledByPlatform = true;isWfcEnabledByPlatform = false", "none"),
+            ("- - -", "0 0 -", "", "offered"),     # Settings offers Wi-Fi calling
+            ("- - -", "0 0 -", "", "unread"),      # the screen was not read
+            ("- - -", "", "", "none"),             # the properties not read
+        ):
+            self.assertEqual(self.level(*args), "warn", args)
+
+    def test_the_job_uses_it(self):
+        text = read(os.path.join(CI, "emulator-antumbra.sh"))
+        self.assertIn('check wifi_calling_off "$(wifi_calling_level "$IMS_PROPS_BEFORE" "$props" "$platform" "$screen")"',
+                      text)
+        # Read before the module's install, checked right after it.
+        self.assertLess(text.index("IMS_PROPS_BEFORE=$(ims_props)"), text.index("\ninstall_module\nwifi_calling_off\n"))
+        # Nothing dialled: no call intent, no emergency-number test mode.
+        start = text.index("wifi_calling_off() {")
+        body = text[start:text.index("\n}\n", start)]
+        for word in ("action.CALL", "tel:", "KEYCODE_CALL", "dial", "emergency"):
+            self.assertNotIn(word, body)
+
+
 class ModuleParsersTest(unittest.TestCase):
     """emulator-antumbra.sh's module_parsers_level, cut out of the script and
     run in bash: the parts run 21 printed fail unless exactly as expected;
