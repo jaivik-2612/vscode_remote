@@ -1,0 +1,14 @@
+[Unit]
+# Started by the Waydroid container's LXC post-stop hook
+# (antumbra-waydroid-post-stop) whenever the container stops: stops
+# Waydroid's container service once Waydroid has cleaned up, so that its
+# ExecStopPost closes the binder devices, the render node, the DMA-BUF
+# heaps and the framebuffers again. Outside the container service's cgroup,
+# so that stopping it does not kill this.
+Description=Close Android's devices once its container has stopped
+ConditionPathExists=/run/antumbra/android-enabled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/antumbra-waydroid-stopped
+TimeoutStartSec=5min

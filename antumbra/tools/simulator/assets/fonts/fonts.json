@@ -1,0 +1,65 @@
+[
+ {
+  "file": "fonts/Roboto-300.woff2",
+  "family": "Roboto",
+  "weight": 300,
+  "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Light.ttf",
+  "package": "fonts-roboto-unhinted",
+  "licence": "Apache-2.0",
+  "bytes": 14796
+ },
+ {
+  "file": "fonts/Roboto-400.woff2",
+  "family": "Roboto",
+  "weight": 400,
+  "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Regular.ttf",
+  "package": "fonts-roboto-unhinted",
+  "licence": "Apache-2.0",
+  "bytes": 14632
+ },
+ {
+  "file": "fonts/Roboto-500.woff2",
+  "family": "Roboto",
+  "weight": 500,
+  "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Medium.ttf",
+  "package": "fonts-roboto-unhinted",
+  "licence": "Apache-2.0",
+  "bytes": 14688
+ },
+ {
+  "file": "fonts/Roboto-700.woff2",
+  "family": "Roboto",
+  "weight": 700,
+  "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Bold.ttf",
+  "package": "fonts-roboto-unhinted",
+  "licence": "Apache-2.0",
+  "bytes": 14724
+ },
+ {
+  "file": "fonts/Roboto-900.woff2",
+  "family": "Roboto",
+  "weight": 900,
+  "source_in_image": "/usr/share/fonts/truetype/roboto/unhinted/RobotoTTF/Roboto-Black.ttf",
+  "package": "fonts-roboto-unhinted",
+  "licence": "Apache-2.0",
+  "bytes": 14516
+ },
+ {
+  "file": "fonts/NotoSansMono-400.woff2",
+  "family": "Noto Sans Mono",
+  "weight": 400,
+  "source_in_image": "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf",
+  "package": "fonts-noto-mono",
+  "licence": "OFL-1.1",
+  "bytes": 20860
+ },
+ {
+  "file": "fonts/NotoSansMono-700.woff2",
+  "family": "Noto Sans Mono",
+  "weight": 700,
+  "source_in_image": "/usr/share/fonts/truetype/noto/NotoSansMono-Bold.ttf",
+  "package": "fonts-noto-mono",
+  "licence": "OFL-1.1",
+  "bytes": 21384
+ }
+]

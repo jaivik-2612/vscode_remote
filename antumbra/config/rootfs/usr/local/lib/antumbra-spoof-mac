@@ -1,0 +1,118 @@
+#!/bin/sh
+# Adapted from Tails' tails-spoof-mac (the GNOME notification path and the
+# live-config username lookup are replaced by a state file the shell reads).
+#
+# Spoof the MAC address of the NIC given as argument according to the
+# Welcome screen setting (default: enabled). On failure fall into panic
+# mode: disable the NIC's driver for this session, and if that fails,
+# stop and mask NetworkManager so nothing can use the real address.
+set -eu
+
+FAILED_STATE_DIR=/run/antumbra
+FAILED_STATE_FILE="${FAILED_STATE_DIR}/mac-spoof-failed"
+
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=tails-shell-library/tails-greeter.sh
+. /usr/local/lib/tails-shell-library/tails-greeter.sh
+
+log() { logger -t spoof-mac -p daemon.info -- "$*"; }
+
+nic_exists() { [ -e "/sys/class/net/${1}" ]; }
+get_current_mac_of_nic() { cat "/sys/class/net/${1}/address"; }
+get_module_used_by_nic() {
+    if [ -L "/sys/class/net/${1}/device/driver/module" ]; then
+        basename "$(readlink "/sys/class/net/${1}/device/driver/module")"
+    fi
+}
+
+stop_and_disable_NM() {
+    for s in NetworkManager-dispatcher.service NetworkManager-wait-online.service NetworkManager.service; do
+        systemctl stop "${s}" || true
+        systemctl disable "${s}" || true
+        systemctl mask "${s}" || true
+    done
+    log "Networking disabled"
+}
+
+record_failure() {
+    mkdir -p "${FAILED_STATE_DIR}"
+    printf '%s\n%s\n' "${1}" "${2}" > "${FAILED_STATE_FILE}"
+}
+
+mac_spoof_panic() {
+    nic="${1}"
+    ip link set dev "${nic}" down || log "Failed to down NIC ${nic} in panic mode."
+    module="$(get_module_used_by_nic "${nic}")"
+    if [ -n "${module}" ]; then
+        printf 'install %s /bin/true\n' "${module}" >> "/etc/modprobe.d/${module}-blocklist.conf"
+        modprobe -r "${module}" 2>/dev/null || rmmod "${module}" 2>/dev/null || true
+    fi
+    if nic_exists "${nic}"; then
+        log "Failed to unload module ${module:-?} of NIC ${nic}."
+        stop_and_disable_NM
+        record_failure "All networking disabled" "MAC address anonymization failed for ${nic} and the error recovery also failed, so all networking is disabled."
+    else
+        log "Successfully unloaded module ${module} of NIC ${nic}."
+        record_failure "Network interface disabled" "MAC address anonymization failed for ${nic}, so it is disabled for this session."
+    fi
+}
+
+spoof_mac() {
+    if ! msg="$(macchanger -e "${1}" 2>&1)"; then
+        log "macchanger failed for NIC ${1}: ${msg}"
+        return 1
+    fi
+}
+
+NIC="${1}"
+
+if ! mac_spoof_is_enabled; then
+    log "MAC spoofing disabled by the user for ${NIC}"
+    exit 0
+fi
+
+# udev can expand $name before systemd's net-setup-link renames the device
+# (eth0 -> enp0s7 for a PCI NIC); the event's IFINDEX does not change, so
+# find the interface by its index if the name is gone.
+if ! nic_exists "${NIC}" && [ -n "${IFINDEX:-}" ]; then
+    for d in /sys/class/net/*; do
+        if [ "$(cat "${d}/ifindex" 2>/dev/null)" = "${IFINDEX}" ]; then
+            log "NIC ${NIC} was renamed to $(basename "${d}")"
+            NIC="$(basename "${d}")"
+            break
+        fi
+    done
+fi
+
+log "Trying to spoof MAC address of NIC ${NIC}..."
+if ! nic_exists "${NIC}"; then
+    log "NIC ${NIC} doesn't exist, skipping"
+    exit 1
+fi
+
+OLD_MAC="$(get_current_mac_of_nic "${NIC}")"
+NEW_MAC=""
+# There is a 1/2^24 chance macchanger will pick the real address; retry.
+for _ in 1 2 3; do
+    if ! spoof_mac "${NIC}"; then
+        NEW_MAC=""
+        break
+    fi
+    NEW_MAC="$(get_current_mac_of_nic "${NIC}")"
+    [ "${OLD_MAC}" != "${NEW_MAC}" ] && break
+done
+
+if [ -z "${OLD_MAC}" ] || [ -z "${NEW_MAC}" ] || [ "${OLD_MAC}" = "${NEW_MAC}" ] \
+    || grep -qs -w 'debug=test_mac_spoof_panic' /proc/cmdline; then
+    log "Failed to spoof MAC address of NIC ${NIC}. Going into panic mode."
+    if ! mac_spoof_panic "${NIC}"; then
+        log "Panic mode failed for NIC ${NIC}."
+        stop_and_disable_NM
+    fi
+    exit 1
+fi
+log "Successfully spoofed MAC address of NIC ${NIC}"
+# Evidence for antumbra-selfcheck --late: the interface index with the old
+# and the new address.
+mkdir -p "${FAILED_STATE_DIR}/mac-spoof"
+printf '%s %s %s\n' "${NIC}" "${OLD_MAC}" "${NEW_MAC}" > "${FAILED_STATE_DIR}/mac-spoof/$(cat "/sys/class/net/${NIC}/ifindex")"

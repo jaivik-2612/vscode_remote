@@ -1,0 +1,73 @@
+#!/bin/sh
+# shellcheck disable=SC2154  # DESTDIR and version are exported by mkinitramfs
+# Antumbra initramfs hook. Adds the recorded live-partition UUID, the tools
+# the loop/overlay/verity path needs and the few modules that are not built
+# into the kernel, then removes every network-related module live-boot's
+# hook pulled in: nothing in the initramfs may bring up a network interface
+# before the firewall and the MAC spoofer are in place (Tails patches
+# live-boot for the same reason).
+PREREQ="udev live"
+prereqs() { echo "${PREREQ}"; }
+case "${1:-}" in prereqs) prereqs; exit 0 ;; esac
+. /usr/share/initramfs-tools/hook-functions
+mkdir -p "${DESTDIR}/etc/antumbra" "${DESTDIR}/etc/modprobe.d"
+cp /etc/antumbra/live-fs-uuid "${DESTDIR}/etc/antumbra/live-fs-uuid"
+cp /etc/modprobe.d/all-net-blocklist.conf "${DESTDIR}/etc/modprobe.d/all-net-blocklist.conf"
+# initramfs-tools' hidden-dependency rule for the (built-in) msm DRM driver
+# adds these after every hook ran, so they cannot be kept out; make them
+# unloadable inside the initramfs instead (the root filesystem loads them
+# itself later). 80-base-initramfs.sh checks this file is in place.
+cat > "${DESTDIR}/etc/modprobe.d/antumbra-initramfs.conf" <<'MODPROBE'
+# Antumbra: never load these inside the initramfs (no QRTR, no glink).
+install qrtr /bin/false
+install pmic_glink /bin/false
+install pmic_glink_altmode /bin/false
+install gpio_sbu_mux /bin/false
+MODPROBE
+copy_exec /sbin/blkid /sbin
+copy_exec /sbin/losetup /sbin
+copy_exec /usr/bin/udevadm /usr/bin
+manual_add_modules loop overlay squashfs ext4 dm-verity dm-mod
+
+# Module subtrees that must not reach the initramfs.
+banned_subtree() {
+    case "$1" in
+        drivers/net|drivers/net/*|net|net/*|drivers/soc/qcom|drivers/soc/qcom/*|drivers/remoteproc|drivers/remoteproc/*|drivers/rpmsg|drivers/rpmsg/*|drivers/bluetooth|drivers/bluetooth/*|drivers/nfc|drivers/nfc/*|drivers/usb/gadget|drivers/usb/gadget/*|drivers/usb/typec|drivers/usb/typec/*)
+            return 0 ;;
+    esac
+    return 1
+}
+
+# 1. live-boot's "auto_add_modules net" copies the USB NIC drivers at once
+#    (dracut-install) and queues the rest. Drop what is already there.
+for kmod in "${DESTDIR}/lib/modules/${version}/kernel" "${DESTDIR}/usr/lib/modules/${version}/kernel"; do
+    [ -d "${kmod}" ] || continue
+    for sub in drivers/net net drivers/soc/qcom drivers/remoteproc drivers/rpmsg drivers/bluetooth drivers/nfc drivers/usb/gadget drivers/usb/typec; do
+        rm -rf "${kmod:?}/${sub}"
+    done
+done
+
+# 2. initramfs-tools (>= 0.142) queues module names (or "=dir" entries) in
+#    __MODULES_TO_ADD and copies them after all hooks ran. Filter the queue;
+#    refuse to continue if that interface is gone rather than silently ship
+#    network drivers.
+if [ -z "${__MODULES_TO_ADD:-}" ] || ! [ -f "${__MODULES_TO_ADD}" ]; then
+    echo "antumbra initramfs hook: initramfs-tools no longer exposes __MODULES_TO_ADD" >&2
+    exit 1
+fi
+keep="$(mktemp)"
+while IFS= read -r mod; do
+    [ -n "${mod}" ] || continue
+    case "${mod}" in
+        =*) banned_subtree "${mod#=}" && continue ;;
+        *)
+            path="$(modinfo -k "${version}" -F filename "${mod}" 2>/dev/null || true)"
+            case "${path}" in
+                */kernel/*) banned_subtree "${path#*/kernel/}" && continue ;;
+            esac ;;
+    esac
+    printf '%s\n' "${mod}" >> "${keep}"
+done < "${__MODULES_TO_ADD}"
+cat "${keep}" > "${__MODULES_TO_ADD}"
+rm -f "${keep}"
+exit 0

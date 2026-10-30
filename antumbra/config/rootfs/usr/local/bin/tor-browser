@@ -1,0 +1,6 @@
+#!/bin/sh
+# User-side Tor Browser launcher: hands over to the root helper, which enters
+# the tbb network namespace and drops back to the user (Tails' netnsdrop).
+export PATH='/usr/local/bin:/usr/bin:/bin'
+exec sudo --preserve-env=WAYLAND_DISPLAY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,LANG,LANGUAGE,XDG_SESSION_TYPE,XDG_CURRENT_DESKTOP \
+    /usr/local/lib/antumbra-run-tor-browser "$@"

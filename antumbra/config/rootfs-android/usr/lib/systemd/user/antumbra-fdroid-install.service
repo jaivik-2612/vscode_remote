@@ -1,0 +1,14 @@
+[Unit]
+# F-Droid, the app store Antumbra ships (no Google apps), installed into
+# Android on its first start in a session unless it is already there (kept
+# by the "Android" Persistent Storage feature).
+Description=Install F-Droid into Android
+ConditionPathExists=/run/antumbra/android-enabled
+ConditionPathExists=/usr/share/antumbra/android/F-Droid.apk
+After=antumbra-android-session.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/antumbra-fdroid-install
+# Android's start (up to 40 minutes) and the installation (up to 15).
+TimeoutStartSec=60min

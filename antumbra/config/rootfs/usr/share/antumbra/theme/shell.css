@@ -1,0 +1,464 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * Antumbra shell theme, GTK 3: Phosh 0.46 and squeekboard 1.43.
+ * docs/architecture.md, "Interface theme".
+ *
+ * Loaded through ~/.config/gtk-3.0/gtk.css (a one-line @import that
+ * antumbra-session writes when the file is absent, and hook 50 installs for
+ * the Welcome screen's user). GTK 3 reads that file at USER priority (800),
+ * above phosh's compiled-in stylesheet (600) and its accent colour (601),
+ * and the highest-priority provider wins each property whatever the
+ * selector's specificity. Two consequences shape this file:
+ *
+ * - Every GTK 3 program of the user reads it, Tor Browser's chrome
+ *   included. Every selector therefore names a phosh or squeekboard node
+ *   (phosh-*, .phosh-*, #phosh-*, sq_*), never a bare element such as
+ *   button, and no GTK-wide colour (theme_selected_bg_color and the like) is
+ *   redefined. The colour names defined below are phosh's own (phosh_*) or
+ *   new (antumbra_*); nothing else refers to them.
+ * - A property set here overrides phosh's rule for every state, so where a
+ *   property is set the states that need another value are set here too.
+ *
+ * Node names and classes are internal to phosh and squeekboard and come
+ * from phosh 0.46.0 (src/stylesheet/common.css) and squeekboard 1.43.1
+ * (data/style*.css). Check the screenshots after upgrading either.
+ *
+ * Palette: Material 3 "tonal spot" dark scheme (Android's default dynamic
+ * colour scheme), generated once offline from the seed #4d2c9e (a deep
+ * violet, HCT hue 298) with material-color-utilities 0.3.0 (Apache-2.0).
+ * Only the resulting values are kept. apps.css carries the same values for
+ * GTK 4; tests/unit/test_theme.py checks that the two agree.
+ */
+
+/* Palette (tone in brackets) */
+@define-color antumbra_primary #cebdfe;                    /* primary 80 */
+@define-color antumbra_on_primary #35275d;                 /* primary 20 */
+@define-color antumbra_primary_container #4c3e76;          /* primary 30 */
+@define-color antumbra_on_primary_container #e8ddff;       /* primary 90 */
+@define-color antumbra_secondary #cbc3dc;                  /* secondary 80 */
+@define-color antumbra_secondary_container #494458;        /* secondary 30 */
+@define-color antumbra_on_secondary_container #e8def8;     /* secondary 90 */
+@define-color antumbra_tertiary #efb8c9;                   /* tertiary 80 */
+@define-color antumbra_surface #141218;                    /* neutral 6 */
+@define-color antumbra_surface_container_lowest #0f0d13;   /* neutral 4 */
+@define-color antumbra_surface_container_low #1c1b20;      /* neutral 10 */
+@define-color antumbra_surface_container #211f24;          /* neutral 12 */
+@define-color antumbra_surface_container_high #2b292f;     /* neutral 17 */
+@define-color antumbra_surface_container_highest #36343a;  /* neutral 22 */
+@define-color antumbra_on_surface #e6e1e9;                 /* neutral 90 */
+@define-color antumbra_on_surface_variant #cac4cf;         /* neutral variant 80 */
+@define-color antumbra_outline #948f99;                    /* neutral variant 60 */
+@define-color antumbra_outline_variant #48454e;            /* neutral variant 30 */
+@define-color antumbra_light_surface #fdf7ff;              /* neutral 98 */
+@define-color antumbra_light_on_surface #1c1b20;           /* neutral 10 */
+
+/* Phosh's colour names (phosh 0.46 src/stylesheet/adwaita-dark.css). Its
+ * own rules refer to these, so redefining them retints the whole shell;
+ * the hover and pressed shades it derives follow. */
+@define-color phosh_fg_color @antumbra_on_surface;
+@define-color phosh_bg_color @antumbra_surface;
+@define-color phosh_notification_bg_color @antumbra_surface_container_high;
+@define-color phosh_action_bg_color @antumbra_secondary_container;
+@define-color phosh_button_bg_color @antumbra_surface_container_highest;
+@define-color phosh_splash_bg_color @antumbra_light_surface;
+@define-color phosh_splash_fg_color @antumbra_light_on_surface;
+
+/* Phosh rings a focused button, which a tap also makes, in GNOME's accent
+ * colour; use the primary colour in phosh's surfaces instead. More
+ * specific rules below (quick-setting tiles) set their own. */
+phosh-top-panel button:focus,
+phosh-home button:focus,
+phosh-lockscreen button:focus,
+.phosh-system-modal button:focus {
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
+
+/* ---- Top bar ------------------------------------------------------------ */
+
+phosh-top-panel .phosh-topbar-clock,
+phosh-top-panel .phosh-topbar-date {
+  font-weight: 500;
+}
+
+phosh-top-panel .indicators,
+.phosh-wwan-indicator {
+  font-weight: 500;
+}
+
+
+/* ---- Settings drawer ---------------------------------------------------- */
+
+.phosh-settings-menu {
+  border-bottom-left-radius: 28px;
+  border-bottom-right-radius: 28px;
+}
+
+widget.phosh-settings-menu > scrolledwindow {
+  border-radius: 28px;
+}
+
+/* Quick-setting tiles: tall rounded rectangles (Material 3's 28px
+ * "extra large" shape) instead of small pills, filled with the primary
+ * colour when on. */
+phosh-quick-setting {
+  min-height: 64px;
+  border-radius: 28px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+phosh-quick-setting:active {
+  background-color: @antumbra_primary;
+  color: @antumbra_on_primary;
+}
+
+/* Phosh's horizontal padding: at 360px wide (the VM) two tiles per row
+ * leave just enough room for "Bluetooth" next to its arrow. */
+phosh-quick-setting button {
+  padding: 0 12px;
+}
+
+phosh-quick-setting button:first-child {
+  border-radius: 28px 0 0 28px;
+}
+
+phosh-quick-setting button:only-child {
+  border-radius: 28px;
+}
+
+phosh-quick-setting button:last-child:not(:only-child) {
+  border-radius: 0 28px 28px 0;
+}
+
+/* State layers: the content colour at 8% (hover) and 12% (pressed). */
+phosh-quick-setting button:hover {
+  background: mix(@phosh_button_bg_color, @phosh_fg_color, 0.08);
+}
+
+phosh-quick-setting button:active {
+  background: mix(@phosh_button_bg_color, @phosh_fg_color, 0.12);
+}
+
+phosh-quick-setting:active button:hover {
+  background: mix(@antumbra_primary, @antumbra_on_primary, 0.08);
+  color: @antumbra_on_primary;
+}
+
+phosh-quick-setting:active button:active {
+  background: mix(@antumbra_primary, @antumbra_on_primary, 0.12);
+  color: @antumbra_on_primary;
+}
+
+phosh-quick-setting button:focus {
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
+phosh-quick-setting:active button:focus {
+  box-shadow: inset 0 0 0 2px alpha(@antumbra_on_primary, 0.4);
+}
+
+phosh-quick-setting separator {
+  margin: 18px 0;
+  background-color: alpha(currentColor, 0.24);
+}
+
+/* Brightness, volume and torch sliders: a thick track filled with the
+ * primary colour, the handle a dark dot at the end of the fill. GTK's own
+ * Adwaita draws handles and switches with gradient images, so these rules
+ * use the background shorthand, which clears the image. */
+.phosh-settings-menu scale trough {
+  min-height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: @antumbra_surface_container_highest;
+  outline-color: @antumbra_primary;
+}
+
+.phosh-settings-menu scale highlight {
+  min-height: 28px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 14px;
+  background: @antumbra_primary;
+}
+
+.phosh-settings-menu scale slider {
+  min-width: 20px;
+  min-height: 20px;
+  margin: 4px;
+  border: none;
+  border-radius: 10px;
+  background: @antumbra_on_primary;
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
+.phosh-settings-menu switch:checked,
+.phosh-status-page switch:checked {
+  border-color: @antumbra_primary;
+  background: @antumbra_primary;
+}
+
+.phosh-settings-menu switch:checked slider,
+.phosh-status-page switch:checked slider {
+  border-color: @antumbra_on_primary;
+  background: @antumbra_on_primary;
+}
+
+/* Cards in the drawer: notifications, media player, detail pages. */
+phosh-notification-frame .notification-container,
+phosh-call-notification,
+phosh-media-player,
+.phosh-status-page,
+.phosh-settings-list-box {
+  border-radius: 24px;
+}
+
+phosh-notification-content .actions-area button {
+  color: @antumbra_on_secondary_container;
+}
+
+phosh-notification-content .actions-area button:first-child {
+  border-bottom-left-radius: 24px;
+}
+
+phosh-notification-content .actions-area button:last-child {
+  border-bottom-right-radius: 24px;
+}
+
+phosh-notification-content .actions-area button:only-child {
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+.phosh-settings-list-box list row,
+.phosh-status-page list row {
+  border-radius: 16px;
+}
+
+
+/* ---- Home: gesture pill, search, app grid -------------------------------- */
+
+/* A thin gesture pill (108x4, as Android's) in place of phosh's wide bar.
+ * -gtk-recolor paints it in the foreground colour; GTK 3 recolours only
+ * files named *-symbolic.svg, hence the name. Phosh's position,
+ * repeat and its shake animation on a failed gesture still apply. */
+phosh-home #powerbar {
+  background-image: -gtk-recolor(url("file:///usr/share/antumbra/theme/pill-symbolic.svg"));
+  background-size: 108px 4px;
+}
+
+/* Dim the wallpaper behind the open app grid, as Android's app drawer
+ * does, so labels stay legible on any wallpaper. */
+phosh-home .phosh-overview {
+  background-color: alpha(@antumbra_surface_container_lowest, 0.72);
+}
+
+.phosh-search-bar {
+  padding: 10px 20px 10px 16px;
+  background-color: @antumbra_surface_container_high;
+}
+
+.phosh-search-bar:focus {
+  border-color: @antumbra_primary;
+  box-shadow: inset 0 0 0 1px @antumbra_primary;
+}
+
+/* Labels at Material 3 "label medium" size; icons stay at phosh's 64px. */
+phosh-app-grid-button button,
+phosh-app-grid-folder-button button {
+  font-size: 12px;
+  border-radius: 20px;
+  padding: 6px 0 4px 0;
+}
+
+.search-active phosh-app-grid-button:first-child button {
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
+
+/* ---- Lock screen ---------------------------------------------------------- */
+
+/* Regular weight instead of phosh's light 84px; the small clock (shown with
+ * notifications or media) is Material 3's "display large". */
+#phosh-lockscreen-clock {
+  font-weight: 400;
+  font-size: 80px;
+}
+
+.p-small #phosh-lockscreen-clock {
+  font-size: 57px;
+}
+
+#phosh-lockscreen-date {
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.p-small #phosh-lockscreen-date {
+  font-size: 14px;
+}
+
+phosh-keypad button {
+  background: alpha(@antumbra_surface_container_highest, 0.6);
+}
+
+phosh-keypad button:active {
+  background: alpha(@antumbra_on_surface, 0.24);
+}
+
+phosh-keypad label.digit {
+  font-size: 28px;
+  font-weight: 400;
+}
+
+.phosh-lockscreen-pin,
+.phosh-lockscreen-pin:focus {
+  border-radius: 16px;
+}
+
+
+/* ---- System dialogs, power menu, OSD, splash ------------------------------- */
+
+/* Polkit, Wi-Fi password, keyring, end-session and power-menu dialogs. */
+.phosh-system-modal-dialog {
+  border-color: transparent;
+  border-radius: 28px;
+  background-color: @antumbra_surface_container_high;
+}
+
+.phosh-system-modal-dialog-buttons button:first-child {
+  border-bottom-left-radius: 27px;
+}
+
+.phosh-system-modal-dialog-buttons button:last-child {
+  border-bottom-right-radius: 27px;
+}
+
+.phosh-system-modal-dialog-buttons button:only-child {
+  border-bottom-left-radius: 27px;
+  border-bottom-right-radius: 27px;
+}
+
+.phosh-system-modal-dialog button.suggested-action {
+  background: @antumbra_primary;
+  color: @antumbra_on_primary;
+}
+
+.phosh-system-modal-dialog button.suggested-action:focus {
+  box-shadow: inset 0 0 0 2px alpha(@antumbra_on_primary, 0.4);
+}
+
+.phosh-system-modal-dialog entry:focus {
+  box-shadow: inset 0 0 0 2px @antumbra_primary;
+}
+
+phosh-power-menu grid button {
+  border-radius: 28px;
+}
+
+phosh-osd-window #osd-bubble {
+  border-radius: 28px;
+  background-color: @antumbra_surface_container_high;
+}
+
+phosh-osd-window levelbar block.low,
+phosh-osd-window levelbar block.high,
+phosh-osd-window levelbar block.full {
+  background-color: @antumbra_primary;
+}
+
+phosh-osd-window levelbar trough {
+  background-color: @antumbra_surface_container_highest;
+}
+
+
+/* ---- On-screen keyboard (squeekboard) --------------------------------------
+ * Flat keys with small rounded corners on a tonal surface; modifier keys
+ * on the secondary container, Enter in the primary colour. Squeekboard
+ * picks a light or dark stylesheet from the GTK theme; every colour it sets
+ * is set here, so the keyboard looks the same under both. */
+
+sq_view {
+  font-family: Roboto, sans-serif;
+  background-color: @antumbra_surface_container;
+  color: @antumbra_on_surface;
+  box-shadow: none;
+}
+
+sq_view sq_button {
+  border-radius: 8px;
+  color: @antumbra_on_surface;
+  background: @antumbra_surface_container_highest;
+  box-shadow: none;
+}
+
+sq_view sq_button:active {
+  background: mix(@antumbra_surface_container_highest, @antumbra_on_surface, 0.16);
+}
+
+sq_view sq_button.altline,
+sq_view sq_button.special,
+sq_view sq_button.special-2,
+sq_view sq_button.special-3,
+sq_view sq_button.wide,
+sq_view sq_button.change-view,
+sq_view sq_button.change-view-2,
+sq_view sq_button.change-view-3,
+sq_view sq_button.subtle-highlight,
+sq_view sq_button.subtle-highlight-2,
+sq_view sq_button.emoji-group,
+sq_view sq_button.character-group {
+  color: @antumbra_on_secondary_container;
+  background: @antumbra_secondary_container;
+  border: none;
+}
+
+sq_view sq_button.altline:active,
+sq_view sq_button.special:active,
+sq_view sq_button.special-2:active,
+sq_view sq_button.special-3:active,
+sq_view sq_button.wide:active,
+sq_view sq_button.change-view:active,
+sq_view sq_button.change-view-2:active,
+sq_view sq_button.change-view-3:active,
+sq_view sq_button.subtle-highlight:active,
+sq_view sq_button.subtle-highlight-2:active,
+sq_view sq_button.emoji-group:active,
+sq_view sq_button.character-group:active {
+  background: mix(@antumbra_secondary_container, @antumbra_on_secondary_container, 0.16);
+  border: none;
+}
+
+sq_view sq_button.placeholder,
+sq_view sq_button.placeholder-2 {
+  background: alpha(@antumbra_surface_container_highest, 0.4);
+}
+
+sq_view sq_button.placeholder:active,
+sq_view sq_button.placeholder-2:active {
+  background: alpha(@antumbra_surface_container_highest, 0.4);
+}
+
+/* Shift pressed once, then locked (caps). */
+sq_view sq_button.latched {
+  color: @antumbra_on_primary_container;
+  background: @antumbra_primary_container;
+}
+
+sq_view sq_button.locked {
+  color: @antumbra_on_primary;
+  background: @antumbra_primary;
+}
+
+sq_view #Return {
+  color: @antumbra_on_primary;
+  background: @antumbra_primary;
+}
+
+sq_view #Return:active {
+  color: @antumbra_on_primary;
+  background: mix(@antumbra_primary, @antumbra_on_primary, 0.16);
+}

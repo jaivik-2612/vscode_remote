@@ -1,0 +1,14 @@
+[Unit]
+Description=Antumbra privacy self-check (early)
+After=nftables.service systemd-sysctl.service antumbra-create-netns.service
+Requires=nftables.service
+Before=antumbra-apply-welcome-settings.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/rm -f /run/antumbra/selfcheck.status
+ExecStart=/usr/local/sbin/antumbra-selfcheck
+
+[Install]
+WantedBy=multi-user.target

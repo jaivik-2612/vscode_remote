@@ -1,0 +1,18 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# The "Android" launcher: Android's own full-screen interface when Android
+# apps are on for this session, otherwise a notification that says how to
+# turn them on (at the Welcome screen, at the next start).
+set -u
+notify() {
+    gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.Notify "Android" 0 "waydroid" "$1" "$2" "[]" "{}" 8000 >/dev/null 2>&1 || true
+}
+if [ ! -e /run/antumbra/android-enabled ]; then
+    notify "Android apps are off" "Turn on Android apps on the Welcome screen when you next start Antumbra."
+    exit 0
+fi
+if [ ! -e /run/antumbra/android-ready ]; then
+    notify "Android is starting" "Android opens when it is ready. The first start of a session takes a minute or two."
+fi
+exec waydroid show-full-ui

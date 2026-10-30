@@ -1,0 +1,45 @@
+# Antumbra's own block list: domains that this phone's software (LineageOS
+# 23.2 on the OnePlus 7T Pro, with Qualcomm and OnePlus vendor parts) may
+# contact on its own. One domain per line; each also blocks its subdomains.
+#
+# Antumbra switches these services off (L0). This list is the second line:
+# if one is missed, its lookup fails here and the request never leaves,
+# not even through Tor. Checked on 2026-10-11.
+#
+# Deliberately not listed: Android's connectivity check
+# (connectivitycheck.gstatic.com and the like). Blocking it would mark every
+# network as "no Internet"; the check is switched off instead, and if it
+# runs it goes through Tor like everything else.
+
+# LineageOS Statistics (also in HaGeZi Pro).
+stats.lineageos.org
+
+# Qualcomm location assistance: XTRA satellite data and the izat location
+# services, which identify the chipset to Qualcomm's servers.
+izatcloud.net
+gpsonextra.net
+
+# SUPL (assisted GPS) server set by AOSP; it learns the phone's cell and
+# position.
+supl.google.com
+
+# Remote key provisioning: Android fetching attestation keys from Google,
+# which ties the device to a Google request. The OnePlus 7T Pro's keystore
+# does not use it; listed in case a component tries.
+remoteprovisioning.googleapis.com
+
+# OnePlus's analytics endpoint in OxygenOS (reported in 2017). LineageOS
+# does not ship OxygenOS apps; listed in case vendor parts carry it over.
+open.oneplus.net
+
+# Google's ad-serving and ad-conversion domains, whole. HaGeZi Pro blocks
+# only listed subdomains of them (so that ad links in search results keep
+# working); Antumbra has no use for either. The emulator's tracker test
+# asks for doubleclick.net.
+doubleclick.net
+googleadservices.com
+
+# Firefox's DNS-over-HTTPS canary. A "no such name" answer makes
+# Firefox-based browsers (not Tor Browser, which runs its own Tor) keep
+# using the system's lookups instead of their own encrypted DNS.
+use-application-dns.net

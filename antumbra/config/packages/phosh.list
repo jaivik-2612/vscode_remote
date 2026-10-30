@@ -1,0 +1,17 @@
+# Graphics, fonts and media stack for the Phosh session.
+mesa-vulkan-drivers
+libgl1-mesa-dri
+libegl-mesa0
+fonts-cantarell
+# Roboto, the interface font (90_antumbra.gschema.override); Apache-2.0.
+fonts-roboto-unhinted
+fonts-noto-core
+fonts-noto-color-emoji
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-pipewire
+alsa-ucm-conf
+adwaita-icon-theme
+# GTK loads the (SVG) icon theme through gdk-pixbuf's SVG loader, which
+# GTK only recommends: without it every icon is a placeholder.
+librsvg2-common

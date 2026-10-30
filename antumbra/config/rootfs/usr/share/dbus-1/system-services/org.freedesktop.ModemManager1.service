@@ -1,0 +1,7 @@
+# ModemManager is not installed; this activation entry makes sure nothing can
+# start it on demand either (the modem radio must stay in low-power mode).
+[D-BUS Service]
+Name=org.freedesktop.ModemManager1
+Exec=/bin/false
+User=root
+SystemdService=

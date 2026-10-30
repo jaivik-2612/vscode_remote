@@ -1,0 +1,10 @@
+#!/system/bin/sh
+# Test stand-in for Android's getprop: properties are NAME=VALUE lines in
+# /antumbra-test/props.
+f=/antumbra-test/props
+if [ $# -eq 0 ]; then
+	cat "$f"
+	exit 0
+fi
+v=$(grep -F "$1=" "$f" | sed -n "s/^$1=//p" | tail -n 1)
+printf '%s\n' "${v:-${2-}}"

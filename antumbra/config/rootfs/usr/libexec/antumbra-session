@@ -1,0 +1,30 @@
+#!/bin/sh
+# The user's session, started by greetd on the Welcome screen's request.
+# phosh-session does not export the session variables itself.
+set -eu
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+export XDG_SESSION_DESKTOP=phosh
+export GDMSESSION=phosh
+# shellcheck source=antumbra-session-env
+. /usr/libexec/antumbra-session-env
+
+# Interface theme (docs/architecture.md, "Interface theme"): GTK reads
+# gtk-3.0/gtk.css (phosh, squeekboard) and gtk-4.0/gtk.css (apps) from the
+# user's configuration directory. Write one-line stubs importing the system
+# stylesheets, only where no file exists: a user's own gtk.css, for example
+# from the Dotfiles persistence feature (linked in before this session
+# starts), wins, and an empty file opts out. The stubs are not in /etc/skel
+# because an image-provided ~/.config would stop antumbra-persistence from
+# linking a persisted one.
+theme_stub() {
+    [ -n "${HOME:-}" ] || return 0
+    dir="${XDG_CONFIG_HOME:-${HOME}/.config}/$1"
+    if [ -e "${dir}/gtk.css" ] || [ -L "${dir}/gtk.css" ]; then return 0; fi
+    mkdir -p "${dir}"
+    printf '@import url("file:///usr/share/antumbra/theme/%s");\n' "$2" > "${dir}/gtk.css"
+}
+theme_stub gtk-3.0 shell.css || true
+theme_stub gtk-4.0 apps.css || true
+
+exec /usr/bin/phosh-session

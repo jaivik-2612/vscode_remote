@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+
+     Antumbra Welcome: the device owner, and the home screen until the
+     session starts. README.md explains each component and permission. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Only to read the DNS filter's status page on 127.0.0.1:5380. The
+         network security config allows clear text to the loopback address
+         alone, and the app connects nowhere else. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Wi-Fi off and on, and removing saved networks: allowed to a device
+         owner (WifiManager.setWifiEnabled, removeNonCallerConfiguredNetworks). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The session service keeps the choices in memory until shutdown and
+         shows the ongoing notification with "Quick power off". -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- For "Return to call" before Start (TelecomManager.showInCallScreen,
+         EmergencyCall.kt), and for the emergency card (WEL10): Android's
+         emergency-number list (TelephonyManager.getEmergencyNumberList) and
+         whether a call is in progress (TelecomManager.isInCall). Welcome
+         grants it to itself as the device owner; it reads no identifier
+         with it (NoIdentifiersTest). -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Only for "Show my position" (WEL10, Position.kt): one fix from the
+         satellite receiver (GPS_PROVIDER) on request, shown on screen and
+         nowhere else. Welcome grants both to itself as the device owner at
+         the first press and never revokes them (revoking a runtime
+         permission kills the app). COARSE is declared with FINE, as Android
+         requires. Never background location: the fix is taken only while
+         Welcome is on screen. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Granted only if the Antumbra module installs this app as a
+         privileged app with a privapp-permissions allowlist entry. Then
+         Quick power off powers off; otherwise it can only restart
+         (DevicePolicyManager.reboot). -->
+    <uses-permission
+        android:name="android.permission.SHUTDOWN"
+        tools:ignore="ProtectedPermissions" />
+
+    <!-- The "Emergency call" button looks up the system's emergency dial
+         pad (EmergencyCall.kt); without this, package visibility hides it. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.DIAL_EMERGENCY" />
+        </intent>
+    </queries>
+
+    <application
+        android:name=".WelcomeApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Antumbra"
+        tools:targetApi="36">
+
+        <!-- The Welcome screen. The home screen and a locked task until
+             Start; disabled at Start so that the normal launcher becomes
+             home, and enabled again at shutdown and at boot. -->
+        <!-- configChanges: rotation, keyboard and display changes do not
+             re-create it, so a Start in progress is not interrupted. -->
+        <activity
+            android:name=".WelcomeActivity"
+            android:clearTaskOnLaunch="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|fontScale|uiMode"
+            android:directBootAware="true"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <!-- After Start: Tor's progress, the tracker filter's counters and
+             "Power off now". Also the launcher entry. Its own task
+             affinity: with the package's, it joined Welcome's home task,
+             and when PackageManager finished the disabled WelcomeActivity
+             (about 10 s after Start) that task closed with it and the
+             launcher came to the front. -->
+        <activity
+            android:name=".StatusActivity"
+            android:directBootAware="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="org.antumbra.welcome.status">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".AdminReceiver"
+            android:directBootAware="true"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/device_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Boot, and the moment this app becomes the device owner. Only
+             the system sends these, so the receiver is not exported. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:directBootAware="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.app.action.DEVICE_OWNER_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The notification's "Quick power off" action (explicit, from this
+             app only). -->
+        <receiver
+            android:name=".QuickPowerOffReceiver"
+            android:directBootAware="true"
+            android:exported="false" />
+
+        <!-- The session's choices for the Antumbra module, which reads
+             content://org.antumbra.welcome.state/session with the 'content
+             query' command, and the module's word on the last calls, which
+             it gives with 'content call' (MOD11). Exported because that
+             command runs outside this app; the provider itself answers
+             queries from uid 0 (root) and uid 2000 (shell) only, and takes
+             the module's word from uid 0 only. -->
+        <provider
+            android:name=".StateProvider"
+            android:authorities="org.antumbra.welcome.state"
+            android:directBootAware="true"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            tools:ignore="ExportedContentProvider" />
+
+        <service
+            android:name=".SessionService"
+            android:directBootAware="true"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the privacy session's choices in memory until shutdown and offers an immediate power-off (Quick power off)." />
+        </service>
+
+        <service
+            android:name=".QuickPowerOffTileService"
+            android:directBootAware="true"
+            android:exported="true"
+            android:icon="@drawable/ic_power"
+            android:label="@string/tile_label"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

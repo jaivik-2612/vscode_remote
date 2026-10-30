@@ -1,0 +1,15 @@
+[Unit]
+Description=Retry the phone's own firmware once udev has seen every partition
+After=systemd-udev-trigger.service antumbra-phone-firmware.service
+Before=rmtfs.service tqftpserv.service
+ConditionPathExists=/run/antumbra/phone-firmware/incomplete
+ConditionVirtualization=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/antumbra-phone-firmware --late
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

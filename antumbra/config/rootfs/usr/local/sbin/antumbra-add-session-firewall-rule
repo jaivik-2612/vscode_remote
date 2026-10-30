@@ -1,0 +1,15 @@
+#!/bin/sh
+# Ported from Tails' tails-add-session-firewall-rule: record an nftables rule
+# for the session (so the dispatcher can replay it) and optionally apply it.
+# usage: antumbra-add-session-firewall-rule [--apply] 'add rule inet antumbra-session forward ...'
+set -eu
+APPLY=no
+if [ "${1}" = --apply ]; then APPLY=yes; shift; fi
+RULE="${*}"
+mkdir -p /var/lib/antumbra
+if ! grep --silent --no-messages --line-regexp --fixed-strings -- "${RULE}" /var/lib/antumbra/session-firewall-rules; then
+    echo "${RULE}" >> /var/lib/antumbra/session-firewall-rules
+fi
+if [ "${APPLY}" = yes ]; then
+    /usr/sbin/nft "${RULE}"
+fi
