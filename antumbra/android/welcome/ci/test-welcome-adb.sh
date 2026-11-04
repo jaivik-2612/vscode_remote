@@ -1537,7 +1537,7 @@ grants_ok() {
     app_grants $P3 false false false false false
 }
 fault() { sed -i "s/^android.permission.$2: .*/$3/" "$work/pkg-$1"; } # PKG PERMISSION LINE: one permission as the dump prints it
-grants() { "$script" check-app-grants --wait "${1:-0}" --precise $P1 --approximate $P2 --denied $P3; }
+grants() { "$script" check-app-grants --wait 0 --precise $P1 --approximate $P2 --denied $P3; }
 grants_ok
 if grants 2>"$work/err"; then
     grep -q "$P1: location precise, phone state denied, each with POLICY_FIXED" "$work/err" &&
@@ -1591,7 +1591,7 @@ H=$(printf 'a probe certificate' | sha256sum | cut -d ' ' -f 1)
 CA=org.antumbra.probe.carrier CB=org.antumbra.probe.carrierlate
 : >"$work/$CA.apk"
 : >"$work/$CB.apk"
-carrier() { "$script" check-carrier --hash "$H" --change $CA "$work/$CA.apk" --install $CB "$work/$CB.apk" --wait "${1:-2}"; }
+carrier() { "$script" check-carrier --hash "$H" --change $CA "$work/$CA.apk" --install $CB "$work/$CB.apk" --wait 2; }
 cleared() { [ ! -f "$work/ccvalue" ] && grep -qx 'shell cmd phone cc clear-values -s 0' "$work/log"; }
 carrier_only() { ! grep -Eq 'input tap|input text|KEYCODE|tel:|emergency|settings put|uninstall|pm clear|pm hide|pm unhide| -p ' "$work/log"; }
 wel9_reset

@@ -80,5 +80,5 @@ done
 grep -qE '^[0-9a-f]{64}$' "$out/carrier-cert-sha256" || die "no certificate hash for key b"
 # Key a's must differ: only the carrier probes may match.
 a=$("$bt/apksigner" verify --print-certs "$out/org.antumbra.probe.one.apk" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
-[ -n "$a" ] && [ "$a" != "$(cat "$out/carrier-cert-sha256")" ] || die "keys a and b have the same certificate"
+if [ -z "$a" ] || [ "$a" = "$(cat "$out/carrier-cert-sha256")" ]; then die "keys a and b have the same certificate"; fi
 echo "build-probes: ${#PROBES[@]} probes in $out; key b's certificate $(cut -c1-16 "$out/carrier-cert-sha256")…"

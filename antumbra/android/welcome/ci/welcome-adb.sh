@@ -2023,8 +2023,8 @@ cmd_check_carrier() {
         shift
     done
     [[ $hash =~ ^[0-9a-fA-F]{64}$ ]] || die "check-carrier: --hash must be a SHA-256 in hexadecimal"
-    [ -n "$change_pkg" ] && [ -n "$install_pkg" ] || die "check-carrier: needs --change PKG APK and --install PKG APK"
-    [ -r "$change_apk" ] && [ -r "$install_apk" ] || die "check-carrier: cannot read $change_apk or $install_apk"
+    if [ -z "$change_pkg" ] || [ -z "$install_pkg" ]; then die "check-carrier: needs --change PKG APK and --install PKG APK"; fi
+    if [ ! -r "$change_apk" ] || [ ! -r "$install_apk" ]; then die "check-carrier: cannot read $change_apk or $install_apk"; fi
     case $wait in '' | *[!0-9]*) die "check-carrier: --wait takes a number of seconds" ;; esac
     # Nothing is changed before these hold.
     [ "$(sh_ id -u)" = 0 ] || die "check-carrier needs adb as root ('adb root')"
