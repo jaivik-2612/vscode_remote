@@ -97,6 +97,14 @@ data class PositionUi(
     /** Welcome read Location on at some point since this search's switch-on. */
     val wasOn: Boolean = false,
     val now: Long = 0,
+    /** WEL9: a session with apps chosen for location: Location on when safe, until shutdown. */
+    val keptOn: Boolean = false,
+    /** ... and why it is not on yet: a refusal (a call's hold among them). */
+    val keepWhy: PositionRefusal? = null,
+    /** ... or it waits until every other app the person installed has been refused location ([PositionPlatform.appsReady]). */
+    val keepWaitsForApps: Boolean = false,
+    /** ... and Welcome looks again (a hold, a switch that failed, a reason that may go). */
+    val keepPending: Boolean = false,
 )
 
 /** What [PositionMachine] needs from Android ([AndroidPosition]); a fake in PositionTest. */
@@ -128,6 +136,12 @@ interface PositionPlatform {
     /** One fix from the GPS provider alone; false when it could not be asked. */
     fun startFix(onFix: (Fix) -> Unit, onOff: () -> Unit): Boolean
     fun stopFix()
+
+    /** WEL9: this session's pass refused location to every other app the person installed ([AppPolicies.locationReady]). */
+    fun appsReady(): Boolean
+
+    /** WEL9: a new pass over the apps ([AppPolicies.request]): one whose denial failed is tried again. */
+    fun requestApps()
 }
 
 /**
@@ -149,10 +163,23 @@ interface PositionPlatform {
  * process, during a call's hold), Location's switch is held as after a
  * call, until [CallWatch.CALLBACK_WINDOW_MS] after the machine was made: no
  * call can have ended after that.
+ *
+ * [keepOn] (WEL9): a session with apps chosen for location. Location comes
+ * on under the same rules as a press: not while a call holds (it comes on
+ * when the hold ends), not while assistance, a network location provider
+ * or Wi-Fi scanning is on or there is no GPS provider (it stays off, and
+ * the status screen says why), and only once every other app the person
+ * installed has been refused location ([PositionPlatform.appsReady]; while
+ * it waits, a new pass is asked for at most every [APPS_RETRY_MS], so that
+ * one denial that failed does not keep Location off for the session); a
+ * failed switch is tried again. Apps that came with the phone keep
+ * Android's location permissions (WEL6).
+ * Then Show my position leaves it on ([Off.KEPT_ON]); only shutdown
+ * ([offNow]) switches it off.
  */
 class PositionMachine(private val p: PositionPlatform, processStart: Boolean = false) {
-    /** Location's switch now: off, left on while a call (or calls not known) hold, or still on because switching failed. */
-    enum class Off { OFF, WAITS_FOR_CALL, FAILED }
+    /** Location's switch now: off, left on while a call (or calls not known) hold, still on because switching failed, or kept on for the chosen apps (WEL9). */
+    enum class Off { OFF, WAITS_FOR_CALL, FAILED, KEPT_ON }
 
     var state: PositionState = PositionState.Idle
         private set
@@ -171,6 +198,14 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
     private var startHoldUntil = Long.MIN_VALUE
     private val startedAt = p.now()
     private var firstLook = processStart
+
+    /** WEL9: Location kept on for the session's chosen apps ([keepOn]), until [offNow]. */
+    private var keep = false
+    private var keepWhy: PositionRefusal? = null
+    private var keepWaitsForApps = false
+    private var keepPending = false
+    private var lastKeepTry = Long.MIN_VALUE
+    private var lastAppsRequest: Long? = null
 
     /** Location's switch, read; the process's first look decides the hold at its start. */
     private fun readOn(): Boolean {
@@ -326,10 +361,65 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
         // A pending switch-off is looked at again every 5 s: during a call,
         // Welcome asks no more often than that whether the call goes on.
         if (offPending && now - lastOffTry >= RETRY_MS) offWhenSafe()
+        if (keep && keepPending && now - lastKeepTry >= RETRY_MS) onWhenSafe()
     }
 
     @Synchronized
-    fun busy(): Boolean = state is PositionState.Looking || state is PositionState.Found || offPending
+    fun busy(): Boolean = state is PositionState.Looking || state is PositionState.Found || offPending || (keep && keepPending)
+
+    /** WEL9: the session chose apps for location; Location on when safe ([onWhenSafe]), and on until shutdown. */
+    @Synchronized
+    fun keepOn() {
+        keep = true
+        onWhenSafe()
+    }
+
+    /**
+     * Location on for the chosen apps, under Show my position's rules
+     * ([refusal]): during a call's hold, while a reason holds, until every
+     * other app has lost its location, or after a switch that failed, it
+     * stays as it is and is looked at again every [RETRY_MS]. The call's
+     * hold is looked at again just before the switch. True once it is on.
+     */
+    @Synchronized
+    fun onWhenSafe(): Boolean {
+        if (!keep) return false
+        lastKeepTry = p.now()
+        refusal()?.let {
+            keepWhy = it
+            keepWaitsForApps = false
+            // Only the device owner can switch it: then there is nothing to retry.
+            keepPending = it != PositionRefusal.NOT_OWNER
+            return false
+        }
+        keepWhy = null
+        keepWaitsForApps = !p.appsReady()
+        if (keepWaitsForApps) {
+            keepPending = true
+            // A denial that failed is tried again by a new pass, not more often than APPS_RETRY_MS.
+            if (AppRules.due(lastAppsRequest, p.now(), APPS_RETRY_MS)) {
+                lastAppsRequest = p.now()
+                p.requestApps()
+            }
+            return false
+        }
+        if (readOn()) {
+            keepPending = false
+            return true
+        }
+        if (p.callHold()) {
+            keepWhy = PositionRefusal.CALL
+            keepPending = true
+            return false
+        }
+        if (p.setLocation(true)) {
+            lastReadOn = true
+            keepPending = false
+            return true
+        }
+        keepPending = true
+        return false
+    }
 
     /**
      * Location off, unless a call holds, or the process started with it on
@@ -338,10 +428,20 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
      * Location is already off, hold or not. Used by every switch-off in
      * Welcome but shutdown's ([offNow]): the end of a search, the baseline at
      * boot, on becoming the device owner and at Start, and the process's
-     * start.
+     * start. In a session that keeps Location on for its chosen apps, once
+     * every other app has lost its location, it writes nothing and leaves
+     * Location as the session wants it ([Off.KEPT_ON]); before that, a
+     * search ends with Location off as before WEL9.
      */
     @Synchronized
     fun offWhenSafe(): Off {
+        if (keep && p.appsReady()) {
+            offPending = false
+            offWaitsForCall = false
+            offWaitsForStart = false
+            confirmUntil = Long.MIN_VALUE
+            return Off.KEPT_ON
+        }
         if (!readOn()) {
             // Off. After a switch-on that failed, looked at again until confirmUntil.
             offPending = p.now() < confirmUntil
@@ -374,9 +474,13 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
         return Off.FAILED
     }
 
-    /** At shutdown: the search ended and Location off at once (the phone is going down, a call with it). */
+    /** At shutdown: the search ended, the session's Location (WEL9) ended, and Location off at once (the phone is going down, a call with it). */
     @Synchronized
     fun offNow(): Boolean {
+        keep = false
+        keepPending = false
+        keepWhy = null
+        keepWaitsForApps = false
         if (state is PositionState.Looking) {
             p.stopFix()
             state = PositionState.Ended(PositionEnd.STOPPED)
@@ -392,7 +496,10 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
 
     @Synchronized
     fun snapshot(): PositionUi =
-        PositionUi(state, offPending, offWaitsForCall, offWaitsForStart, touched, lastReadOn, wasOn, p.now())
+        PositionUi(
+            state, offPending, offWaitsForCall, offWaitsForStart, touched, lastReadOn, wasOn, p.now(),
+            keptOn = keep, keepWhy = keepWhy, keepWaitsForApps = keepWaitsForApps, keepPending = keepPending,
+        )
 
     companion object {
         /** How long one search may look (Welcome's own limit, and the request's duration). */
@@ -403,6 +510,9 @@ class PositionMachine(private val p: PositionPlatform, processStart: Boolean = f
 
         /** A pending switch-off (a call holding it, or a failed switch) is looked at again after this. */
         const val RETRY_MS = 5_000L
+
+        /** WEL9: while Location waits for the apps, a new pass is asked for at most this often. */
+        const val APPS_RETRY_MS = 30_000L
     }
 }
 
@@ -414,6 +524,8 @@ object PositionTexts {
      * never read it on since a switch-on that failed.
      */
     fun offLine(p: PositionUi): Int? = when {
+        // WEL9: a session that keeps Location on for its chosen apps.
+        p.keptOn && p.touched && p.lastReadOn && !p.offPending -> R.string.position_kept_on
         p.offPending && p.offWaitsForCall -> R.string.position_off_call
         p.offPending && p.offWaitsForStart -> R.string.position_off_start
         p.offPending && p.lastReadOn -> R.string.position_off_retry
@@ -422,6 +534,23 @@ object PositionTexts {
         !p.touched || p.lastReadOn -> null
         p.state == PositionState.Ended(PositionEnd.SWITCH_FAILED) && !p.wasOn -> R.string.position_unchanged
         p.state is PositionState.Found || p.state is PositionState.Ended || p.state is PositionState.Refused -> R.string.position_off_again
+        else -> null
+    }
+
+    /** WEL9: the status screen's Location value, for a session with [chosen] apps. */
+    fun sessionValue(p: PositionUi, chosen: Int): Int = when {
+        chosen == 0 -> R.string.value_off
+        p.keptOn && p.lastReadOn -> R.string.location_value_on
+        else -> R.string.location_value_not_yet
+    }
+
+    /** ... and why Location is not on yet; null when there is nothing to say. */
+    fun sessionReason(p: PositionUi, chosen: Int): Int? = when {
+        chosen == 0 || (p.keptOn && p.lastReadOn) -> null
+        p.keepWhy == PositionRefusal.CALL -> R.string.location_wait_call
+        p.keepWhy != null -> refusal(p.keepWhy)
+        p.keepWaitsForApps -> R.string.location_wait_apps
+        p.keepPending -> R.string.location_wait_retry
         else -> null
     }
 
@@ -483,8 +612,9 @@ object PositionFormat {
 /**
  * The window rules of both screens, apart from Android so that they can be
  * unit-tested (PositionTest): no screenshot and no recents thumbnail
- * (FLAG_SECURE) while a position is on screen, or bridge lines the person
- * typed on the Welcome screen; the screen kept on (FLAG_KEEP_SCREEN_ON)
+ * (FLAG_SECURE) while a position is on screen, bridge lines the person
+ * typed on the Welcome screen, or the list of installed apps it shows for
+ * Location (WEL9); the screen kept on (FLAG_KEEP_SCREEN_ON)
  * while a position is looked for. Each activity sets exactly [MASK]'s
  * flags to [flags] whenever they change.
  */
@@ -492,7 +622,10 @@ object WindowRules {
     const val MASK = WindowManager.LayoutParams.FLAG_SECURE or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
 
     fun secure(position: PositionState, choices: Choices? = null): Boolean =
-        position is PositionState.Found || (choices != null && typedBridges(choices))
+        position is PositionState.Found || (choices != null && (typedBridges(choices) || showsApps(choices)))
+
+    /** WEL9: "On for apps you choose" shows the installed apps on the Welcome screen. */
+    fun showsApps(c: Choices): Boolean = c.location
 
     fun keepOn(position: PositionState): Boolean = position is PositionState.Looking
 
@@ -558,6 +691,9 @@ object Position {
 
     /** At shutdown ([PositionMachine.offNow]). */
     fun offNow(context: Context): Boolean = machine(context).offNow()
+
+    /** WEL9: after Start, for a session with apps chosen for location ([PositionMachine.keepOn]). */
+    fun keepOn(context: Context) = later(context) { it.keepOn() }
 
     private fun later(context: Context, step: (PositionMachine) -> Unit) {
         val m = machine(context)
@@ -724,6 +860,10 @@ class AndroidPosition(
             Log.w(TAG, "the request could not be removed", e)
         }
     }
+
+    override fun appsReady(): Boolean = AppPolicies.locationReady
+
+    override fun requestApps() = AppPolicies.request(context, "location waits")
 
     companion object {
         private const val TAG = "AntumbraPosition"

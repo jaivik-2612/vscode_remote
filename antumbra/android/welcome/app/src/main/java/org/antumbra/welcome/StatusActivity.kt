@@ -64,6 +64,8 @@ class StatusActivity : ComponentActivity() {
                                 phone = phone,
                                 emergency = emergency,
                                 position = Position.ui,
+                                // WEL9: a count only; which apps stays in the session.
+                                locationApps = if (session.started) Session.locationApps().size else 0,
                             ),
                             onOpenWelcome = ::openWelcome,
                             onWifiSettings = { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
@@ -95,6 +97,8 @@ class StatusActivity : ComponentActivity() {
                     val s = Session.current()
                     val phoneMode = s.started && PhoneTexts.phoneMode(s.cell, p.carried)
                     emergency = withContext(Dispatchers.IO) { EmergencyWatch.read(this@StatusActivity, p, phoneMode) }
+                    // WEL9: a change of the default phone or SMS app brings a pass.
+                    withContext(Dispatchers.IO) { AppWatch.rolesLook(this@StatusActivity) }
                     delay(2000)
                 }
             }

@@ -67,6 +67,14 @@
 #      mobile data, none; Phone off, calls and texts) and reads the whole
 #      page after each (checks welcome_choices_gate_off, _phone, _data, and
 #      welcome_radio_line; warnings until they have passed on CI once). Then
+#      WEL9 with the welcome job's probe apps (welcome/ci/build-probes.sh;
+#      "not judged" without them): three installed and each denied location
+#      and phone state with POLICY_FIXED (welcome_location_before); the
+#      carrier configuration's certificate list given a probe's certificate,
+#      as root, in memory, and Welcome refusing that probe on the change and
+#      another at its install (welcome_carrier_trigger, welcome_carrier_refused;
+#      the value cleared after it); warnings until they have passed on CI
+#      once. Then
 #      the choices for the run, the gate at "phone", each row found by its
 #      test tag alone (never by a text, which another row's detail may
 #      hold) from the top of the page and read back checked: Internet
@@ -74,12 +82,18 @@
 #      Phone: calls and texts (the radio on all run, mobile data off; Phone
 #      off if Welcome does not offer it within 60 s, welcome_phone_start, a
 #      warning; the provider's row after Start says which), new Wi-Fi address on,
-#      Administration OFF (the default session), Unsafe Browser off. Then
+#      Administration OFF (the default session), Unsafe Browser off, and
+#      Location on for two probes, one precise, one approximate
+#      (welcome_location_start, WEL9; set back to Off when it fails). Then
 #      "Start Antumbra". adb must still answer; the provider row must say
 #      started=1, tor_mode=direct and its cell.
 #   7. Wi-Fi joined as a person would ('cmd wifi connect-network AndroidWifi
 #      open'); Wi-Fi must become the default network. Welcome's policies and
-#      its status screen are checked with welcome/ci/welcome-adb.sh. Then
+#      its status screen are checked with welcome/ci/welcome-adb.sh
+#      (check-policies --location-apps once WEL9 chose apps). Then WEL9
+#      after Start, warnings: only the two chosen probes hold location, as
+#      chosen (welcome_location_grants), and a probe installed now gets none
+#      (welcome_location_new_install). Then
 #      MOD11: Welcome's provider takes the module's word from root only
 #      (welcome-adb.sh check-module-word; only "none" and malformed words
 #      are sent; a failure since run 20), and the module's parsers read the
@@ -136,6 +150,8 @@
 #                          when ANTUMBRA_MODULE_ZIP is not set (build-module.sh
 #                          then stages the scripts from the checkout)
 #   ANTUMBRA_WELCOME_APK   app-debug.apk (required)
+#   ANTUMBRA_WEL9_PROBES   the directory of WEL9's probe apps (welcome/ci/build-probes.sh);
+#                          unset or empty: the WEL9 checks are "not judged"
 #   ANTUMBRA_SERIAL, ANTUMBRA_CAPTURE, ANTUMBRA_CI_IMAGE
 #   ANTUMBRA_CI_BOOTSTRAP_TIMEOUT  seconds to wait for tor (default 900)
 #   ANTUMBRA_CI_TRACKERS   names that must be blocked
@@ -387,6 +403,19 @@ ui_top() {
 	sleep 1
 }
 
+# ui_bottom: down to the end of the page (fast swipes up, begun above the
+# pinned buttons; no dump), where Additional settings' switches are,
+# whatever WEL9's Location section adds above them.
+ui_bottom() {
+	local w h
+	read -r w h < <(screen_size)
+	w=${w:-1080} h=${h:-2400}
+	for _ in 1 2 3 4 5 6 7 8; do
+		ash "input swipe $((w / 2)) $((h * 13 / 20)) $((w / 2)) $((h * 3 / 20)) 150" >/dev/null
+	done
+	sleep 1
+}
+
 # ui_choose ID: choose the radio row ID by its test tag alone, from the top
 # of the page, and read it back checked; a second try if it does not read
 # so. Never by its text: another row's detail may hold it ("Wi-Fi" is in
@@ -563,7 +592,7 @@ wel10_undo() {
 	[ "$status" != 2 ] || return 0
 	[ -z "$shot" ] || screenshot "$shot"
 	ASH_TIMEOUT=15 ash "setprop debug.antumbra.emergency_states ''" >/dev/null 2>&1
-	timeout -k 10 90 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-position-test >>"$log" 2>&1 ||
+	timeout -k 10 90 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-position-test ${LOCATION_KEPT:+"$LOCATION_KEPT"} >>"$log" 2>&1 ||
 		check welcome_position_recover "$(wel10_level)" "the position test could not be undone: $(tail -n 1 "$log")"
 	ASH_TIMEOUT=15 wake_screen
 	if [ "$screen" = welcome ]; then
@@ -658,7 +687,8 @@ welcome_wel10_session() {
 	log=$LOGS/$SCEN-status-position.txt
 	n0=$(filter_queries)
 	event position_start
-	wel10_run welcome_position_session 180 "$log" check-position --source test --leave home || wel10_undo status "$log" $?
+	# WEL9: in a session with apps chosen for location, Location stays on.
+	wel10_run welcome_position_session 180 "$log" check-position --source test --leave home ${LOCATION_KEPT:+"$LOCATION_KEPT"} || wel10_undo status "$log" $?
 	event position_end
 	n1=$(filter_queries)
 	if [ -z "$n0" ] || [ -z "$n1" ]; then
@@ -677,6 +707,221 @@ welcome_wel10_session() {
 	screenshot status-after-wel10
 }
 
+# --- WEL9: the apps' location, phone state and carrier privileges -----------------
+#
+# wel9_level: the level of every WEL9 check: warn until it has passed on CI
+# once (then fail), as wel10_level. Nothing of WEL9 can fail the run or hold
+# it up. The probe apps come from the welcome job (welcome/ci/
+# build-probes.sh, a step that may fail, in an artifact of their own); a
+# check whose probe was not built or does not install, or whose carrier
+# value the emulator does not take, is "not judged" (a warning). Every step
+# is bounded: WEL9_BEFORE_S before Start, WEL9_CHOOSE_S for the run's choice,
+# WEL9_AFTER_S after Start, each call killed 20 s after its time is up (an
+# install 45 s at most). With what follows a budget (the carrier value
+# cleared again, 30 s; Welcome back, about a minute; Location set back to
+# Off, 60 s), WEL9 adds at most about 5.5, 3 and 2.5 minutes, under 11 in
+# all, and normally two or three. The carrier configuration's test values are
+# cleared after check-carrier whatever happens (it clears them itself, and
+# clear-carrier-test runs again after a failure). Nothing is dialled, no
+# location setting is written, and only the probes' names reach the logs.
+wel9_level() { echo warn; }
+WEL9_BEFORE_S=210
+WEL9_CHOOSE_S=90
+WEL9_AFTER_S=120
+WEL9_END=0
+PROBE_DIR=${ANTUMBRA_WEL9_PROBES:-}
+PROBE_ONE=org.antumbra.probe.one
+PROBE_TWO=org.antumbra.probe.two
+PROBE_THREE=org.antumbra.probe.three
+PROBE_LATE=org.antumbra.probe.late
+PROBE_CARRIER=org.antumbra.probe.carrier
+PROBE_CARRIER_LATE=org.antumbra.probe.carrierlate
+# 1 once the three location probes are installed.
+WEL9_PROBES_IN=0
+# Once WEL9's choice ran before Start, check-policies takes --location-apps
+# (WELCOME_POLICY_ARGS, lib/common.sh: Location may be on in the session);
+# once it chose the probes, Show my position after Start takes
+# --location-kept (Location stays on).
+LOCATION_KEPT=
+
+# wel9_budget SECONDS, wel9_left: as WEL10's.
+wel9_budget() { WEL9_END=$((SECONDS + $1)); }
+wel9_left() {
+	local left=$((WEL9_END - SECONDS))
+	[ "$left" -gt 0 ] || left=0
+	echo "$left"
+}
+
+# wel9_apk PKG: the probe's APK, or nothing (status 1) when the welcome job did not build it.
+wel9_apk() { [ -n "$PROBE_DIR" ] && [ -s "$PROBE_DIR/$1.apk" ] && echo "$PROBE_DIR/$1.apk"; }
+
+# wel9_install NAME PKG...: each probe installed (45 s each at most, never
+# past the budget); NAME not judged (the level) when one was not built or
+# does not install. Returns 0 when every one is in.
+wel9_install() {
+	local name=$1 pkg apk left out
+	shift
+	for pkg in "$@"; do
+		if ! apk=$(wel9_apk "$pkg"); then
+			check "$name" "$(wel9_level)" "not judged: the probe $pkg was not built (the welcome job's build-probes.sh)"
+			return 1
+		fi
+		left=$(wel9_left)
+		if [ "$left" -lt 30 ]; then
+			check "$name" "$(wel9_level)" "not judged: WEL9's time was used up"
+			return 1
+		fi
+		[ "$left" -le 45 ] || left=45
+		out=$(timeout -k 10 "$left" adb -s "$ANTUMBRA_SERIAL" install -r "$apk" 2>&1 </dev/null)
+		printf '%s\n' "$out" >>"$LOGS/$SCEN-wel9-installs.txt"
+		if ! printf '%s\n' "$out" | grep -q '^Success'; then
+			check "$name" "$(wel9_level)" "not judged: the probe $pkg did not install: $(printf '%s\n' "$out" | tail -n 1)"
+			return 1
+		fi
+	done
+	return 0
+}
+
+# wel9_call SECONDS LOG ARGS...: welcome-adb.sh ARGS for SECONDS at most,
+# never past the budget (killed 20 s after its time is up), its output in
+# LOG. Returns its status: 0 passed, 3 not judged (check-carrier: the value
+# not taken), 2 not run (less than 30 s of the budget left), else failed.
+wel9_call() {
+	local limit=$1 log=$2 left rc=0
+	shift 2
+	left=$(wel9_left)
+	if [ "$left" -lt 30 ]; then
+		echo "not run: WEL9's time was used up" >"$log"
+		return 2
+	fi
+	[ "$limit" -le "$left" ] || limit=$left
+	timeout -k 20 "$limit" bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" "$@" >"$log" 2>&1 || rc=$?
+	if [ "$rc" = 2 ]; then rc=1; fi
+	return "$rc"
+}
+
+# wel9_run NAME SECONDS LOG ARGS...: wel9_call, and check NAME ok or the
+# level with the log's last lines. Returns wel9_call's status.
+wel9_run() {
+	local name=$1 limit=$2 log=$3 rc=0
+	shift 3
+	wel9_call "$limit" "$log" "$@" || rc=$?
+	case $rc in
+	0) check "$name" ok "$(tail -n 1 "$log")" ;;
+	2) check "$name" "$(wel9_level)" "not run: WEL9's time was used up" ;;
+	3) check "$name" "$(wel9_level)" "not judged: $(grep -v '^$' "$log" | tail -n 2 | tr '\n' ';')" ;;
+	*) check "$name" "$(wel9_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')" ;;
+	esac
+	return "$rc"
+}
+
+# wel9_carrier STATUS LOG: the two carrier checks from check-carrier's log:
+# welcome_carrier_trigger (refused on the carrier configuration's change),
+# welcome_carrier_refused (refused at install, and the whole check: data
+# kept, the value cleared).
+wel9_carrier() {
+	local rc=$1 log=$2 line
+	case $rc in
+	2) check welcome_carrier_trigger "$(wel9_level)" "not run: WEL9's time was used up"
+		check welcome_carrier_refused "$(wel9_level)" "not run: WEL9's time was used up"
+		return 0 ;;
+	3) line=$(grep -m 1 -o 'not judged: .*' "$log" || true)
+		check welcome_carrier_trigger "$(wel9_level)" "${line:-not judged}"
+		check welcome_carrier_refused "$(wel9_level)" "${line:-not judged}"
+		return 0 ;;
+	esac
+	line=$(grep -m 1 -o 'refused on the change: [a-z]*' "$log" || true)
+	case $line in
+	*': yes') check welcome_carrier_trigger ok "$line" ;;
+	'') check welcome_carrier_trigger "$(wel9_level)" "not reached: $(grep -v '^$' "$log" | tail -n 2 | tr '\n' ';')" ;;
+	*) check welcome_carrier_trigger "$(wel9_level)" "$line" ;;
+	esac
+	if [ "$rc" = 0 ]; then
+		check welcome_carrier_refused ok "$(tail -n 1 "$log")"
+	else
+		check welcome_carrier_refused "$(wel9_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	fi
+}
+
+# welcome_wel9: before Start (the network closed), Welcome in its lock task:
+# three location probes installed, each denied location and phone state by
+# Welcome's policy (welcome_location_before); then the carrier configuration
+# names the carrier probes' certificate and Welcome refuses them, the one
+# installed before on the change (welcome_carrier_trigger) and the one
+# installed after at its install (welcome_carrier_refused); the value is
+# cleared after it. Then Welcome in front again.
+welcome_wel9() {
+	local log rc=0
+	wel9_budget "$WEL9_BEFORE_S"
+	log=$LOGS/$SCEN-welcome-location-before.txt
+	if wel9_install welcome_location_before "$PROBE_ONE" "$PROBE_TWO" "$PROBE_THREE"; then
+		WEL9_PROBES_IN=1
+		wel9_run welcome_location_before 75 "$log" check-app-grants --wait 45 \
+			--denied "$PROBE_ONE" --denied "$PROBE_TWO" --denied "$PROBE_THREE" || true
+	fi
+	log=$LOGS/$SCEN-welcome-carrier.txt
+	if ! wel9_apk "$PROBE_CARRIER" >/dev/null || ! wel9_apk "$PROBE_CARRIER_LATE" >/dev/null ||
+		[ ! -s "$PROBE_DIR/carrier-cert-sha256" ]; then
+		check welcome_carrier_trigger "$(wel9_level)" "not judged: the carrier probes were not built"
+		check welcome_carrier_refused "$(wel9_level)" "not judged: the carrier probes were not built"
+	else
+		wel9_call 120 "$log" check-carrier --hash "$(head -c 64 "$PROBE_DIR/carrier-cert-sha256")" \
+			--change "$PROBE_CARRIER" "$PROBE_DIR/$PROBE_CARRIER.apk" \
+			--install "$PROBE_CARRIER_LATE" "$PROBE_DIR/$PROBE_CARRIER_LATE.apk" --wait 30 || rc=$?
+		wel9_carrier "$rc" "$log"
+		# check-carrier clears the value itself; after a failure or a kill, again.
+		if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then
+			timeout -k 10 30 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-carrier-test >>"$log" 2>&1 ||
+				check welcome_carrier_recover "$(wel9_level)" "the carrier configuration's test values could not be cleared: $(tail -n 1 "$log")"
+		fi
+	fi
+	ASH_TIMEOUT=15 wake_screen
+	ASH_TIMEOUT=15 ash "am start -n $PKG/.WelcomeActivity" >/dev/null 2>&1
+	ui_wait start_button 30 'Start Antumbra' ||
+		check welcome_location_recover "$(wel9_level)" "Welcome did not come back after the WEL9 checks"
+}
+
+# wel9_choose: the run's location choice, just before Start: "On for apps
+# you choose", the probe one precise, two approximate, three not chosen
+# (welcome_location_start). When that fails, Location is set back to Off,
+# and the checks after Start say what they cannot judge.
+wel9_choose() {
+	local log=$LOGS/$SCEN-welcome-location-start.txt
+	if [ "$WEL9_PROBES_IN" != 1 ]; then
+		check welcome_location_start "$(wel9_level)" "not judged: the location probes are not installed"
+		return 0
+	fi
+	wel9_budget "$WEL9_CHOOSE_S"
+	WELCOME_POLICY_ARGS=(--location-apps)
+	if wel9_run welcome_location_start "$WEL9_CHOOSE_S" "$log" choose-location --precise "$PROBE_ONE" --approximate "$PROBE_TWO"; then
+		LOCATION_KEPT=--location-kept
+	else
+		timeout -k 10 60 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" choose-location --off >>"$log" 2>&1 ||
+			check welcome_location_recover "$(wel9_level)" "Location could not be set back to Off for the run's session"
+	fi
+}
+
+# welcome_wel9_session: after Start, the run's choice carried out
+# (welcome_location_grants: the probe one precise, two approximate, three
+# nothing), and a probe installed during the session gets nothing
+# (welcome_location_new_install).
+welcome_wel9_session() {
+	local log
+	wel9_budget "$WEL9_AFTER_S"
+	log=$LOGS/$SCEN-status-location-grants.txt
+	if [ -n "$LOCATION_KEPT" ]; then
+		wel9_run welcome_location_grants 75 "$log" check-app-grants --wait 45 \
+			--precise "$PROBE_ONE" --approximate "$PROBE_TWO" --denied "$PROBE_THREE" || true
+	else
+		check welcome_location_grants "$(wel9_level)" "not judged: the run's session chose no app for location (welcome_location_start)"
+	fi
+	log=$LOGS/$SCEN-status-location-new-install.txt
+	if wel9_install welcome_location_new_install "$PROBE_LATE"; then
+		wel9_run welcome_location_new_install 75 "$log" check-app-grants --wait 45 --denied "$PROBE_LATE" || true
+	fi
+	screenshot status-after-wel9
+}
+
 # The session's Phone choice for the run: calls (the radio on all run,
 # mobile data off), or off when Welcome did not offer it (welcome_start).
 PHONE_CHOICE=off
@@ -692,6 +937,7 @@ welcome_start() {
 	welcome_power_menu
 	welcome_wel10
 	welcome_choices
+	welcome_wel9
 	# The run's session: Wi-Fi, Tor directly, calls and texts with the gate
 	# at "phone" (as the install leaves it after PH3's outcome A). Each row
 	# by its test tag alone and read back checked, whatever the walk left
@@ -708,11 +954,19 @@ welcome_start() {
 		check welcome_phone_start "$(choices_level)" "neither Phone row could be chosen; the provider's row after Start says which the run has"
 	fi
 	ui_choose tor_direct || abort welcome_choice "Connect to Tor directly (tor_direct) could not be chosen by its test tag"
+	# Each switch looked for from a known place, since WEL9's Location section
+	# lies above them: the Wi-Fi address from the top of the page (ui_locate
+	# scrolls down first), Additional settings' two from its end.
+	ui_top
 	ui_set_switch switch_mac true 'New Wi-Fi hardware address' || check welcome_mac warn "could not set the Wi-Fi address switch"
+	ui_bottom
 	ui_set_switch switch_unsafe_browser false 'Unsafe Browser' || check welcome_unsafe warn "could not find the Unsafe Browser switch off"
 	# The default session: Administration off. adb survives it only through
 	# the debug build's test hook.
+	ui_bottom
 	ui_set_switch switch_admin false 'Administration' || abort welcome_admin "could not switch Administration off"
+	# WEL9: Location on for two probes, one precise, one approximate; a warning, never a stop.
+	wel9_choose
 	screenshot welcome-2-choices
 	ui_tap start_button 'Start Antumbra' || abort welcome_start "Start Antumbra not found"
 	event welcome_start
@@ -979,6 +1233,7 @@ welcome_start
 wifi_join
 # shellcheck disable=SC2119 # a default session: check-policies without --admin
 welcome_checks
+welcome_wel9_session
 module_word
 phone_checks
 if wait_bootstrap; then

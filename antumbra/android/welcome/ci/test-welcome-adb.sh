@@ -31,6 +31,9 @@ set -u
 d=$FAKE_DIR
 [ "${1:-}" = -s ] && shift 2
 printf '%s\n' "$*" >>"$d/log"
+# WEL9: Welcome refuses an app (hides it, its data kept); with
+# $d/carrier_uninstalls it is removed instead, which the check must catch.
+refuse() { if [ -f "$d/carrier_uninstalls" ]; then rm -f "$d/pkg-$1"; else touch "$d/hidden-$1"; fi; }
 # WEL8: the fake screen, while its state file exists.
 if [ -f "$d/ui-state.json" ]; then
     case "$*" in
@@ -58,6 +61,59 @@ case "$*" in
     "shell cmd phone emergency-number-test-mode -p")
         if [ -f "$d/eccfail" ]; then echo "Exception: getEmergencyNumberListTestMode: not allowed"; exit 0; fi
         cat "$d/ecc" 2>/dev/null || echo "[1234, 5678]" ;;
+    # WEL9: an installed app is $d/pkg-PKG (its user 0 runtime permissions,
+    # as 'dumpsys package' prints them; Welcome's pass denies all five at
+    # install), hidden with $d/hidden-PKG; $d/pkgnext-PKG replaces it after
+    # one dump (a pass landing late). Slot 0's carrier certificate list is
+    # $d/ccvalue: Welcome refuses a "carrier" probe on the change and at
+    # install, unless $d/carrier_trigger_ignored or
+    # $d/carrier_install_ignored; $d/ccrefuse: the value is not taken,
+    # $d/ccstuck: clear-values clears nothing.
+    "install -r "*)
+        p=$(basename "${!#}" .apk)
+        for q in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION ACCESS_BACKGROUND_LOCATION READ_PHONE_STATE READ_PHONE_NUMBERS; do
+            echo "android.permission.$q: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SENSITIVE_WHEN_DENIED|POLICY_FIXED]"
+        done >"$d/pkg-$p"
+        rm -f "$d/hidden-$p"
+        if [ -f "$d/ccvalue" ] && [[ $p == *carrier* ]] && [ ! -f "$d/carrier_install_ignored" ]; then refuse "$p"; fi
+        printf '%s\n' "Performing Streamed Install" Success ;;
+    "shell dumpsys package "*)
+        p=$4
+        if [ ! -f "$d/pkg-$p" ]; then echo "Unable to find package: $p"; exit 0; fi
+        h=false
+        [ ! -f "$d/hidden-$p" ] || h=true
+        printf '%s\n' 'Activity Resolver Table:' '' 'Packages:' "  Package [$p] (4f1c2d):" '    userId=10150' \
+            "    User 0: ceDataInode=812 deDataInode=811 installed=true hidden=$h suspended=false distractionFlags=0 stopped=true notLaunched=true enabled=0 instant=false virtual=false quarantined=false" \
+            '      installReason=0' '      gids=[3003]' '      runtime permissions:'
+        sed 's/^/        /' "$d/pkg-$p"
+        # Another user's grants never count for user 0.
+        printf '%s\n' '    User 10: ceDataInode=0 deDataInode=0 installed=true hidden=false suspended=false' '      runtime permissions:' \
+            '        android.permission.ACCESS_COARSE_LOCATION: granted=true, flags=[ USER_SET]' \
+            '        android.permission.READ_PHONE_STATE: granted=true' '' 'Queries:' '  system apps queryable: false'
+        if [ -f "$d/pkgnext-$p" ]; then mv "$d/pkgnext-$p" "$d/pkg-$p"; fi ;;
+    "shell pm list packages" | "shell pm list packages -u")
+        for f in "$d"/pkg-*; do
+            [ -e "$f" ] || continue
+            p=${f##*/pkg-}
+            if [ "${5:-}" = -u ] || [ ! -f "$d/hidden-$p" ]; then echo "package:$p"; fi
+        done ;;
+    "shell cmd phone cc set-value -s 0 carrier_certificate_string_array "*)
+        if [ -f "$d/ccrefuse" ]; then echo "cc set-value: No carrier config values found for subId -1."; exit 0; fi
+        printf '%s' "${!#}" >"$d/ccvalue"
+        printf '%s\n' 'Previous value: ' 'carrier_certificate_string_array   STRING_ARRAY   ' 'New value: ' \
+            "carrier_certificate_string_array   STRING_ARRAY   \"${!#}\""
+        if [ ! -f "$d/carrier_trigger_ignored" ]; then
+            for f in "$d"/pkg-*carrier*; do [ ! -e "$f" ] || refuse "${f##*/pkg-}"; done
+        fi ;;
+    "shell cmd phone cc get-value -s 0 carrier_certificate_string_array")
+        if [ -f "$d/ccvalue" ]; then v="\"$(cat "$d/ccvalue")\""; else v=''; fi
+        echo "carrier_certificate_string_array   STRING_ARRAY   $v" ;;
+    "shell cmd phone cc clear-values -s 0")
+        [ -f "$d/ccstuck" ] || rm -f "$d/ccvalue"
+        echo "All previously set carrier config override values has been cleared" ;;
+    # $d/ccnotapplied: slot 0's configuration is not a carrier's own.
+    "shell cmd phone cc get-value -s 0 carrier_config_applied_bool")
+        echo "carrier_config_applied_bool   BOOLEAN   $([ -f "$d/ccnotapplied" ] && echo false || echo true)" ;;
     "shell cmd phone "*) echo "fake adb: refused: $*" >&2; exit 1 ;;
     "shell setprop debug.antumbra.emergency_states "*)
         v=${!#}; [ "$v" = "''" ] && v=''
@@ -425,6 +481,29 @@ if "$script" check-policies --keep-adb 2>"$work/err"; then bad "check-policies p
     grep -q 'no effective restrictions for user 0' "$work/err" && pass "check-policies needs user 0's block" ||
         bad "check-policies without user 0: $(cat "$work/err")"
 fi
+# 5c. WEL9: with apps chosen for location, Location may be on (and the
+#     person still cannot switch it); without, Location on fails.
+# shellcheck disable=SC2086 # word lists
+users $always $unless_admin no_add_managed_profile >"$work/restrictions"
+echo 3 >"$work/location"
+if "$script" check-policies --keep-adb --location-apps 2>"$work/err"; then
+    grep -q 'location: on (apps chosen for location; location_mode 3)' "$work/err" &&
+        pass "check-policies --location-apps: Location on for the chosen apps, the restriction still set" ||
+        bad "check-policies --location-apps: $(cat "$work/err")"
+else
+    bad "check-policies --location-apps failed: $(cat "$work/err")"
+fi
+if "$script" check-policies --keep-adb 2>"$work/err"; then bad "check-policies passed with Location on and no apps chosen"; else
+    grep -q 'location is on' "$work/err" && pass "check-policies: Location on without apps chosen fails" ||
+        bad "check-policies, Location on: $(cat "$work/err")"
+fi
+# shellcheck disable=SC2086 # word lists; the restriction itself is required either way
+users $always no_install_unknown_sources_globally no_bluetooth no_add_managed_profile >"$work/restrictions"
+if "$script" check-policies --keep-adb --location-apps 2>"$work/err"; then bad "check-policies --location-apps passed without no_config_location"; else
+    grep -q 'missing restriction no_config_location' "$work/err" && pass "check-policies --location-apps still needs no_config_location" ||
+        bad "check-policies --location-apps, no restriction: $(cat "$work/err")"
+fi
+rm -f "$work/location"
 
 # 7. check-emergency (WEL7), before Start: the dialer opens from Welcome's
 #    button and from 'am start', Back returns to Welcome, still locked, and
@@ -888,7 +967,10 @@ def card_rows(screen_name, radio_shown):
     else:
         r += [row("position_detail", [S["position_detail"]], False), row("position_detail_apps", [S["position_detail_apps"]], False)]
     if pos in ("found", "stopped"):
-        r.append(row("position_location", [S["position_off_again"] if loc == "0" else S["position_off_retry"]], False))
+        if st.get("kept") and loc != "0":
+            r.append(row("position_location", [S["position_kept_on"]], False))
+        else:
+            r.append(row("position_location", [S["position_off_again"] if loc == "0" else S["position_off_retry"]], False))
     refused = "pos_refused" in bugs
     if refused:
         r.append(row("position_refusal", [S["position_refused_call"]], False))
@@ -936,6 +1018,20 @@ def welcome_rows(pad):
     else:
         card = [S["carrier_choice_on"]] + SEES + data_lines(i)
     r.append(row("card_carrier_choice", [S["card_carrier"]] + card, False))
+    # WEL9: the Location rows, in a state that lists apps ("apps").
+    if "apps" in st:
+        on = st.get("location", False)
+        r.append(row("location_off", [S["location_off"], S["location_off_detail"]], True, not on))
+        r.append(row("location_apps", [S["location_apps"], S["location_apps_detail"]], True, on))
+        for p in st["apps"] if on else []:
+            prec = st.get("chosen", {}).get(p)
+            r.append(row("location_app_" + p, [p, S["location_app_none"] if prec is None else S["location_app_%s_value" % prec]],
+                         True, prec is not None))
+            if prec is not None:
+                r.append(row("location_approximate_" + p, [S["location_approximate"], S["location_approximate_detail"]], True,
+                             prec == "approximate"))
+                r.append(row("location_precise_" + p, [S["location_precise"], S["location_precise_detail"]], True,
+                             prec == "precise"))
     if "offline_text" in bugs:
         r.append(row("", ["Stay offline"], False))
     r.append(row("switch_mac", [S["mac_title"], S["mac_on"]], True, True))
@@ -1072,19 +1168,36 @@ elif what == "tap":
                 fd_write("location", "3")
         elif rid == "position_stop":
             st["pos"] = "stopped"
-            fd_write("location", "0")
+            if not st.get("kept"):
+                fd_write("location", "0")
         elif rid == "position_hide" and "pos_hide_ignored" not in bugs:
             st["pos"] = "idle"
+        # WEL9: Location off, or on for the apps ticked, approximate unless chosen precise.
+        elif rid == "location_off":
+            st["location"] = False
+        elif rid == "location_apps":
+            st["location"] = True
+        elif rid.startswith("location_app_") and "location_taps_ignored" not in bugs:
+            p, chosen = rid[len("location_app_"):], st.setdefault("chosen", {})
+            if p in chosen:
+                del chosen[p]
+            else:
+                chosen[p] = "approximate"
+        elif rid.startswith(("location_approximate_", "location_precise_")) and "precision_ignored" not in bugs:
+            _, level, p = rid.split("_", 2)
+            if p in st.get("chosen", {}):
+                st["chosen"][p] = level
 elif what == "leave":
+    # "kept" (WEL9): the session keeps Location on for its chosen apps.
     if st.get("pos") == "looking":
         st["pos"] = "stopped"
-        if "pos_leave_stays_on" not in bugs:
+        if "pos_leave_stays_on" not in bugs and not st.get("kept"):
             fd_write("location", "0")
 elif what == "fix":
     if st.get("pos") == "looking" and fd_read("location", "0") != "0":
         st.update(pos="found", pos_lat=float(sys.argv[3]), pos_lon=float(sys.argv[4]), pos_acc=sys.argv[5],
                   pos_mock=sys.argv[6] == "test")
-        if "pos_stays_on" not in bugs:
+        if ("pos_stays_on" not in bugs and not st.get("kept")) or "kept_goes_off" in bugs:
             fd_write("location", "0")
 elif what == "swipe":
     y1, y2, ms = int(sys.argv[4]), int(sys.argv[6]), int(sys.argv[7]) if len(sys.argv) > 7 else 300
@@ -1396,6 +1509,218 @@ touch "$work/testprovider"
     never_writes && pass "clear-position-test stops a search with Welcome's Stop and removes the test provider" ||
     bad "clear-position-test: $(cat "$work/err"); log: $(cat "$work/log")"
 wel10_reset
+
+# 13. WEL9: the apps' location, phone state and carrier privileges, against
+#     the fake package dumps, carrier configuration and screen. Each check
+#     passes as it should and fails with each fault it must catch; none
+#     taps, types or dials anything it should not, and check-carrier always
+#     clears the carrier configuration's test values, also when killed.
+wel9_reset() {
+    rm -f "$work"/pkg-* "$work"/hidden-* "$work"/pkgnext-* "$work/ccvalue" "$work/ccrefuse" "$work/ccstuck" \
+        "$work/carrier_trigger_ignored" "$work/carrier_install_ignored" "$work/carrier_uninstalls" "$work/ccnotapplied" "$work/uid"
+    echo 0 >"$work/calls"
+    : >"$work/log"
+}
+P1=org.antumbra.probe.one P2=org.antumbra.probe.two P3=org.antumbra.probe.three
+app_grants() { # PKG COARSE FINE BACKGROUND PHONE_STATE PHONE_NUMBERS: each true or false, set by Welcome's policy
+    local pkg=$1 p
+    shift
+    for p in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION ACCESS_BACKGROUND_LOCATION READ_PHONE_STATE READ_PHONE_NUMBERS; do
+        echo "android.permission.$p: granted=$1, flags=[ USER_SENSITIVE_WHEN_GRANTED|POLICY_FIXED]"
+        shift
+    done >"$work/pkg-$pkg"
+}
+grants_ok() {
+    wel9_reset
+    app_grants $P1 true true false false false
+    app_grants $P2 true false false false false
+    app_grants $P3 false false false false false
+}
+fault() { sed -i "s/^android.permission.$2: .*/$3/" "$work/pkg-$1"; } # PKG PERMISSION LINE: one permission as the dump prints it
+grants() { "$script" check-app-grants --wait "${1:-0}" --precise $P1 --approximate $P2 --denied $P3; }
+grants_ok
+if grants 2>"$work/err"; then
+    grep -q "$P1: location precise, phone state denied, each with POLICY_FIXED" "$work/err" &&
+        grep -q "$P2: location approximate" "$work/err" && grep -q "$P3: no location" "$work/err" &&
+        ! grep -qv '^shell dumpsys package ' "$work/log" &&
+        pass "check-app-grants: precise, approximate and no location as Welcome's policy sets them, user 0 only; it only reads" ||
+        bad "check-app-grants: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-app-grants failed: $(cat "$work/err")"
+fi
+# A pass that lands late: looked at again until it holds.
+grants_ok
+cp "$work/pkg-$P3" "$work/pkgnext-$P3"
+fault $P3 ACCESS_COARSE_LOCATION 'android.permission.ACCESS_COARSE_LOCATION: granted=true, flags=[ USER_SET]'
+"$script" check-app-grants --wait 30 --denied $P3 2>"$work/err" && [ "$(grep -c "^shell dumpsys package $P3" "$work/log")" -ge 2 ] &&
+    pass "check-app-grants waits for a pass that lands late" || bad "check-app-grants, late pass: $(cat "$work/err")"
+# Each fault it must catch: a denial or a default that is not Welcome's
+# (no POLICY_FIXED), location or phone state given where it must not be,
+# a refused or missing app, a permission the dump does not list.
+# Each case: NAME#PKG PERMISSION#the permission's line as the dump prints it#what the check must say.
+for case_ in \
+    "notfixed#$P3 ACCESS_FINE_LOCATION#android.permission.ACCESS_FINE_LOCATION: granted=false, flags=[ USER_SENSITIVE_WHEN_GRANTED|USER_SET|USER_FIXED]#ACCESS_FINE_LOCATION granted=false fixed=no, expected granted=false with POLICY_FIXED" \
+    "noflags#$P3 ACCESS_COARSE_LOCATION#android.permission.ACCESS_COARSE_LOCATION: granted=false#ACCESS_COARSE_LOCATION granted=false fixed=no" \
+    "grantednotfixed#$P1 ACCESS_FINE_LOCATION#android.permission.ACCESS_FINE_LOCATION: granted=true, flags=[ USER_SET]#ACCESS_FINE_LOCATION granted=true fixed=no, expected granted=true with POLICY_FIXED" \
+    "coarse#$P3 ACCESS_COARSE_LOCATION#android.permission.ACCESS_COARSE_LOCATION: granted=true, flags=[ POLICY_FIXED]#$P3: ACCESS_COARSE_LOCATION granted=true fixed=yes, expected granted=false" \
+    "fine#$P2 ACCESS_FINE_LOCATION#android.permission.ACCESS_FINE_LOCATION: granted=true, flags=[ POLICY_FIXED]#$P2: ACCESS_FINE_LOCATION granted=true fixed=yes, expected granted=false" \
+    "background#$P1 ACCESS_BACKGROUND_LOCATION#android.permission.ACCESS_BACKGROUND_LOCATION: granted=true, flags=[ POLICY_FIXED]#$P1: ACCESS_BACKGROUND_LOCATION granted=true" \
+    "phonestate#$P3 READ_PHONE_STATE#android.permission.READ_PHONE_STATE: granted=true, flags=[ POLICY_FIXED]#$P3: READ_PHONE_STATE granted=true" \
+    "phonenumbers#$P1 READ_PHONE_NUMBERS#android.permission.READ_PHONE_NUMBERS: granted=false, flags=[ USER_SET]#$P1: READ_PHONE_NUMBERS granted=false fixed=no" \
+    "unlisted#$P1 ACCESS_BACKGROUND_LOCATION##$P1: ACCESS_BACKGROUND_LOCATION not listed" \
+    "hidden#$P2 -##$P2 is not installed and visible (state installed=true hidden=true)" \
+    "missing#$P3 -##$P3 is not installed and visible (not listed)"; do
+    IFS='#' read -r name target line want <<<"$case_"
+    grants_ok
+    read -r pkg perm <<<"$target"
+    case $name in
+        hidden) touch "$work/hidden-$pkg" ;;
+        missing) rm -f "$work/pkg-$pkg" ;;
+        unlisted) sed -i "/^android.permission.$perm: /d" "$work/pkg-$pkg" ;;
+        *) fault "$pkg" "$perm" "$line" ;;
+    esac
+    if grants 2>"$work/err"; then bad "check-app-grants passed with $name"; else
+        grep -qF "$want" "$work/err" && pass "check-app-grants fails with $name" || bad "check-app-grants with $name: $(cat "$work/err")"
+    fi
+done
+grants_ok
+if "$script" check-app-grants --wait 0 2>"$work/err"; then bad "check-app-grants passed without an app"; else pass "check-app-grants needs an app"; fi
+
+# check-carrier: the carrier configuration names a probe's certificate, and Welcome refuses it.
+H=$(printf 'a probe certificate' | sha256sum | cut -d ' ' -f 1)
+CA=org.antumbra.probe.carrier CB=org.antumbra.probe.carrierlate
+: >"$work/$CA.apk"
+: >"$work/$CB.apk"
+carrier() { "$script" check-carrier --hash "$H" --change $CA "$work/$CA.apk" --install $CB "$work/$CB.apk" --wait "${1:-2}"; }
+cleared() { [ ! -f "$work/ccvalue" ] && grep -qx 'shell cmd phone cc clear-values -s 0' "$work/log"; }
+carrier_only() { ! grep -Eq 'input tap|input text|KEYCODE|tel:|emergency|settings put|uninstall|pm clear|pm hide|pm unhide| -p ' "$work/log"; }
+wel9_reset
+if carrier 2>"$work/err"; then
+    grep -q 'carrier value: taken' "$work/err" && grep -q 'refused on the change: yes' "$work/err" &&
+        grep -q 'refused at install: yes' "$work/err" && [ -f "$work/hidden-$CA" ] && [ -f "$work/hidden-$CB" ] &&
+        [ -f "$work/pkg-$CA" ] && [ -f "$work/pkg-$CB" ] && cleared && carrier_only &&
+        [ "$(at "install -r $work/$CA.apk")" -lt "$(at 'cc set-value')" ] && [ "$(at 'cc set-value')" -lt "$(at "install -r $work/$CB.apk")" ] &&
+        grep -qx "shell cmd phone cc set-value -s 0 carrier_certificate_string_array $H" "$work/log" &&
+        pass "check-carrier: refused on the change and at install, hidden with their data kept; the value cleared" ||
+        bad "check-carrier: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-carrier failed: $(cat "$work/err")"
+fi
+# The emulator does not take the value: not judged (status 3), cleared, nothing more installed.
+wel9_reset
+touch "$work/ccrefuse"
+rc=0
+carrier 2>"$work/err" || rc=$?
+[ "$rc" = 3 ] && grep -q 'carrier value: not taken' "$work/err" && grep -q 'not judged' "$work/err" && cleared &&
+    ! grep -q "install -r $work/$CB.apk" "$work/log" && pass "check-carrier: a value not taken is not judged (status 3), and cleared" ||
+    bad "check-carrier, value not taken (status $rc): $(cat "$work/err")"
+# Not a carrier's own configuration: not judged (status 3), with nothing installed or changed.
+wel9_reset
+touch "$work/ccnotapplied"
+rc=0
+carrier 2>"$work/err" || rc=$?
+[ "$rc" = 3 ] && grep -q "not a carrier's own" "$work/err" && grep -q 'not judged' "$work/err" &&
+    ! grep -Eq '^install|cc set-value|cc clear-values' "$work/log" &&
+    pass "check-carrier: a configuration that is not a carrier's own is not judged, and nothing is changed" ||
+    bad "check-carrier, not a carrier's own (status $rc): $(cat "$work/err"); log: $(cat "$work/log")"
+# Each fault it must catch, the value cleared after each.
+for case_ in "carrier_trigger_ignored|was not refused within 2 s of the carrier configuration's change (no)" \
+    "carrier_install_ignored|$CB was not refused within 2 s of its install (no)" \
+    "carrier_uninstalls|was not refused within 2 s of the carrier configuration's change (gone)" \
+    "ccstuck|the carrier configuration still names the certificate"; do
+    wel9_reset
+    touch "$work/${case_%|*}"
+    if carrier 2>"$work/err"; then bad "check-carrier passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && grep -qx 'shell cmd phone cc clear-values -s 0' "$work/log" && carrier_only &&
+            { [ "${case_%|*}" = ccstuck ] || [ ! -f "$work/ccvalue" ]; } &&
+            pass "check-carrier fails with ${case_%|*}, and clears the value" || bad "check-carrier with ${case_%|*}: $(cat "$work/err")"
+    fi
+done
+# Refused with nothing changed: not root, a call in progress.
+for case_ in "notroot|needs adb as root" "call|a call is in progress; the carrier configuration is not changed"; do
+    wel9_reset
+    case ${case_%|*} in notroot) echo 2000 >"$work/uid" ;; call) echo 2 >"$work/calls" ;; esac
+    if carrier 2>"$work/err"; then bad "check-carrier passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && ! grep -Eq '^install|cmd phone cc' "$work/log" &&
+            pass "check-carrier refuses and changes nothing (${case_%|*})" || bad "check-carrier with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# Killed while the value is set: still cleared.
+wel9_reset
+touch "$work/carrier_trigger_ignored"
+timeout 6 "$script" check-carrier --hash "$H" --change $CA "$work/$CA.apk" --install $CB "$work/$CB.apk" --wait 60 2>"$work/err" &&
+    bad "check-carrier was not killed" ||
+    { grep -q 'cc set-value' "$work/log" && [ ! -f "$work/ccvalue" ] && pass "check-carrier clears the value when it is killed" ||
+        bad "the carrier value stayed set after a kill: $(cat "$work/err")"; }
+wel9_reset
+echo x >"$work/ccvalue"
+"$script" clear-carrier-test 2>"$work/err" && [ ! -f "$work/ccvalue" ] && pass "clear-carrier-test clears the carrier configuration's test values" ||
+    bad "clear-carrier-test: $(cat "$work/err")"
+wel9_reset
+
+# choose-location: Location on for the apps chosen, each as chosen, by test tag.
+loc_ui() { # [BUGS...]: the Welcome screen, with three apps that ask for location
+    local b=''
+    [ $# -eq 0 ] || b=$(printf '"%s",' "$@")
+    wel10_reset
+    ui "{\"screen\": \"welcome\", \"gate\": \"off\", \"internet\": \"wifi\", \"phone\": false, \"radio\": \"Off\", \"sim\": \"Unlocked\", \"apps\": [\"$P1\", \"$P2\", \"$P3\"], \"bugs\": [${b%,}]}"
+}
+location_state() { python3 -I -c 'import json, sys; s = json.load(open(sys.argv[1])); print(s.get("location", False), json.dumps(s.get("chosen", {}), sort_keys=True))' "$work/ui-state.json"; }
+taps_only() { ! grep -Eq 'input text|KEYCODE|tel:|settings put|pm grant|pm revoke|appops' "$work/log"; }
+loc_ui
+if "$script" choose-location --precise $P1 --approximate $P2 2>"$work/err"; then
+    [ "$(location_state)" = "True {\"$P1\": \"precise\", \"$P2\": \"approximate\"}" ] && taps_only &&
+        pass "choose-location: on for the apps chosen, one precise, one approximate, the third not chosen" ||
+        bad "choose-location: $(location_state); $(cat "$work/err")"
+else
+    bad "choose-location failed: $(cat "$work/err")"
+fi
+"$script" choose-location --off 2>"$work/err" && [ "$(location_state | cut -d ' ' -f 1)" = False ] && taps_only &&
+    pass "choose-location --off" || bad "choose-location --off: $(cat "$work/err")"
+for case_ in "location_taps_ignored|$P1's switch did not come on" "precision_ignored|$P1 could not be set precise"; do
+    loc_ui "${case_%|*}"
+    if "$script" choose-location --precise $P1 2>"$work/err"; then bad "choose-location passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && pass "choose-location fails with ${case_%|*}" || bad "choose-location with ${case_%|*}: $(cat "$work/err")"
+    fi
+done
+loc_ui
+if "$script" choose-location --precise org.antumbra.not.offered 2>"$work/err"; then bad "choose-location chose an app not offered"; else
+    grep -q "location_app_org.antumbra.not.offered' not found" "$work/err" && pass "choose-location fails for an app not offered" ||
+        bad "choose-location, app not offered: $(cat "$work/err")"
+fi
+
+# check-position --location-kept: a session that keeps Location on for its chosen apps.
+kept_ui() { # [BUGS...]: the status screen of such a session, Location on
+    card_ui status On LOADED none "$@"
+    python3 -I -c 'import json, sys; p = sys.argv[1]; s = json.load(open(p)); s["kept"] = True; json.dump(s, open(p, "w"))' "$work/ui-state.json"
+    echo 3 >"$work/location"
+}
+kept_ui
+if "$script" check-position --source test --leave home --location-kept 2>"$work/err"; then
+    [ "$(cat "$work/location")" = 3 ] && undone && never_writes && grep -q 'Location stayed on, kept for the chosen apps' "$work/err" &&
+        grep -q 'Location kept on after it' "$work/err" && grep -q 'secure: yes' "$work/err" &&
+        pass "check-position --location-kept: the position on screen, Location kept on after it and after leaving" ||
+        bad "check-position --location-kept: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-position --location-kept failed: $(cat "$work/err")"
+fi
+kept_ui kept_goes_off
+if "$script" check-position --source test --leave home --location-kept 2>"$work/err"; then bad "check-position --location-kept passed with Location going off"; else
+    grep -qF "Location went off after the position was found" "$work/err" && undone &&
+        pass "check-position --location-kept fails when Location goes off" || bad "check-position --location-kept, goes off: $(cat "$work/err")"
+fi
+kept_ui
+if "$script" check-position --source test --leave home 2>"$work/err"; then bad "check-position passed with Location kept on but no --location-kept"; else
+    grep -qF "Location is on before the check" "$work/err" && pass "check-position without --location-kept refuses a Location kept on" ||
+        bad "check-position, kept without the option: $(cat "$work/err")"
+fi
+kept_ui
+touch "$work/testprovider"
+"$script" clear-position-test --location-kept 2>"$work/err" && [ "$(cat "$work/location")" = 3 ] && undone &&
+    grep -q 'kept for the session' "$work/err" && pass "clear-position-test --location-kept leaves Location on and removes the test provider" ||
+    bad "clear-position-test --location-kept: $(cat "$work/err")"
+wel10_reset
+wel9_reset
 
 rm -f "${work:?}/ui-state.json"
 export PATH="$PATH_BEFORE_UI"

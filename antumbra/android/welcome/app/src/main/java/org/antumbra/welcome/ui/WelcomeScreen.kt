@@ -42,10 +42,12 @@ import org.antumbra.welcome.CellLevel
 import org.antumbra.welcome.Choices
 import org.antumbra.welcome.EmergencyUi
 import org.antumbra.welcome.Internet
+import org.antumbra.welcome.LocationApp
 import org.antumbra.welcome.PhoneChoices
 import org.antumbra.welcome.PhoneStatus
 import org.antumbra.welcome.PhoneTexts
 import org.antumbra.welcome.PositionUi
+import org.antumbra.welcome.Precision
 import org.antumbra.welcome.R
 import org.antumbra.welcome.TorMode
 
@@ -67,6 +69,8 @@ data class WelcomeUi(
     val phone: PhoneStatus = PhoneStatus(),
     /** The emergency card's number and state lines, and why Show my position would be refused (WEL10). */
     val emergency: EmergencyUi = EmergencyUi(),
+    /** WEL9: the installed apps that may be chosen for location, on screen only. */
+    val locationApps: List<LocationApp> = emptyList(),
 )
 
 /**
@@ -187,6 +191,9 @@ fun WelcomeScreen(
             }
             Spacer(Modifier.height(8.dp))
             TextCard(stringResource(R.string.card_carrier), PhoneTexts.carrierChoice(c), tag = "card_carrier_choice")
+
+            SectionTitle(stringResource(R.string.section_location))
+            LocationChoices(ui, onChoices)
 
             SectionTitle(stringResource(R.string.section_network))
             RowGroup {
@@ -342,6 +349,72 @@ private fun BridgeChoices(ui: WelcomeUi, onChoices: (Choices) -> Unit) {
         )
     }
     Spacer(Modifier.height(4.dp))
+}
+
+/**
+ * WEL9: Location Off (the default), or On for apps you choose: each app
+ * the person installed that asks for location, ticked or not, and a ticked
+ * app approximate (the default) or precise; precise only for an app that
+ * asks for fine location alone. The app list is on this screen only, in a
+ * secure window (WindowRules).
+ */
+@Composable
+private fun LocationChoices(ui: WelcomeUi, onChoices: (Choices) -> Unit) {
+    val c = ui.choices
+    RowGroup(Modifier.selectableGroup()) {
+        RadioRow(
+            stringResource(R.string.location_off), stringResource(R.string.location_off_detail),
+            selected = !c.location, tag = "location_off",
+            onSelect = { onChoices(c.copy(location = false)) },
+        )
+        GroupDivider()
+        RadioRow(
+            stringResource(R.string.location_apps), stringResource(R.string.location_apps_detail),
+            selected = c.location, tag = "location_apps",
+            onSelect = { onChoices(c.copy(location = true)) },
+        )
+    }
+    if (!c.location) return
+    Spacer(Modifier.height(8.dp))
+    RowGroup {
+        if (ui.locationApps.isEmpty()) {
+            InfoRow(stringResource(R.string.location_no_apps), null, tag = "location_no_apps")
+        }
+        ui.locationApps.forEachIndexed { i, app ->
+            if (i > 0) GroupDivider()
+            val precision = c.locationApps[app.pkg]
+            SwitchRow(
+                app.label,
+                stringResource(
+                    when (precision) {
+                        null -> R.string.location_app_none
+                        Precision.APPROXIMATE -> R.string.location_app_approximate_value
+                        Precision.PRECISE -> R.string.location_app_precise_value
+                    },
+                ),
+                checked = precision != null, tag = "location_app_${app.pkg}",
+                onCheckedChange = { onChoices(c.withLocationApp(app.pkg, it, first = app.precisions.first())) },
+            )
+            if (precision != null) {
+                // An app that asks for fine location alone is offered precise only (approximate would give it nothing).
+                Column(Modifier.selectableGroup()) {
+                    if (Precision.APPROXIMATE in app.precisions) {
+                        RadioRow(
+                            stringResource(R.string.location_approximate), stringResource(R.string.location_approximate_detail),
+                            selected = precision == Precision.APPROXIMATE, tag = "location_approximate_${app.pkg}", indent = true,
+                            onSelect = { onChoices(c.withPrecision(app.pkg, Precision.APPROXIMATE)) },
+                        )
+                    }
+                    RadioRow(
+                        stringResource(R.string.location_precise),
+                        stringResource(if (app.fineOnly) R.string.location_precise_only_detail else R.string.location_precise_detail),
+                        selected = precision == Precision.PRECISE, tag = "location_precise_${app.pkg}", indent = true,
+                        onSelect = { onChoices(c.withPrecision(app.pkg, Precision.PRECISE)) },
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** One Internet choice; Mobile data only where the add-on allows it, with the reason otherwise. */

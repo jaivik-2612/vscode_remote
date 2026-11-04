@@ -20,7 +20,12 @@ also have an **emergency card** (WEL10): the general emergency number
 Android lists now, lines on the SIM, the radio and VoLTE that say this
 phone can still try and point to the other phone too, and **Show my
 position**, one fix from the satellite receiver shown in large type and
-sent nowhere (see "Emergency card").
+sent nowhere (see "Emergency card"). And it asks about **Location**
+(WEL9): off, or on for the apps you choose, each precise or approximate;
+every other app you installed is refused location and phone state (apps
+that came with the phone keep Android's location permissions until WEL6),
+and an app with carrier privileges is refused (see "Apps: location, phone
+state and carrier privileges").
 
 Package `org.antumbra.welcome`. Kotlin, Jetpack Compose with Material 3.
 compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
@@ -29,9 +34,10 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 |---|---|
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
-| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, the emergency card's number, lines, hook and Show my position (WEL10), and the texts |
-| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb`, `check-addon`, `check-module-word`, `check-choices`, `check-phone`, `check-module-cell`, `check-emergency-card`, `check-emergency-states`, `check-position` and `clear-position-test`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
+| `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, the emergency card's number, lines, hook and Show my position (WEL10), the apps' location, phone state and carrier privileges and Location kept on for the chosen apps (WEL9), and the texts |
+| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` (with `--location-apps` in a session with apps chosen for location), `check-addon`, `check-module-word`, `check-choices`, `check-phone`, `check-module-cell`, `check-emergency-card`, `check-emergency-states`, `check-position` and `clear-position-test` (each with `--location-kept` in such a session), and WEL9's `check-app-grants`, `check-carrier`, `clear-carrier-test` and `choose-location`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
+| `ci/build-probes.sh` | WEL9's probe apps for the emulator job: six code-less APKs that ask for location and phone state, built with `aapt2`, `zipalign` and `apksigner` and signed with two keys made for the build (the welcome job runs it, not blocking) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
 | `gradlew`, `gradle/wrapper/gradle-wrapper.properties` | The pinned Gradle (see "Building") |
 | `gradle/libs.versions.toml` | Every plugin and library version |
@@ -65,6 +71,15 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
      gate says `phone` or `data`, else disabled with "Not available yet:
      Phone needs checks on this phone first." Then the card **What your
      carrier sees** for the choice made.
+   - **Location** (WEL9): *Off* (default) or *On for apps you choose*;
+     with the second, each app you installed that asks for location (apps
+     that came with the phone, Welcome and the default phone and SMS apps
+     aside) with a switch, and a ticked app *Approximate* (default) or
+     *Precise* (*Precise* only for an app that asks for fine location
+     alone). Both texts say that every other app you installed is refused
+     and that apps that came with the phone keep Android's location
+     permissions for now. The list is on this screen only, in a secure
+     window (see "Apps: location, phone state and carrier privileges").
    - **Network**: *New Wi-Fi hardware address*, on by default.
    - **Persistent Storage**: shown, disabled, "Not set up yet" (v0).
    - **Additional settings**: *Administration*, off; *Unsafe Browser*,
@@ -87,7 +102,8 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
    the **Phone** card (the SIM, the cellular radio, "Calls and texts
    (VoLTE)" from the module's IMS reading in a Phone-mode session, "Not
    checked" otherwise) and **What your carrier sees** for the radio as
-   it is now and what the add-on carries out; the session's choices (Internet, Tor, Phone, Wi-Fi address,
+   it is now and what the add-on carries out; the session's choices (Internet, Tor, Phone, Location
+   (WEL9: Off, "On for the apps you chose", or "Not on yet" with the reason), Wi-Fi address,
    Administration, Unsafe Browser) and the firewall row ("Live (rules …)" only from
    `antumbra.fw.armed`); buttons for Wi-Fi settings and for adding the
    Quick Settings tile; and **Emergency call** and **Power off now** (Quick
@@ -136,7 +152,11 @@ name: `internet_wifi`, `internet_mobile`, `internet_none`, `tor_direct`,
 `position_button`, `position_stop`, `position_hide`, `position_status`,
 `position_refusal`, `position_lat_label`, `position_lat`,
 `position_lon_label`, `position_lon`, `position_map`, `position_accuracy`,
-`position_age`, `position_mock`, `position_location`.
+`position_age`, `position_mock`, `position_location`; WEL9's:
+`location_off`, `location_apps`, `location_no_apps`, and for each app
+`location_app_<package>`, `location_approximate_<package>` and
+`location_precise_<package>`; `row_location` and `location_reason` on the
+status screen.
 `emergency_number_value` holds one number, or several Android ranks alike
 separated by " · ".
 
@@ -273,7 +293,10 @@ shutdown for the next boot; `BootState`, `Home`):
   call" button. Back does nothing.
 - The baseline policies are applied (next section), including those that
   an earlier Administration session lifted: Administration lasts until the
-  next shutdown, not into the next boot.
+  next shutdown, not into the next boot. Among them a pass over the
+  installed apps (WEL9): no app gets location or phone state, and one
+  with carrier privileges is refused; it runs at `LOCKED_BOOT_COMPLETED`
+  already, so a cut shutdown's grants go as early as Welcome can act.
 - Wi-Fi is locked (`DISALLOW_CHANGE_WIFI_STATE`, `DISALLOW_CONFIG_WIFI`,
   `DISALLOW_ADD_WIFI_CONFIG`), switched off, and checked to be off; saved
   Wi-Fi networks are removed (`removeNonCallerConfiguredNetworks`). With
@@ -308,7 +331,9 @@ shutdown for the next boot; `BootState`, `Home`):
    restrictions; for a Wi-Fi session with the add-on, the Wi-Fi lock is
    lifted and Wi-Fi switched on. The cellular radio and mobile data are the
    module's (root): Welcome only reports the choice (`cell`), and the
-   module carries it out as far as the phone's gate allows.
+   module carries it out as far as the phone's gate allows. The apps
+   chosen for location (WEL9; only those still offered) are kept with the
+   session's choices, in memory, apart from the provider's row.
 6. A leftover power-off request is deleted (see "Quick power off"), the
    session's choices are fixed in memory, and the provider starts
    answering `started = 1`. Policies come first because the module opens
@@ -322,6 +347,10 @@ shutdown for the next boot; `BootState`, `Home`):
    only home. The status screen has its own task affinity: in Welcome's
    home task it was closed along with WelcomeActivity when Android acted
    on the disabled component, about 10 s later.
+9. WEL9: a pass over the apps grants the chosen ones location as chosen
+   and denies every other; in a session with chosen apps, Location then
+   comes on when safe and stays on until shutdown (see "Apps: location,
+   phone state and carrier privileges").
 
 **During the session** the choices exist only in memory. The foreground
 service keeps the process alive, so the provider keeps answering, and so
@@ -330,8 +359,9 @@ registered receivers only, and defers it for cached processes.)
 
 **At shutdown or restart**, Welcome is made home again (enabled, preferred,
 allowed to lock its task), the baseline policies are applied again
-(Administration's loosening ends here), Wi-Fi is turned off and locked,
-and saved networks are removed. The shutdown broadcast has a few seconds,
+(Administration's loosening ends here; Location off at once), Wi-Fi is
+turned off and locked, saved networks are removed, and last the chosen
+apps' location is denied again (WEL9). The shutdown broadcast has a few seconds,
 so it does not wait to see Wi-Fi off. If the phone loses power or crashes
 instead, the same happens at the next boot (`LOCKED_BOOT_COMPLETED`), a
 few seconds after the launcher may have shown.
@@ -526,12 +556,13 @@ Start; only a Start loosens anything (`Policies.kt`).
 | Automatic time off, automatic time zone off, time zone UTC | always | See "Automatic time". |
 | `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY` | unless Administration | No apps from outside the preinstalled store. |
 | `DISALLOW_BLUETOOTH` | unless Administration | Bluetooth tethering and nearby-device scans. |
-| `DISALLOW_CONFIG_LOCATION`, and Location off | always, Administration included (since WEL8; Location switched off before Start and at every Start, through `Position.offWhenSafe`: nothing written while it is already off, and left as it is while a call, emergency callback mode or the 5 minutes after a call hold; at shutdown at once) | Location, scans and GNSS through Tor still locate you. Until WEL9 ("off, or on for chosen apps") nothing switches Location on but Welcome itself, for one satellite fix the person asks for (WEL10, "Emergency card"); the person still cannot switch it. |
+| `DISALLOW_CONFIG_LOCATION`, and Location off | always, Administration included (since WEL8; Location switched off before Start and at every Start, through `Position.offWhenSafe`: nothing written while it is already off, and left as it is while a call, emergency callback mode or the 5 minutes after a call hold; at shutdown at once) | Location, scans and GNSS through Tor still locate you. The person never switches it; only Welcome does: for one satellite fix the person asks for (WEL10, "Emergency card"), and in a session with apps chosen for location from Start until shutdown (WEL9). |
+| Location and phone state denied to every app the person installed (`setPermissionGrantState`, `POLICY_FIXED`); the chosen apps' location granted as chosen; apps with carrier privileges refused (`setApplicationHidden`); Welcome's own phone-state block lifted on the default phone and SMS apps (`PERMISSION_GRANT_STATE_DEFAULT`, only from `DENIED`) | before Start (boot, device owner, process start), at Start, at each install or update (that package first), carrier-configuration change and change of default app; at shutdown, last, the chosen apps denied again | WEL9: see "Apps: location, phone state and carrier privileges". System apps and Welcome are never touched: apps that came with the phone keep Android's location permissions until WEL6. |
 | Wi-Fi locked: `DISALLOW_CHANGE_WIFI_STATE`, `DISALLOW_CONFIG_WIFI`, `DISALLOW_ADD_WIFI_CONFIG`; Wi-Fi off, checked | before Start; sessions whose Internet is not Wi-Fi (None, mobile data); add-on missing | Fail closed: no network without the add-on. A device owner can still switch Wi-Fi (`WifiServiceImpl`, Android 16), except in airplane mode (below). |
 | Wi-Fi lock lifted, Wi-Fi on | Start, Internet Wi-Fi, add-on present | The user then adds a network in Settings. |
 | `POST_NOTIFICATIONS` granted to itself | Start | The session notification. |
-| `READ_PHONE_STATE` granted to itself | before Start (`Home.claim`) | "Return to call" (`TelecomManager.showInCallScreen`; see "Emergency calls"), Android's emergency-number list and `TelecomManager.isInCall` (WEL10). WEL9's phone-state denial must leave Welcome out. |
-| `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` granted to itself | the first press of Show my position (WEL10) | One fix from the GPS provider. Allowed to a device owner set with `dpm set-device-owner` over adb (`canAdminGrantSensorsPermissions`); never revoked, since revoking a runtime permission kills the app and the session it keeps in memory. WEL6's denial must leave Welcome out. |
+| `READ_PHONE_STATE` granted to itself | before Start (`Home.claim`) | "Return to call" (`TelecomManager.showInCallScreen`; see "Emergency calls"), Android's emergency-number list and `TelecomManager.isInCall` (WEL10), and the carrier configuration's certificate list (WEL9). WEL9's phone-state denial leaves Welcome out (its plan never names Welcome; `PositionTest`, `AppRulesTest`). |
+| `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` granted to itself | the first press of Show my position (WEL10) | One fix from the GPS provider. Allowed to a device owner set with `dpm set-device-owner` over adb (`canAdminGrantSensorsPermissions`); never revoked, since revoking a runtime permission kills the app and the session it keeps in memory. WEL9's location denial leaves Welcome out, and so must WEL6's. |
 
 "Administration" lifts the two "unless Administration" rows from Start
 until the next shutdown; it never turns debugging or Location on. The
@@ -539,7 +570,12 @@ protective rows (safe boot, tethering, Wi-Fi Direct, debugging, and the
 Wi-Fi lock when Wi-Fi must stay off) refuse a session with Internet when
 they fail. No call or SMS restriction is set (`DISALLOW_OUTGOING_CALLS`,
 `DISALLOW_SMS`): emergency calls must work in every session, and Phone
-off is the module's radio, not a restriction.
+off is the module's radio, not a restriction. Nor any other telephony
+restriction (WEL9, `PoliciesTest` scans every source): no 2G restriction
+and no network type forced (on an LTE-only VoLTE carrier they protect
+nothing and could take away a fallback to another operator's network for
+an emergency call), no roaming restriction (data roaming is checked on the
+phone, PH3, not relied on: carrier settings may keep it sticky).
 
 **Wi-Fi in airplane mode.** Android 16 lets only Settings switch Wi-Fi in
 airplane mode (`WifiServiceImpl.setWifiEnabled`: "only Settings can toggle
@@ -564,10 +600,15 @@ global-settings allowlist), so it would be the module's job (as root).
 
 Not set in v0:
 
-- Location and nearby-device permissions set to denied for every app:
-  needs a grant per installed app and on every new install (a
-  package-added listener); later work. Location stays off and locked in
-  every session, and Bluetooth is off unless Administration.
+- Nearby-device permissions set to denied for every app, and location
+  for apps that came with the phone (WEL6). WEL9 refuses location and
+  phone state to every other app the person installed (Welcome and the
+  default phone and SMS apps aside); Bluetooth is off unless
+  Administration.
+- Adding users: Android itself forbids managed, clone and private
+  profiles once there is a device owner, but Welcome does not set
+  `DISALLOW_ADD_USER`, and its passes cover user 0's apps only (see
+  "Apps: location, phone state and carrier privileges", "Other users").
 - Hiding or suspending the Magisk app in user 0 outside a maintenance
   mode: the weekly "Install to inactive slot" update needs the app, and
   that maintenance mode does not exist yet (later work).
@@ -642,6 +683,192 @@ number line) and nothing else: not the Phone card, not Start, not what the
 module is told. The CI emulator cannot remove or lock its SIM, so this is
 how each state's text is shown there (`check-emergency-states`, which
 clears the property afterwards whatever happens).
+
+## Apps: location, phone state and carrier privileges
+
+WEL9. The rules are in `AppRules.kt` (no Android code, `AppRulesTest`), and
+`AppPolicies.kt` applies them as the device owner. Only location
+(`ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`,
+`ACCESS_BACKGROUND_LOCATION`) and phone state (`READ_PHONE_STATE`,
+`READ_PHONE_NUMBERS`) are ever set, and only the ones an app asks for. No
+call or SMS permission is touched, in any app.
+
+**Never touched:** system apps (`FLAG_SYSTEM`, updated ones included:
+the dialer, Telephony, cell broadcast, IMS, the location and GNSS
+providers among them), Welcome, and the default phone and SMS apps (but
+for lifting Welcome's own block, below). So every other app you installed
+is refused, and **apps that came with the phone keep Android's location
+permissions until WEL6**: they can get your location whenever Location is
+on. **Every other app you installed:**
+
+- **Location** denied with `setPermissionGrantState(DENIED)`, which
+  revokes the permission and sets `POLICY_FIXED`, so neither the app nor
+  the person can grant it back. In a session with chosen apps, each chosen
+  app gets coarse location, and fine location too when *Precise* was
+  chosen (approximate is the default), both `GRANTED` and `POLICY_FIXED`;
+  background location never. An app that asks for fine location alone (one
+  written for Android 11 or earlier) is offered *Precise* only, as
+  Android's own dialog does for such apps: approximate would give it
+  nothing.
+- **Phone state** denied the same way. The opt-in for SIM-bound messaging
+  apps (D3: phone state in Phone mode only, their data in Persistent
+  Storage) exists only as the plan's empty `phoneStateApps`: nothing on
+  screen offers it until AM4 and PH3.
+- **Refused** when it has carrier privileges (below).
+
+**When.** A pass reads everything again each time (the installed apps, the
+session's choice, the default phone and SMS apps, the carrier
+configuration), so passes may come in any order and the last one is right;
+they run one at a time, on their own thread. At boot
+(`LOCKED_BOOT_COMPLETED`, Welcome's boot receiver being direct-boot aware,
+listing every package whether or not it runs in direct boot; again at
+`BOOT_COMPLETED`), on becoming the device owner, at the process's start
+(a process that restarted knows no session, so no app keeps location),
+at Start before the session (the baseline) and after it, when the default
+phone or SMS app changes (below), at each change of the carrier
+configuration, and at each install or update (`AppWatch`): first a pass
+over that package alone (its name is in the broadcast), then one over
+every app. No step throws: each grant state, refusal and lift is caught on
+its own, and a failure is counted.
+
+**At shutdown** the chosen apps' location is denied again, so that
+Android's stored grants keep no trace of the choice. It is the last step,
+after Location is switched off and Wi-Fi is locked off and its networks
+forgotten: the shutdown broadcast has 10 s in all (`ShutdownThread`'s
+`MAX_BROADCAST_TIME`), and the denials wait 6 s at most. Grants stop for
+good first (`GrantGate`: one lock holds a grant under way and the
+closing), so that a pass still running cannot grant anything after the
+denials. If shutdown is cut (power lost, a crash, the 6 s running out),
+the next boot's first pass denies them.
+
+**Location's switch** in a session with chosen apps (`Position.kt`,
+`PositionMachine.keepOn`) comes on after Start under WEL10's rules: not
+while assistance, a network location provider or Wi-Fi scanning is on, or
+without a satellite receiver (it then stays off, and the status screen
+says why); never while a call, emergency callback mode or the 5 minutes
+after a call hold (it comes on when the hold ends: "Location comes on 5
+minutes after the call ends"); and only once a pass in the session has
+refused location to every other app you installed. While it waits for
+that, Welcome asks for a new pass at most every 30 s, so that one denial
+that failed is tried again rather than keeping Location off for the
+session. Welcome looks again every 5 s and tries a failed switch again.
+Then Show my position leaves it on (`Off.KEPT_ON`, "Location stays on for
+the apps you chose, until you shut down"), and so do leaving the screen
+and Stop; only shutdown switches it off. Before that pass, a search still
+ends with Location off, as before WEL9. The person still cannot switch
+Location (`DISALLOW_CONFIG_LOCATION`). Android shows its own notice that
+apps can access your location, and PermissionController may show one that
+the device's admin allowed an app's location (on screen only).
+
+**The list of apps** on the Welcome screen is read again only after an
+install, update or removal, or a change of the default phone or SMS app
+(`AppWatch.generation`), not at every poll; system apps are dropped before
+any label is loaded, and no certificate is read for it. While "On for apps
+you choose" shows it, the window is `FLAG_SECURE` (`WindowRules`): no
+screenshot, no recents thumbnail.
+
+**Carrier privileges.** Android has three sources (`CarrierPrivilegesTracker`):
+the SIM's own access rules (and an eSIM profile's), the carrier
+configuration's certificate list (`KEY_CARRIER_CERTIFICATE_STRING_ARRAY`),
+and test overrides. A device owner can read only the second (with
+`READ_PHONE_STATE`, which Welcome holds: `getConfigForSubId` for each SIM
+slot's subscription); the others are exposed only through `@SystemApi`,
+so MOD10's live list from root is the next `PrivilegeSource`. Welcome uses
+a slot's list as `CarrierPrivilegesTracker` does, only when a carrier's
+own configuration has been applied
+(`CarrierConfigManager.isConfigForIdentifiedCarrier`), and matches it as
+`UiccAccessRule` does: an entry is a certificate hash in hexadecimal,
+either case, alone or followed by `:` and packages separated by `,` (split
+as Java's `String.split` does, so an empty name in the list means any
+package); it matches an app when the SHA-256 of one of its signing
+certificates (the signing history, or every signer when there are
+several) is the hash, or the SHA-1 when the hash is 20 bytes. When one
+entry cannot be decoded (an odd length, a character that is not
+hexadecimal, nothing before `:`), Android drops the slot's whole list
+(`IccUtils` throws and nothing catches it), and so does Welcome: it
+refuses nothing from that list. A matching app is **refused with
+`setApplicationHidden(admin, package, true)`**, not uninstalled: its data
+stays, and Android treats it as not installed for the user. A hidden
+package is killed, is listed by no query without
+`MATCH_UNINSTALLED_PACKAGES`, so none of its components can start, and
+Android sends `PACKAGE_REMOVED` for it, on which `CarrierPrivilegesTracker`
+drops it (its own query does not ask for uninstalled packages): it can
+neither run nor keep carrier privileges, so uninstalling is not needed.
+Welcome never unhides an app; an update keeps it hidden, and the pass
+after it hides it again anyway.
+
+The trigger for a change is `CarrierConfigManager.registerCarrierConfigChangeListener`
+(API 34), registered at the process's start: TelephonyRegistry calls it on
+every change and asks for no permission. Not a receiver for
+`ACTION_CARRIER_CONFIG_CHANGED`: the phone process (uid 1001) sends it, and
+Android lets only root and system_server reach a receiver that is not
+exported, in the manifest or registered with `RECEIVER_NOT_EXPORTED`, so
+such a receiver never fires. Besides the change, the check runs at boot,
+at Start and at each install or update.
+
+**The default phone and SMS apps** are read at every pass
+(`TelecomManager.getDefaultDialerPackage`, `Telephony.Sms.getDefaultSmsPackage`):
+a device owner may not watch the role holders (`RoleManager`'s listener
+needs `OBSERVE_ROLE_HOLDERS`, `signature|installer|module`). A change
+brings a pass: Telecom's `ACTION_DEFAULT_DIALER_CHANGED` (sent by
+system_server), and the Welcome and status screens' polls, which read
+both again and compare them with the last pass's (a pass at most every
+30 s from these). When either cannot be read (none, or an exception), the
+pass sets no phone state, refuses nothing and lifts nothing (calls come
+first); location still goes, since no call or text depends on an app's
+location grant.
+
+**Welcome lifts only its own block** on the current default phone and SMS
+apps (not system apps, not Welcome): an app Welcome denied phone state
+before the person made it the default would otherwise keep that denial,
+which Android's grant to the new default does not override. At each pass
+that could read the default apps, for `READ_PHONE_STATE` and
+`READ_PHONE_NUMBERS` only, and only when `getPermissionGrantState` reads
+`DENIED`, Welcome sets `PERMISSION_GRANT_STATE_DEFAULT`: never granted,
+never another permission. After the lift the app can ask for the
+permission again, or the person can allow it in Settings; choosing the
+app again as the default phone or SMS app gives the role's grant back. A
+former default is denied again at the next pass.
+
+**Nothing about the choice goes anywhere.** The chosen apps are in memory
+only, beside the session's choices but not in the provider's row; the
+status screen shows Location's state, not the apps; Welcome's log lines
+give counts and the pass's reason, never a package (`AppRulesTest`).
+Nothing reaches `status.json` or the module.
+
+**Other users.** With a device owner, Android itself forbids managed,
+clone and private profiles (`DevicePolicyManagerService` sets
+`DISALLOW_ADD_MANAGED_PROFILE`, `DISALLOW_ADD_CLONE_PROFILE` and
+`DISALLOW_ADD_PRIVATE_PROFILE` on every user). Welcome does not set
+`DISALLOW_ADD_USER`: where the build allows several users, a secondary
+user could be added, and its apps are not in Welcome's passes, which cover
+user 0. A gap, left as it is; AM4's Persistent Storage user needs the same
+passes.
+
+**What waits:** apps privileged by the SIM's own access rules or an eSIM
+profile (MOD10's list); nearby-device grants for every app and location
+grants of apps that came with the phone (WEL6); the messaging opt-in (AM4
+and PH3). WEL9 switches nothing cellular on: release behaves as debug,
+WEL8's `/data/adb/antumbra-cell` gate still holds, and Wi-Fi calling stays
+MOD7's. Residual: a newly installed app may ask the person for location or
+phone state in the moment before its own pass denies them.
+
+**On the emulator** (warnings until they have passed on CI once):
+`welcome_location_before` (three probes installed before Start, each
+denied location and phone state with `POLICY_FIXED`),
+`welcome_carrier_trigger` and `welcome_carrier_refused` (the carrier
+configuration names a probe's certificate, as root with `cmd phone cc
+set-value`, in memory only: the probe installed before is refused on the
+change, the one installed after at its install; "not judged" when slot 0's
+configuration is not a carrier's own or the emulator does not take the
+value, which is cleared afterwards whatever happens;
+`welcome_carrier_recover` when it cannot be), `welcome_location_start`
+(one probe precise, one approximate; `welcome_location_recover` when
+Welcome or Location's Off cannot be put back), then after Start
+`welcome_location_grants` (only those two hold location, as chosen) and
+`welcome_location_new_install` (a probe installed during the session gets
+none); `check-policies --location-apps` and Show my position with
+`--location-kept`.
 
 ## SIM, cellular radio and VoLTE (WEL8)
 
@@ -978,7 +1205,10 @@ on request:
 
 What remains (PH5 on the phone, WEL6, MOD8): while Location is on, apps
 holding a location grant can get the fix, and Android's remembered last
-fix the next time Location is on; the app-ops history records that Welcome
+fix the next time Location is on (since WEL9 no app the person installed
+holds one outside a session's chosen apps; apps that came with the phone
+keep Android's location permissions until WEL6); the app-ops history
+records that Welcome
 used location, and when; the GNSS engine keeps its last position; a PSDS
 download Android arms with the first fix of a boot runs at the next network,
 as system traffic, so through Tor after Start, with the known hosts refused
@@ -1112,11 +1342,17 @@ $W check-power-menu                            # before Start: the power menu sh
 $W check-emergency-card                        # WEL10 (adb root): each number the card shows is Android's, its lines match the device; reads only
 $W check-emergency-states --shots shots/       # WEL10 (debug build): each state's text through the hook; the hook cleared after
 $W check-position --source test                # WEL10 (adb root): a test-provider fix on screen, Location off after, nothing kept
+adb install -r one.apk                         # WEL9: any apps that ask for location (CI: welcome/ci/build-probes.sh)
+$W check-app-grants --denied org.example.one   # WEL9, before Start: no location, no phone state, POLICY_FIXED
+$W check-carrier --hash SHA256 --change PKG1 APK1 --install PKG2 APK2   # WEL9 (adb root): refused on the change and at install
+$W choose-location --precise org.example.one   # WEL9, before Start: Location on for the apps chosen
 $W screenshot welcome.png
 $W check-choices --gate off                    # WEL8, before Start: the six attempts; the gate the module told Welcome
 $W start --tor bridges --bridges-file plain-bridges.txt   # --internet wifi|mobile|none, --phone off|calls
 $W expect started=1 tor_mode=bridges bridges=2
-$W check-policies                              # add --admin, --keep-adb, --wifi-locked as they apply
+$W check-policies                              # add --admin, --keep-adb, --wifi-locked, --location-apps as they apply
+$W check-app-grants --precise org.example.one  # WEL9, after Start: as chosen
+$W check-position --source test --location-kept   # WEL9: in a session with chosen apps Location stays on
 $W check-addon                                 # Welcome reads antumbra.fw.armed (opens the status screen, scrolls to the row)
 $W check-phone --cell off                      # WEL8: the status screen's session lines, Phone and carrier cards
 $W check-module-cell                           # WEL8 (adb root): the word on the cell radio from root only
@@ -1242,11 +1478,26 @@ drives Welcome itself with the same test tags and provider URI, and calls
 this script only for `check-emergency` (before Start, check
 `welcome_emergency_dialer`), `check-power-menu` (right after it, check
 `welcome_power_menu_emergency`, a warning until it has passed on CI once),
-`check-policies --keep-adb` and `check-addon`. It
+`check-policies --keep-adb` and `check-addon`, and for WEL9's checks (see
+"Apps: location, phone state and carrier privileges"). It
 must set `debug.antumbra.keep_adb 1` before `dpm set-device-owner` to keep
 adb. The Welcome job in
 `.github/workflows/antumbra-android.yml` builds the debug APK and runs the
-unit tests.
+unit tests, and builds WEL9's probe apps (`ci/build-probes.sh`, not
+blocking).
+
+`check-app-grants` reads each app's user 0 runtime permissions in `dumpsys
+package` and requires `POLICY_FIXED` on every one, so that a denial the
+person made, or Android's default, never counts as Welcome's. It looks
+again every 3 s, as a pass may land a moment after an install.
+`check-carrier` changes only slot 0's carrier certificate list, in memory
+(`cmd phone cc set-value` without `-p`, as root on a non-user build), and
+clears it with `cmd phone cc clear-values` whatever happens, also when
+killed; when slot 0's configuration is not a carrier's own
+(`carrier_config_applied_bool`, read first, before anything is changed),
+or the value does not read back, it says "not judged" and exits with
+status 3. `choose-location` taps rows by their test tags and reads
+each back checked. None of them dials or writes a setting.
 
 ## Verified, and not yet
 
@@ -1474,6 +1725,54 @@ the list with the radio off and the SIM locked, the card's lines in each
 state, the Qualcomm stack in standalone mode, its time to a fix against the
 3-minute limit, and anything it asks a server for.
 
+WEL9 (2026-11-03, then 2026-11-04 after its review: 143 unit tests in
+all, lint clean; no emulator here):
+the plan for every mix of session, chosen apps, default apps and carrier
+privileges: only the chosen apps get location, coarse always and fine only
+when precise, background never, every other app denied; phone state
+denied to every other app and granted to none; system apps, Welcome and
+the default phone and SMS apps never named, refused or not; no permission
+outside location and phone state ever set; no phone state, no refusal
+and no lift when a default app cannot be read; a refused app gets no
+location even if chosen; an app that asks for fine location alone offered
+precise only; one package's pass the same as its part of a pass over every
+app; Welcome's own block on the current default apps lifted only from
+`DENIED`, never granted, a former default denied again; shutdown denies
+the chosen apps again, leaving the same state as before Start, and no grant
+passes the closed gate; the carrier certificate list decoded and matched as
+`CarrierPrivilegesTracker` and `UiccAccessRule` do (a carrier's own
+configuration only, SHA-256 and SHA-1, either case, package-bound rules,
+Java's split, one undecodable entry dropping the slot's whole list);
+the window secure while the app list shows; Location kept on in a
+session with chosen apps (on at once, never during a call's hold and on at
+the first look after it, off with its reason for assistance, a network
+provider, Wi-Fi scanning or no GPS, waiting for the apps' pass and asking
+for a new one at most every 30 s, a failed switch retried, Show my
+position, Stop and leaving the screen leaving it on, only shutdown
+switching it off); source scans: no telephony
+restriction in any source, the carrier listener and the install listener
+registered from the process's start and no receiver for the carrier
+broadcast, the new package's pass before the full one, the shutdown's
+denials after Wi-Fi's steps, the app list read only when it changed and
+without certificates, the boot path at `LOCKED_BOOT_COMPLETED`, a denial
+and a lift only in `AppPolicies.kt` and from the plan, nothing
+uninstalled, no log line or
+the provider naming an app, `SubscriptionManager` used for a slot's
+subscription number only. `ci/test-welcome-adb.sh` runs `check-app-grants`,
+`check-carrier`, `clear-carrier-test`, `choose-location`, `check-policies
+--location-apps` and `check-position --location-kept` against fake dumps,
+carrier configuration and screen, failing as they should with each fault
+(a denial without `POLICY_FIXED`, location or phone state where it must
+not be, another user's grants, a hidden or missing app, a carrier change
+or an install not refused, an app uninstalled instead of hidden, a value
+that is not cleared, Location going off in a session that keeps it), "not
+judged" when the value is not taken or slot 0's configuration is not a
+carrier's own, and clearing the value also when killed. Not yet: all of it on a device. On the emulator first:
+`setPermissionGrantState` at `LOCKED_BOOT_COMPLETED`, the carrier
+listener's call on `cmd phone cc`, `setApplicationHidden` of a privileged
+app, `dumpsys package`'s format, and Location kept on with the run's other
+checks; on the phone (PH3): the carrier's own configuration and SIM rules.
+
 ## Open risks
 
 - **The session lives in one process.** The foreground service makes its
@@ -1516,12 +1815,26 @@ state, the Qualcomm stack in standalone mode, its time to a fix against the
 - **The SIM-PIN screen covers Welcome** before Start when the SIM is
   locked; the person must not type the PIN in a start without the add-on.
   Welcome can only say so.
-- **Location cannot be switched on** by the person in any session until
-  WEL9 brings "off, or on for chosen apps" (WEL8 took it out of
-  Administration); only Welcome switches it, for one satellite fix the
-  person asks for (WEL10), and off again. Meanwhile apps holding a location
-  grant could get that fix (WEL6), and the phone's own GNSS stack may ask
-  for assistance data through Tor (PH5).
+- **Location is Welcome's alone to switch** (WEL8 took it out of
+  Administration): for one satellite fix the person asks for (WEL10), and
+  from Start until shutdown in a session with apps chosen for location
+  (WEL9). Every other app the person installed is refused location
+  outside the chosen ones; apps that came with the phone keep Android's
+  location permissions until WEL6, and can get the position whenever
+  Location is on, all session long in a session with chosen apps; the
+  phone's own GNSS stack may ask for assistance data through Tor (PH5).
+- **Carrier privileges from the SIM's own rules or an eSIM profile** are
+  not seen: a device owner can read only the carrier configuration's list
+  (MOD10 brings the live list from root).
+- **A newly installed app** may ask the person for location or phone
+  state in the moment before its own pass denies them. A default phone or
+  SMS app Welcome denied phone state before it became the default has the
+  block lifted (back to Android's default), but is not granted anything:
+  it asks again, or the person allows it in Settings, or chooses it again
+  as the default.
+- **A secondary user** can be added where the build allows several users
+  (Welcome does not set `DISALLOW_ADD_USER`); its apps are not in Welcome's
+  passes.
 - **Quick power off restarts rather than powers off** unless the module
   installs Welcome as a privileged app or implements the power-off request.
 - **Bridges need lyrebird**, which the tor part does not build yet; only

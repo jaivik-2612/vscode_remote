@@ -11,7 +11,7 @@ going. Every job has a time limit.
 | `firewall` | ubuntu-24.04 | shellcheck of `antumbra-fw` and the sandbox test; `firewall/tests/sandbox-test.sh` as root with the legacy iptables backend (Android's; `AFW_TEST_BACKEND=legacy`, no silent fallback to nft), under bash, dash, busybox and mksh, with IPv6 required |
 | `dnsfilter` | ubuntu-24.04 | `build.sh --test --fuzz 60s --check --require-selftest`: `go vet`, `go test -race`, 60 s of fuzzing each for `FuzzHandle` and `FuzzReply` (a failing input is uploaded), both static binaries, and both self-tests run (arm64 under `qemu-user-static`); then the block list (`fetch-lists.sh`) checked by the filter itself, with a fresh `SHA256SUMS` of exactly the files in the artifact. The last sources that downloaded cleanly are cached; a source that fails to download now is taken from there (`--fallback`), with a warning in the summary |
 | `tor` | ubuntu-24.04 | `build-tor.sh` for arm64-v8a and x86_64 with the NDK pinned in `tor/sources.lock` (the runner's copy if it is that revision, else `sdkmanager`, through `sdk-install.sh`), sources checked by SHA-256 and OpenPGP signature; `hostcheck-tor.sh` as root; `check-tor-binary.sh` on both. Cached under `build-tor.sh --print-cache-key` plus `-host`: the cache and the artifact also hold `host/tor-hostcheck`, the static x86_64 tor that `module-e2e` runs |
-| `welcome` | ubuntu-24.04 | `./gradlew assembleDebug`, then `testDebugUnitTest lintDebug`, `tools/builtin-bridges.sh --check`, and shellcheck of `gradlew`, `ci/welcome-adb.sh` and `tools/builtin-bridges.sh` |
+| `welcome` | ubuntu-24.04 | `./gradlew assembleDebug`, WEL9's probe apps (`ci/build-probes.sh`, not blocking, an artifact of their own), then `testDebugUnitTest lintDebug`, `tools/builtin-bridges.sh --check`, shellcheck of `gradlew`, `ci/welcome-adb.sh`, `ci/test-welcome-adb.sh`, `ci/build-probes.sh` and `tools/builtin-bridges.sh`, and `ci/test-welcome-adb.sh` |
 | `module` | ubuntu-24.04 | shellcheck (`-s sh -x`) of every module script, `module/tests/unit.sh`, then `build-module.sh` with the outputs of the jobs above |
 | `module-e2e` | ubuntu-24.04 | `module/tests/e2e-host.sh` as root: the module's boot scripts on Linux with the real firewall, tor, DNS filter and `antumbra-run`, under Android 16's toybox and mksh and Magisk's busybox, built from the pins in `module/tests/build-test-tools.sh` (cached by that file's hash) |
 | `emulator` | ubuntu-24.04 with KVM | the two scenarios below, the leak analysis, the job summary, `verdict.json` and the artifact; twice: Android 16 (`android-36;default`, blocking) and Android 16 QPR2 (`android-36.1;google_apis`, the Android version of LineageOS 23.2, with Google services; `continue-on-error`) |
@@ -268,18 +268,45 @@ that the captures must show traffic from the phone.
    artifact, not on the Daily page). The walk is bounded (7 minutes a
    gate, no gate begun after 15 minutes; a gate cut short is a warning),
    so that a slow screen cannot make the step run out of time. Nothing is
-   dialled, and no emergency number is set. Then the choices for the run,
+   dialled, and no emergency number is set.
+   Then WEL9, still before Start, with the probe apps the welcome job
+   built (`welcome/ci/build-probes.sh`: six code-less APKs that ask for
+   location and phone state, signed with two keys made for the build;
+   the artifact `antumbra-android-welcome-probes-<run>`, which may be
+   missing): `welcome_location_before` (three probes installed, each
+   denied location and phone state with `POLICY_FIXED`, `welcome-adb.sh
+   check-app-grants`), then `welcome_carrier_trigger` and
+   `welcome_carrier_refused` (`check-carrier`, as root: a carrier probe
+   installed, then `cmd phone cc set-value -s 0
+   carrier_certificate_string_array` with the other key's certificate
+   hash, in memory only, and Welcome must refuse that probe on the change
+   and a second one at its install, both hidden with their data kept;
+   "not judged" when slot 0's configuration is not a carrier's own
+   (`carrier_config_applied_bool`, read before anything is changed) or
+   the emulator does not take the value; the value
+   cleared afterwards whatever happens, `clear-carrier-test` again after
+   a failure, `welcome_carrier_recover`), Welcome brought back
+   (`welcome_location_recover`). Three and a half minutes at most
+   (`WEL9_BEFORE_S`), each install 45 s at most; a check without its probe is "not
+   judged". Warnings until they have passed on CI once (`wel9_level`).
+   Then the choices for the run,
    with the gate at `phone` (as the install leaves it after PH3's outcome
    A), whatever the walk left selected: each row by its test tag alone
    (`ui_choose`: never by its text, which another row's detail may hold:
    "Wi-Fi" is also in None's), from the top of the page, and read back
-   checked, with a second try: Internet Wi-Fi and Tor directly (the run
+   checked, with a second try (each switch from a known place, since WEL9's
+   Location section lies above them: the Wi-Fi address from the top of the
+   page, Unsafe Browser and Administration from its end, `ui_top` and
+   `ui_bottom`): Internet Wi-Fi and Tor directly (the run
    stops if either cannot be chosen), **Phone: calls and texts**
    (`welcome_phone_start`; Phone off if Welcome does not offer it within
    60 s or the row does not read checked, a warning, so the leak test never
    stops for a WEL8 check; if the row after Start says otherwise, the
    checks after Start follow the row), new Wi-Fi address, **Administration off**
-   (the default session a user gets), Unsafe Browser off; then "Start
+   (the default session a user gets), Unsafe Browser off, and WEL9's
+   Location: on for the probes one (precise) and two (approximate), three
+   not chosen (`welcome_location_start`, `choose-location`, a minute and a
+   half at most; set back to Off when it fails); then "Start
    Antumbra". adb must still answer; the provider row must say
    `started=1`, `tor_mode=direct` and `admin=0`, and `provider_cell` its
    `cell`. The leak test then judges the setup the owner uses daily: the
@@ -291,8 +318,14 @@ that the captures must show traffic from the phone.
    again (`guest-links.txt`). Wi-Fi's hardware address must differ
    from the one before the module (a warning). Welcome's own checks through
    `welcome/ci/welcome-adb.sh`: `check-policies --keep-adb` (the
-   device-owner restrictions of a default session) and `check-addon` (the
-   status screen shows the firewall live). Then MOD11: `welcome_module_word`
+   device-owner restrictions of a default session; with `--location-apps`
+   once WEL9 chose apps for location, when Location may be on) and
+   `check-addon` (the status screen shows the firewall live). Then WEL9
+   after Start, two minutes at most (`WEL9_AFTER_S`), warnings:
+   `welcome_location_grants` (only the probes one and two hold location,
+   one precise, one approximate, background never; three none) and
+   `welcome_location_new_install` (a probe installed during the session
+   gets no location and no phone state). Then MOD11: `welcome_module_word`
    (a failure since it passed in run 20; `welcome-adb.sh
    check-module-word`: the module's word given as the shell user, uid 2000
    through `su`, is refused with a `SecurityException`, a malformed one
@@ -324,7 +357,8 @@ that the captures must show traffic from the phone.
    on the status screen in the run's Phone-mode session: the radio on, so no
    radio line, and the VoLTE line, the emulator having no IMS),
    `welcome_position_session` (Show my position with the network up, left
-   with Home), `position_lookups` (no query line in the DNS filter's log
+   with Home; with `--location-kept` in WEL9's session, where Location
+   stays on), `position_lookups` (no query line in the DNS filter's log
    between the events `position_start` and `position_end`; any names in the
    warning: an assistance download would show here) and
    `position_not_in_status` (the test position not in the module's

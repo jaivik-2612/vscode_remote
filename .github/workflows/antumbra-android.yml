@@ -344,6 +344,23 @@ jobs:
           overwrite: true
           if-no-files-found: error
 
+      # WEL9's probe apps for the emulator job: code-less APKs built with
+      # aapt2, zipalign and apksigner (this job has the build tools). Not
+      # blocking: without them the emulator's WEL9 checks say "not judged".
+      - name: WEL9 probe apps (not blocking)
+        continue-on-error: true
+        working-directory: antumbra/android/welcome
+        run: bash ci/build-probes.sh "$RUNNER_TEMP/welcome-probes"
+
+      - uses: actions/upload-artifact@v6
+        continue-on-error: true
+        with:
+          name: antumbra-android-welcome-probes-${{ github.run_number }}
+          path: ${{ runner.temp }}/welcome-probes
+          retention-days: 5
+          overwrite: true
+          if-no-files-found: ignore
+
       - name: Unit tests and lint
         working-directory: antumbra/android/welcome
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug
@@ -352,7 +369,7 @@ jobs:
         working-directory: antumbra/android/welcome
         run: |
           sh tools/builtin-bridges.sh --check
-          shellcheck gradlew ci/welcome-adb.sh ci/test-welcome-adb.sh tools/builtin-bridges.sh
+          shellcheck gradlew ci/welcome-adb.sh ci/test-welcome-adb.sh ci/build-probes.sh tools/builtin-bridges.sh
           bash ci/test-welcome-adb.sh
 
       - name: Notes for the summary
@@ -523,8 +540,8 @@ jobs:
     name: emulator (${{ matrix.name }})
     needs: [firewall, dnsfilter, tor, welcome, module]
     runs-on: ubuntu-24.04
-    # 30 (BASELINE) + 50 (ANTUMBRA) + 10 (analysis), and room for the rest.
-    timeout-minutes: 110
+    # 30 (BASELINE) + 60 (ANTUMBRA) + 10 (analysis), and room for the rest.
+    timeout-minutes: 120
     continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
@@ -565,6 +582,7 @@ jobs:
             echo "ANTUMBRA_CAPTURE_DIR=$RUNNER_TEMP/capture"
             echo "ANTUMBRA_MODULE_TREE=$RUNNER_TEMP/module-tree"
             echo "ANTUMBRA_WELCOME_APK=$RUNNER_TEMP/welcome/app-debug.apk"
+            echo "ANTUMBRA_WEL9_PROBES=$RUNNER_TEMP/welcome-probes"
           } >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/report/build" "$RUNNER_TEMP/capture" "$RUNNER_TEMP/module-tree"
 
@@ -577,6 +595,13 @@ jobs:
         with:
           name: antumbra-android-welcome-${{ github.run_number }}
           path: ${{ runner.temp }}/welcome
+
+      # WEL9's probe apps; missing, the WEL9 checks are "not judged".
+      - uses: actions/download-artifact@v7
+        continue-on-error: true
+        with:
+          name: antumbra-android-welcome-probes-${{ github.run_number }}
+          path: ${{ runner.temp }}/welcome-probes
 
       - uses: actions/download-artifact@v7
         with:
@@ -642,7 +667,8 @@ jobs:
 
       - name: 'ANTUMBRA: module, Welcome, Start, Wi-Fi, tor, tracker test, probes, armed state'
         if: ${{ !cancelled() }}
-        timeout-minutes: 50
+        # 50 before WEL9, whose bounded steps add at most about 11 minutes (emulator-antumbra.sh, wel9_level).
+        timeout-minutes: 60
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
         env:
           ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/antumbra.pcap

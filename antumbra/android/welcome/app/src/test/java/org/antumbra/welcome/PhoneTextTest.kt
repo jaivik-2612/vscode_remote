@@ -251,9 +251,27 @@ class PhoneTextTest {
         // Plain bridges do not hide Tor use.
         assertTrue(t("tor_bridges_detail").contains("do not hide that you use Tor"))
         assertFalse(t("tor_bridges_detail").contains("Hides"))
-        // Administration no longer covers location.
-        assertTrue(t("admin_detail").contains("Location stays off"))
+        // Administration no longer covers location (WEL8); since WEL9 Location has its own choice.
+        assertTrue(t("admin_detail").contains("It does not switch Location on (see Location above)"))
         assertFalse(t("admin_detail").contains("turning Location on"))
+        assertFalse(t("admin_detail").contains("Location stays off"))
+        // WEL9: Off by default; on for the apps ticked, approximate unless chosen precise, never in the background.
+        // What is refused is said as it is: every other app the person installed; apps that came with the phone
+        // keep Android's location permissions (WEL6), in every text that speaks of the others.
+        val kept = "apps that came with the phone keep Android's location permissions for now"
+        for (name in listOf("location_off_detail", "location_apps_detail", "location_wait_apps")) {
+            assertTrue(name, StringsXml.of(name).lowercase().contains(kept.lowercase()))
+            assertFalse(name, StringsXml.of(name).contains("No app gets your location") || StringsXml.of(name).contains("Every other app is refused"))
+        }
+        assertTrue(t("location_off_detail").startsWith("Location stays off. Every app you installed is refused location;"))
+        assertTrue(t("location_apps_detail").contains("The apps you tick get it, never in the background; every other app you installed is refused."))
+        assertTrue(t("location_apps_detail").contains("stays on until you shut down"))
+        assertTrue(t("location_wait_apps").startsWith("Location comes on once Welcome has refused location to every other app you installed."))
+        assertTrue(t("location_precise_only_detail").contains("approximate would give it nothing"))
+        assertTrue(t("location_approximate_detail").contains("not your exact position"))
+        assertEquals("Location stays on for the apps you chose, until you shut down.", t("position_kept_on"))
+        // While a call holds, the session's Location waits as Show my position does.
+        assertTrue(t("location_wait_call").contains("Welcome changes nothing during a call or just after it"))
         // Welcome cannot type the SIM PIN; type it only after a normal start,
         // decided from what can be known while Android's PIN screen covers Welcome.
         assertTrue(t("sim_pin_help").contains("Welcome cannot type it for you, and its warnings cannot be seen then"))
@@ -320,9 +338,9 @@ class PhoneTextTest {
             it.startsWith("internet_") || it.startsWith("phone_") || it.startsWith("sim_") || it.startsWith("carrier_") ||
                 it.startsWith("ims_") || it.startsWith("radio_") || it.startsWith("status_mode_") || it.startsWith("cell_") ||
                 it.startsWith("emergency_state_") || it.startsWith("emergency_number_") || it.startsWith("emergency_numbers_") ||
-                it.startsWith("emergency_other_") || it.startsWith("position_")
+                it.startsWith("emergency_other_") || it.startsWith("position_") || it.startsWith("location_")
         }
-        assertTrue(wel8.size > 40)
+        assertTrue(wel8.size > 55)
         wel8.forEach { (name, v) ->
             v.forEach { s ->
                 assertFalse(name, Regex("\\d{2,}").containsMatchIn(s.replace("%1\$d", "").replace("4G", "").replace("2G", "").replace("3G", "")))

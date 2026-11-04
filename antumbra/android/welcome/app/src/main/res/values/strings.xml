@@ -87,6 +87,8 @@
     <string name="position_failed">Location could not be switched on.</string>
     <string name="position_unchanged">Nothing was changed: Location is off.</string>
     <string name="position_off_start">Welcome has just started, so it does not know whether a call ended a moment ago. Location stays on for 5 minutes: Welcome changes nothing then, in case the emergency service needs this phone. Then Welcome switches it off.</string>
+    <!-- WEL9: in a session with apps chosen for location, the search leaves Location on. -->
+    <string name="position_kept_on">Location stays on for the apps you chose, until you shut down.</string>
     <string name="position_request_failed">Welcome could not ask the satellite receiver.</string>
 
     <!-- Welcome screen -->
@@ -180,6 +182,22 @@
     <string name="carrier_data_off">Mobile data is off: your Internet traffic does not pass through your carrier.</string>
     <string name="carrier_hotspot">If your Wi-Fi is another phone\'s hotspot, that phone\'s carrier sees that you use Tor.</string>
 
+    <!-- WEL9: Location off, or on for the apps chosen (AppRules.kt,
+         AppPolicies.kt). The list of apps is shown here only. -->
+    <string name="section_location">Location</string>
+    <string name="location_off">Off</string>
+    <string name="location_off_detail">Location stays off. Every app you installed is refused location; apps that came with the phone keep Android\'s location permissions for now. Show my position still works, for one fix at a time.</string>
+    <string name="location_apps">On for apps you choose</string>
+    <string name="location_apps_detail">After Start, Location comes on, from the satellite receiver only, and stays on until you shut down. The apps you tick get it, never in the background; every other app you installed is refused. Apps that came with the phone keep Android\'s location permissions for now.</string>
+    <string name="location_no_apps">No installed app asks for your location.</string>
+    <string name="location_app_none">No location</string>
+    <string name="location_app_approximate_value">Approximate location</string>
+    <string name="location_app_precise_value">Precise location</string>
+    <string name="location_approximate">Approximate</string>
+    <string name="location_approximate_detail">Roughly where you are, not your exact position.</string>
+    <string name="location_precise">Precise</string>
+    <string name="location_precise_detail">Your exact position.</string>
+    <string name="location_precise_only_detail">Your exact position. This app asks only for that, so approximate would give it nothing.</string>
     <string name="section_network">Network</string>
     <string name="mac_title">New Wi-Fi hardware address</string>
     <string name="mac_on">A random Wi-Fi address for this session, so Wi-Fi networks cannot recognise the phone by it. It does not change the phone\'s IMEI or the SIM card\'s identity (IMSI): your carrier sees both whenever the cellular radio is on.</string>
@@ -191,7 +209,7 @@
 
     <string name="section_additional">Additional settings</string>
     <string name="admin_title">Administration</string>
-    <string name="admin_detail">Allows installing apps from outside the Antumbra store, and Bluetooth, until you restart the phone. Location stays off, and so does USB debugging. Off by default, as in Tails.</string>
+    <string name="admin_detail">Allows installing apps from outside the Antumbra store, and Bluetooth, until you restart the phone. It does not switch Location on (see Location above), and USB debugging stays off. Off by default, as in Tails.</string>
     <string name="unsafe_title">Unsafe Browser</string>
     <string name="unsafe_detail">Coming later. For signing in to hotel or café Wi-Fi, without Tor.</string>
 
@@ -265,6 +283,12 @@
     <string name="row_tor">Tor</string>
     <string name="row_phone">Phone</string>
     <string name="row_mac">Wi-Fi address</string>
+    <string name="row_location">Location</string>
+    <string name="location_value_on">On for the apps you chose</string>
+    <string name="location_value_not_yet">Not on yet</string>
+    <string name="location_wait_call">Location comes on 5 minutes after the call ends: Welcome changes nothing during a call or just after it, in case the emergency service needs this phone.</string>
+    <string name="location_wait_apps">Location comes on once Welcome has refused location to every other app you installed. Apps that came with the phone keep Android\'s location permissions for now.</string>
+    <string name="location_wait_retry">Location could not be switched on yet. Welcome keeps trying.</string>
     <string name="row_admin">Administration</string>
     <string name="row_unsafe">Unsafe Browser</string>
     <string name="row_firewall">Firewall</string>

@@ -37,6 +37,11 @@ data class StartPolicies(
  * before Start ([applyBaseline]) is the strict one, and it is applied again
  * at boot, on becoming the device owner, at shutdown and at every Start;
  * only Start loosens anything, and only for the choices made.
+ *
+ * No telephony restriction, ever (WEL9; PoliciesTest scans every source):
+ * no 2G or network-type restriction (on a carrier with no 2G they protect
+ * nothing and could take away a fallback to another network for an
+ * emergency call), no roaming restriction, no call or SMS restriction.
  */
 class Policies(private val context: Context) {
     private val dpm = context.getSystemService(DevicePolicyManager::class.java)
@@ -55,7 +60,11 @@ class Policies(private val context: Context) {
      * - USB debugging off: DISALLOW_DEBUGGING_FEATURES and the adb settings
      *   reset, in every session (the debug-build test hook aside, [TestHook]);
      * - no automatic time or time zone, and the time zone set to UTC;
-     * - no device name in DHCP requests (Android 15 and later).
+     * - no device name in DHCP requests (Android 15 and later);
+     * - WEL9, every app the person installed (system apps, Welcome and the
+     *   default phone and SMS apps aside): location and phone state denied,
+     *   apps with carrier privileges refused (an [AppPolicies] pass, on its
+     *   own thread). Not at shutdown: [appsAtShutdown] comes last there.
      *
      * Location goes off through [Position.offWhenSafe] (WEL10): nothing is
      * written when it is already off, and while a call, emergency callback
@@ -73,6 +82,7 @@ class Policies(private val context: Context) {
                 check(Position.offWhenSafe(context) != PositionMachine.Off.FAILED) { "Location is still on" }
             }
         }
+        if (!atShutdown) step(failures, "apps") { AppPolicies.request(context, "baseline") }
         failures += debugging()
         // Automatic time would ask an NTP server (UDP 123) and the carrier
         // (NITZ) for the time outside Tor; the firewall rejects the NTP
@@ -89,6 +99,19 @@ class Policies(private val context: Context) {
         // from a packet socket below the firewall. A device owner may forbid
         // it for open and secure networks alike (WifiServiceImpl).
         step(failures, "dhcp_hostname") { noDhcpHostname() }
+        return failures
+    }
+
+    /**
+     * WEL9, the last step at shutdown, after Wi-Fi's (the shutdown broadcast
+     * has 10 s in all, ShutdownThread's MAX_BROADCAST_TIME): the session's
+     * chosen apps' location denied again, waiting 6 s at most
+     * ([AppPolicies.atShutdown]); after a cut shutdown the next boot's
+     * first pass denies them.
+     */
+    fun appsAtShutdown(): List<String> {
+        val failures = ArrayList<String>()
+        step(failures, "apps") { check(AppPolicies.atShutdown(context) == 0) { "a chosen app's location could not be denied" } }
         return failures
     }
 
@@ -293,14 +316,13 @@ class Policies(private val context: Context) {
             // The module sets private DNS off; a DNS-over-TLS host set by
             // the user would go around the tracker filter.
             UserManager.DISALLOW_CONFIG_PRIVATE_DNS,
-            // Location stays off in every session (WEL8): Administration
-            // no longer lifts it, and until WEL9 ("off, or on for chosen
-            // apps") nothing switches it on but Welcome itself, for one
-            // satellite fix the person asks for (WEL10, Position.kt; the
+            // The person never switches Location (WEL8): Administration no
+            // longer lifts it; only Welcome does, as the device owner (the
             // device owner's switch is system_server's write, which the
-            // restriction lets through). Sessions without Administration
-            // already had it so; emergency calls are as before (the
-            // restriction blocks no call).
+            // restriction lets through): for one satellite fix the person
+            // asks for (WEL10), and, in a session with apps chosen for
+            // location, from Start until shutdown (WEL9, Position.kt).
+            // Emergency calls are as before (the restriction blocks no call).
             UserManager.DISALLOW_CONFIG_LOCATION,
         )
 

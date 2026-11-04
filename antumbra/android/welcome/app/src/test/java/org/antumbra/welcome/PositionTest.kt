@@ -86,6 +86,13 @@ class PositionTest {
             if (active) log += "remove"
             active = false
         }
+
+        /** WEL9: the session's apps pass is done; a new pass asked for. */
+        var apps = true
+        override fun appsReady() = apps
+        override fun requestApps() {
+            log += "apps pass"
+        }
     }
 
     private fun machine(processStart: Boolean = false, setup: FakePlatform.() -> Unit = {}): Pair<FakePlatform, PositionMachine> {
@@ -506,6 +513,10 @@ class PositionTest {
             assertTrue(s.toString(), WindowRules.secure(s, typed))
             assertEquals(s.toString(), secure or (if (looking) keepOn else 0), WindowRules.flags(s, typed))
         }
+        // WEL9: the installed apps listed for Location: secure whatever the position.
+        for (s in states) assertTrue(s.toString(), WindowRules.secure(s, Choices(location = true)))
+        assertFalse(WindowRules.showsApps(Choices()))
+        assertTrue(WindowRules.showsApps(Choices(location = true)))
         assertFalse(WindowRules.typedBridges(typed.copy(bridgeText = " ")))
         assertFalse(WindowRules.typedBridges(typed.copy(bridgeSource = BridgeSource.BUILT_IN)))
         assertFalse(WindowRules.typedBridges(typed.copy(torMode = TorMode.DIRECT)))
@@ -690,28 +701,254 @@ class PositionTest {
         assertEquals("assisted_gps_enabled", AndroidPosition.ASSISTED_GPS_ENABLED)
     }
 
-    /** Welcome never revokes a permission of its own: that kills its process, and the session with it. */
+    /**
+     * Welcome never revokes a permission of its own: that kills its process,
+     * and the session with it. Since WEL9 a denial is set in AppPolicies.kt
+     * alone, from the plan of AppRules, which never names Welcome.
+     */
     @Test
     fun noPermissionOfWelcomesOwnIsRevoked() {
         for (f in SourceScan.sources()) {
             val code = SourceScan.withoutComments(f.readText())
-            for (w in listOf("PERMISSION_GRANT_STATE_DENIED", "PERMISSION_GRANT_STATE_DEFAULT", "revokeSelfPermission", "revokeRuntimePermission", "revokeSelfPermissionsOnKill")) {
+            val never = listOf("revokeSelfPermission", "revokeRuntimePermission", "revokeSelfPermissionsOnKill")
+            for (w in never + if (f.name == "AppPolicies.kt") emptyList() else listOf("PERMISSION_GRANT_STATE_DENIED", "PERMISSION_GRANT_STATE_DEFAULT")) {
                 assertFalse("${f.name}: $w", code.contains(w))
             }
-            // Each call's arguments (to its closing parenthesis): the last is GRANTED.
+            // Each call's arguments (to its closing parenthesis): the last is GRANTED, or in AppPolicies the plan's state.
             Regex("setPermissionGrantState\\(").findAll(code).forEach {
-                var depth = 1
-                var i = it.range.last + 1
-                while (depth > 0) {
-                    if (code[i] == '(') depth++ else if (code[i] == ')') depth--
-                    i++
+                val args = SourceScan.arguments(code, it.range.last + 1).trim().trimEnd(',').trim()
+                if (f.name == "AppPolicies.kt" && args.startsWith("admin, l.pkg, l.permission,")) {
+                    // The lift of Welcome's own block on a default app: back to Android's default, never granted.
+                    assertEquals(args, "admin, l.pkg, l.permission, DevicePolicyManager.PERMISSION_GRANT_STATE_DEFAULT", args)
+                } else if (f.name == "AppPolicies.kt") {
+                    assertTrue(args, args.startsWith("admin, s.pkg, s.permission,"))
+                    assertTrue(args, args.endsWith("if (s.grant == Grant.GRANTED) DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED else DevicePolicyManager.PERMISSION_GRANT_STATE_DENIED"))
+                } else {
+                    assertTrue("${f.name}: $args", args.endsWith("DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED"))
                 }
-                val args = code.substring(it.range.last + 1, i - 1).trim().trimEnd(',').trim()
-                assertTrue("${f.name}: $args", args.endsWith("DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED"))
             }
         }
+        // The plan's steps never name Welcome, whatever is chosen or privileged.
+        val self = "org.antumbra.welcome"
+        val apps = listOf(InstalledApp(self, false, requested = (AppRules.LOCATION + AppRules.PHONE).toSet()))
+        for (chosen in listOf(null, mapOf(self to Precision.PRECISE))) {
+            for (roles in listOf(RoleHolders("x.d", "x.s"), null)) {
+                val plan = AppRules.plan(apps, self, chosen, roles, setOf(self))
+                assertTrue(plan.steps.isEmpty() && plan.refuse.isEmpty())
+            }
+        }
+        assertTrue(AppRules.atShutdown(mapOf(self to Precision.PRECISE), self).isEmpty())
+        assertTrue(AppRules.plan(apps, self, null, RoleHolders(self, self), emptySet()).lifts.isEmpty())
+        val policies = SourceScan.code("AppPolicies.kt")
+        assertTrue(policies.contains("AppRules.plan(apps, context.packageName,"))
+        assertTrue(policies.contains("AppRules.atShutdown(Session.locationApps(), context.packageName)"))
         assertEquals(listOf("android.permission.ACCESS_FINE_LOCATION", "android.permission.ACCESS_COARSE_LOCATION"), AndroidPosition.PERMISSIONS)
         assertTrue(position.contains("PERMISSIONS.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }"))
+    }
+
+    // --- WEL9: Location kept on for the chosen apps --------------------------
+
+    /** After Start, a session with chosen apps: Location on at once when nothing holds, and Show my position leaves it on. */
+    @Test
+    fun aSessionWithChosenAppsKeepsLocationOn() {
+        val (p, m) = machine()
+        m.keepOn()
+        assertEquals(listOf("location true"), p.log)
+        assertTrue(p.location)
+        assertFalse(m.busy())
+        var ui = m.snapshot()
+        assertTrue(ui.keptOn && ui.lastReadOn)
+        assertEquals(R.string.location_value_on, PositionTexts.sessionValue(ui, 2))
+        assertNull(PositionTexts.sessionReason(ui, 2))
+        // Show my position: no switch, the fix, and Location left on.
+        m.press()
+        p.onFix!!(fix)
+        assertEquals(listOf("location true", "grant", "request gps", "remove"), p.log)
+        assertTrue(p.location)
+        assertEquals(PositionMachine.Off.KEPT_ON, m.offWhenSafe())
+        ui = m.snapshot()
+        assertFalse(ui.offPending)
+        assertEquals(R.string.position_kept_on, PositionTexts.offLine(ui))
+        // Stop, the screen leaving, Start's end and the baseline leave it on too.
+        for (why in listOf(PositionEnd.STOPPED, PositionEnd.LEFT)) {
+            m.press()
+            m.end(why)
+        }
+        repeat(20) {
+            p.t += 10_000
+            m.tick()
+        }
+        assertTrue(p.location)
+        assertFalse(p.log.contains("location false"))
+        // Only shutdown switches it off, and it stays off.
+        assertTrue(m.offNow())
+        assertFalse(p.location)
+        repeat(5) {
+            p.t += PositionMachine.RETRY_MS
+            m.tick()
+        }
+        assertFalse(p.location)
+        assertEquals("location false", p.log.last())
+        assertFalse(m.snapshot().keptOn)
+        // No apps chosen: the status screen says Off.
+        assertEquals(R.string.value_off, PositionTexts.sessionValue(PositionUi(), 0))
+        assertNull(PositionTexts.sessionReason(PositionUi(), 0))
+    }
+
+    /** It is never switched during a call's hold: it comes on at the first look after the hold ends. */
+    @Test
+    fun theSessionsLocationWaitsForACall() {
+        val (p, m) = machine { hold = true }
+        m.keepOn()
+        assertFalse(p.location)
+        assertEquals(emptyList<String>(), p.log)
+        var ui = m.snapshot()
+        assertEquals(PositionRefusal.CALL, ui.keepWhy)
+        assertEquals(R.string.location_value_not_yet, PositionTexts.sessionValue(ui, 1))
+        assertEquals(R.string.location_wait_call, PositionTexts.sessionReason(ui, 1))
+        assertTrue(m.busy())
+        repeat(30) {
+            p.t += 10_000
+            m.tick()
+        }
+        assertEquals(emptyList<String>(), p.log)
+        p.hold = false
+        p.t += 1_000
+        m.tick()
+        assertFalse(p.location)
+        p.t += PositionMachine.RETRY_MS
+        m.tick()
+        assertTrue(p.location)
+        assertEquals(listOf("location true"), p.log)
+        ui = m.snapshot()
+        assertNull(ui.keepWhy)
+        assertFalse(m.busy())
+        // A call that begins between the look and the switch: no switch.
+        val p2 = FakePlatform()
+        var looks = 0
+        val holdOnSecondLook = object : PositionPlatform by p2 {
+            override fun callHold(): Boolean = ++looks >= 2
+        }
+        val m2 = PositionMachine(holdOnSecondLook)
+        m2.keepOn()
+        assertEquals(2, looks)
+        assertFalse(p2.location)
+        assertEquals(emptyList<String>(), p2.log)
+        assertEquals(PositionRefusal.CALL, m2.snapshot().keepWhy)
+    }
+
+    /** It stays off with its reason on screen while assistance, a network provider or Wi-Fi scanning is on, or there is no GPS; it comes on once that goes. */
+    @Test
+    fun theSessionsLocationStaysOffWithItsReason() {
+        fun case(want: PositionRefusal, setup: FakePlatform.() -> Unit) = setup to want
+        for ((setup, want) in listOf(
+            case(PositionRefusal.ASSISTED) { assisted = 1 },
+            case(PositionRefusal.ASSISTED) { assisted = null },
+            case(PositionRefusal.NETWORK_PROVIDER) { network = true },
+            case(PositionRefusal.WIFI_SCANNING) { scanning = true },
+            case(PositionRefusal.WIFI_SCANNING) { scanning = null },
+            case(PositionRefusal.NO_GPS) { gps = false },
+        )) {
+            val (p, m) = machine(setup = setup)
+            m.keepOn()
+            assertFalse(want.name, p.location)
+            assertEquals(want.name, emptyList<String>(), p.log)
+            val ui = m.snapshot()
+            assertEquals(want, ui.keepWhy)
+            assertEquals(PositionTexts.refusal(want), PositionTexts.sessionReason(ui, 1))
+            // Show my position is refused the same, and changes nothing.
+            m.press()
+            assertEquals(PositionState.Refused(want), m.state)
+            assertFalse(p.location)
+        }
+        // The reason goes: on at the next look.
+        val (p, m) = machine { scanning = true }
+        m.keepOn()
+        p.scanning = false
+        p.t += PositionMachine.RETRY_MS
+        m.tick()
+        assertTrue(p.location)
+        // Not the device owner: nothing to retry.
+        val (p2, m2) = machine { owner = false }
+        m2.keepOn()
+        assertFalse(p2.location || m2.busy())
+        assertEquals(PositionRefusal.NOT_OWNER, m2.snapshot().keepWhy)
+    }
+
+    /**
+     * It waits until every other app the person installed has been refused
+     * location, asking for a new pass meanwhile at most every 30 s (so that
+     * one denial that failed does not keep Location off for the session);
+     * meanwhile Show my position ends with Location off, as before WEL9.
+     */
+    @Test
+    fun theSessionsLocationWaitsForTheApps() {
+        val (q, n) = machine { apps = false }
+        n.keepOn()
+        assertEquals(listOf("apps pass"), q.log)
+        assertEquals(30_000L, PositionMachine.APPS_RETRY_MS)
+        val start = q.t
+        while (q.t < start + PositionMachine.APPS_RETRY_MS - PositionMachine.RETRY_MS) {
+            q.t += PositionMachine.RETRY_MS
+            n.tick()
+        }
+        assertEquals(listOf("apps pass"), q.log)
+        q.t = start + PositionMachine.APPS_RETRY_MS
+        n.tick()
+        assertEquals(listOf("apps pass", "apps pass"), q.log)
+        // The pass that lands lets Location come on, and no more passes are asked for.
+        q.apps = true
+        q.t += PositionMachine.RETRY_MS
+        n.tick()
+        assertTrue(q.location)
+        q.t += 5 * PositionMachine.APPS_RETRY_MS
+        n.tick()
+        assertEquals(listOf("apps pass", "apps pass", "location true"), q.log)
+        assertTrue(position.contains("override fun requestApps() = AppPolicies.request(context, \"location waits\")"))
+        val (p, m) = machine { apps = false }
+        m.keepOn()
+        assertFalse(p.location)
+        var ui = m.snapshot()
+        assertTrue(ui.keepWaitsForApps)
+        assertEquals(R.string.location_wait_apps, PositionTexts.sessionReason(ui, 3))
+        m.press()
+        p.onFix!!(fix)
+        assertFalse(p.location)
+        assertEquals("location false", p.log.last())
+        p.apps = true
+        p.t += PositionMachine.RETRY_MS
+        m.tick()
+        assertTrue(p.location)
+        ui = m.snapshot()
+        assertFalse(ui.keepWaitsForApps)
+        assertEquals(R.string.location_value_on, PositionTexts.sessionValue(ui, 3))
+    }
+
+    /** A switch that fails is tried again every RETRY_MS, and the screen says so. */
+    @Test
+    fun theSessionsFailedSwitchIsRetried() {
+        val (p, m) = machine { switchWorks = false }
+        m.keepOn()
+        assertFalse(p.location)
+        assertEquals(R.string.location_wait_retry, PositionTexts.sessionReason(m.snapshot(), 1))
+        assertTrue(m.busy())
+        p.t += 1_000
+        m.tick()
+        assertEquals(1, p.log.count { it == "location true" })
+        p.t += PositionMachine.RETRY_MS
+        m.tick()
+        assertEquals(2, p.log.count { it == "location true" })
+        p.switchWorks = true
+        p.t += PositionMachine.RETRY_MS
+        m.tick()
+        assertTrue(p.location)
+        assertFalse(m.busy())
+        // Without keepOn nothing switches Location on but a press.
+        val (p2, m2) = machine()
+        assertFalse(m2.onWhenSafe())
+        assertEquals(emptyList<String>(), p2.log)
+        assertTrue(SourceScan.code("WelcomeActivity.kt").contains("if (Session.locationApps().isNotEmpty()) Position.keepOn(this)"))
+        assertTrue(position.contains("override fun appsReady(): Boolean = AppPolicies.locationReady"))
     }
 
     /** The baseline's Location off goes through offWhenSafe; shutdown's at once (PoliciesTest has the lists). */

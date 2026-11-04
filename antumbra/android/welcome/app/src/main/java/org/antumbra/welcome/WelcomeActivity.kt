@@ -43,6 +43,9 @@ object WelcomeModel {
 
     /** Wi-Fi should be on for this session but is not (airplane mode). */
     var wifiNotOn: Boolean = false
+
+    /** WEL9: the [AppWatch.generation] the app list on screen was read at (-1: not yet). */
+    var appsGeneration: Int = -1
 }
 
 /** Screen 1. The home screen and a locked task until Start (see Home). */
@@ -98,12 +101,24 @@ class WelcomeActivity : ComponentActivity() {
                     val present = withContext(Dispatchers.IO) { AddOnCheck.run() }.present
                     val phone = withContext(Dispatchers.IO) { CellWatch.status(this@WelcomeActivity) }
                     val emergency = withContext(Dispatchers.IO) { EmergencyWatch.read(this@WelcomeActivity, phone, phoneMode = false) }
+                    // WEL9: a change of the default phone or SMS app brings a pass;
+                    // the apps that may be chosen for location (on screen only),
+                    // read again only after an install, update or removal, or
+                    // such a change (AppWatch.generation).
+                    withContext(Dispatchers.IO) { AppWatch.rolesLook(this@WelcomeActivity) }
+                    val generation = AppWatch.generation
+                    val apps = if (generation == WelcomeModel.appsGeneration) {
+                        WelcomeModel.ui.locationApps
+                    } else {
+                        withContext(Dispatchers.IO) { AppPolicies.offered(this@WelcomeActivity) }.also { WelcomeModel.appsGeneration = generation }
+                    }
                     val ui = WelcomeModel.ui
                     WelcomeModel.ui = ui.copy(
                         addOnPresent = present,
                         notDeviceOwner = !policies.isDeviceOwner,
                         phone = phone,
                         emergency = emergency,
+                        locationApps = apps,
                         choices = if (ui.starting) ui.choices else PhoneChoices.fit(ui.choices, phone, present),
                     )
                     delay(3000)
@@ -111,8 +126,9 @@ class WelcomeActivity : ComponentActivity() {
             }
         }
         // No screenshots and no recents thumbnail while bridge lines typed
-        // by the user, or a position (WEL10), are on screen; the screen
-        // stays on while Show my position looks (WindowRules).
+        // by the user, a position (WEL10) or the installed apps listed for
+        // Location (WEL9) are on screen; the screen stays on while Show my
+        // position looks (WindowRules).
         lifecycleScope.launch {
             snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices) }
                 .collect { window.setFlags(it, WindowRules.MASK) }
@@ -201,6 +217,10 @@ class WelcomeActivity : ComponentActivity() {
             refuse(getString(R.string.start_refused_cell))
             return
         }
+        // WEL9: only apps still offered keep their location choice (one
+        // removed meanwhile, or now the default phone or SMS app, does not).
+        val offered = withContext(Dispatchers.IO) { AppPolicies.offered(this@WelcomeActivity) }.map { it.pkg }.toSet()
+        val session = choices.copy(locationApps = choices.locationApps.filterKeys { it in offered })
         // Policies first: the module opens the network as soon as the
         // provider reports started = 1. The boot lock keeps a late boot
         // broadcast from locking Wi-Fi again in between.
@@ -215,7 +235,7 @@ class WelcomeActivity : ComponentActivity() {
                 WelcomeModel.wifiNotOn = result.wifiNotOn
                 // The module had its chance to act on a power-off request.
                 QuickPowerOff.clearRequest(this@WelcomeActivity)
-                Session.start(choices, bridges)
+                Session.start(session, bridges)
                 result
             }
         } ?: return
@@ -223,6 +243,11 @@ class WelcomeActivity : ComponentActivity() {
             refuse(getString(R.string.start_refused_policies, started.protective.joinToString()))
             return
         }
+        // WEL9: the chosen apps' location granted, every other app's denied
+        // (a pass on the apps' thread); then, for a session with chosen
+        // apps, Location on when safe, once that pass is done.
+        AppPolicies.request(this, "start")
+        if (Session.locationApps().isNotEmpty()) Position.keepOn(this)
         // From here the bridge lines live in the session only.
         WelcomeModel.ui = WelcomeUi()
         SessionService.start(this)

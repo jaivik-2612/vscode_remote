@@ -786,9 +786,13 @@ wifi_join() {
 # restrictions of a default session (Administration off, the test hook on,
 # Wi-Fi unlocked since the add-on is present), and the status screen
 # showing the firewall live. Arguments go to check-policies ('--admin' for
-# a session with Administration on, the app lab's).
+# a session with Administration on, the app lab's), and so does
+# WELCOME_POLICY_ARGS, which a scenario sets before ('--location-apps' once
+# WEL9 chose apps for location, emulator-antumbra.sh: Location may then be
+# on; it only loosens the Location line, and is empty otherwise).
+WELCOME_POLICY_ARGS=()
 welcome_checks() {
-	if timeout 300 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-policies --keep-adb "$@" >"$LOGS/$SCEN-welcome-policies.txt" 2>&1; then
+	if timeout 300 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-policies --keep-adb "$@" "${WELCOME_POLICY_ARGS[@]}" >"$LOGS/$SCEN-welcome-policies.txt" 2>&1; then
 		check welcome_policies ok "$(tail -n 1 "$LOGS/$SCEN-welcome-policies.txt")"
 	else
 		check welcome_policies fail "$(grep -v '^$' "$LOGS/$SCEN-welcome-policies.txt" | tail -n 5 | tr '\n' ';')"

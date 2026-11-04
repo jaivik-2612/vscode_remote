@@ -1636,5 +1636,173 @@ class Wel10EmulatorTest(unittest.TestCase):
                          "check position_not_in_status warn the test position is in the module's status.json")
 
 
+class Wel9EmulatorTest(unittest.TestCase):
+    """emulator-antumbra.sh's WEL9 steps: every check a warning until it has
+    passed on CI once, "not judged" without the probe apps or when the
+    emulator does not take the carrier value, every step bounded, the
+    carrier configuration's test value cleared after a failure, each step in
+    its place, and nothing that dials, writes a location setting or names
+    an app other than the probes."""
+
+    WEL9 = ("wel9_level", "wel9_budget", "wel9_left", "wel9_apk", "wel9_install", "wel9_call", "wel9_run",
+            "wel9_carrier", "welcome_wel9", "wel9_choose", "welcome_wel9_session")
+    NAMES = ("welcome_location_before", "welcome_carrier_trigger", "welcome_carrier_refused", "welcome_carrier_recover",
+             "welcome_location_start", "welcome_location_recover", "welcome_location_grants", "welcome_location_new_install")
+
+    def script(self):
+        return read(os.path.join(CI, "emulator-antumbra.sh"))
+
+    def fn(self, name):
+        text = self.script()
+        start = text.index(name + "() {")
+        end = text.index("\n}\n", start) + 3 if not text[start:].split("\n", 1)[0].endswith("}") else text.index("\n", start) + 1
+        return text[start:end]
+
+    def bash(self, body, *args):
+        return subprocess.run(["bash", "-c", body, "probe"] + list(args), capture_output=True, text=True)
+
+    def test_every_check_warns_until_it_has_passed_once(self):
+        self.assertEqual(self.bash(self.fn("wel9_level") + "wel9_level").stdout.strip(), "warn")
+        code = "".join(self.fn(f) for f in self.WEL9)
+        for n in self.NAMES:
+            self.assertRegex(code, r'(check|wel9_run|wel9_install) %s\b' % n, n)
+        checks = [l.strip() for l in code.splitlines() if re.search(r'(^|[;{(|&)]\s*)check ', l.strip())]
+        self.assertTrue(len(checks) >= 16)
+        for l in checks:
+            self.assertRegex(l, r'check "?[a-z_$]+"? (ok|"\$\(wel9_level\)")( |$)', l)
+        for word in ("abort", " fail ", "FAILED=1", "exit "):
+            self.assertNotIn(word, code)
+
+    def test_bounded(self):
+        text = self.script()
+        self.assertIn("WEL9_BEFORE_S=210\nWEL9_CHOOSE_S=90\nWEL9_AFTER_S=120\n", text)
+        self.assertIn('timeout -k 20 "$limit" bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" "$@"', self.fn("wel9_call"))
+        self.assertIn('timeout -k 10 "$left" adb -s "$ANTUMBRA_SERIAL" install -r "$apk"', self.fn("wel9_install"))
+        for f in self.WEL9:
+            for l in self.fn(f).splitlines():
+                if 'bash "$WELCOME_ADB"' in l or "adb -s" in l:
+                    self.assertRegex(l, r'timeout -k \d+ ("\$limit"|"\$left"|\d+) (bash "\$WELCOME_ADB"|adb -s)', l)
+        for f in ("welcome_wel9", "wel9_choose", "welcome_wel9_session"):
+            self.assertEqual(self.fn(f).count("wel9_budget"), 1, f)
+        # The ANTUMBRA step has room for it: 50 minutes before WEL9, 60 since.
+        wf = read(os.path.join(CI, "..", "..", "..", ".github", "workflows", "antumbra-android.yml"))
+        step = wf[wf.index("- name: 'ANTUMBRA:"):]
+        self.assertIn("# 50 before WEL9, whose bounded steps add at most about 11 minutes", step[:600])
+        self.assertIn("timeout-minutes: 60\n", step[:600])
+        stubs = ('check() { echo "check $*"; }; timeout() { echo "timeout $*" >&3; return "${RC:-0}"; }; '
+                 'tail() { echo last; }; grep() { echo why; }; WELCOME_ADB=w; ANTUMBRA_SERIAL=s; ')
+        fns = "".join(self.fn(f) for f in ("wel9_level", "wel9_budget", "wel9_left", "wel9_call", "wel9_run"))
+        r = self.bash(stubs + fns + '{ wel9_budget 29; wel9_run n 90 /dev/null check-x; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines(), ["check n warn not run: WEL9's time was used up", "rc=2"])
+        r = self.bash(stubs + fns + '{ wel9_budget 60; wel9_run n 90 /dev/null check-x --a; echo "rc=$?"; } 3>&1')
+        out = r.stdout.splitlines()
+        self.assertRegex(out[0], r"^timeout -k 20 (60|59) bash w -s s check-x --a$")
+        self.assertEqual(out[1:], ["check n ok last", "rc=0"])
+        r = self.bash(stubs + fns + '{ wel9_budget 400; RC=3 wel9_run n 90 /dev/null check-carrier; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines()[1:], ["check n warn not judged: last;", "rc=3"])
+        r = self.bash(stubs + fns + '{ wel9_budget 400; RC=124 wel9_run n 90 /dev/null check-x; echo "rc=$?"; } 3>&1')
+        self.assertEqual(r.stdout.splitlines()[1:], ["check n warn last;", "rc=124"])
+
+    def test_not_judged_without_the_probes(self):
+        stubs = ('check() { echo "check $*"; }; ash() { :; }; wake_screen() { :; }; ui_wait() { :; }; '
+                 'timeout() { echo "timeout $*"; }; PROBE_DIR=; LOGS=/tmp; SCEN=s; PKG=p; WEL9_BEFORE_S=240; ')
+        fns = "".join(self.fn(f) for f in self.WEL9)
+        r = self.bash(stubs + fns + "PROBE_ONE=a; PROBE_TWO=b; PROBE_THREE=c; PROBE_CARRIER=d; PROBE_CARRIER_LATE=e; welcome_wel9")
+        self.assertEqual(r.stdout.splitlines(), [
+            "check welcome_location_before warn not judged: the probe a was not built (the welcome job's build-probes.sh)",
+            "check welcome_carrier_trigger warn not judged: the carrier probes were not built",
+            "check welcome_carrier_refused warn not judged: the carrier probes were not built"])
+        # No probes in: the run's choice and the grants after Start are not judged, and nothing is tapped.
+        r = self.bash(stubs + fns + "WEL9_PROBES_IN=0; WELCOME_POLICY_ARGS=(); wel9_choose; echo \"args=${WELCOME_POLICY_ARGS[*]}\"; "
+                      "LOCATION_KEPT=; PROBE_LATE=f; screenshot() { :; }; WEL9_AFTER_S=150; welcome_wel9_session")
+        self.assertEqual(r.stdout.splitlines(), [
+            "check welcome_location_start warn not judged: the location probes are not installed", "args=",
+            "check welcome_location_grants warn not judged: the run's session chose no app for location (welcome_location_start)",
+            "check welcome_location_new_install warn not judged: the probe f was not built (the welcome job's build-probes.sh)"])
+
+    def carrier(self, rc, log):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write(log)
+        try:
+            r = self.bash('check() { echo "check $*"; }; ' + self.fn("wel9_level") + self.fn("wel9_carrier")
+                          + 'wel9_carrier "$1" "$2"', str(rc), f.name)
+        finally:
+            os.unlink(f.name)
+        return r.stdout.splitlines()
+
+    def test_the_carrier_checks(self):
+        ok = "welcome-adb: carrier value: taken\nwelcome-adb: refused on the change: yes\nwelcome-adb: refused at install: yes\nwelcome-adb: check-carrier: both\n"
+        self.assertEqual(self.carrier(0, ok), ["check welcome_carrier_trigger ok refused on the change: yes",
+                                               "check welcome_carrier_refused ok welcome-adb: check-carrier: both"])
+        out = self.carrier(1, ok.replace("change: yes", "change: no"))
+        self.assertEqual([l.split(" ")[2] for l in out], ["warn", "warn"])
+        self.assertEqual(out[0], "check welcome_carrier_trigger warn refused on the change: no")
+        words = "not run: WEL9's time was used up"
+        self.assertEqual(self.carrier(2, ""), ["check welcome_carrier_trigger warn " + words,
+                                               "check welcome_carrier_refused warn " + words])
+        # Not judged: check-carrier's own reason (the value not taken, or not a carrier's own configuration).
+        for why in ("the emulator did not take the carrier configuration's value",
+                    "Android gives no carrier privileges from this configuration, and nor does Welcome"):
+            self.assertEqual(self.carrier(3, "welcome-adb: check-carrier: not judged: %s\n" % why),
+                             ["check welcome_carrier_trigger warn not judged: " + why,
+                              "check welcome_carrier_refused warn not judged: " + why])
+        self.assertEqual(self.carrier(3, ""), ["check welcome_carrier_trigger warn not judged",
+                                               "check welcome_carrier_refused warn not judged"])
+        self.assertIn("not reached", self.carrier(124, "welcome-adb: carrier value: taken\n")[0])
+
+    def test_the_carrier_value_is_cleared_after_a_failure(self):
+        body = self.fn("welcome_wel9")
+        self.assertIn('timeout -k 10 30 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" clear-carrier-test', body)
+        self.assertIn('if [ "$rc" != 0 ] && [ "$rc" != 2 ]; then', body)
+        self.assertLess(body.index("wel9_carrier \"$rc\""), body.index("clear-carrier-test"))
+        # The value is the carrier probes' certificate, and check-carrier bounds its own waits.
+        self.assertIn('check-carrier --hash "$(head -c 64 "$PROBE_DIR/carrier-cert-sha256")"', body)
+        self.assertIn("--wait 30", body)
+
+    def test_in_their_place(self):
+        start = self.fn("welcome_start")
+        self.assertLess(start.index("welcome_choices"), start.index("welcome_wel9"))
+        self.assertLess(start.index("welcome_wel9"), start.index("cell_gate phone"))
+        self.assertLess(start.index("ui_set_switch switch_admin false"), start.index("wel9_choose"))
+        self.assertLess(start.index("wel9_choose"), start.index("ui_tap start_button"))
+        # The switches below the Location section, each looked for from a known place.
+        self.assertIn("\tui_top\n\tui_set_switch switch_mac true", start)
+        self.assertIn("\tui_bottom\n\tui_set_switch switch_unsafe_browser false", start)
+        self.assertIn("\tui_bottom\n\tui_set_switch switch_admin false", start)
+        bottom = self.fn("ui_bottom")
+        self.assertIn("input swipe $((w / 2)) $((h * 13 / 20)) $((w / 2)) $((h * 3 / 20)) 150", bottom)
+        main = self.script()[self.script().index("\nwelcome_checks\n"):]
+        self.assertLess(main.index("\nwelcome_checks\n"), main.index("\nwelcome_wel9_session\n"))
+        self.assertLess(main.index("\nwelcome_wel9_session\n"), main.index("\nmodule_word\n"))
+        choose = self.fn("wel9_choose")
+        self.assertLess(choose.index("WELCOME_POLICY_ARGS=(--location-apps)"), choose.index("choose-location --precise"))
+        self.assertIn('choose-location --precise "$PROBE_ONE" --approximate "$PROBE_TWO"', choose)
+        self.assertIn("LOCATION_KEPT=--location-kept", choose)
+        self.assertIn("choose-location --off", choose)
+        session = self.fn("welcome_wel9_session")
+        self.assertIn('--precise "$PROBE_ONE" --approximate "$PROBE_TWO" --denied "$PROBE_THREE"', session)
+        self.assertIn('check-app-grants --wait 45 --denied "$PROBE_LATE"', session)
+        # check-policies with --location-apps (common.sh), Show my position with --location-kept after Start.
+        common = read(os.path.join(CI, "lib", "common.sh"))
+        self.assertIn('check-policies --keep-adb "$@" "${WELCOME_POLICY_ARGS[@]}"', common)
+        self.assertIn("\nWELCOME_POLICY_ARGS=()\n", common)
+        self.assertIn('--leave home ${LOCATION_KEPT:+"$LOCATION_KEPT"} || wel10_undo status', self.fn("welcome_wel10_session"))
+        self.assertIn('clear-position-test ${LOCATION_KEPT:+"$LOCATION_KEPT"}', self.fn("wel10_undo"))
+
+    def test_nothing_dials_or_writes_a_location_setting(self):
+        for f in self.WEL9:
+            code = self.fn(f)
+            for word in ("emergency-number-test-mode", "KEYCODE_CALL", "tel:", "112", "911", "settings put",
+                         "location_mode", "set-location-enabled", "assisted_gps", "pm revoke", "pm grant", "input text",
+                         "cc set-value", "-p "):
+                self.assertNotIn(word, code, f)
+            # Only the probes are named.
+            for pkg in re.findall(r"\borg\.[a-z.]+", code):
+                self.assertTrue(pkg.startswith("org.antumbra.probe."), pkg)
+        names = re.findall(r"^PROBE_(?!DIR=)[A-Z_]+=(\S+)$", self.script(), re.M)
+        self.assertEqual(len(names), 6)
+        self.assertTrue(all(n.startswith("org.antumbra.probe.") for n in names))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,7 @@ import org.antumbra.welcome.EmergencyUi
 import org.antumbra.welcome.Internet
 import org.antumbra.welcome.PhoneStatus
 import org.antumbra.welcome.PhoneTexts
+import org.antumbra.welcome.PositionTexts
 import org.antumbra.welcome.PositionUi
 import org.antumbra.welcome.R
 import org.antumbra.welcome.SessionState
@@ -60,8 +61,10 @@ data class StatusUi(
     val phone: PhoneStatus = PhoneStatus(),
     /** The emergency card's number and state lines, and why Show my position would be refused (WEL10). */
     val emergency: EmergencyUi = EmergencyUi(),
-    /** Show my position's state (WEL10). */
+    /** Show my position's state (WEL10), and Location kept on for the chosen apps (WEL9). */
     val position: PositionUi = PositionUi(),
+    /** WEL9: how many apps the session chose for location (none: Location off). */
+    val locationApps: Int = 0,
 )
 
 /** The emergency card's buttons (WEL10). */
@@ -306,6 +309,20 @@ private fun SessionPart(ui: StatusUi) {
         stringResource(PhoneTexts.phoneValue(s.cell, ui.phone.carried)),
         tag = "row_phone",
     )
+    // WEL9: Location for the apps chosen, and why it is not on yet.
+    ValueLine(
+        stringResource(R.string.row_location),
+        stringResource(PositionTexts.sessionValue(ui.position, ui.locationApps)),
+        tag = "row_location",
+    )
+    PositionTexts.sessionReason(ui.position, ui.locationApps)?.let {
+        Text(
+            stringResource(it),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp).testTag("location_reason"),
+        )
+    }
     ValueLine(stringResource(R.string.row_mac), stringResource(if (s.newMac) R.string.value_new else R.string.value_keep))
     ValueLine(stringResource(R.string.row_admin), if (s.admin) on else off)
     ValueLine(stringResource(R.string.row_unsafe), if (s.unsafeBrowser) on else off)

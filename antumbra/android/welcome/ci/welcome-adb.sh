@@ -7,7 +7,8 @@
 # for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb',
 # 'check-addon', 'check-module-word', 'check-choices', 'check-phone',
 # 'check-module-cell', 'check-emergency-card', 'check-emergency-states',
-# 'check-position' and 'clear-position-test'). It
+# 'check-position', 'clear-position-test', and WEL9's 'check-app-grants',
+# 'check-carrier', 'clear-carrier-test' and 'choose-location'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -40,10 +41,13 @@
 #   query                     Print the provider's row (runs as the shell user, uid 2000).
 #   expect KEY=VALUE...       Fail unless the row has these values (bridges: give a count,
 #                             as bridges=2).
-#   check-policies [--admin] [--keep-adb] [--wifi-locked]
+#   check-policies [--admin] [--keep-adb] [--wifi-locked] [--location-apps]
 #                             Check user 0's device-owner restrictions, adb, automatic time
 #                             and the time zone after Start. --keep-adb: the test hook is on;
-#                             --wifi-locked: an offline session or one without the add-on.
+#                             --wifi-locked: an offline session or one without the add-on;
+#                             --location-apps: the session chose apps for location (WEL9),
+#                             so Location may be on (it is said which); without it Location
+#                             must be off.
 #   check-addon [SECONDS]     Fail unless the status screen's firewall row shows the rules
 #                             of antumbra.fw.armed (Welcome could read it). Opens the status
 #                             screen and scrolls to the row; gives up after SECONDS (60).
@@ -137,9 +141,12 @@
 #                             property: the check then fails and says so. --shots: a
 #                             screenshot per case, DIR/emergency-state-CASE.png.
 #   check-position [--source test|gnss] [--screenshot FILE.png] [--wait SECONDS]
-#                  [--leave sleep|home|none]
+#                  [--leave sleep|home|none] [--location-kept]
 #                             WEL10, with adb as root, never during a call: Show my
-#                             position. Location must be off before. Source test (the
+#                             position. Location must be off before; with --location-kept
+#                             (WEL9: a session with apps chosen for location) it must be on
+#                             before (60 s at most), and stay on after the position and
+#                             after leaving, the card saying it stays on. Source test (the
 #                             default): mock location allowed for the shell user, then as
 #                             the shell user ('su 2000 cmd location providers'):
 #                             add-test-provider gps, set-test-provider-enabled gps true;
@@ -162,9 +169,49 @@
 #                             its own Stop button, the test provider removed and
 #                             mock_location back to its default. Welcome alone switches
 #                             Location; this command never writes a location setting.
-#   clear-position-test       Undo what check-position may leave: a search stopped with
+#   clear-position-test [--location-kept]
+#                             Undo what check-position may leave: a search stopped with
 #                             Welcome's Stop, the test provider removed, mock_location back
-#                             to default; fails while Location stays on.
+#                             to default; fails while Location stays on (unless
+#                             --location-kept: the session keeps it on).
+#   check-app-grants [--wait SECONDS] [--denied PKG]... [--approximate PKG]...
+#                    [--precise PKG]...
+#                             WEL9: each PKG's runtime permissions for user 0 ('dumpsys
+#                             package'), as Welcome's policy sets them, every one with
+#                             POLICY_FIXED (a denial the person made does not count):
+#                             --denied no location (ACCESS_COARSE_LOCATION,
+#                             ACCESS_FINE_LOCATION, ACCESS_BACKGROUND_LOCATION each
+#                             granted=false); --approximate coarse granted, fine and
+#                             background not; --precise coarse and fine granted,
+#                             background not; and for every PKG READ_PHONE_STATE and
+#                             READ_PHONE_NUMBERS granted=false. Each PKG must ask for all
+#                             five (the CI probes do), be installed and not hidden. Looked
+#                             at again every 3 s until it holds (--wait, 60 s). Reads only.
+#   check-carrier --hash SHA256 --change PKG APK --install PKG APK [--wait SECONDS]
+#                             WEL9, with adb as root, never during a call: Welcome refuses
+#                             an app with carrier privileges. Not judged (exit status 3,
+#                             nothing changed) unless slot 0's configuration is a carrier's
+#                             own (carrier_config_applied_bool true): Android gives no
+#                             privileges from any other, and nor does Welcome. APK (signed with the
+#                             certificate whose SHA-256 is SHA256) is installed first and
+#                             must be seen by Welcome (its location denied) and not refused;
+#                             then 'cmd phone cc set-value -s 0
+#                             carrier_certificate_string_array SHA256' (in memory, read back
+#                             with get-value; "carrier value: not taken" and exit status 3,
+#                             not judged, when the emulator does not take it); that app must
+#                             be refused (hidden: "refused on the change") within --wait (60
+#                             s); then the second APK is installed and must be refused too
+#                             ("refused at install"). Both keep their data: listed by 'pm
+#                             list packages -u', not by 'pm list packages'. The carrier
+#                             values are cleared afterwards whatever happens ('cmd phone cc
+#                             clear-values -s 0', 'clear-carrier-test').
+#   clear-carrier-test        Clear every carrier configuration value set with 'cmd phone cc'
+#                             (adb as root).
+#   choose-location [--off] [--approximate PKG]... [--precise PKG]...
+#                             WEL9, before Start, Welcome in front: Location "On for apps you
+#                             choose", each PKG's switch on and its precision chosen (each
+#                             row by its test tag and read back checked); --off chooses Off.
+#                             Taps rows only.
 #   screenshot FILE.png       Save the screen.
 #   power-off-tile            Add the Quick power off tile, click it, and wait until the
 #                             device has restarted (the boot id changes).
@@ -652,12 +699,13 @@ restriction() {
 }
 
 cmd_check_policies() {
-    local admin=false keep_adb=false wifi_locked=false
+    local admin=false keep_adb=false wifi_locked=false location_apps=false mode
     while [ $# -gt 0 ]; do
         case "$1" in
             --admin) admin=true ;;
             --keep-adb) keep_adb=true ;;
             --wifi-locked) wifi_locked=true ;;
+            --location-apps) location_apps=true ;;
             *) die "check-policies: unknown option $1" ;;
         esac
         shift
@@ -686,9 +734,17 @@ cmd_check_policies() {
     [ "$(sh_ settings get global auto_time)" = 0 ] || { say "automatic time is on"; fail=1; }
     [ "$(sh_ settings get global auto_time_zone)" = 0 ] || { say "automatic time zone is on"; fail=1; }
     [ "$(sh_ getprop persist.sys.timezone)" = UTC ] || { say "time zone is not UTC"; fail=1; }
-    [ "$(sh_ settings get secure location_mode)" = 0 ] || { say "location is on"; fail=1; }
+    # WEL9: a session with apps chosen for location may have Location on
+    # (Welcome switches it on when safe); the person still cannot switch it
+    # (no_config_location, above). Otherwise Location stays off.
+    mode=$(sh_ settings get secure location_mode)
+    if [ "$location_apps" = true ]; then
+        say "location: $([ "$mode" = 0 ] && echo off || echo on) (apps chosen for location; location_mode $mode)"
+    else
+        [ "$mode" = 0 ] || { say "location is on"; fail=1; }
+    fi
     [ "$fail" = 0 ] || die "policy checks failed"
-    say "policies as expected (administration: $admin, test hook: $keep_adb, Wi-Fi locked: $wifi_locked)"
+    say "policies as expected (administration: $admin, test hook: $keep_adb, Wi-Fi locked: $wifi_locked, apps chosen for location: $location_apps)"
 }
 
 # What has the input focus, for the log.
@@ -1641,9 +1697,14 @@ else:
 '
 }
 
+# WEL9: "true" in a session that keeps Location on for its chosen apps
+# (--location-kept): Location must stay on, not go off.
+LOCATION_KEPT=false
+
 # clear-position-test: a search still on screen stopped with its own Stop
 # button, the test provider removed, mock_location back to its default;
-# fails while Location stays on. Idempotent; writes no location setting.
+# fails while Location stays on, unless LOCATION_KEPT. Idempotent; writes
+# no location setting.
 clear_position_test() {
     local fail=0 x y _c _e
     # A search always has Location on: only then is there a Stop to look for.
@@ -1653,6 +1714,10 @@ clear_position_test() {
     fi
     test_provider remove-test-provider gps >/dev/null
     a shell appops set com.android.shell android:mock_location default >/dev/null 2>&1 || true
+    if [ "$LOCATION_KEPT" = true ]; then
+        say "the test provider is removed and mock_location is back to its default; Location is $([ "$(location_mode)" = 0 ] && echo off || echo on), kept for the session's chosen apps"
+        return 0
+    fi
     if ! wait_location off 15; then
         say "Location is still on ($(location_mode)): Welcome did not switch it off"
         fail=1
@@ -1671,6 +1736,7 @@ cmd_check_position() {
             --screenshot) shot=$2; shift ;;
             --wait) wait=$2; shift ;;
             --leave) leave=$2; shift ;;
+            --location-kept) LOCATION_KEPT=true ;;
             *) die "check-position: unknown option $1" ;;
         esac
         shift
@@ -1685,7 +1751,11 @@ cmd_check_position() {
     screen=$(front_screen) || die "neither the Welcome nor the status screen is in front"
     [ -n "$leave" ] || leave=$([ "$screen" = welcome ] && echo sleep || echo home)
     calls_idle || die "a call is in progress; Show my position is not pressed"
-    wait_location off 5 || die "Location is on before the check (location_mode $(location_mode)); it must be off"
+    if [ "$LOCATION_KEPT" = true ]; then
+        wait_location on 60 || die "Location is off before the check (location_mode $(location_mode)); in a session with apps chosen for location it must be on"
+    else
+        wait_location off 5 || die "Location is on before the check (location_mode $(location_mode)); it must be off"
+    fi
     problems=()
     # From here on, whatever happens, the test is undone.
     trap 'clear_position_test || say "clear-position-test failed; run it again"' EXIT
@@ -1748,7 +1818,15 @@ cmd_check_position() {
     elif [ -n "$mock" ]; then
         problems+=("the emulator's receiver's position is said to be a test location")
     fi
-    if wait_location off 10; then
+    if [ "$LOCATION_KEPT" = true ]; then
+        # WEL9: the session keeps Location on; 10 s on is the check.
+        if wait_location off 10; then
+            problems+=("Location went off after the position was found, in a session that keeps it on for the chosen apps")
+        else
+            loc=$(view_row position_location | cut -f2) || loc=''
+            [ "$loc" = "$(str position_kept_on)" ] || problems+=("the card does not say Location stays on for the chosen apps: '$loc'")
+        fi
+    elif wait_location off 10; then
         loc=$(view_row position_location | cut -f2) || loc=''
         [ "$loc" = "$(str position_off_again)" ] || problems+=("the card does not say Location is off again: '$loc'")
     else
@@ -1781,7 +1859,9 @@ cmd_check_position() {
             a shell input tap "$x" "$y"
             if wait_location on 15; then
                 if [ "$leave" = sleep ]; then a shell input keyevent KEYCODE_SLEEP; else a shell input keyevent KEYCODE_HOME; fi
-                if wait_location off 10; then left="Location off within 10 s"; else left="Location stayed on"; problems+=("Location stayed on after leaving the screen during a search ($leave)"); fi
+                if [ "$LOCATION_KEPT" = true ]; then
+                    if wait_location off 10; then left="Location went off"; problems+=("Location went off after leaving the screen, in a session that keeps it on ($leave)"); else left="Location stayed on, kept for the chosen apps"; fi
+                elif wait_location off 10; then left="Location off within 10 s"; else left="Location stayed on"; problems+=("Location stayed on after leaving the screen during a search ($leave)"); fi
                 a shell input keyevent KEYCODE_WAKEUP
                 a shell wm dismiss-keyguard >/dev/null 2>&1 || true
                 [ "$leave" != home ] || a shell am start -n "$PKG/.StatusActivity" >/dev/null
@@ -1802,7 +1882,255 @@ cmd_check_position() {
     trap - EXIT INT TERM HUP
     clear_position_test || problems+=("the test could not be undone")
     [ "${#problems[@]}" -eq 0 ] || die "check-position ($source, $screen): ${problems[*]}"
-    say "check-position ($source, $screen): the test position on screen as written, Location off after it, the window secure ($secure), nothing in Welcome's files, log or properties, Hide works; ${left:-not left}"
+    say "check-position ($source, $screen): the test position on screen as written, Location $([ "$LOCATION_KEPT" = true ] && echo "kept on" || echo off) after it, the window secure ($secure), nothing in Welcome's files, log or properties, Hide works; ${left:-not left}"
+}
+
+# --- WEL9: apps' location, phone state and carrier privileges -------------------
+
+# app_state PKG: PKG's user 0 state and runtime permissions, from 'dumpsys
+# package PKG': "state installed=true|false hidden=true|false", then one
+# line per runtime permission, "NAME granted=true|false fixed=yes|no"
+# (fixed: POLICY_FIXED, which only the device owner's grant state sets).
+# Nothing when the dump does not list PKG.
+APP_STATE_PY='
+import re, sys
+pkg = sys.argv[1]
+lines = sys.stdin.read().splitlines()
+start = next((i for i, l in enumerate(lines) if l.strip().startswith("Package [%s]" % pkg)), None)
+if start is None:
+    sys.exit(0)
+indent = len(lines[start]) - len(lines[start].lstrip())
+user = None
+for l in lines[start + 1:]:
+    if l.strip() and len(l) - len(l.lstrip()) <= indent:
+        break
+    m = re.match(r"^\s*User (\d+):(.*)$", l)
+    if m:
+        user = m.group(1)
+        if user == "0":
+            i = re.search(r"\binstalled=(\w+)", m.group(2))
+            h = re.search(r"\bhidden=(\w+)", m.group(2))
+            print("state installed=%s hidden=%s" % (i.group(1) if i else "?", h.group(1) if h else "?"))
+        continue
+    if user != "0":
+        continue
+    m = re.match(r"^\s*(android\.permission\.[A-Z_]+): granted=(true|false)(?:, flags=\[([^\]]*)\])?\s*$", l)
+    if m:
+        flags = [f.strip() for f in (m.group(3) or "").split("|")]
+        print("%s granted=%s fixed=%s" % (m.group(1), m.group(2), "yes" if "POLICY_FIXED" in flags else "no"))
+'
+app_state() { sh_ dumpsys package "$1" | python3 -I -c "$APP_STATE_PY" "$1"; }
+
+# grants_problems PKG LEVEL: how PKG's state differs from Welcome's policy
+# for LEVEL (denied, approximate, precise), one line each; nothing when it
+# holds. Every value must carry POLICY_FIXED: a denial the person made, or
+# Android's default, is not Welcome's policy.
+grants_problems() {
+    local pkg=$1 level=$2 state p want got
+    state=$(app_state "$pkg")
+    if ! grep -qx 'state installed=true hidden=false' <<<"$state"; then
+        echo "$pkg is not installed and visible ($(grep '^state' <<<"$state" || echo 'not listed'))"
+        return 0
+    fi
+    for p in ACCESS_COARSE_LOCATION ACCESS_FINE_LOCATION ACCESS_BACKGROUND_LOCATION READ_PHONE_STATE READ_PHONE_NUMBERS; do
+        case $p:$level in
+            ACCESS_COARSE_LOCATION:approximate | ACCESS_COARSE_LOCATION:precise | ACCESS_FINE_LOCATION:precise) want=true ;;
+            *) want=false ;;
+        esac
+        got=$(grep "^android.permission.$p " <<<"$state" | cut -d ' ' -f 2- || true)
+        [ "$got" = "granted=$want fixed=yes" ] || echo "$pkg: $p ${got:-not listed}, expected granted=$want with POLICY_FIXED"
+    done
+}
+
+cmd_check_app_grants() {
+    local wait=60 specs=() spec level pkg end out
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --denied | --approximate | --precise)
+                [ $# -ge 2 ] || die "check-app-grants: $1 needs a package"
+                specs+=("${1#--} $2")
+                shift ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-app-grants: unknown option $1" ;;
+        esac
+        shift
+    done
+    case $wait in '' | *[!0-9]*) die "check-app-grants: --wait takes a number of seconds" ;; esac
+    [ ${#specs[@]} -gt 0 ] || die "check-app-grants: name at least one app"
+    end=$((SECONDS + wait))
+    while :; do
+        out=$(for spec in "${specs[@]}"; do read -r level pkg <<<"$spec"; grants_problems "$pkg" "$level"; done)
+        [ -n "$out" ] || break
+        [ $SECONDS -lt "$end" ] || die "check-app-grants: $(tr '\n' ';' <<<"$out")"
+        sleep 3
+    done
+    for spec in "${specs[@]}"; do
+        read -r level pkg <<<"$spec"
+        say "$pkg: $([ "$level" = denied ] && echo "no location" || echo "location $level"), phone state denied, each with POLICY_FIXED"
+    done
+    say "check-app-grants: each app's location and phone state as Welcome's policy sets them"
+}
+
+CARRIER_KEY=carrier_certificate_string_array
+
+# carrier_value: slot 0's carrier certificate list, as 'cmd phone cc get-value' prints it (root).
+carrier_value() { sh_ cmd phone cc get-value -s 0 "$CARRIER_KEY" 2>&1 || true; }
+
+# clear-carrier-test: every value 'cmd phone cc' set on slot 0 cleared (as root).
+clear_carrier_test() {
+    local out
+    out=$(sh_ cmd phone cc clear-values -s 0 2>&1 || true)
+    case $out in
+        *cleared*) say "the carrier configuration's test values are cleared"; return 0 ;;
+    esac
+    say "the carrier configuration's test values could not be cleared: $out"
+    return 1
+}
+
+# app_hidden PKG: "yes" when installed but hidden for user 0 (refused,
+# its data kept), "no" when installed and visible, "gone" otherwise.
+app_hidden() {
+    case $(app_state "$1" | grep '^state' || true) in
+        'state installed=true hidden=true') echo yes ;;
+        'state installed=true hidden=false') echo no ;;
+        *) echo gone ;;
+    esac
+}
+
+# wait_hidden PKG SECONDS: PKG hidden within SECONDS.
+wait_hidden() {
+    local end=$((SECONDS + $2))
+    while :; do
+        [ "$(app_hidden "$1")" != yes ] || return 0
+        [ $SECONDS -lt "$end" ] || return 1
+        sleep 2
+    done
+}
+
+# apk_in APK: 'adb install -r APK'; true when adb says Success.
+apk_in() { a install -r "$1" 2>&1 | tr -d '\r' | grep -q '^Success'; }
+
+cmd_check_carrier() {
+    local hash='' change_pkg='' change_apk='' install_pkg='' install_apk='' wait=60 out on_change at_install pkg end
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --hash) hash=$2; shift ;;
+            --change) [ $# -ge 3 ] || die "check-carrier: --change needs PKG APK"; change_pkg=$2; change_apk=$3; shift 2 ;;
+            --install) [ $# -ge 3 ] || die "check-carrier: --install needs PKG APK"; install_pkg=$2; install_apk=$3; shift 2 ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-carrier: unknown option $1" ;;
+        esac
+        shift
+    done
+    [[ $hash =~ ^[0-9a-fA-F]{64}$ ]] || die "check-carrier: --hash must be a SHA-256 in hexadecimal"
+    [ -n "$change_pkg" ] && [ -n "$install_pkg" ] || die "check-carrier: needs --change PKG APK and --install PKG APK"
+    [ -r "$change_apk" ] && [ -r "$install_apk" ] || die "check-carrier: cannot read $change_apk or $install_apk"
+    case $wait in '' | *[!0-9]*) die "check-carrier: --wait takes a number of seconds" ;; esac
+    # Nothing is changed before these hold.
+    [ "$(sh_ id -u)" = 0 ] || die "check-carrier needs adb as root ('adb root')"
+    calls_idle || die "a call is in progress; the carrier configuration is not changed"
+    # Android takes certificates only from a carrier's own configuration
+    # (CarrierPrivilegesTracker: isConfigForIdentifiedCarrier), and so does Welcome.
+    case $(sh_ cmd phone cc get-value -s 0 carrier_config_applied_bool 2>&1 || true) in
+        *BOOLEAN*true*) ;;
+        *)
+            say "carrier configuration: not a carrier's own on slot 0 (carrier_config_applied_bool not true)"
+            say "check-carrier: not judged: Android gives no carrier privileges from this configuration, and nor does Welcome"
+            exit 3 ;;
+    esac
+    problems=()
+    # From here on, whatever happens, the carrier configuration's test values are cleared.
+    trap 'clear_carrier_test || say "clear-carrier-test failed; run it again"' EXIT
+    trap 'exit 1' INT TERM HUP
+    # 1. The first app before any value: Welcome's pass has seen it (its
+    #    location denied) and has not refused it.
+    apk_in "$change_apk" || die "check-carrier: $change_apk did not install"
+    end=$((SECONDS + wait))
+    while out=$(grants_problems "$change_pkg" denied) && [ -n "$out" ]; do
+        [ $SECONDS -lt "$end" ] || die "check-carrier: Welcome's pass did not reach $change_pkg before the change: $(tr '\n' ';' <<<"$out")"
+        sleep 3
+    done
+    # 2. Slot 0's certificate list names the app's certificate (in memory: no -p).
+    out=$(sh_ cmd phone cc set-value -s 0 "$CARRIER_KEY" "$hash" 2>&1 || true)
+    if ! carrier_value | grep -qiF "\"$hash\""; then
+        say "carrier value: not taken ($(tail -n 1 <<<"$out"))"
+        trap - EXIT INT TERM HUP
+        clear_carrier_test || true
+        say "check-carrier: not judged: the emulator did not take the carrier configuration's value"
+        exit 3
+    fi
+    say "carrier value: taken"
+    # 3. Refused on the change (CarrierConfigManager's listener).
+    if wait_hidden "$change_pkg" "$wait"; then on_change=yes; else
+        on_change=no
+        problems+=("$change_pkg was not refused within $wait s of the carrier configuration's change ($(app_hidden "$change_pkg"))")
+    fi
+    say "refused on the change: $on_change"
+    # 4. The second app installed while the list names its certificate: refused at install.
+    if apk_in "$install_apk" && wait_hidden "$install_pkg" "$wait"; then at_install=yes; else
+        at_install=no
+        problems+=("$install_pkg was not refused within $wait s of its install ($(app_hidden "$install_pkg"))")
+    fi
+    say "refused at install: $at_install"
+    # 5. Refused, not removed: still on the phone with its data, hidden.
+    for pkg in "$change_pkg" "$install_pkg"; do
+        [ "$(app_hidden "$pkg")" = yes ] || continue
+        if ! sh_ pm list packages -u | grep -qx "package:$pkg" || sh_ pm list packages | grep -qx "package:$pkg"; then
+            problems+=("$pkg is not kept hidden ('pm list packages -u' and 'pm list packages')")
+        fi
+    done
+    trap - EXIT INT TERM HUP
+    clear_carrier_test || problems+=("the carrier configuration's test values could not be cleared")
+    ! carrier_value | grep -qiF "\"$hash\"" || problems+=("the carrier configuration still names the certificate")
+    [ "${#problems[@]}" -eq 0 ] || die "check-carrier: ${problems[*]}"
+    say "check-carrier: both apps refused (hidden, their data kept), on the change and at install; the carrier configuration's test values cleared"
+}
+
+# choose_row ID: radio row ID chosen by its test tag (tapped unless it is
+# checked) and read back checked.
+choose_row() {
+    local x y c _e
+    read -r x y c _e < <(locate "$1") || return 1
+    if [ "$c" != true ]; then
+        a shell input tap "$x" "$y"
+        sleep 1
+        read -r x y c _e < <(locate "$1") || return 1
+    fi
+    [ "$c" = true ]
+}
+
+cmd_choose_location() {
+    local off=false specs=() spec level pkg x y c _e
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --off) off=true ;;
+            --approximate | --precise)
+                [ $# -ge 2 ] || die "choose-location: $1 needs a package"
+                specs+=("${1#--} $2")
+                shift ;;
+            *) die "choose-location: unknown option $1" ;;
+        esac
+        shift
+    done
+    [ "$off" = false ] || [ ${#specs[@]} -eq 0 ] || die "choose-location: --off takes no app"
+    [ "$off" = true ] || [ ${#specs[@]} -gt 0 ] || die "choose-location: name an app, or --off"
+    wait_for start_button 60
+    if [ "$off" = true ]; then
+        choose_row location_off || die "choose-location: Location Off (location_off) could not be chosen"
+        say "choose-location: Location off"
+        return 0
+    fi
+    choose_row location_apps || die "choose-location: 'On for apps you choose' (location_apps) could not be chosen"
+    for spec in "${specs[@]}"; do
+        read -r level pkg <<<"$spec"
+        set_switch "location_app_$pkg" true
+        sleep 1
+        read -r x y c _e < <(locate "location_app_$pkg") || die "choose-location: $pkg is not offered (location_app_$pkg)"
+        [ "$c" = true ] || die "choose-location: $pkg's switch did not come on"
+        choose_row "location_${level}_$pkg" || die "choose-location: $pkg could not be set $level (location_${level}_$pkg)"
+        say "chose $pkg: $level"
+    done
+    say "choose-location: Location on for ${#specs[@]} app(s), each as chosen"
 }
 
 cmd_power_off_tile() {
@@ -1823,7 +2151,7 @@ cmd_power_off_tile() {
     die "the device did not restart within 240 s of Quick power off"
 }
 
-[ $# -ge 1 ] || { sed -n "4,173p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -ge 1 ] || { sed -n "4,218p" "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 command=$1
 shift
 case "$command" in
@@ -1862,7 +2190,19 @@ case "$command" in
     check-emergency-card) cmd_check_emergency_card "$@" ;;
     check-emergency-states) cmd_check_emergency_states "$@" ;;
     check-position) cmd_check_position "$@" ;;
-    clear-position-test) clear_position_test || die "a search is still running, the test provider is still there, or Location is still on" ;;
+    clear-position-test)
+        case "${1:-}" in
+            "") ;;
+            --location-kept) LOCATION_KEPT=true ;;
+            *) die "clear-position-test: unknown option $1" ;;
+        esac
+        clear_position_test || die "a search is still running, the test provider is still there, or Location is still on" ;;
+    check-app-grants) cmd_check_app_grants "$@" ;;
+    check-carrier) cmd_check_carrier "$@" ;;
+    clear-carrier-test)
+        [ "$(sh_ id -u)" = 0 ] || die "clear-carrier-test needs adb as root ('adb root')"
+        clear_carrier_test || die "the carrier configuration's test values are not cleared" ;;
+    choose-location) cmd_choose_location "$@" ;;
     clear-power-menu-test) clear_power_menu_test || die "the power menu is not closed or power_button_long_press is not as it was" ;;
     screenshot)
         [ $# -eq 1 ] || die "usage: screenshot FILE.png"

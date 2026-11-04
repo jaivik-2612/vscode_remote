@@ -61,7 +61,27 @@ data class Choices(
     val admin: Boolean = false,
     /** Always false in v0: the Unsafe Browser comes later (W11). */
     val unsafeBrowser: Boolean = false,
+    /** WEL9: Location on for the apps chosen; false is Off, the default. */
+    val location: Boolean = false,
+    /** The apps ticked, each approximate (the default) or precise; they count only with [location]. */
+    val locationApps: Map<String, Precision> = emptyMap(),
 ) {
+    /** The apps that get location in the session these choices start. */
+    val chosenLocationApps: Map<String, Precision>
+        get() = if (location) locationApps else emptyMap()
+
+    /**
+     * An app ticked or unticked; ticked, it keeps the precision it had, or
+     * gets [first] (approximate, or precise for an app that asks for fine
+     * location alone: [LocationApp.precisions]).
+     */
+    fun withLocationApp(pkg: String, on: Boolean, first: Precision = Precision.APPROXIMATE): Choices =
+        copy(locationApps = if (on) locationApps + (pkg to (locationApps[pkg] ?: first)) else locationApps - pkg)
+
+    /** A ticked app's precision; unchanged for an app not ticked. */
+    fun withPrecision(pkg: String, precision: Precision): Choices =
+        if (pkg in locationApps) copy(locationApps = locationApps + (pkg to precision)) else this
+
     /** The provider's cell column for these choices. */
     val cell: CellLevel
         get() = when {
@@ -138,7 +158,18 @@ object Session {
     private val flow = MutableStateFlow(notStarted)
     val state: StateFlow<SessionState> = flow.asStateFlow()
 
+    /**
+     * WEL9: the apps chosen for location, kept apart from the row: they go
+     * to no provider, status file or log (AppPolicies applies them, the
+     * status screen counts them).
+     */
+    @Volatile
+    private var locationApps: Map<String, Precision> = emptyMap()
+
     fun current(): SessionState = flow.value
+
+    /** The session's apps chosen for location; none before Start. */
+    fun locationApps(): Map<String, Precision> = if (flow.value.started) locationApps else emptyMap()
 
     /**
      * Fixes the session's choices. Returns false (and changes nothing) if
@@ -148,6 +179,8 @@ object Session {
     @Synchronized
     fun start(choices: Choices, bridges: List<String>): Boolean {
         if (flow.value.started) return false
+        // Before started = true, so that a pass that sees the session sees its apps.
+        locationApps = choices.chosenLocationApps.toMap()
         val torMode = choices.wireTorMode
         flow.value = SessionState(
             started = true,

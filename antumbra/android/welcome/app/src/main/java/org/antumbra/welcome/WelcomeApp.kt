@@ -43,5 +43,10 @@ class WelcomeApp : Application() {
             Context.RECEIVER_NOT_EXPORTED,
         )
         Position.atProcessStart(this)
+        // WEL9: installs, updates and carrier-configuration changes each
+        // bring a pass over the apps (location, phone state, carrier
+        // privileges), and so does this start: a process that restarted
+        // knows no session, so no app keeps location.
+        AppWatch.start(this)
     }
 }

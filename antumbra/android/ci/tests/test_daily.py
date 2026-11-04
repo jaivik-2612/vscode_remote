@@ -583,6 +583,20 @@ class DailyTest(unittest.TestCase):
             for status in ("ok", "warn"):
                 self.assertNotIn("_", daily.plain_check(name, status), name)
                 self.assertFalse(daily.plain_check(name, status).startswith("Not as expected: "), name)
+        # WEL9's checks, in plain words; none names an app (only the test apps are spoken of).
+        for name in ("welcome_location_before", "welcome_carrier_trigger", "welcome_carrier_refused",
+                     "welcome_carrier_recover", "welcome_location_start", "welcome_location_recover",
+                     "welcome_location_grants", "welcome_location_new_install"):
+            for status in ("ok", "warn"):
+                words = daily.plain_check(name, status)
+                self.assertNotIn("_", words, name)
+                self.assertFalse(words.startswith("Not as expected: "), name)
+                self.assertNotIn("org.", words, name)
+                self.assertIn("test app" if name not in ("welcome_carrier_recover", "welcome_location_recover") else "", words, name)
+        self.assertIn("(its data kept)", daily.plain_check("welcome_carrier_refused", "ok"))
+        self.assertIn("each as chosen", daily.plain_check("welcome_location_grants", "ok"))
+        # Show my position after Start may leave Location on (WEL9), and says so.
+        self.assertIn("stayed on for the apps chosen", daily.plain_check("welcome_position_session", "ok"))
         # MOD7's check, in plain words.
         for status in ("ok", "warn"):
             self.assertNotIn("_", daily.plain_check("wifi_calling_off", status))

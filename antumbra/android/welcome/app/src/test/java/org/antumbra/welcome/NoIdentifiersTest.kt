@@ -83,9 +83,20 @@ class NoIdentifiersTest {
     /** The code without its comments (strings kept; "//" in a string is not a comment). */
     private fun withoutComments(src: String): String = SourceScan.withoutComments(src)
 
+    /**
+     * WEL9: AppPolicies.kt alone may name SubscriptionManager, for two
+     * statics only: a SIM slot's subscription number (a local counter, not
+     * an identifier) and whether it is valid, to read each slot's carrier
+     * configuration. Nothing that lists subscriptions or reads their details.
+     */
+    private val subscriptionStatics = Regex("\\bSubscriptionManager\\.(?:getSubscriptionId|isValidSubscriptionId)\\(")
+
     /** What the rules find in one source file's text (empty: nothing). */
     private fun violations(name: String, src: String): List<String> {
-        val code = withoutComments(src)
+        val code = withoutComments(src).let {
+            if (name != "AppPolicies.kt") it
+            else it.replace("import android.telephony.SubscriptionManager\n", "\n").replace(subscriptionStatics, "(")
+        }
         val found = ArrayList<String>()
         val numbers = emergencyNumberHolders(code)
         for ((list, tail) in listOf(getters to "\\b", families to "\\w*")) {
@@ -202,6 +213,19 @@ class NoIdentifiersTest {
             val q = '"'
         """.trimIndent()
         assertEquals(emptyList<String>(), violations("fine", fine))
+        // WEL9: the two statics, in AppPolicies.kt only; any other use of the class is still caught there.
+        val slot = "import android.telephony.SubscriptionManager\n" +
+            "val s = (0 until n).map { SubscriptionManager.getSubscriptionId(it) }.filter { SubscriptionManager.isValidSubscriptionId(it) }"
+        assertEquals(emptyList<String>(), violations("AppPolicies.kt", slot))
+        assertTrue(violations("Other.kt", slot).isNotEmpty())
+        for (seed in listOf(
+            "val sm = context.getSystemService(SubscriptionManager::class.java)",
+            "val x = SubscriptionManager.getDefaultSubscriptionId()", "val x = SubscriptionManager.from(context)",
+            "val x = sm.activeSubscriptionInfoList",
+        )) {
+            assertTrue("not caught in AppPolicies.kt: $seed", violations("AppPolicies.kt", seed).isNotEmpty())
+        }
+        assertTrue(File("src/main/java/org/antumbra/welcome/AppPolicies.kt").readText().contains("SubscriptionManager.getSubscriptionId(it)"))
     }
 
     /**

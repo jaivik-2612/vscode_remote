@@ -64,6 +64,17 @@ object SourceScan {
     fun literals(code: String): List<String> =
         Regex("\"((?:[^\"\\\\\\n]|\\\\.)*)\"").findAll(code).map { it.groupValues[1] }.toList()
 
+    /** A call's arguments in [code], from [start] (just after its opening parenthesis) to the matching one. */
+    fun arguments(code: String, start: Int): String {
+        var depth = 1
+        var i = start
+        while (depth > 0 && i < code.length) {
+            if (code[i] == '(') depth++ else if (code[i] == ')') depth--
+            i++
+        }
+        return code.substring(start, i - 1)
+    }
+
     /** A function in [code], from `fun SIGNATURE` (its name and the start of its parameters) to the next `fun`. */
     fun function(code: String, signature: String): String {
         val start = code.indexOf("fun $signature")

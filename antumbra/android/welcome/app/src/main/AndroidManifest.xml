@@ -23,9 +23,11 @@
     <!-- For "Return to call" before Start (TelecomManager.showInCallScreen,
          EmergencyCall.kt), and for the emergency card (WEL10): Android's
          emergency-number list (TelephonyManager.getEmergencyNumberList) and
-         whether a call is in progress (TelecomManager.isInCall). Welcome
-         grants it to itself as the device owner; it reads no identifier
-         with it (NoIdentifiersTest). -->
+         whether a call is in progress (TelecomManager.isInCall), and for
+         WEL9 the carrier configuration's certificate list
+         (CarrierConfigManager, AppPolicies.kt). Welcome grants it to itself
+         as the device owner, and never denies it to itself; it reads no
+         identifier with it (NoIdentifiersTest). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <!-- Only for "Show my position" (WEL10, Position.kt): one fix from the
          satellite receiver (GPS_PROVIDER) on request, shown on screen and
@@ -36,6 +38,14 @@
          Welcome is on screen. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- WEL9 (AppPolicies.kt): every installed app, to deny its location
+         and phone state, to refuse one with carrier privileges, and to hear
+         of each install or update (package visibility hides both
+         otherwise). Welcome sends nothing anywhere about these apps; the
+         list is shown on the Welcome screen only. -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <!-- Granted only if the Antumbra module installs this app as a
          privileged app with a privapp-permissions allowlist entry. Then
          Quick power off powers off; otherwise it can only restart

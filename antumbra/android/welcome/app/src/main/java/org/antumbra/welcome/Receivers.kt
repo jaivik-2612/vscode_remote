@@ -121,7 +121,9 @@ object BootState {
         } catch (e: Exception) {
             Log.w(TAG, "shutdown: could not restore home", e)
         }
-        val failures = policies.applyBaseline(atShutdown = true) + policies.lockWifiOff() + policies.forgetWifiNetworks()
+        // The chosen apps' denials last (WEL9): their wait must not use up the broadcast's time before Wi-Fi's steps.
+        val failures = policies.applyBaseline(atShutdown = true) + policies.lockWifiOff() + policies.forgetWifiNetworks() +
+            policies.appsAtShutdown()
         if (failures.isNotEmpty()) Log.w(TAG, "shutdown: failed: ${failures.joinToString()}")
     }
 }
