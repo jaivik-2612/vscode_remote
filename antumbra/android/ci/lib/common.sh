@@ -188,26 +188,83 @@ screen_size() {
 	ash 'wm size' | sed -n 's/.*: *\([0-9][0-9]*\)x\([0-9][0-9]*\).*/\1 \2/p' | tail -n 1
 }
 
-# ui_locate ID [TEXT]: like ui_find, scrolling down (then back up) through
-# the page until the control is on screen.
+# ui_locate ID [TEXT]: like ui_find, searching the page from where it is:
+# down until the control is on screen or the page stops moving (a dump the
+# same as the one before it), at most UI_LOCATE_SWIPES swipes, then back up
+# the same way. WEL9's Location section made the Welcome page longer than
+# the 5 swipes down and 4 up this was given before (run 28). Bounded: at
+# most 2 x (UI_LOCATE_SWIPES + 1) dumps. When the control is not found, the
+# last dump is kept for the report (ui_miss).
+UI_LOCATE_SWIPES=14
 ui_locate() {
-	local w h i node
+	local w h dir i xml='' prev node
 	read -r w h < <(screen_size)
 	w=${w:-1080} h=${h:-2400}
-	for i in 1 2 3 4 5 6 7 8 9; do
-		if node=$(ui_find "$@") && [ -n "$node" ]; then
-			echo "$node"
-			return 0
-		fi
-		if [ "$i" -le 5 ]; then
-			ash "input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 3 / 10)) 300" >/dev/null
-		else
-			ash "input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 300" >/dev/null
-		fi
-		sleep 1
+	for dir in down up; do
+		prev=
+		for ((i = 0; i <= UI_LOCATE_SWIPES; i++)); do
+			xml=$(ui_dump) || xml=
+			node=$(printf '%s' "$xml" | "${CITOOL[@]}" ui-find --id "$1" ${2:+--text "$2"})
+			if [ -n "$node" ]; then
+				echo "$node"
+				return 0
+			fi
+			# The end of the page this way: the last swipe moved nothing.
+			if [ -n "$xml" ] && [ "$xml" = "$prev" ]; then break; fi
+			prev=$xml
+			[ "$i" -lt "$UI_LOCATE_SWIPES" ] || break
+			if [ "$dir" = down ]; then
+				ash "input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 3 / 10)) 300" >/dev/null
+			else
+				ash "input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 300" >/dev/null
+			fi
+			sleep 1
+		done
 	done
+	ui_miss "$1" "$xml"
 	return 1
 }
+
+# ui_miss ID XML: the last dump of a search that did not find ID, as
+# ${UI_MISS_PREFIX}ID-ui.xml: logs/<scenario>-ID-ui.xml, or in the app lab
+# logs/apps/welcome-ID-ui.xml (the names its pack step keeps).
+ui_miss() {
+	local f=${UI_MISS_PREFIX:-$LOGS/$SCEN-}$1-ui.xml
+	[ -n "$2" ] || return 0
+	printf '%s\n' "$2" >"$f" && say "$1 not found: the last screen is in $(basename "$f")"
+}
+
+# ui_top: back to the top of the page (fast swipes down; no dump).
+ui_top() {
+	local w h
+	read -r w h < <(screen_size)
+	w=${w:-1080} h=${h:-2400}
+	for _ in 1 2 3 4 5 6; do
+		ash "input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 150" >/dev/null
+	done
+	sleep 1
+}
+
+# ui_bottom: down to the end of the page (fast swipes up, begun above the
+# pinned buttons; no dump), where Additional settings' switches are,
+# whatever WEL9's Location section adds above them.
+ui_bottom() {
+	local w h
+	read -r w h < <(screen_size)
+	w=${w:-1080} h=${h:-2400}
+	for _ in 1 2 3 4 5 6 7 8; do
+		ash "input swipe $((w / 2)) $((h * 13 / 20)) $((w / 2)) $((h * 3 / 20)) 150" >/dev/null
+	done
+	sleep 1
+}
+
+# screenshot_hook 1|'': the debug build's hook debug.antumbra.screenshots
+# (welcome/README.md, "Test hook"). With 1, the Welcome screen's window is
+# not FLAG_SECURE for its list of apps for Location alone (WEL9), so that
+# the screenshots show the screen; a position or typed bridge lines keep it
+# secure. Set before Welcome is installed, cleared at the end. A release
+# build never reads it.
+screenshot_hook() { ASH_TIMEOUT=15 ash "setprop debug.antumbra.screenshots '$1'" >/dev/null 2>&1; }
 
 # ui_tap ID [TEXT]
 ui_tap() {

@@ -127,7 +127,7 @@ private fun PositionPart(
         is PositionState.Refused -> CardLine(stringResource(PositionTexts.refusal(s.why)), "position_status", MaterialTheme.colorScheme.error)
         is PositionState.Ended -> CardLine(stringResource(PositionTexts.end(s.why)), "position_status", MaterialTheme.colorScheme.onSurface)
         PositionState.Idle -> {
-            CardLine(stringResource(R.string.position_detail), "position_detail")
+            CardLine(stringResource(PositionTexts.detail(p)), "position_detail")
             CardLine(stringResource(R.string.position_detail_apps), "position_detail_apps")
         }
     }

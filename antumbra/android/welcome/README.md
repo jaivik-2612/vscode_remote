@@ -684,6 +684,16 @@ module is told. The CI emulator cannot remove or lock its SIM, so this is
 how each state's text is shown there (`check-emergency-states`, which
 clears the property afterwards whatever happens).
 
+The screenshot hook, `debug.antumbra.screenshots`, is honoured by the same
+builds only (`TestHook.screenshots`, read with the Welcome screen's checks
+every 3 s; any other build reads no property and starts no `getprop`).
+With `1`, the list of apps for Location (WEL9's "On for apps you choose")
+no longer makes the Welcome screen's window `FLAG_SECURE`, so that CI's
+screenshots show the screen; a position on screen and typed bridge lines
+still do (`WindowRules.secure`), and so does everything on the status
+screen. Unset, empty or anything else: the list is secure. CI sets it
+before installing Welcome and clears it at the end.
+
 ## Apps: location, phone state and carrier privileges
 
 WEL9. The rules are in `AppRules.kt` (no Android code, `AppRulesTest`), and
@@ -753,8 +763,9 @@ that, Welcome asks for a new pass at most every 30 s, so that one denial
 that failed is tried again rather than keeping Location off for the
 session. Welcome looks again every 5 s and tries a failed switch again.
 Then Show my position leaves it on (`Off.KEPT_ON`, "Location stays on for
-the apps you chose, until you shut down"), and so do leaving the screen
-and Stop; only shutdown switches it off. Before that pass, a search still
+the apps you chose, until you shut down"; the card then leaves out "Location
+is on only while it looks, for up to 3 minutes", `PositionTexts.detail`),
+and so do leaving the screen and Stop; only shutdown switches it off. Before that pass, a search still
 ends with Location off, as before WEL9. The person still cannot switch
 Location (`DISALLOW_CONFIG_LOCATION`). Android shows its own notice that
 apps can access your location, and PermissionController may show one that
@@ -765,7 +776,8 @@ install, update or removal, or a change of the default phone or SMS app
 (`AppWatch.generation`), not at every poll; system apps are dropped before
 any label is loaded, and no certificate is read for it. While "On for apps
 you choose" shows it, the window is `FLAG_SECURE` (`WindowRules`): no
-screenshot, no recents thumbnail.
+screenshot, no recents thumbnail. Only a debug build's CI hook lifts that
+for the list alone ("Test hook": `debug.antumbra.screenshots`).
 
 **Carrier privileges.** Android has three sources (`CarrierPrivilegesTracker`):
 the SIM's own access rules (and an eSIM profile's), the carrier
@@ -1743,13 +1755,16 @@ passes the closed gate; the carrier certificate list decoded and matched as
 `CarrierPrivilegesTracker` and `UiccAccessRule` do (a carrier's own
 configuration only, SHA-256 and SHA-1, either case, package-bound rules,
 Java's split, one undecodable entry dropping the slot's whole list);
-the window secure while the app list shows; Location kept on in a
+the window secure while the app list shows (and, with the debug build's
+screenshot hook, still secure for a position or typed bridge lines; the
+hook read in a test build only); Location kept on in a
 session with chosen apps (on at once, never during a call's hold and on at
 the first look after it, off with its reason for assistance, a network
 provider, Wi-Fi scanning or no GPS, waiting for the apps' pass and asking
 for a new one at most every 30 s, a failed switch retried, Show my
 position, Stop and leaving the screen leaving it on, only shutdown
-switching it off); source scans: no telephony
+switching it off, and the card's 3 minutes said only when it is not kept
+on); source scans: no telephony
 restriction in any source, the carrier listener and the install listener
 registered from the process's start and no receiver for the carrier
 broadcast, the new package's pass before the full one, the shutdown's

@@ -522,7 +522,7 @@ class PositionTest {
         assertFalse(WindowRules.typedBridges(typed.copy(torMode = TorMode.DIRECT)))
         // Each screen sets exactly those flags from the rules, and no other way.
         val uses = mapOf(
-            "WelcomeActivity.kt" to "snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices) }\n                .collect { window.setFlags(it, WindowRules.MASK) }",
+            "WelcomeActivity.kt" to "snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices, WelcomeModel.screenshotHook) }\n                .collect { window.setFlags(it, WindowRules.MASK) }",
             "StatusActivity.kt" to "snapshotFlow { WindowRules.flags(Position.ui.state) }\n                .collect { window.setFlags(it, WindowRules.MASK) }",
         )
         for ((f, use) in uses) {
@@ -533,6 +533,101 @@ class PositionTest {
             }
             assertEquals(f, 1, Regex("window\\.setFlags\\(").findAll(code).count())
         }
+    }
+
+    /**
+     * CI's screenshot hook lifts the app list's rule alone: a position on
+     * screen and typed bridge lines stay secure with it on, and the app
+     * list is secure without it.
+     */
+    @Test
+    fun theScreenshotHookLiftsOnlyTheAppList() {
+        val secure = android.view.WindowManager.LayoutParams.FLAG_SECURE
+        val states = listOf(
+            PositionState.Idle, PositionState.Refused(PositionRefusal.CALL), PositionState.Looking(0),
+            PositionState.Found(fix, 0), PositionState.Ended(PositionEnd.TIMEOUT),
+        )
+        val typed = Choices(torMode = TorMode.BRIDGES, bridgeSource = BridgeSource.CUSTOM, bridgeText = "obfs4 192.0.2.1:443 X")
+        val apps = Choices(location = true, locationApps = mapOf("org.example.maps" to Precision.PRECISE))
+        for (s in states) {
+            val found = s is PositionState.Found
+            // Without the hook: the app list secure whatever the position.
+            assertTrue(s.toString(), WindowRules.secure(s, apps))
+            assertTrue(s.toString(), WindowRules.secure(s, apps, screenshotHook = false))
+            assertEquals(s.toString(), secure, WindowRules.flags(s, apps) and secure)
+            // With it: the app list alone no longer makes the window secure...
+            assertEquals(s.toString(), found, WindowRules.secure(s, apps, screenshotHook = true))
+            assertEquals(s.toString(), found, WindowRules.secure(s, Choices(), screenshotHook = true))
+            // ...but typed bridge lines do, alone or with the app list, and so does a position.
+            assertTrue(s.toString(), WindowRules.secure(s, typed, screenshotHook = true))
+            assertTrue(s.toString(), WindowRules.secure(s, typed.copy(location = true), screenshotHook = true))
+            assertEquals(s.toString(), secure, WindowRules.flags(s, typed.copy(location = true), screenshotHook = true) and secure)
+            // The status screen passes no choices: only the position counts.
+            assertEquals(s.toString(), found, WindowRules.secure(s, null, screenshotHook = true))
+        }
+        val position = PositionState.Found(fix, 0)
+        assertTrue(WindowRules.secure(position, apps, screenshotHook = true))
+        assertEquals(secure, WindowRules.flags(position, apps, screenshotHook = true) and secure)
+        assertEquals(secure, WindowRules.flags(position, null, screenshotHook = true) and secure)
+    }
+
+    /**
+     * A release build ignores the screenshot hook: only a test build
+     * (debuggable or testOnly, as for WEL10's hook) reads the property,
+     * any other build never calls the reader, and only "1" counts.
+     */
+    @Test
+    fun aReleaseBuildIgnoresTheScreenshotHook() {
+        for (raw in listOf("1", "0", "", " 1", "true", null)) {
+            assertFalse(raw.toString(), WindowRules.screenshotHook(testBuild = false) { throw AssertionError("a release build read the property") })
+            var asked = 0
+            assertEquals(raw.toString(), raw == "1", WindowRules.screenshotHook(testBuild = true) { asked++; raw })
+            assertEquals(1, asked)
+        }
+        // The Android part asks isTestBuild, and reads the property only inside the reader.
+        val hook = SourceScan.code("TestHook.kt")
+        assertTrue(hook.contains("WindowRules.screenshotHook(isTestBuild(context)) { SystemProperty.read(SCREENSHOTS) }"))
+        assertEquals(1, Regex("SystemProperty\\.read\\(SCREENSHOTS\\)").findAll(hook).count())
+        assertTrue(hook.contains("const val SCREENSHOTS = \"debug.antumbra.screenshots\""))
+        assertTrue(hook.contains("(ApplicationInfo.FLAG_DEBUGGABLE or ApplicationInfo.FLAG_TEST_ONLY)"))
+        assertTrue(SourceScan.code("Position.kt").contains("fun screenshotHook(testBuild: Boolean, read: () -> String?): Boolean = testBuild && read() == \"1\""))
+        // A release build is neither debuggable nor testOnly.
+        assertFalse(File("src/main/AndroidManifest.xml").readText().contains("testOnly"))
+        assertFalse(File("src/main/AndroidManifest.xml").readText().contains("debuggable"))
+        // The property is named nowhere else; only the Welcome screen reads the hook, once a pass, and only into its window rules.
+        for (f in SourceScan.sources()) {
+            val code = SourceScan.withoutComments(f.readText())
+            if (f.name != "TestHook.kt") assertFalse(f.name, code.contains("debug.antumbra.screenshots") || code.contains("SCREENSHOTS"))
+            if (f.name != "TestHook.kt" && f.name != "WelcomeActivity.kt") assertFalse(f.name, code.contains("TestHook.screenshots("))
+            if (f.name != "WelcomeActivity.kt") assertFalse(f.name, code.contains("screenshotHook ="))
+        }
+        val welcome = SourceScan.code("WelcomeActivity.kt")
+        assertEquals(1, Regex("TestHook\\.screenshots\\(").findAll(welcome).count())
+        assertTrue(welcome.contains("WelcomeModel.screenshotHook = withContext(Dispatchers.IO) { TestHook.screenshots(this@WelcomeActivity) }"))
+        assertEquals(3, Regex("\\bscreenshotHook\\b").findAll(welcome).count())
+        assertFalse(SourceScan.code("StatusActivity.kt").contains("screenshotHook"))
+    }
+
+    /** WEL9: in a session that keeps Location on for its chosen apps, the card does not say it is on only while Welcome looks. */
+    @Test
+    fun theCardSaysThreeMinutesOnlyWhenLocationIsNotKeptOn() {
+        assertEquals(R.string.position_detail, PositionTexts.detail(PositionUi()))
+        assertEquals(R.string.position_detail, PositionTexts.detail(PositionUi(state = PositionState.Ended(PositionEnd.TIMEOUT), touched = true)))
+        assertEquals(R.string.position_detail_kept, PositionTexts.detail(PositionUi(keptOn = true)))
+        assertEquals(R.string.position_detail_kept, PositionTexts.detail(PositionUi(keptOn = true, touched = true, lastReadOn = true)))
+        val plain = StringsXml.of("position_detail")
+        val kept = StringsXml.of("position_detail_kept")
+        assertTrue(plain.contains("Location is on only while it looks, for up to 3 minutes."))
+        assertFalse(kept.contains("3 minutes"))
+        assertFalse(kept.contains("only while it looks"))
+        // The rest is said all the same.
+        assertEquals(plain.replace(" Location is on only while it looks, for up to 3 minutes.", ""), kept)
+        // The kept session's own line still says why.
+        assertEquals(R.string.position_kept_on, PositionTexts.offLine(PositionUi(keptOn = true, touched = true, lastReadOn = true)))
+        // The card takes its explanation from PositionTexts.detail alone.
+        val card = SourceScan.code("ui/EmergencyCard.kt")
+        assertTrue(card.contains("CardLine(stringResource(PositionTexts.detail(p)), \"position_detail\")"))
+        assertFalse(card.contains("R.string.position_detail)"))
     }
 
     @Test

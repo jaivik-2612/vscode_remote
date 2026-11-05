@@ -80,6 +80,10 @@ APP_WAIT=${ANTUMBRA_APPLAB_APP_WAIT:-45}
 BUDGET=${ANTUMBRA_APPLAB_BUDGET:-1440}
 APPLAB=("${PY[@]}" "$CI_DIR/applab.py")
 ALOGS=$LOGS/apps
+# A search for a control of Welcome's that fails keeps its last screen here
+# (common.sh's ui_miss), under a name the pack step keeps.
+# shellcheck disable=SC2034 # read by common.sh's ui_miss
+UI_MISS_PREFIX=$ALOGS/welcome-
 RECORDS=$SDIR/records.jsonl
 FILTER_LOG=$RT/log/dnsfilter.log
 # Apps send more than the ANTUMBRA scenario's probes: a larger buffer for
@@ -105,8 +109,14 @@ session_start() {
 	check welcome_screen ok
 	screenshot welcome-1
 	ui_tap tor_direct 'Connect to Tor directly' || abort welcome_choice "'Connect to Tor directly' not found"
+	# Each switch looked for from a known place, as in ANTUMBRA, since WEL9's
+	# Location section lies above them: the Wi-Fi address from the top of the
+	# page, Additional settings' two from its end.
+	ui_top
 	ui_set_switch switch_mac true 'New Wi-Fi hardware address' || check welcome_mac warn "could not set the Wi-Fi address switch"
+	ui_bottom
 	ui_set_switch switch_unsafe_browser false 'Unsafe Browser' || check welcome_unsafe warn "could not find the Unsafe Browser switch off"
+	ui_bottom
 	ui_set_switch switch_admin true 'Administration' || abort welcome_admin "could not switch Administration on"
 	screenshot welcome-2-choices
 	ui_tap start_button 'Start Antumbra' || abort welcome_start "Start Antumbra not found"
@@ -371,6 +381,7 @@ finish() {
 		wake_screen
 		screenshot final
 	fi
+	screenshot_hook ''
 	if [ "$(ash 'id -u' 2>/dev/null)" = 0 ]; then
 		collect_evidence
 	else
@@ -403,6 +414,7 @@ downloads
 # tor's STREAM events, the network and Welcome.
 session_root
 device_facts
+screenshot_hook 1
 session_prepare
 session_start
 wifi_join

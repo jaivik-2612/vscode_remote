@@ -79,7 +79,8 @@ stops it.
   `store-<name>`, `app-<package>`, `apps-home`, `apps-drawer` and the
   session's screens), `apps/` (the scenario's events, checks, records,
   downloads, tor's STREAM events, the filter's log, `analysis.json`),
-  `logs/apps/` (each item's install output, logcat and screen),
+  `logs/apps/` (each item's install output, logcat and screen, and the
+  last screen of a search for a Welcome switch that failed),
   `leak-report.md` and `.json`, `capture/` (see "The app lab").
 - `antumbra-android-module-<n>` (the Magisk zip) and
   `antumbra-android-welcome-<n>` (the debug APK), 5 days; also
@@ -180,8 +181,13 @@ that the captures must show traffic from the phone.
 5. The Welcome APK; the debug build's test hook
    `setprop debug.antumbra.keep_adb 1` (honoured only by debuggable or
    testOnly builds; Welcome then leaves USB debugging on; `welcome/README.md`,
-   "Test hook"); `dpm set-device-owner`; Welcome as the home app;
-   screenshots.
+   "Test hook"), and before it `setprop debug.antumbra.screenshots 1`
+   (`screenshot_hook`, the same builds only: WEL9's list of apps for
+   Location then leaves the Welcome screen's window capturable, so that the
+   screenshots show the screen; a position on screen or typed bridge lines
+   still make it `FLAG_SECURE`, and their screenshots stay black; cleared
+   at the end, after the final screenshot); `dpm set-device-owner`; Welcome
+   as the home app; screenshots.
 6. Emergency calls before Start (WEL7), check `welcome_emergency_dialer`:
    `welcome/ci/welcome-adb.sh check-emergency` opens the emergency dialer
    from Welcome's lock task, with Welcome's Emergency call button and with
@@ -297,8 +303,11 @@ that the captures must show traffic from the phone.
    checked, with a second try (each switch from a known place, since WEL9's
    Location section lies above them: the Wi-Fi address from the top of the
    page, Unsafe Browser and Administration from its end, `ui_top` and
-   `ui_bottom`): Internet Wi-Fi and Tor directly (the run
-   stops if either cannot be chosen), **Phone: calls and texts**
+   `ui_bottom`, `lib/common.sh`'s; `ui_locate` then searches down until the
+   control is on screen or the page stops moving, two dumps alike, at most
+   14 swipes, then back up the same way, and when it fails keeps its last
+   dump as `logs/antumbra-<test tag>-ui.xml`): Internet Wi-Fi and Tor
+   directly (the run stops if either cannot be chosen), **Phone: calls and texts**
    (`welcome_phone_start`; Phone off if Welcome does not offer it within
    60 s or the row does not read checked, a warning, so the leak test never
    stops for a WEL8 check; if the row after Start says otherwise, the
@@ -675,9 +684,12 @@ result, the certificates, and why an item was not verified.
 shared in `lib/common.sh`): `adb root`, tcpdump inside the guest (with a
 16 MB buffer), the clock marker, airplane mode, the module installed with
 `build-module.sh --emulator` and the filter's query log, tor's STREAM
-events recorded, mobile data off, Welcome as device owner, then Start with
-Tor directly, a new Wi-Fi address and **Administration on**: without it
-Welcome keeps `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY`, and Android
+events recorded, mobile data off, Welcome as device owner (with the
+screenshot hook, as in ANTUMBRA), then Start with Tor directly, a new
+Wi-Fi address and **Administration on** (each switch from a known place,
+as in ANTUMBRA: the Wi-Fi address after `ui_top`, the other two after
+`ui_bottom`; a search that fails keeps its last dump as
+`logs/apps/welcome-<test tag>-ui.xml`): without it Welcome keeps `DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY`, and Android
 refuses every install but the preinstalled store's. The provider row must
 say `admin=1`; `welcome-adb.sh check-policies --admin --keep-adb` checks
 that session's restrictions. Wi-Fi joined, tor's bootstrap (10 minutes at
@@ -1106,7 +1118,10 @@ python3 -B -I antumbra/android/ci/applab.py build "$ANTUMBRA_CI_OUT"
 ## Contracts with the other parts
 
 - **Welcome:** the debug build honours `debug.antumbra.keep_adb=1` (set
-  before `dpm set-device-owner`) by leaving USB debugging on; the test tags
+  before `dpm set-device-owner`) by leaving USB debugging on, and
+  `debug.antumbra.screenshots=1` by leaving the window capturable while
+  the Welcome screen lists apps for Location (never for a position or
+  typed bridges); the test tags
   `tor_direct`, `switch_mac`, `switch_admin`, `switch_unsafe_browser`,
   `start_button`, `status_title`, `row_firewall`; the provider row's
   `started`, `tor_mode` and `admin`; `welcome/ci/welcome-adb.sh -s SERIAL

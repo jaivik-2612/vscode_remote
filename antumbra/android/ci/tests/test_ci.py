@@ -1314,6 +1314,9 @@ class Wel8EmulatorTest(unittest.TestCase):
 
     def fn(self, name):
         text = self.script()
+        if "\n" + name + "() {" not in text:
+            # ui_top and ui_bottom are common.sh's, shared with the app lab.
+            text = read(os.path.join(CI, "lib", "common.sh"))
         start = text.index(name + "() {")
         return text[start:text.index("\n}\n", start) + 3]
 
@@ -1442,6 +1445,138 @@ class Wel8EmulatorTest(unittest.TestCase):
         self.assertTrue(190 <= y < 400, (x, y))
 
 
+class UiLocateTest(unittest.TestCase):
+    """common.sh's ui_locate over a fake page: down until the control is on
+    screen or the page stops moving (a dump the same as the one before),
+    then back up the same way, at most UI_LOCATE_SWIPES swipes each way; the
+    last dump kept when it fails (ui_miss). Both scripts look for Welcome's
+    switches from a known place (ui_top, ui_bottom: common.sh's)."""
+
+    DOWN = "ash: input swipe 540 1440 540 720 300"
+    UP = "ash: input swipe 540 720 540 1920 300"
+
+    def common(self):
+        return read(os.path.join(CI, "lib", "common.sh"))
+
+    def fn(self, name):
+        text = self.common()
+        start = text.index("\n" + name + "() {") + 1
+        return text[start:text.index("\n}\n", start) + 3]
+
+    @staticmethod
+    def page(*ids):
+        return ('<?xml version="1.0"?><hierarchy>%s</hierarchy>' % "".join(
+            '<node resource-id="%s" checked="false" enabled="true" bounds="[0,%d][1080,%d]"/>' % (i, 100 * k, 100 * k + 90)
+            for k, i in enumerate(ids)))
+
+    def locate(self, dumps, want, prefix=""):
+        """ui_locate WANT over DUMPS in turn (None: the dump fails; the last
+        one again once they run out). Returns its lines (stdout, and the
+        stand-ins' on fd 3) and the files it kept {relative path: text}."""
+        swipes = re.search(r"^UI_LOCATE_SWIPES=(\d+)$", self.common(), re.M).group(1)
+        with tempfile.TemporaryDirectory() as d:
+            for k, x in enumerate(dumps):
+                if x is not None:
+                    with open(os.path.join(d, "dump%d" % k), "w") as f:
+                        f.write(x)
+            stub = ("T='%s'; LOGS=$T/logs; SCEN=antumbra; mkdir -p \"$LOGS/apps\"; echo 0 >\"$T/n\"; last=%d; "
+                    "UI_LOCATE_SWIPES=%s; %s CITOOL=(python3 -B -I '%s'); "
+                    "screen_size() { echo '1080 2400'; }; sleep() { :; }; say() { echo \"say: $*\" >&3; }; "
+                    "ash() { echo \"ash: $1\" >&3; }; "
+                    "ui_dump() { local n; n=$(cat \"$T/n\"); echo $((n + 1)) >\"$T/n\"; [ \"$n\" -le \"$last\" ] || n=$last; "
+                    "echo dump >&3; [ -f \"$T/dump$n\" ] || return 1; cat \"$T/dump$n\"; }; "
+                    % (d, len(dumps) - 1, swipes, prefix, os.path.join(CI, "citool.py")))
+            r = subprocess.run(["bash", "-c", stub + self.fn("ui_locate") + self.fn("ui_miss")
+                                + '{ ui_locate "$1"; echo "rc=$?"; } 3>&1', "probe", want],
+                               capture_output=True, text=True)
+            kept = {}
+            for root, _, files in os.walk(os.path.join(d, "logs")):
+                for f in files:
+                    kept[os.path.relpath(os.path.join(root, f), d)] = read(os.path.join(root, f))
+        return r.stdout.strip().splitlines(), kept
+
+    def test_it_searches_further_than_before(self):
+        self.assertIn("\nUI_LOCATE_SWIPES=14\nui_locate() {", self.common())
+        # The switch nine screens down: the old search gave up after 5 swipes down.
+        pages = [self.page("row%d" % k) for k in range(8)] + [self.page("row_persistent", "switch_admin")]
+        out, kept = self.locate(pages, "switch_admin")
+        self.assertEqual(out[-2:], ["540 145 false true", "rc=0"])
+        self.assertEqual((out.count(self.DOWN), out.count(self.UP), out.count("dump")), (8, 0, 9))
+        self.assertEqual(kept, {})
+        # Already on screen: one dump, no swipe.
+        out, _ = self.locate([self.page("switch_admin")], "switch_admin")
+        self.assertEqual(out, ["dump", "540 45 false true", "rc=0"])
+
+    def test_it_stops_where_the_page_stops_moving(self):
+        a, b, c = self.page("internet_wifi"), self.page("phone_calls"), self.page("switch_mac")
+        # Down to the end (the last swipe moved nothing), back up to the top, then it fails.
+        out, kept = self.locate([a, b, c, c, c, b, a, a], "switch_admin")
+        self.assertEqual(out[-1], "rc=1")
+        self.assertEqual(out.count("dump"), 8)
+        moves = [line for line in out if line.startswith("ash: ")]
+        self.assertEqual(moves, [self.DOWN] * 3 + [self.UP] * 3)
+        # The last screen is kept for the report, under the main job's logs.
+        self.assertEqual(list(kept), ["logs/antumbra-switch_admin-ui.xml"])
+        self.assertEqual(kept["logs/antumbra-switch_admin-ui.xml"].strip(), a)
+        self.assertIn("say: switch_admin not found: the last screen is in antumbra-switch_admin-ui.xml", out)
+        # Found on the way back up.
+        out, kept = self.locate([b, c, c, c, b, a], "internet_wifi")
+        self.assertEqual(out[-2:], ["540 45 false true", "rc=0"])
+        self.assertEqual([line for line in out if line.startswith("ash: ")], [self.DOWN] * 2 + [self.UP] * 2)
+        self.assertEqual(kept, {})
+
+    def test_its_cost_is_bounded(self):
+        # A page that never stops changing: 14 swipes down, 14 up, 30 dumps.
+        out, kept = self.locate([self.page("row%d" % k) for k in range(40)], "switch_admin")
+        self.assertEqual(out[-1], "rc=1")
+        self.assertEqual((out.count(self.DOWN), out.count(self.UP), out.count("dump")), (14, 14, 30))
+        self.assertEqual(kept["logs/antumbra-switch_admin-ui.xml"].strip(), self.page("row29"))
+        # No dump at all: as many and no more, and nothing kept.
+        out, kept = self.locate([None], "switch_admin")
+        self.assertEqual((out.count(self.DOWN), out.count(self.UP), out.count("dump"), out[-1]), (14, 14, 30, "rc=1"))
+        self.assertEqual(kept, {})
+
+    def test_the_app_lab_keeps_the_last_screen_where_its_pack_step_looks(self):
+        out, kept = self.locate([self.page("row")], "switch_admin", prefix='UI_MISS_PREFIX="$LOGS/apps/welcome-";')
+        self.assertEqual(list(kept), ["logs/apps/welcome-switch_admin-ui.xml"])
+        apps = read(os.path.join(CI, "emulator-apps.sh"))
+        self.assertIn("ALOGS=$LOGS/apps\n", apps)
+        self.assertIn("UI_MISS_PREFIX=$ALOGS/welcome-\n", apps)
+        workflow = read(os.path.join(CI, "..", "..", "..", ".github", "workflows", "antumbra-android.yml"))
+        self.assertIn("--optional 'logs/apps/*-ui.xml'", workflow)
+
+    def test_both_scripts_look_for_the_switches_from_a_known_place(self):
+        common = self.common()
+        for f in ("ui_top", "ui_bottom", "ui_locate", "ui_miss", "screenshot_hook"):
+            self.assertIn("\n%s() {" % f, common)
+        for script in ("emulator-antumbra.sh", "emulator-apps.sh"):
+            text = read(os.path.join(CI, script))
+            self.assertNotIn("\nui_top() {", text)
+            self.assertNotIn("\nui_bottom() {", text)
+            self.assertNotIn("\nui_locate() {", text)
+        apps = read(os.path.join(CI, "emulator-apps.sh"))
+        start = apps[apps.index("session_start() {"):]
+        self.assertIn("\tui_top\n\tui_set_switch switch_mac true", start)
+        self.assertIn("\tui_bottom\n\tui_set_switch switch_unsafe_browser false", start)
+        self.assertIn("\tui_bottom\n\tui_set_switch switch_admin true", start)
+
+    def test_the_screenshot_hook_is_set_before_welcome_and_cleared_at_the_end(self):
+        self.assertIn("screenshot_hook() { ASH_TIMEOUT=15 ash \"setprop debug.antumbra.screenshots '$1'\" >/dev/null 2>&1; }",
+                      self.common())
+        for script, before in (("emulator-antumbra.sh", "\nscreenshot_hook 1\ninstall_welcome\n"),
+                               ("emulator-apps.sh", "\nscreenshot_hook 1\nsession_prepare\n")):
+            text = read(os.path.join(CI, script))
+            self.assertIn(before, text, script)
+            end = text[text.index("finish() {"):]
+            end = end[:end.index("\n}\n")]
+            # Cleared after the final screenshot, before anything that may fail.
+            self.assertLess(end.index("screenshot final"), end.index("screenshot_hook ''"), script)
+            self.assertLess(end.index("screenshot_hook ''"), end.index("collect_evidence"), script)
+            # Named nowhere else in the scripts.
+            self.assertEqual(text.count("debug.antumbra.screenshots"), 1 if script == "emulator-antumbra.sh" else 0, script)
+            self.assertEqual(text.count("screenshot_hook "), 2, script)
+
+
 class Wel10EmulatorTest(unittest.TestCase):
     """emulator-antumbra.sh's WEL10 steps: every check a warning until it has
     passed on CI once, every step bounded so that nothing of WEL10 can fail
@@ -1460,6 +1595,9 @@ class Wel10EmulatorTest(unittest.TestCase):
 
     def fn(self, name):
         text = self.script()
+        if "\n" + name + "() {" not in text:
+            # ui_top and ui_bottom are common.sh's, shared with the app lab.
+            text = read(os.path.join(CI, "lib", "common.sh"))
         start = text.index(name + "() {")
         end = text.index("\n}\n", start) + 3 if not text[start:].split("\n", 1)[0].endswith("}") else text.index("\n", start) + 1
         return text[start:end]
@@ -1654,6 +1792,9 @@ class Wel9EmulatorTest(unittest.TestCase):
 
     def fn(self, name):
         text = self.script()
+        if "\n" + name + "() {" not in text:
+            # ui_top and ui_bottom are common.sh's, shared with the app lab.
+            text = read(os.path.join(CI, "lib", "common.sh"))
         start = text.index(name + "() {")
         end = text.index("\n}\n", start) + 3 if not text[start:].split("\n", 1)[0].endswith("}") else text.index("\n", start) + 1
         return text[start:end]

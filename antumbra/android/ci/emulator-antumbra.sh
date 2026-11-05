@@ -40,7 +40,10 @@
 #      only network is Wi-Fi, which has no saved network yet.
 #   5. The Welcome APK; the debug build's test hook debug.antumbra.keep_adb=1
 #      (Welcome then leaves USB debugging on; see welcome/README.md, "Test
-#      hook"); 'dpm set-device-owner'; Welcome as the home app.
+#      hook"), and debug.antumbra.screenshots=1 (Welcome's list of apps for
+#      Location then leaves its window capturable, so that the screenshots
+#      show the screen; a position or typed bridge lines never do; cleared
+#      at the end); 'dpm set-device-owner'; Welcome as the home app.
 #   6. Before Start, emergency calls from Welcome's lock task (check
 #      welcome_emergency_dialer): the emergency dialer opens from Welcome's
 #      button and in a task of its own, and Back returns to Welcome, still
@@ -391,30 +394,6 @@ ui_enabled_is() {
 # choices_level NAME: the check's level: warn until it has passed on CI
 # once (then fail), as welcome_power_menu_emergency was.
 choices_level() { echo warn; }
-
-# ui_top: back to the top of the page (fast swipes down; no dump).
-ui_top() {
-	local w h
-	read -r w h < <(screen_size)
-	w=${w:-1080} h=${h:-2400}
-	for _ in 1 2 3 4 5 6; do
-		ash "input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 150" >/dev/null
-	done
-	sleep 1
-}
-
-# ui_bottom: down to the end of the page (fast swipes up, begun above the
-# pinned buttons; no dump), where Additional settings' switches are,
-# whatever WEL9's Location section adds above them.
-ui_bottom() {
-	local w h
-	read -r w h < <(screen_size)
-	w=${w:-1080} h=${h:-2400}
-	for _ in 1 2 3 4 5 6 7 8; do
-		ash "input swipe $((w / 2)) $((h * 13 / 20)) $((w / 2)) $((h * 3 / 20)) 150" >/dev/null
-	done
-	sleep 1
-}
 
 # ui_choose ID: choose the radio row ID by its test tag alone, from the top
 # of the page, and read it back checked; a second try if it does not read
@@ -1187,6 +1166,7 @@ finish() {
 		wake_screen
 		screenshot final
 	fi
+	screenshot_hook ''
 	if [ "$(ash 'id -u' 2>/dev/null)" = 0 ]; then
 		collect_evidence
 	else
@@ -1228,6 +1208,7 @@ install_module
 wifi_calling_off
 start_stream_recorder
 network_on
+screenshot_hook 1
 install_welcome
 welcome_start
 wifi_join

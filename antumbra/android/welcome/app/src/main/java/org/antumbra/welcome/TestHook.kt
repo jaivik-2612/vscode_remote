@@ -9,8 +9,9 @@ import java.io.File
  * Test hooks for CI, honoured only by debuggable or testOnly builds. With
  * the first, Welcome leaves USB debugging on in every session, so that CI
  * can drive a session without Administration over adb; the second
- * ([emergencyStates], WEL10) sets the emergency card's state lines. A
- * release build reads neither.
+ * ([emergencyStates], WEL10) sets the emergency card's state lines; the
+ * third ([screenshots]) lets CI's screenshots show the Welcome screen while
+ * it lists the apps for Location. A release build reads none of them.
  *
  * Set it with 'adb shell setprop debug.antumbra.keep_adb 1' before
  * 'dpm set-device-owner' (debug.* properties may be set by the shell user
@@ -52,4 +53,16 @@ object TestHook {
      */
     fun emergencyStates(context: Context): EmergencyHook? =
         EmergencyHook.effective(isTestBuild(context)) { SystemProperty.read(EMERGENCY_STATES) }
+
+    /** CI's hook for its screenshots of the Welcome screen: set to 1, the app list for Location leaves the window capturable. */
+    const val SCREENSHOTS = "debug.antumbra.screenshots"
+
+    /**
+     * [SCREENSHOTS] is 1, in a test build only ([WindowRules.screenshotHook]):
+     * the Welcome screen's window is then not FLAG_SECURE for the app list
+     * alone (WindowRules.showsApps), never for a position or typed bridge
+     * lines. Any other build reads no property and gets false. Never kept.
+     */
+    fun screenshots(context: Context): Boolean =
+        WindowRules.screenshotHook(isTestBuild(context)) { SystemProperty.read(SCREENSHOTS) }
 }

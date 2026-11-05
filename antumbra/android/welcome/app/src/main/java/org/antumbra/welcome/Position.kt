@@ -537,6 +537,13 @@ object PositionTexts {
         else -> null
     }
 
+    /**
+     * The card's explanation: "Location is on only while it looks, for up to
+     * 3 minutes" only when it is not kept on for the apps chosen (WEL9: it
+     * then says that Location stays on, [offLine]).
+     */
+    fun detail(p: PositionUi): Int = if (p.keptOn) R.string.position_detail_kept else R.string.position_detail
+
     /** WEL9: the status screen's Location value, for a session with [chosen] apps. */
     fun sessionValue(p: PositionUi, chosen: Int): Int = when {
         chosen == 0 -> R.string.value_off
@@ -616,16 +623,26 @@ object PositionFormat {
  * typed on the Welcome screen, or the list of installed apps it shows for
  * Location (WEL9); the screen kept on (FLAG_KEEP_SCREEN_ON)
  * while a position is looked for. Each activity sets exactly [MASK]'s
- * flags to [flags] whenever they change.
+ * flags to [flags] whenever they change. In a test build only, CI's hook
+ * ([TestHook.SCREENSHOTS], [screenshotHook]) lifts the app list's rule, so
+ * that CI's screenshots show the Welcome screen; never a position's or
+ * typed bridges'.
  */
 object WindowRules {
     const val MASK = WindowManager.LayoutParams.FLAG_SECURE or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
 
-    fun secure(position: PositionState, choices: Choices? = null): Boolean =
-        position is PositionState.Found || (choices != null && (typedBridges(choices) || showsApps(choices)))
+    fun secure(position: PositionState, choices: Choices? = null, screenshotHook: Boolean = false): Boolean =
+        position is PositionState.Found ||
+            (choices != null && (typedBridges(choices) || (showsApps(choices) && !screenshotHook)))
 
     /** WEL9: "On for apps you choose" shows the installed apps on the Welcome screen. */
     fun showsApps(c: Choices): Boolean = c.location
+
+    /**
+     * CI's hook: true for "1" in a test build ([TestHook.isTestBuild]); any
+     * other build never calls [read] (no getprop is started) and gets false.
+     */
+    fun screenshotHook(testBuild: Boolean, read: () -> String?): Boolean = testBuild && read() == "1"
 
     fun keepOn(position: PositionState): Boolean = position is PositionState.Looking
 
@@ -633,9 +650,9 @@ object WindowRules {
     fun typedBridges(c: Choices): Boolean =
         c.wireTorMode == TorMode.BRIDGES && c.bridgeSource == BridgeSource.CUSTOM && c.bridgeText.isNotBlank()
 
-    /** The window's flags under [MASK]: the status screen passes no [choices]. */
-    fun flags(position: PositionState, choices: Choices? = null): Int =
-        (if (secure(position, choices)) WindowManager.LayoutParams.FLAG_SECURE else 0) or
+    /** The window's flags under [MASK]: the status screen passes no [choices] (and no hook). */
+    fun flags(position: PositionState, choices: Choices? = null, screenshotHook: Boolean = false): Int =
+        (if (secure(position, choices, screenshotHook)) WindowManager.LayoutParams.FLAG_SECURE else 0) or
             (if (keepOn(position)) WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON else 0)
 }
 

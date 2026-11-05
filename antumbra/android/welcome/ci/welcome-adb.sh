@@ -333,11 +333,15 @@ set_switch() {
     [ "$checked" = "$2" ] || a shell input tap "$x" "$y"
 }
 
-# Scrolls to the top of the page.
+# Scrolls to the top of the page, and lets the last fling end: a control
+# located while the page still moves is tapped where it no longer is (run
+# 28: Show my position, just above Internet Wi-Fi, was pressed as
+# check-choices began, most likely by its first tap).
 to_top() {
     local w h
     read -r w h < <(screen_size)
     for _ in 1 2 3 4 5 6 7 8; do a shell input swipe $((w / 2)) $((h * 3 / 10)) $((w / 2)) $((h * 8 / 10)) 150; done
+    sleep 1
 }
 
 # scan_page FILE: the whole page, from the top down: a dump, then a slow

@@ -46,6 +46,9 @@ object WelcomeModel {
 
     /** WEL9: the [AppWatch.generation] the app list on screen was read at (-1: not yet). */
     var appsGeneration: Int = -1
+
+    /** CI's screenshot hook ([TestHook.screenshots]) as last read; false in any build but a test build. */
+    var screenshotHook by mutableStateOf(false)
 }
 
 /** Screen 1. The home screen and a locked task until Start (see Home). */
@@ -112,6 +115,7 @@ class WelcomeActivity : ComponentActivity() {
                     } else {
                         withContext(Dispatchers.IO) { AppPolicies.offered(this@WelcomeActivity) }.also { WelcomeModel.appsGeneration = generation }
                     }
+                    WelcomeModel.screenshotHook = withContext(Dispatchers.IO) { TestHook.screenshots(this@WelcomeActivity) }
                     val ui = WelcomeModel.ui
                     WelcomeModel.ui = ui.copy(
                         addOnPresent = present,
@@ -127,10 +131,11 @@ class WelcomeActivity : ComponentActivity() {
         }
         // No screenshots and no recents thumbnail while bridge lines typed
         // by the user, a position (WEL10) or the installed apps listed for
-        // Location (WEL9) are on screen; the screen stays on while Show my
+        // Location (WEL9) are on screen (the app list's rule lifted by CI's
+        // hook in a test build only); the screen stays on while Show my
         // position looks (WindowRules).
         lifecycleScope.launch {
-            snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices) }
+            snapshotFlow { WindowRules.flags(Position.ui.state, WelcomeModel.ui.choices, WelcomeModel.screenshotHook) }
                 .collect { window.setFlags(it, WindowRules.MASK) }
         }
     }

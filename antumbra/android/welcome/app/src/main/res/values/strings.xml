@@ -89,6 +89,8 @@
     <string name="position_off_start">Welcome has just started, so it does not know whether a call ended a moment ago. Location stays on for 5 minutes: Welcome changes nothing then, in case the emergency service needs this phone. Then Welcome switches it off.</string>
     <!-- WEL9: in a session with apps chosen for location, the search leaves Location on. -->
     <string name="position_kept_on">Location stays on for the apps you chose, until you shut down.</string>
+    <!-- WEL9: position_detail for such a session: Location is not on only while Welcome looks. -->
+    <string name="position_detail_kept">Welcome asks the satellite receiver (GPS) once, never Wi-Fi or cell towers. Welcome shows the position on this screen only: it does not save or send it.</string>
     <string name="position_request_failed">Welcome could not ask the satellite receiver.</string>
 
     <!-- Welcome screen -->
