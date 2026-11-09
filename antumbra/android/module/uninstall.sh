@@ -23,8 +23,10 @@
 # on in Settings. The cell radio comes back at the next start (or when
 # airplane mode is switched on and off): enable_cellular_on_boot and
 # airplane_mode_radios are among the values put back. It also deletes the
-# early arm script in /data/adb/post-fs-data.d and the Phone-mode gate
-# (/data/adb/antumbra-cell, written by the install's PH3 step; WEL8).
+# early arm script in /data/adb/post-fs-data.d, the Phone-mode gate
+# (/data/adb/antumbra-cell, written by the install's PH3 step; WEL8) and
+# PH3's NFLOG opt-in (/data/adb/antumbra-nflog, written by hand for the
+# measurement; MOD10).
 #
 # Wi-Fi calling and video calling (MOD7): the module set their force-on
 # properties to 0 in memory only, never stored. During a boot nothing is
@@ -112,5 +114,5 @@ fi
 if ! grep -q ' /data/adb/antumbra ' /proc/mounts 2>/dev/null; then
 	rmdir /data/adb/antumbra 2>/dev/null
 fi
-rm -f /data/adb/antumbra-force /data/adb/antumbra-cell /data/adb/post-fs-data.d/antumbra-arm.sh
+rm -f /data/adb/antumbra-force /data/adb/antumbra-cell /data/adb/antumbra-nflog /data/adb/post-fs-data.d/antumbra-arm.sh
 exit 0

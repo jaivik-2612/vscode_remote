@@ -248,6 +248,11 @@ CHECK_WORDS = {
                             "Welcome's check of who may tell it about recent calls did not go as expected"),
     "module_parsers": ("The add-on read the virtual phone's call and IMS state as expected",
                        "The add-on's reading of the virtual phone's call or IMS state was not as expected"),
+    "welcome_live_list": ("Welcome refused a test app the add-on listed as having carrier privileges (its data kept), "
+                          "and left the phone's own apps and the default phone and SMS apps alone",
+                          "Welcome's handling of the add-on's list of apps with carrier privileges was not as expected"),
+    "ph3_snapshot": ("The phone test's measuring kit ran on the virtual phone, and its report held no address or identifier",
+                     "The phone test's measuring kit did not run as expected, or its report was not clean"),
     "wifi_calling_off": ("Wi-Fi calling and video calling were off for the whole phone, and Settings offered no Wi-Fi calling",
                          "Wi-Fi calling or video calling was not shown off for the whole phone"),
     "tor_bootstrap": ("Tor connected", "Tor did not connect"),

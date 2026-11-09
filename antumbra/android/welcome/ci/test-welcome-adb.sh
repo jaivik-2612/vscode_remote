@@ -5,7 +5,8 @@
 # Runs welcome-adb.sh against a fake adb: the screen logic (finding
 # controls, typing bridge lines), the test hook rule, the provider checks
 # and check-policies / check-addon / check-emergency / check-power-menu /
-# check-module-word. No device or emulator needed.
+# check-module-word, WEL9's and MOD10's checks (check-carrier,
+# check-live-list). No device or emulator needed.
 #
 #   ci/test-welcome-adb.sh        exit status 0 when every case passed
 #
@@ -34,6 +35,22 @@ printf '%s\n' "$*" >>"$d/log"
 # WEL9: Welcome refuses an app (hides it, its data kept); with
 # $d/carrier_uninstalls it is removed instead, which the check must catch.
 refuse() { if [ -f "$d/carrier_uninstalls" ]; then rm -f "$d/pkg-$1"; else touch "$d/hidden-$1"; fi; }
+# MOD10: a live list taken (the call's arguments in $1): each installed app
+# it names that Welcome may refuse is refused (not $d/system-PKG, not
+# Welcome, not the default phone or SMS app); none with $d/live_ignored,
+# every one with $d/live_hides_all.
+live_refuse() {
+    local l p
+    l=$(printf '%s\n' "$1" | sed -n 's/.*packages:s:\([^ ]*\).*/\1/p')
+    [ ! -f "$d/live_ignored" ] || return 0
+    for p in ${l//,/ }; do
+        [ -f "$d/pkg-$p" ] || continue
+        if [ -f "$d/live_hides_all" ] || { [ ! -f "$d/system-$p" ] && [ "$p" != org.antumbra.welcome ] &&
+            [ "$p" != "$(cat "$d/role-DIALER" 2>/dev/null)" ] && [ "$p" != "$(cat "$d/role-SMS" 2>/dev/null)" ]; }; then
+            refuse "$p"
+        fi
+    done
+}
 # WEL8: the fake screen, while its state file exists.
 if [ -f "$d/ui-state.json" ]; then
     case "$*" in
@@ -266,6 +283,24 @@ case "$*" in
         if [ -f "$d/rootrefused" ]; then echo 'Error while accessing provider:org.antumbra.welcome.state'; else
             echo 'Result: Bundle[{v=1}]'
         fi ;;
+    # MOD10's check-live-list: Welcome's provider refuses the shell user's
+    # list unless $d/liveshelltakes and a malformed one unless
+    # $d/livemalformedtaken (each then refuses as root's would); root's list
+    # is taken (live_refuse). The default apps: $d/role-DIALER, $d/role-SMS.
+    "shell su 2000 content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier "*)
+        if [ -f "$d/liveshelltakes" ]; then live_refuse "$*"; echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.SecurityException: uid 2000 may not call module_carrier'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier --extra v:i:2 "*)
+        if [ -f "$d/livemalformedtaken" ]; then live_refuse "$*"; echo 'Result: Bundle[{v=1}]'; else
+            echo 'Error while accessing provider:org.antumbra.welcome.state'
+            echo 'java.lang.IllegalArgumentException: Malformed word'
+        fi ;;
+    "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier --extra v:i:1 "*)
+        live_refuse "$*"
+        echo 'Result: Bundle[{v=1}]' ;;
+    "shell cmd role get-role-holders --user 0 android.app.role."*) cat "$d/role-${7#android.app.role.}" 2>/dev/null || echo ;;
     "shell wm size") echo "Physical size: 1080x2400" ;;
     # adb goes away once Start ran with the hook cleared.
     "shell true") if [ "$(cat "$d/hook" 2>/dev/null)" = 0 ] && grep -q '^shell input tap' "$d/log"; then exit 1; fi ;;
@@ -1656,6 +1691,71 @@ wel9_reset
 echo x >"$work/ccvalue"
 "$script" clear-carrier-test 2>"$work/err" && [ ! -f "$work/ccvalue" ] && pass "clear-carrier-test clears the carrier configuration's test values" ||
     bad "clear-carrier-test: $(cat "$work/err")"
+wel9_reset
+
+# check-live-list (MOD10): root's list refuses the probe it names, and
+# never a system app, Welcome or the default phone or SMS app on it; the
+# shell's and a malformed list are refused; root's empty list goes last.
+PL=org.antumbra.probe.live
+: >"$work/$PL.apk"
+LIVE_EMPTY="shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier --extra v:i:1 --extra packages:s: --extra at:l:1"
+live_reset() {
+    wel9_reset
+    rm -f "$work"/system-* "$work"/role-* "$work/liveshelltakes" "$work/livemalformedtaken" "$work/live_ignored" "$work/live_hides_all"
+    for p in com.android.phone com.android.settings com.android.dialer com.android.messaging org.antumbra.welcome; do
+        app_grants "$p" false false false false false
+    done
+    for p in com.android.phone com.android.settings com.android.dialer com.android.messaging; do touch "$work/system-$p"; done
+    echo com.android.dialer >"$work/role-DIALER"
+    echo com.android.messaging >"$work/role-SMS"
+}
+live() { "$script" check-live-list --probe $PL "$work/$PL.apk" --wait 2; }
+live_last_empty() { [ "$(grep 'method module_carrier' "$work/log" | tail -n 1)" = "$LIVE_EMPTY" ]; }
+live_only() { ! grep -Eq 'input tap|input text|KEYCODE|tel:|emergency|settings put|uninstall|pm clear|pm hide|pm unhide|cmd phone cc' "$work/log"; }
+live_reset
+if live 2>"$work/err"; then
+    [ -f "$work/hidden-$PL" ] && [ -f "$work/pkg-$PL" ] && live_last_empty && live_only &&
+        [ "$(grep -c 'method module_carrier' "$work/log")" = 4 ] &&
+        grep -qx "shell content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier --extra v:i:1 --extra packages:s:$PL,com.android.phone,com.android.settings,org.antumbra.welcome,com.android.dialer,com.android.messaging --extra at:l:1" "$work/log" &&
+        ! ls "$work"/hidden-com.android.* "$work/hidden-org.antumbra.welcome" >/dev/null 2>&1 &&
+        grep -q 'refused on root.s list: yes' "$work/err" &&
+        pass "check-live-list: root's list refuses the probe (hidden, its data kept), never the system apps, Welcome or the default apps; the list emptied" ||
+        bad "check-live-list: $(cat "$work/err"); log: $(cat "$work/log")"
+else
+    bad "check-live-list failed: $(cat "$work/err")"
+fi
+# Each fault it must catch, root's empty list last after each.
+for case_ in "liveshelltakes|the shell user (uid 2000) gave Welcome a list" \
+    "livemalformedtaken|root's malformed list was taken" \
+    "live_ignored|$PL was not refused within 2 s of root's list (no)" \
+    "live_hides_all|com.android.phone is refused: Welcome must leave system apps, itself and the default phone and SMS apps alone" \
+    "carrier_uninstalls|$PL was not refused within 2 s of root's list (gone)"; do
+    live_reset
+    touch "$work/${case_%|*}"
+    if live 2>"$work/err"; then bad "check-live-list passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && live_last_empty && live_only &&
+            pass "check-live-list fails with ${case_%|*}, and empties the list" || bad "check-live-list with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# Refused with nothing given or installed: not root, a call in progress, no default SMS app.
+for case_ in "notroot|needs adb as root" "call|a call is in progress; no list is given" \
+    "norole|the default phone or SMS app could not be read"; do
+    live_reset
+    case ${case_%|*} in notroot) echo 2000 >"$work/uid" ;; call) echo 2 >"$work/calls" ;; norole) rm -f "$work/role-SMS" ;; esac
+    if live 2>"$work/err"; then bad "check-live-list passed with ${case_%|*}"; else
+        grep -qF "${case_#*|}" "$work/err" && ! grep -Eq '^install|module_carrier' "$work/log" &&
+            pass "check-live-list refuses and gives no list (${case_%|*})" || bad "check-live-list with ${case_%|*}: $(cat "$work/err"); log: $(cat "$work/log")"
+    fi
+done
+# Killed while the probe waits to be refused: root's empty list still goes last.
+live_reset
+touch "$work/live_ignored"
+timeout 8 "$script" check-live-list --probe $PL "$work/$PL.apk" --wait 60 2>"$work/err" &&
+    bad "check-live-list was not killed" ||
+    { live_last_empty && pass "check-live-list empties the list when it is killed" ||
+        bad "the live list was not emptied after a kill: $(cat "$work/err"); log: $(cat "$work/log")"; }
+live_reset
+rm -f "$work"/system-* "$work"/role-*
 wel9_reset
 
 # choose-location: Location on for the apps chosen, each as chosen, by test tag.

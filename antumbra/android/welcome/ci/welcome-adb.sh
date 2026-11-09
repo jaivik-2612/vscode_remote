@@ -7,8 +7,9 @@
 # for 'check-emergency', 'check-power-menu', 'check-policies --keep-adb',
 # 'check-addon', 'check-module-word', 'check-choices', 'check-phone',
 # 'check-module-cell', 'check-emergency-card', 'check-emergency-states',
-# 'check-position', 'clear-position-test', and WEL9's 'check-app-grants',
-# 'check-carrier', 'clear-carrier-test' and 'choose-location'). It
+# 'check-position', 'clear-position-test', WEL9's 'check-app-grants',
+# 'check-carrier', 'clear-carrier-test' and 'choose-location', and MOD10's
+# 'check-live-list'). It
 # works the screen the way a person does (uiautomator finds each control by
 # its test tag, then 'input tap'), and checks results through the state
 # provider and the system's own dumps.
@@ -207,6 +208,22 @@
 #                             clear-values -s 0', 'clear-carrier-test').
 #   clear-carrier-test        Clear every carrier configuration value set with 'cmd phone cc'
 #                             (adb as root).
+#   check-live-list --probe PKG APK [--wait SECONDS]
+#                             MOD10, with adb as root, never during a call: Welcome's
+#                             provider takes the module's live list of apps with carrier
+#                             privileges (method module_carrier) from root only, and refuses
+#                             what it may refuse. APK is installed and must be seen by
+#                             Welcome (its location denied) and not refused; a list naming
+#                             it from the shell user (uid 2000) and a malformed one from
+#                             root must be refused (SecurityException,
+#                             IllegalArgumentException) and change nothing; then root's
+#                             list names it, com.android.phone, com.android.settings,
+#                             Welcome and the default phone and SMS apps ('cmd role
+#                             get-role-holders'): PKG must be refused (hidden, listed by 'pm
+#                             list packages -u' only) within --wait (60 s), and none of the
+#                             others. Root's empty list goes last, whatever happens (Welcome
+#                             never unhides an app). Nothing is dialled or texted, and no
+#                             setting is written.
 #   choose-location [--off] [--approximate PKG]... [--precise PKG]...
 #                             WEL9, before Start, Welcome in front: Location "On for apps you
 #                             choose", each PKG's switch on and its precision chosen (each
@@ -1121,6 +1138,102 @@ cmd_check_module_word() {
     out=$(word_call -- "${WORD_NONE[@]}")
     [ "$out" = 'Result: Bundle[{v=1}]' ] || die "root's word was not taken: $out"
     say "root's word taken: $out"
+}
+
+# --- MOD10: the module's live list of apps with carrier privileges ---------------
+
+# Two apps that come with every Android image: the live list may name
+# them, and Welcome must leave them alone.
+LIVE_SYSTEM=(com.android.phone com.android.settings)
+
+# live_call [PREFIX...] -- EXTRA...: 'content call' with the module_carrier
+# method, as word_call does for module_word.
+live_call() {
+    local prefix=()
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do prefix+=("$1"); shift; done
+    shift
+    sh_ "${prefix[@]}" content call --user 0 --uri "$WORD_URI" --method module_carrier "$@" 2>&1 || true
+}
+
+# role_holder DIALER|SMS: the role's holder for user 0 ('cmd role
+# get-role-holders' joins several with ';'); nothing when there is none.
+role_holder() { sh_ cmd role get-role-holders --user 0 "android.app.role.$1" 2>/dev/null | tr ';' '\n' | sed -n 1p || true; }
+
+# live_empty: root's last word, the empty list (the module would send none
+# on the emulator, whose SIM gives no app carrier privileges).
+live_empty() { live_call -- --extra v:i:1 --extra packages:s: --extra at:l:1; }
+
+cmd_check_live_list() {
+    local pkg='' apk='' wait=60 out dialer sms list p end
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --probe) [ $# -ge 3 ] || die "check-live-list: --probe needs PKG APK"; pkg=$2; apk=$3; shift 2 ;;
+            --wait) wait=$2; shift ;;
+            *) die "check-live-list: unknown option $1" ;;
+        esac
+        shift
+    done
+    [ -n "$pkg" ] || die "check-live-list: needs --probe PKG APK"
+    [ -r "$apk" ] || die "check-live-list: cannot read $apk"
+    case $wait in '' | *[!0-9]*) die "check-live-list: --wait takes a number of seconds" ;; esac
+    [ "$(sh_ id -u)" = 0 ] || die "check-live-list needs adb as root ('adb root')"
+    sh_ dpm list-owners | grep -q "$PKG" || die "Welcome is not the device owner"
+    calls_idle || die "a call is in progress; no list is given"
+    dialer=$(role_holder DIALER)
+    sms=$(role_holder SMS)
+    if [ -z "$dialer" ] || [ -z "$sms" ]; then
+        die "check-live-list: the default phone or SMS app could not be read (Welcome then refuses nothing)"
+    fi
+    problems=()
+    # From here on, whatever happens, root's last list is the empty one.
+    trap 'live_empty >/dev/null' EXIT
+    trap 'exit 1' INT TERM HUP
+    # 1. The probe before any list: Welcome's pass has seen it (its location denied) and has not refused it.
+    apk_in "$apk" || die "check-live-list: $apk did not install"
+    end=$((SECONDS + wait))
+    while out=$(grants_problems "$pkg" denied) && [ -n "$out" ]; do
+        [ $SECONDS -lt "$end" ] || die "check-live-list: Welcome's pass did not reach $pkg before the list: $(tr '\n' ';' <<<"$out")"
+        sleep 3
+    done
+    # 2. The shell's list and root's malformed one: refused, and nothing refused by them.
+    out=$(live_call su 2000 -- --extra v:i:1 --extra "packages:s:$pkg" --extra at:l:1)
+    case $out in
+        *'Result:'*) problems+=("the shell user (uid 2000) gave Welcome a list: $out") ;;
+        *SecurityException*) say "the shell user's list refused (SecurityException)" ;;
+        *) problems+=("the shell user's list was not refused as expected: $out") ;;
+    esac
+    out=$(live_call -- --extra v:i:2 --extra "packages:s:$pkg" --extra at:l:1)
+    case $out in
+        *'Result:'*) problems+=("root's malformed list was taken: $out") ;;
+        *IllegalArgumentException*) say "root's malformed list refused" ;;
+        *) problems+=("root's malformed list was not refused as expected: $out") ;;
+    esac
+    sleep 3
+    [ "$(app_hidden "$pkg")" = no ] || problems+=("$pkg was refused without root's list ($(app_hidden "$pkg"))")
+    # 3. Root's list: the probe, two system apps, Welcome, the default phone and SMS apps.
+    list=$pkg
+    for p in "${LIVE_SYSTEM[@]}" "$PKG" "$dialer" "$sms"; do list="$list,$p"; done
+    out=$(live_call -- --extra v:i:1 --extra "packages:s:$list" --extra at:l:1)
+    [ "$out" = 'Result: Bundle[{v=1}]' ] || problems+=("root's list was not taken: $out")
+    if wait_hidden "$pkg" "$wait"; then say "refused on root's list: yes"; else
+        problems+=("$pkg was not refused within $wait s of root's list ($(app_hidden "$pkg"))")
+    fi
+    for p in "${LIVE_SYSTEM[@]}" "$PKG" "$dialer" "$sms"; do
+        [ "$(app_hidden "$p")" = no ] ||
+            problems+=("$p is $(app_hidden "$p" | sed 's/^yes$/refused/'): Welcome must leave system apps, itself and the default phone and SMS apps alone")
+    done
+    say "left alone on root's list: ${LIVE_SYSTEM[*]}, Welcome, $dialer (phone), $sms (SMS)"
+    # 4. Refused, not removed: still on the phone with its data, hidden.
+    if [ "$(app_hidden "$pkg")" = yes ]; then
+        if ! sh_ pm list packages -u | grep -qx "package:$pkg" || sh_ pm list packages | grep -qx "package:$pkg"; then
+            problems+=("$pkg is not kept hidden ('pm list packages -u' and 'pm list packages')")
+        fi
+    fi
+    trap - EXIT INT TERM HUP
+    out=$(live_empty)
+    [ "$out" = 'Result: Bundle[{v=1}]' ] || problems+=("root's empty list was not taken: $out")
+    [ "${#problems[@]}" -eq 0 ] || die "check-live-list: ${problems[*]}"
+    say "check-live-list: root's list refused the probe (hidden, its data kept), the shell's and a malformed list were refused, and the system apps, Welcome and the default phone and SMS apps on it were left alone; the list emptied"
 }
 
 # --- WEL8: the two choices at Start, the Phone card, the module's word on the cell radio ---
@@ -2203,6 +2316,7 @@ case "$command" in
         clear_position_test || die "a search is still running, the test provider is still there, or Location is still on" ;;
     check-app-grants) cmd_check_app_grants "$@" ;;
     check-carrier) cmd_check_carrier "$@" ;;
+    check-live-list) cmd_check_live_list "$@" ;;
     clear-carrier-test)
         [ "$(sh_ id -u)" = 0 ] || die "clear-carrier-test needs adb as root ('adb root')"
         clear_carrier_test || die "the carrier configuration's test values are not cleared" ;;

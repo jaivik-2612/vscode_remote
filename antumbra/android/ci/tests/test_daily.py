@@ -594,6 +594,16 @@ class DailyTest(unittest.TestCase):
                 self.assertNotIn("org.", words, name)
                 self.assertIn("test app" if name not in ("welcome_carrier_recover", "welcome_location_recover") else "", words, name)
         self.assertIn("(its data kept)", daily.plain_check("welcome_carrier_refused", "ok"))
+        # MOD10's checks, in plain words; the live list's names no app but the test app.
+        for name in ("welcome_live_list", "ph3_snapshot"):
+            for status in ("ok", "warn"):
+                words = daily.plain_check(name, status)
+                self.assertNotIn("_", words, name)
+                self.assertFalse(words.startswith("Not as expected: "), name)
+                self.assertNotIn("org.", words, name)
+        self.assertIn("test app", daily.plain_check("welcome_live_list", "ok"))
+        self.assertIn("(its data kept)", daily.plain_check("welcome_live_list", "ok"))
+        self.assertIn("no address or identifier", daily.plain_check("ph3_snapshot", "ok"))
         self.assertIn("each as chosen", daily.plain_check("welcome_location_grants", "ok"))
         # Show my position after Start may leave Location on (WEL9), and says so.
         self.assertIn("stayed on for the apps chosen", daily.plain_check("welcome_position_session", "ok"))

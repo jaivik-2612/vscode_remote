@@ -30,14 +30,16 @@ import kotlin.concurrent.thread
  * setPermissionGrantState (POLICY_FIXED either way) and setApplicationHidden.
  *
  * A pass reads the installed apps, the session's choice, the default phone
- * and SMS apps and the carrier configuration again each time, so passes may
+ * and SMS apps, the carrier configuration and the module's live list (MOD10,
+ * in memory) again each time, so passes may
  * come in any order and the last one is right. They run one at a time on
  * their own thread: at boot (LOCKED_BOOT_COMPLETED first, then
  * BOOT_COMPLETED), on becoming the device owner and at Start (the baseline,
  * [Policies.applyBaseline]), at the process's start, after Start, when the
  * default phone or SMS app changes, and at each install or update (the new
- * package alone first, then every app) and carrier-configuration change
- * ([AppWatch]). No step throws: each is caught on its own, and the log
+ * package alone first, then every app), carrier-configuration change
+ * ([AppWatch]) and change of the module's live list ([LiveList],
+ * StateProvider). No step throws: each is caught on its own, and the log
  * names no app.
  */
 object AppPolicies {
@@ -107,7 +109,9 @@ object AppPolicies {
         val apps = if (only == null) installedApps(context) else listOfNotNull(installedApp(context, only))
         val roles = roleHolders(context)
         val privileged = if (roles == null) null else CarrierConfigSource(context).privileged(apps)
-        val plan = AppRules.plan(apps, context.packageName, chosen, roles, privileged.orEmpty())
+        // MOD10's live list from root, the second source: the SIM's own access rules and an eSIM profile's.
+        val live = if (roles == null) emptySet() else LiveList.privileged(apps)
+        val plan = AppRules.plan(apps, context.packageName, chosen, roles, privileged.orEmpty() + live)
         var failed = 0
         var locationLeft = 0
         for (s in plan.steps) {
@@ -140,9 +144,11 @@ object AppPolicies {
             lastRoles = roles
             locationReady = started && Session.current().started && locationLeft == 0 && !gate.isClosed()
         }
+        // How many of the refused the module's live list named: never how many it names.
+        val byLiveList = plan.refuse.count { it in live }
         Log.i(
             TAG,
-            "$why: ${plan.steps.size} grant states, ${plan.refuse.size} refused, ${lifts.size} lifted, $failed failed" +
+            "$why: ${plan.steps.size} grant states, ${plan.refuse.size} refused ($byLiveList of them by the module's list), ${lifts.size} lifted, $failed failed" +
                 (if (privileged == null && roles != null) "; the carrier configuration could not be read" else "") +
                 (if (plan.rolesUnknown) "; the default phone or SMS app could not be read: no phone-state step and no refusal" else ""),
         )

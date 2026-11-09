@@ -235,11 +235,37 @@ ims_off_restore() {
 fw() {
 	_fw_doh=$MODDIR/lists/doh-ipv4.txt
 	[ -f "$LISTS/doh-ipv4.txt" ] && _fw_doh=$LISTS/doh-ipv4.txt
+	_fw_nflog=
+	[ "${1-}" != apply ] || _fw_nflog=$(nflog_group)
 	ANTUMBRA_DIR=$FWDIR \
 		ANTUMBRA_FW_EXEMPT=$STATE/fw-exempt.conf \
 		ANTUMBRA_FW_RELAYS=$STATE/fw-relays.conf \
 		ANTUMBRA_FW_DOH=$_fw_doh \
+		ANTUMBRA_FW_NFLOG_GROUP=$_fw_nflog \
 		"$BIN/antumbra-fw" "$@"
+}
+
+# PH3's NFLOG opt-in (MOD10): the firewall copies the packets it refuses or
+# drops, and the first packet of each connection it passes into Tor, to an
+# NFLOG group (rate-limited to 20 a second per rule; antumbra-fw's nflog())
+# only when ANTUMBRA_FW_NFLOG_GROUP names one, and the module names one
+# only when the owner wrote it, by hand, into this root-only file, for the
+# measurement on the phone (README, "PH3's measuring kit"). NFLOG adds no
+# verdict: what passes and what is refused stay the same. Only a process
+# with CAP_NET_ADMIN can listen to a group; with no listener the kernel
+# drops the copies. As installed there is no file and no NFLOG rule.
+NFLOG_FILE=/data/adb/antumbra-nflog
+
+# nflog_group: the group in NFLOG_FILE (1 to 65535, decimal, the first
+# line exactly) when the file is a regular file of root's that neither its
+# group nor others may write (cell_gate_owner_ok); nothing otherwise. Read
+# at each 'apply' (at boot, and when the module loads the rule set again).
+nflog_group() {
+	[ -f "$NFLOG_FILE" ] && [ ! -L "$NFLOG_FILE" ] && cell_gate_owner_ok "$NFLOG_FILE" || return 0
+	_ng=$(read_value "$NFLOG_FILE")
+	case $_ng in '' | 0* | *[!0-9]* | ??????*) return 0 ;; esac
+	[ "$_ng" -le 65535 ] || return 0
+	echo "$_ng"
 }
 
 # fw_state: print the firewall's state as 'status' reports it (live, armed,
@@ -1409,8 +1435,12 @@ airplane_set() { /system/bin/cmd connectivity airplane-mode "$1" >/dev/null 2>&1
 # (the process missing, not ready yet, or dying), while Telephony checks
 # again and places the call as an emergency call: a new or missing
 # process is a doubt (cell_note).
-phone_proc() {
-	_pp=$($TB pidof com.android.phone 2>/dev/null) || return 1
+phone_proc() { proc_of com.android.phone; }
+
+# proc_of NAME: phone_proc's reading for any process name: "PID:START", or
+# status 1 (not running, running twice, unreadable).
+proc_of() {
+	_pp=$($TB pidof "$1" 2>/dev/null) || return 1
 	case $_pp in '' | *[!0-9]*) return 1 ;; esac
 	read -r _pp_s 2>/dev/null <"/proc/$_pp/stat" || return 1
 	_pp_s=${_pp_s##*') '}
@@ -2436,6 +2466,258 @@ cell_shutdown() {
 	fi
 	cell_reset
 	log "shutdown: airplane mode stored off and cell_on 1, without a broadcast; the radio stays off at the next start"
+}
+
+# --- Apps with carrier privileges: the live list for Welcome (MOD10) -------------------
+#
+# Android gives carrier privileges from three sources
+# (CarrierPrivilegesTracker): the SIM's own access rules (an eSIM profile's
+# among them), the carrier configuration's certificate list and test
+# overrides. Welcome, as the device owner, can read only the second (WEL9's
+# CarrierConfigSource); the others are @SystemApi. The tracker sends its
+# whole set, package names and uids, to the telephony registry, whose dump
+# prints it for each phone:
+#   mCarrierPrivilegeState=<packages=[a.b, c.d], uids=[10123, 10124]>
+# the names in clear on a debuggable build (LineageOS's userdebug builds,
+# the emulator), "[***, size=N]" otherwise; the uids always. The module
+# reads that line (one native dump, no Java start) and tells Welcome the
+# packages, through its provider as for its other words:
+#   content call --user 0 --uri content://org.antumbra.welcome.state \
+#     --method module_carrier --extra v:i:1 --extra packages:s:a.b,c.d \
+#     --extra at:l:AT
+# Welcome refuses those WEL9 may refuse (hidden, their data kept; never a
+# system app, Welcome itself or the default phone or SMS app). Read in
+# every mode, not only in Phone mode: the SIM, and its access rules with
+# it, is read with the radio off too (the radio's power is not the card's),
+# and a read costs one native dump every 5 minutes. Nothing of it goes
+# into status.json, a property, a file or the log (the log says only that
+# Welcome did or did not take a list, never what it holds).
+PRIV_METHOD=module_carrier
+# Seconds between reads; a read this soon after the SIM's state or the
+# installed packages changed (the tracker updates the registry a moment
+# after them); seconds between looks at packages.list's time; seconds
+# between tries while Welcome does not take the list; at most this many
+# packages (more reads as unreadable).
+PRIV_EVERY=300
+PRIV_SOON=15
+PRIV_STAT_EVERY=30
+PRIV_RETRY=300
+PRIV_MAX=200
+# Package names with their uids, as PackageManager writes them for native
+# code (Settings.writePackageListLPr: "NAME UID ..."); root may read it.
+PKG_LIST=/data/system/packages.list
+PRIV_NEXT=0        # uptime of the next read (0: at the first turn)
+PRIV_LIST=         # the packages at the last read that could read them, "a.b,c.d" (empty: none)
+PRIV_READ=         # 1 or 0: whether the last read could read them (empty: no read yet)
+PRIV_TOLD=         # the list Welcome took last (empty: none, which is what Welcome holds at its start)
+PRIV_WELCOME=      # Welcome's process when it took it, "PID:START" (proc_of)
+PRIV_BAD=0         # 1 while Welcome does not take it (logged once)
+PRIV_BAD_AT=0      # uptime of the last try Welcome did not take
+PRIV_BAD_LIST=     # that try's list
+PRIV_SIM=          # gsm.sim.state (cell_step's CELL_SIM) at the last turn
+PRIV_PKGS=         # packages.list's time at the last look (empty: not looked at yet)
+PRIV_STAT_NEXT=0   # uptime of the next look at it
+PRIV_TURN=         # uptime of the last turn that read the list or told it (service.sh checks the ports again then)
+
+# priv_name_ok NAME: NAME is a package name as Android takes it: segments of
+# letters, digits and "_" joined by dots, each beginning with a letter.
+priv_name_ok() {
+	case $1 in '' | [!A-Za-z]* | *[!A-Za-z0-9_.]* | *. | *.[!A-Za-z]*) return 1 ;; esac
+	return 0
+}
+
+# priv_state: read 'dumpsys telephony.registry' on standard input and print
+# the apps with carrier privileges, one line each: "p NAME" for a package
+# named in clear, "u UID" for each uid of a phone whose names are hidden
+# ("[***, size=N]": a build that is not debuggable). Only the "last known
+# state" part is read, and in it only mCarrierPrivilegeState (the dump
+# also holds numbers and cells, which are read past). Returns 1 unless
+# there is at least one phone, each with exactly one such line of that
+# form, with valid names and uids (decimal, no leading zero).
+priv_state() {
+	_ps_in=0
+	_ps_phones=0
+	_ps_n=0
+	_ps_out=
+	while IFS= read -r _ps_l; do
+		case $_ps_l in
+		'last known state:')
+			_ps_in=1
+			continue
+			;;
+		'local logs:') break ;;
+		esac
+		[ "$_ps_in" = 1 ] || continue
+		_ps_l=${_ps_l#"${_ps_l%%[! ]*}"}
+		case $_ps_l in
+		'Phone Id='*)
+			[ "$_ps_phones" = 0 ] || [ "$_ps_n" = 1 ] || return 1
+			_ps_phones=$((_ps_phones + 1))
+			_ps_n=0
+			;;
+		mCarrierPrivilegeState=*)
+			[ "$_ps_phones" -gt 0 ] && [ "$_ps_n" = 0 ] || return 1
+			_ps_n=1
+			_ps_v=${_ps_l#mCarrierPrivilegeState=}
+			case $_ps_v in '<packages=['*'], uids=['*']>') ;; *) return 1 ;; esac
+			_ps_p=${_ps_v#'<packages=['}
+			_ps_p=${_ps_p%%'], uids=['*}
+			_ps_u=${_ps_v#*'], uids=['}
+			_ps_u=${_ps_u%']>'}
+			# No empty entry (an empty list is "[]").
+			case "$_ps_p|$_ps_u" in ', '* | *', |'* | *', , '* | *'|, '* | *', ') return 1 ;; esac
+			_ps_k=p
+			case $_ps_p in '***, size='*)
+				case ${_ps_p#'***, size='} in '' | *[!0-9]*) return 1 ;; esac
+				_ps_k=u
+				;;
+			esac
+			# The uids always checked; told for a phone whose names are hidden.
+			_ps_x=$_ps_u
+			while [ -n "$_ps_x" ]; do
+				_ps_y=${_ps_x%%', '*}
+				if [ "$_ps_y" = "$_ps_x" ]; then _ps_x=; else _ps_x=${_ps_x#*', '}; fi
+				case $_ps_y in '' | 0?* | *[!0-9]*) return 1 ;; esac
+				[ "$_ps_k" = p ] || _ps_out="${_ps_out}u $_ps_y
+"
+			done
+			[ "$_ps_k" = p ] || continue
+			while [ -n "$_ps_p" ]; do
+				_ps_y=${_ps_p%%', '*}
+				if [ "$_ps_y" = "$_ps_p" ]; then _ps_p=; else _ps_p=${_ps_p#*', '}; fi
+				priv_name_ok "$_ps_y" || return 1
+				_ps_out="${_ps_out}p $_ps_y
+"
+			done
+			;;
+		esac
+	done
+	[ "$_ps_phones" -gt 0 ] && [ "$_ps_n" = 1 ] || return 1
+	printf '%s' "$_ps_out"
+}
+
+# priv_list: priv_state's lines on standard input as the list told to
+# Welcome: the names, and every package of each uid's app id (the uid in
+# user 0, as PKG_LIST names each package with it), sorted, once each,
+# joined by commas; empty for none. Returns 1 when a uid must be looked up
+# and PKG_LIST cannot be read, or when there are more than PRIV_MAX.
+priv_list() {
+	_pl_p=
+	_pl_u=
+	while read -r _pl_k _pl_x || [ -n "$_pl_k" ]; do
+		case $_pl_k in
+		p) _pl_p="$_pl_p$_pl_x
+" ;;
+		u) _pl_u="$_pl_u $((_pl_x % 100000))" ;;
+		esac
+	done
+	if [ -n "$_pl_u" ]; then
+		[ -r "$PKG_LIST" ] || return 1
+		while read -r _pl_x _pl_id _ || [ -n "$_pl_x" ]; do
+			case $_pl_id in '' | *[!0-9]*) continue ;; esac
+			case "$_pl_u " in *" $_pl_id "*)
+				priv_name_ok "$_pl_x" && _pl_p="$_pl_p$_pl_x
+"
+				;;
+			esac
+		done <"$PKG_LIST"
+	fi
+	_pl_p=$(printf '%s' "$_pl_p" | sort -u)
+	[ "$(printf '%s\n' "$_pl_p" | grep -c .)" -le "$PRIV_MAX" ] || return 1
+	printf '%s' "$_pl_p" | tr '\n' ','
+}
+
+# priv_soon NOW: the next read PRIV_SOON seconds after NOW at the latest.
+priv_soon() {
+	[ "$PRIV_NEXT" -le $(($1 + PRIV_SOON)) ] || PRIV_NEXT=$(($1 + PRIV_SOON))
+}
+
+# priv_step NOW: at every turn once the framework answers (service.sh, after
+# the cell radio's steps): the list read at the first turn, every
+# PRIV_EVERY seconds, and PRIV_SOON seconds after the SIM's state
+# (gsm.sim.state, which cell_step reads at every turn) or packages.list's
+# time (looked at every PRIV_STAT_EVERY seconds: an install, an update or a
+# removal) changed; then told to Welcome (priv_tell). Nothing while a call,
+# emergency callback mode or the 5 minutes after either hold, or while the
+# call state cannot be read (cell_hold): no dump and no Java start then,
+# the read waits until the hold ends. A list that cannot be read changes
+# nothing; that is logged once, and once when it can be read again.
+priv_step() {
+	if [ "$CELL_SIM" != "$PRIV_SIM" ]; then
+		[ -z "$PRIV_SIM" ] || priv_soon "$1"
+		PRIV_SIM=$CELL_SIM
+	fi
+	if [ "$1" -ge "$PRIV_STAT_NEXT" ]; then
+		PRIV_STAT_NEXT=$(($1 + PRIV_STAT_EVERY))
+		_pr_m=$($TB stat -c %Y "$PKG_LIST" 2>/dev/null)
+		_pr_m=${_pr_m:--}
+		[ -z "$PRIV_PKGS" ] || [ "$_pr_m" = "$PRIV_PKGS" ] || priv_soon "$1"
+		PRIV_PKGS=$_pr_m
+	fi
+	[ "$1" -ge "$PRIV_NEXT" ] || return 0
+	! cell_hold "$1" >/dev/null || return 0
+	PRIV_NEXT=$(($1 + PRIV_EVERY))
+	# shellcheck disable=SC2034 # read by service.sh
+	PRIV_TURN=$1
+	if _pr_s=$(cell_dump telephony.registry | priv_state) && _pr_l=$(printf '%s\n' "$_pr_s" | priv_list); then
+		[ "$PRIV_READ" != 0 ] || log "carrier: the list of apps with carrier privileges can be read again"
+		PRIV_READ=1
+		PRIV_LIST=$_pr_l
+		priv_tell "$1"
+	else
+		[ "$PRIV_READ" = 0 ] || log "carrier: the list of apps with carrier privileges could not be read; Welcome keeps the one it took"
+		PRIV_READ=0
+	fi
+}
+
+# priv_send EXTRA...: 'content call' to Welcome's provider with the
+# module_carrier method; prints what the tool prints on standard output.
+# Bounded at 10 s.
+priv_send() {
+	$TB timeout 10 /system/bin/content call --user 0 --uri "$WORD_URI" --method "$PRIV_METHOD" "$@" 2>/dev/null
+}
+
+# priv_tell NOW: tell Welcome the list just read when it differs from the
+# one Welcome took last (Welcome holds none at its start), or when
+# Welcome's process is another than the one that took it (a new process
+# holds none) and the list is not empty. While Welcome does not take it (a
+# Welcome from before MOD10 answers "Unknown method"), again every
+# PRIV_RETRY seconds and at once when the list changes, but never for the
+# list Welcome took. Only while Welcome is the device owner (the authority
+# is then Welcome's). The refusal and the recovery are logged once each,
+# never the list.
+priv_tell() {
+	_pt_w=$(proc_of "$WELCOME_PKG") || _pt_w=-
+	_pt_go=0
+	if [ "$PRIV_BAD" = 1 ]; then
+		if [ "$PRIV_LIST" != "$PRIV_BAD_LIST" ]; then
+			_pt_go=1
+		elif [ "$PRIV_LIST" != "$PRIV_TOLD" ] &&
+			{ [ "$1" -lt "$PRIV_BAD_AT" ] || [ $(($1 - PRIV_BAD_AT)) -ge "$PRIV_RETRY" ]; }; then
+			_pt_go=1
+		fi
+	else
+		[ "$PRIV_LIST" = "$PRIV_TOLD" ] || _pt_go=1
+		[ -z "$PRIV_LIST" ] || [ "$_pt_w" = "$PRIV_WELCOME" ] || _pt_go=1
+	fi
+	[ "$_pt_go" = 1 ] || return 0
+	welcome_is_owner || return 0
+	_pt_o=$(priv_send --extra v:i:1 --extra "packages:s:$PRIV_LIST" --extra "at:l:$1")
+	if [ "$_pt_o" = 'Result: Bundle[{v=1}]' ]; then
+		PRIV_TOLD=$PRIV_LIST
+		PRIV_WELCOME=$_pt_w
+		if [ "$PRIV_BAD" = 1 ]; then
+			PRIV_BAD=0
+			log "carrier: Welcome takes the module's list of apps with carrier privileges again"
+		fi
+	else
+		PRIV_BAD_AT=$1
+		PRIV_BAD_LIST=$PRIV_LIST
+		if [ "$PRIV_BAD" = 0 ]; then
+			PRIV_BAD=1
+			log "carrier: Welcome did not take the module's list of apps with carrier privileges (an older Welcome?); it refuses by the carrier configuration alone"
+		fi
+	fi
 }
 
 # --- IPv6 off, per interface ----------------------------------------------------------

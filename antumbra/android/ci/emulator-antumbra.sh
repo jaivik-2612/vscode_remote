@@ -110,6 +110,15 @@
 #      carrier cards (welcome-adb.sh check-phone), and Welcome's provider
 #      takes the module's word on the cell radio from root only
 #      (check-module-cell); warnings until they have passed on CI once.
+#      Then MOD10, warnings until they have passed on CI once: Welcome's
+#      provider takes the module's live list of apps with carrier
+#      privileges from root only and refuses the probe it names, never a
+#      system app, Welcome or the default phone or SMS app on it
+#      (welcome-adb.sh check-live-list, welcome_live_list; "not judged"
+#      without the probe), and PH3's measuring kit
+#      (module/tests/ph3-snapshot.sh) run as root, read only, its report
+#      kept in logs/ and scanned again here for addresses and identifiers
+#      (ph3_snapshot; the emulator has no IMS: the mechanics only).
 #      Then WEL10 after Start, 4 minutes at most, warnings: the card on the
 #      status screen (welcome_emergency_card_session: the VoLTE line, the
 #      emulator having no IMS) and Show my position with the network up
@@ -302,6 +311,105 @@ module_parsers_level() {
 	else
 		echo warn
 	fi
+}
+
+# --- MOD10: PH3's measuring kit, and the live list in Welcome ---------------------
+#
+# mod10_level: the level of MOD10's checks: warn until each has passed on
+# CI once (then fail). Nothing of MOD10 can fail the run or hold it up:
+# the kit's push and run are bounded (30 s and 2 minutes, normally about
+# half a minute), Welcome's check at 3 minutes (normally under one), each
+# killed 10 or 20 s after its time, about 6 minutes at most in all; and
+# nothing is dialled, texted or switched. The kit changes nothing on the
+# device and only its report leaves it, redacted by the kit itself;
+# ph3_snapshot_level scans it again.
+mod10_level() { echo warn; }
+PH3_KIT=$ANDROID_DIR/module/tests/ph3-snapshot.sh
+PH3_KIT_ON_DEVICE=/data/local/tmp/antumbra-ph3-snapshot.sh
+PROBE_LIVE=org.antumbra.probe.live
+
+# welcome_live_list: MOD10's live list in Welcome, after Start (the radio
+# on for the run's Phone session; the emulator's SIM gives no app carrier
+# privileges, so the module itself tells Welcome nothing):
+# welcome-adb.sh check-live-list installs the probe, has the shell's list
+# and a malformed one refused, gives root's list naming the probe, two
+# system apps, Welcome and the default phone and SMS apps, and checks that
+# only the probe is refused (hidden, its data kept); root's empty list
+# last, whatever happens.
+welcome_live_list() {
+	local log=$LOGS/$SCEN-welcome-live-list.txt apk rc=0
+	if ! apk=$(wel9_apk "$PROBE_LIVE"); then
+		check welcome_live_list "$(mod10_level)" "not judged: the probe $PROBE_LIVE was not built (the welcome job's build-probes.sh)"
+		return 0
+	fi
+	timeout -k 20 180 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-live-list --probe "$PROBE_LIVE" "$apk" --wait 45 \
+		>"$log" 2>&1 </dev/null || rc=$?
+	if [ "$rc" = 0 ]; then
+		check welcome_live_list ok "$(tail -n 1 "$log")"
+	else
+		check welcome_live_list "$(mod10_level)" "$(grep -v '^$' "$log" | tail -n 3 | tr '\n' ';')"
+	fi
+}
+
+# ph3_snapshot: PH3's measuring kit as the owner runs it on the phone:
+# pushed from the checkout, run as root (adb root), its report on standard
+# output kept in logs/, the kit removed again. ph3_snapshot_level judges
+# the report: every section, its end, and nothing in it that looks like
+# an address, a MAC address, a long number or one of the device's own
+# addresses or its Wi-Fi network's name.
+ph3_snapshot() {
+	local report=$LOGS/$SCEN-ph3-snapshot.txt err=$LOGS/$SCEN-ph3-snapshot-errors.txt rc=0 addrs level
+	if ! timeout -k 10 30 adb -s "$ANTUMBRA_SERIAL" push "$PH3_KIT" "$PH3_KIT_ON_DEVICE" >"$err" 2>&1 </dev/null; then
+		check ph3_snapshot "$(mod10_level)" "the kit could not be pushed: $(tail -n 1 "$err")"
+		return 0
+	fi
+	timeout -k 10 120 adb -s "$ANTUMBRA_SERIAL" shell "sh $PH3_KIT_ON_DEVICE" 2>>"$err" </dev/null | tr -d '\r' >"$report" ||
+		rc=${PIPESTATUS[0]}
+	ASH_TIMEOUT=20 ash "rm -f $PH3_KIT_ON_DEVICE" >/dev/null 2>&1
+	addrs=$(ASH_TIMEOUT=20 ash 'ip -o addr' | sed -n 's/.* inet6\{0,1\} \([0-9a-fA-F.:]*\).*/\1/p' |
+		grep -v -x -F -e 127.0.0.1 -e ::1 | tr '\n' ' ')
+	level=$(ph3_snapshot_level "$report" "$rc" "$addrs $WLAN_MAC_BEFORE AndroidWifi")
+	case $level in
+	ok) check ph3_snapshot ok "$(grep -c . "$report") lines: $(grep -m 1 '^IMS: ' "$report" | cut -c1-40); $(grep -m 1 "^the module's live list" "$report"); $(grep -m 1 'nm_mdmprxy rule' "$report")" ;;
+	*) check ph3_snapshot "$(mod10_level)" "${level#warn }" ;;
+	esac
+}
+
+# ph3_snapshot_level REPORT RC KNOWN: "ok", or "warn WHY": the kit's status
+# 0, its nine sections and its end; nothing that looks like an IPv4 or
+# IPv6 address, a MAC address (also dotted), a run of 7 digits (a
+# hexadecimal 0x mark aside) or 7 digits in groups joined by a space or a
+# dash with a dash, a parenthesis or a leading plus, an MCC or MNC label
+# or a package name; none of KNOWN (the device's own addresses, MAC
+# address, Wi-Fi network name). WHY names the kind found, never the value.
+ph3_snapshot_level() {
+	local report=$1 rc=$2 why=() k
+	# v6: an IPv6 address, as grep -E -i reads it: eight groups, or fewer
+	# with "::", standing alone (not inside a word, a time such as
+	# 10:00:00, a port range such as 32768:60999 or a MAC address).
+	local v6='(^|[^0-9a-z:.])(([0-9a-f]{1,4}:){7}[0-9a-f]{1,4}|([0-9a-f]{1,4}:){1,7}:|([0-9a-f]{1,4}:){1,6}(:[0-9a-f]{1,4}){1,6}|:(:[0-9a-f]{1,4}){1,7})($|[^0-9a-z:])'
+	[ "$rc" = 0 ] || why+=("the kit exited with $rc")
+	[ "$(grep -c '^## ' "$report" 2>/dev/null)" = 9 ] || why+=("not every section")
+	grep -q -x '# end of report' "$report" 2>/dev/null || why+=("no end of report")
+	if grep -q -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' "$report"; then why+=("an IPv4 address"); fi
+	if grep -q -i -E "$v6" "$report"; then why+=("an IPv6 address"); fi
+	if grep -q -i -E '([0-9a-f]{2}[:-]){5}[0-9a-f]{2}|[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}' "$report"; then why+=("a MAC address"); fi
+	if sed 's/0x[0-9a-fA-F]*//g' "$report" | grep -q -E '[0-9]{7}'; then why+=("a long number"); fi
+	# Numbers in groups, as the kit's pass finds them (MAC addresses and 0x
+	# marks aside, which their own checks judge).
+	if [ "$(sed -E 's/([0-9a-fA-F]{2}[:-]){5}[0-9a-fA-F]{2}//g; s/0x[0-9a-fA-F]*//g' "$report" | awk '{ s = $0
+		while (match(s, /[+]?[(]?[0-9]+([)]?[ -][(]?[0-9]+)+[)]?/)) {
+			r = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+			d = r; gsub(/[^0-9]/, "", d)
+			if (length(d) >= 7 && r ~ /[-+(]/) f = 1
+		} } END { print f + 0 }' 2>/dev/null)" = 1 ]; then why+=("a number in groups"); fi
+	if grep -q -i -E '(mcc|mnc)[0-9]' "$report"; then why+=("an MCC or MNC"); fi
+	if sed -E 's/[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4}//g' "$report" |
+		grep -q -E '(^|[^A-Za-z0-9_.])[A-Za-z][A-Za-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*\.[A-Za-z][A-Za-z0-9_]*'; then why+=("a package name"); fi
+	for k in $3; do
+		if grep -q -i -F -- "$k" "$report"; then why+=("one of the device's own addresses or names"); break; fi
+	done
+	if [ ${#why[@]} -eq 0 ]; then echo ok; else echo "warn $(IFS=';'; echo "${why[*]}")"; fi
 }
 
 # --- MOD7: Wi-Fi calling and video calling off ------------------------------------
@@ -1217,6 +1325,8 @@ welcome_checks
 welcome_wel9_session
 module_word
 phone_checks
+welcome_live_list
+ph3_snapshot
 if wait_bootstrap; then
 	screenshot status-2-bootstrapped
 	tracker_test

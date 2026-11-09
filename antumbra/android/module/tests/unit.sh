@@ -28,10 +28,11 @@ if [ "${1-}" != --inner ]; then
 	rc=0
 	for s in $shells; do
 		echo "== $s"
+		# UNIT_SHELL: the shell the kit's tests run tests/ph3-snapshot.sh in.
 		if [ "$s" = busybox ]; then
-			busybox sh "$0" --inner || rc=1
+			UNIT_SHELL='busybox sh' busybox sh "$0" --inner || rc=1
 		else
-			"$s" "$0" --inner || rc=1
+			UNIT_SHELL=$s "$s" "$0" --inner || rc=1
 		fi
 	done
 	exit "$rc"
@@ -2058,20 +2059,22 @@ S_STARTED=0 SES_CELL=off
 
 # service.sh: a turn that looked tells Welcome the word, then checks the
 # ports again at once, so that neither the look nor the word (up to 10 s)
-# is added to the next turn's wait (regressions-3).
+# is added to the next turn's wait (regressions-3); the live list of apps
+# with carrier privileges (MOD10) comes after the word on the cell radio,
+# and a turn that read or told it checks the ports too.
 # line_of PATTERN: the number of the one line of service.sh that is
 # exactly PATTERN (a fixed string, the indentation included).
 line_of() { grep -n -x -F "$1" "$MODULE/service.sh" | sed 's/:.*//'; }
 # shellcheck disable=SC2016 # lines of service.sh, not expanded here
 r="$(line_of '		cell_step "$NOW"') $(line_of '		cell_tell "$NOW"') $(line_of '		cell_offer_tell "$NOW"')"
-# shellcheck disable=SC2016 # a line of service.sh, not expanded here
-r="$r $(line_of '		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ]; } && ports_check')"
+# shellcheck disable=SC2016 # lines of service.sh, not expanded here
+r="$r $(line_of '		priv_step "$NOW"') $(line_of '		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ] || [ "$PRIV_TURN" = "$NOW" ]; } && ports_check')"
 case $r in
-[0-9]*' '[0-9]*' '[0-9]*' '[0-9]*)
-	# shellcheck disable=SC2086 # four line numbers
+[0-9]*' '[0-9]*' '[0-9]*' '[0-9]*' '[0-9]*)
+	# shellcheck disable=SC2086 # five line numbers
 	set -- $r
-	step_check "service.sh: look, word, word on the cell radio, then the port check, one after the other ($r)" \
-		test "$2" = $(($1 + 1)) -a "$3" = $(($2 + 1)) -a "$4" = $(($3 + 1))
+	step_check "service.sh: look, word, word on the cell radio, the live list, then the port check, one after the other ($r)" \
+		test "$2" = $(($1 + 1)) -a "$3" = $(($2 + 1)) -a "$4" = $(($3 + 1)) -a "$5" = $(($4 + 1))
 	;;
 *) bad "service.sh: look, words, then the port check: lines not found ($r)" ;;
 esac
@@ -3087,6 +3090,670 @@ v=$(grep -n -E '^[^#]*volte_avail_ovr' "$MODULE"/*.sh "$MODULE"/lib/*.sh \
 expect "no module script touches volte_avail_ovr" "" "$v"
 v=$(grep -n -E '^[^#]*resetprop[^#]*[[:space:]]-[a-zA-Z]*[pP]' "$MODULE"/*.sh "$MODULE"/lib/*.sh 2>/dev/null)
 expect "no module script stores a property (resetprop -p)" "" "$v"
+
+# --- MOD10: the live list of apps with carrier privileges (priv_state, priv_list) -----
+# reg_fixture VALUE...: 'dumpsys telephony.registry' with one phone per
+# VALUE, its mCarrierPrivilegeState ("-": a phone without the line), among
+# the lines that are read past (a number, a service state, a cell), and a
+# local log that names another package.
+reg_fixture() {
+	echo 'last known state:'
+	_rf_i=0
+	for _rf_v in "$@"; do
+		echo "  Phone Id=$_rf_i"
+		printf '    %s\n' mCallState=0 'mCallIncomingNumber=+0987654321' \
+			'mServiceState={mVoiceRegState=0(IN_SERVICE), mOperatorAlphaLong=TestOp, mMcc=001, mMnc=01}' \
+			'mCellIdentity=CellIdentityLte:{ mCi=123456789 mPci=301 mTac=12345 mEarfcn=6300 mMcc=001 mMnc=01}'
+		[ "$_rf_v" = - ] || echo "    mCarrierPrivilegeState=$_rf_v"
+		echo '    mCarrierServiceState=<package=null, uid=-1>'
+		_rf_i=$((_rf_i + 1))
+	done
+	echo '  mRadioPowerState=1'
+	echo 'local logs:'
+	echo '  notifyCarrierPrivilegesChanged: mCarrierPrivilegeState=<packages=[org.example.logged], uids=[10999]>'
+}
+# pl_of VALUE...: the list priv_list makes of reg_fixture's dump, or
+# "unreadable" (priv_state refused it) or "unmapped" (priv_list did).
+pl_of() {
+	_po=$(reg_fixture "$@" | priv_state) || {
+		echo unreadable
+		return
+	}
+	printf '%s\n' "$_po" | priv_list || echo unmapped
+}
+PKG_LIST=$LOGDIR/packages.list
+printf '%s\n' 'org.example.a 10123 0 /data/user/0/org.example.a default:targetSdkVersion=36 3003 0 1 1 @null' \
+	'org.example.shared 10124 0 /data/user/0/org.example.shared default:targetSdkVersion=36 none 0 1 1 @null' \
+	'org.example.shared2 10124 0 /data/user/0/org.example.shared2 default:targetSdkVersion=36 none 0 1 1 @null' \
+	'org.example.other 10125 0 /data/user/0/org.example.other default:targetSdkVersion=36 none 0 1 1 @null' \
+	'9bad 10123 0 /data/user/0/9bad default none 0 1 1 @null' >"$PKG_LIST"
+for n in a a.b a.b_c.d9 org.example.App_2; do
+	if priv_name_ok "$n"; then ok "priv_name_ok: $n"; else bad "priv_name_ok refuses $n"; fi
+done
+for n in '' 9a a. .a a..b a.9b a-b 'a b' 'a/b' '***'; do
+	if priv_name_ok "$n"; then bad "priv_name_ok accepts [$n]"; else ok "priv_name_ok refuses [$n]"; fi
+done
+expect "priv_list: two packages, sorted" org.example.a,org.example.b \
+	"$(pl_of '<packages=[org.example.b, org.example.a], uids=[10124, 10123]>')"
+expect "priv_list: none" "" "$(pl_of '<packages=[], uids=[]>')"
+expect "priv_list: two phones, each package once" org.example.a,org.example.b,org.example.c \
+	"$(pl_of '<packages=[org.example.a, org.example.b], uids=[10123, 10124]>' '<packages=[org.example.c, org.example.b], uids=[10126, 10124]>')"
+expect "priv_list: names hidden (a build that is not debuggable): each uid's packages from packages.list, another user's by its app id" \
+	org.example.a,org.example.shared,org.example.shared2 "$(pl_of '<packages=[***, size=3], uids=[10123, 1010124]>')"
+expect "priv_list: one phone hidden, one in clear" org.example.a,org.example.z \
+	"$(pl_of '<packages=[***, size=1], uids=[10123]>' '<packages=[org.example.z], uids=[10130]>')"
+mv "$PKG_LIST" "$PKG_LIST.away"
+expect "priv_list: names hidden and packages.list unreadable: unmapped" unmapped \
+	"$(pl_of '<packages=[***, size=1], uids=[10123]>')"
+expect "priv_list: names in clear need no packages.list" org.example.a "$(pl_of '<packages=[org.example.a], uids=[10123]>')"
+mv "$PKG_LIST.away" "$PKG_LIST"
+for v in - '<packages=[org.example.a], uids=[10123]' '<packages=[1bad], uids=[10123]>' '<packages=[org..x], uids=[1]>' \
+	'<packages=[org.example/a], uids=[10123]>' '<packages=[org.example.a], uids=[010123]>' '<packages=[org.example.a], uids=[1a]>' \
+	'<packages=[***, size=x], uids=[10123]>' '<packages=[org.example.a, ], uids=[10123]>' '[org.example.a]' \
+	'<packages=[org.example.a], uids=[10123, ]>'; do
+	expect "priv_state: refuses $v" unreadable "$(pl_of "$v")"
+done
+expect "priv_state: a second phone without the line: unreadable" unreadable \
+	"$(pl_of '<packages=[org.example.a], uids=[10123]>' -)"
+expect "priv_state: no phone at all: unreadable" unreadable "$(printf 'last known state:\n  mRadioPowerState=1\n' | priv_state || echo unreadable)"
+expect "priv_state: not the registry's dump: unreadable" unreadable "$(printf "Can't find service: telephony.registry\n" | priv_state || echo unreadable)"
+expect "priv_state: two lines in one phone: unreadable" unreadable "$(reg_fixture '<packages=[], uids=[]>' |
+	sed 's/^\(    mCarrierPrivilegeState=.*\)$/\1\n\1/' | priv_state || echo unreadable)"
+expect "priv_state: only its own lines, nothing of the number, the cell or the local logs" \
+	"p org.example.a u" "$(reg_fixture '<packages=[org.example.a], uids=[10123]>' '<packages=[***, size=1], uids=[10125]>' |
+		priv_state | cut -c1-15 | sed 's/ 10125$//' | tr '\n' ' ' | sed 's/ $//; s/ u$/ u/')"
+v=$(reg_fixture '<packages=[org.example.a], uids=[10123]>' | priv_state)
+expect "priv_state: a package in clear" "p org.example.a" "$v"
+many=$(i=0; while [ "$i" -le "$PRIV_MAX" ]; do printf 'org.example.p%s, ' "$i"; i=$((i + 1)); done)
+expect "priv_list: more than PRIV_MAX packages: unmapped (unreadable)" unmapped "$(pl_of "<packages=[${many%, }], uids=[]>")"
+
+# --- MOD10: the live list, turn by turn (priv_step, priv_tell) ---------------------------
+PRIVS=$LOGDIR/privs
+PRIV_DUMPS=$LOGDIR/priv-dumps
+PRIV_REG=$LOGDIR/priv-reg
+FAKE_REG_BROKEN=0
+cell_dump() {
+	echo "$1" >>"$PRIV_DUMPS"
+	[ "$FAKE_REG_BROKEN" = 1 ] || cat "$PRIV_REG"
+}
+FAKE_PRIV_ANSWER=$OK_ANSWER
+priv_send() {
+	echo "$*" >>"$PRIVS"
+	[ -z "$FAKE_PRIV_ANSWER" ] || printf '%s\n' "$FAKE_PRIV_ANSWER"
+	return 0
+}
+FAKE_WELCOME_PROC=4321:100
+proc_of() {
+	[ "$1" = org.antumbra.welcome ] && [ "$FAKE_WELCOME_PROC" != - ] || return 1
+	echo "$FAKE_WELCOME_PROC"
+}
+privs_n() { if [ -s "$PRIVS" ]; then grep -c . "$PRIVS"; else echo 0; fi; }
+dumps_n() { if [ -s "$PRIV_DUMPS" ]; then grep -c . "$PRIV_DUMPS"; else echo 0; fi; }
+last_priv() { tail -n 1 "$PRIVS"; }
+priv_args() { echo "--extra v:i:1 --extra packages:s:$1 --extra at:l:$2"; }
+reg_set() { reg_fixture "$@" >"$PRIV_REG"; }
+priv_reset() {
+	PRIV_NEXT=0 PRIV_LIST='' PRIV_READ='' PRIV_TOLD='' PRIV_WELCOME='' PRIV_BAD=0 PRIV_BAD_AT=0 PRIV_BAD_LIST=''
+	PRIV_SIM='' PRIV_PKGS='' PRIV_STAT_NEXT=0 PRIV_TURN=''
+	CL_CALL=0 CL_CBM=0 CELL_LAST='' CELL_SIM=LOADED
+	FAKE_OWNER=1 FAKE_PRIV_ANSWER=$OK_ANSWER FAKE_WELCOME_PROC=4321:100 FAKE_REG_BROKEN=0
+	: >"$PRIVS"
+	: >"$PRIV_DUMPS"
+	: >"$LOGDIR/module.log"
+	reg_set '<packages=[], uids=[]>'
+	NOW=1000
+}
+# pturn [SECONDS]: the clock moves on, and the step takes its turn;
+# prun SECONDS: turns 5 s apart for SECONDS.
+pturn() {
+	NOW=$((NOW + ${1:-5}))
+	priv_step "$NOW"
+}
+prun() {
+	_pn_end=$((NOW + $1))
+	while [ "$NOW" -lt "$_pn_end" ]; do pturn 5; done
+}
+# The host's stat in place of Android's toybox, for packages.list's time.
+TB=
+priv_reset
+pturn 0
+expect "live list: the first turn reads it" 1 "$(dumps_n)"
+expect "live list: ... the registry's dump" telephony.registry "$(cat "$PRIV_DUMPS")"
+expect "live list: ... the turn noted for the port check" "$NOW" "$PRIV_TURN"
+expect "live list: none: nothing told (Welcome holds none at its start)" 0 "$(privs_n)"
+reg_set '<packages=[org.example.a], uids=[10123]>'
+prun 295
+expect "live list: not read again within 300 s" 1 "$(dumps_n)"
+expect "live list: ... nor told" 0 "$(privs_n)"
+pturn 5
+expect "live list: read again after 300 s, and told" "2 1 $(priv_args org.example.a "$NOW")" "$(dumps_n) $(privs_n) $(last_priv)"
+prun 600
+expect "live list: unchanged: read every 300 s, not told again" "4 1" "$(dumps_n) $(privs_n)"
+FAKE_WELCOME_PROC=9999:200
+prun 300
+expect "live list: Welcome's process started again: told again" "2 $(priv_args org.example.a "$NOW")" "$(privs_n) $(last_priv)"
+prun 300
+expect "live list: ... once" 2 "$(privs_n)"
+# A SIM's state changed: read 15 s later, not at once and not 300 s later.
+n=$(dumps_n)
+reg_set '<packages=[], uids=[]>'
+CELL_SIM=ABSENT
+pturn 5
+pturn 5
+pturn 5
+expect "live list: the SIM's state changed: not read at once, nor 10 s later" "$n" "$(dumps_n)"
+pturn 5
+expect "live list: ... read 15 s after the change" $((n + 1)) "$(dumps_n)"
+expect "live list: ... the empty list told (the apps' privileges went with the SIM)" "3 $(priv_args '' "$NOW")" \
+	"$(privs_n) $(last_priv)"
+FAKE_WELCOME_PROC=1111:300
+prun 300
+expect "live list: empty, Welcome's process new: nothing told (it holds none)" 3 "$(privs_n)"
+# packages.list's time changed (an install): read within 30 + 15 s.
+touch -t 202601010000 "$PKG_LIST"
+priv_reset
+pturn 0
+prun 30
+n=$(dumps_n)
+reg_set '<packages=[org.example.new], uids=[10140]>'
+touch -t 202602020000 "$PKG_LIST"
+prun 45
+expect "live list: packages.list changed (an install): read within 45 s" $((n + 1)) "$(dumps_n)"
+expect "live list: ... and told" "$(priv_args org.example.new "$PRIV_TURN")" "$(last_priv)"
+# During a call, emergency callback mode and the 5 minutes after: no dump,
+# no Java start.
+priv_reset
+pturn 0
+reg_set '<packages=[org.example.a], uids=[10123]>'
+CL_CALL=1
+prun 600
+expect "live list: during a call: no dump, nothing told" "1 0" "$(dumps_n) $(privs_n)"
+CL_CALL=0
+CL_CBM=1
+prun 300
+expect "live list: in callback mode: no dump" 1 "$(dumps_n)"
+CL_CBM=0
+CELL_LAST=$NOW
+prun 295
+expect "live list: in the 5 minutes after: no dump" 1 "$(dumps_n)"
+pturn 5
+expect "live list: the hold over: read and told at once" "2 $(priv_args org.example.a "$NOW")" "$(dumps_n) $(last_priv)"
+CL_CALL=unknown
+prun 600
+expect "live list: the call state unreadable: no dump" 2 "$(dumps_n)"
+CL_CALL=0
+# Not while Welcome is not the device owner.
+priv_reset
+pturn 0
+reg_set '<packages=[org.example.a], uids=[10123]>'
+FAKE_OWNER=0
+prun 300
+expect "live list: read, but not told while Welcome is not the device owner" "2 0" "$(dumps_n) $(privs_n)"
+FAKE_OWNER=1
+prun 300
+expect "live list: ... told at the next read once it is" "1 $(priv_args org.example.a "$NOW")" "$(privs_n) $(last_priv)"
+# Welcome refuses it (a Welcome from before MOD10).
+priv_reset
+pturn 0
+reg_set '<packages=[org.example.a], uids=[10123]>'
+FAKE_PRIV_ANSWER=''
+prun 300
+expect "live list: Welcome refuses it: tried once" 1 "$(privs_n)"
+expect "live list: ... logged" 1 "$(grep -c 'did not take the module.s list of apps with carrier privileges' "$LOGDIR/module.log")"
+CELL_SIM=ABSENT
+prun 20
+expect "live list: refused: read again (the SIM), the same list: not tried again before 300 s" 1 "$(privs_n)"
+reg_set '<packages=[org.example.a, org.example.b], uids=[10123, 10124]>'
+CELL_SIM=LOADED
+prun 20
+expect "live list: refused, then the list changed: tried at once" "2 $(priv_args org.example.a,org.example.b "$PRIV_TURN")" \
+	"$(privs_n) $(last_priv)"
+prun 300
+expect "live list: refused: tried again after 300 s" 3 "$(privs_n)"
+expect "live list: ... the refusal logged once" 1 "$(grep -c 'did not take the module.s list' "$LOGDIR/module.log")"
+FAKE_PRIV_ANSWER=$OK_ANSWER
+prun 300
+expect "live list: taken again: logged once" "4 1" "$(privs_n) $(grep -c 'takes the module.s list of apps with carrier privileges again' "$LOGDIR/module.log")"
+prun 600
+expect "live list: taken: not told again" 4 "$(privs_n)"
+# A dump that cannot be read changes nothing.
+priv_reset
+reg_set '<packages=[org.example.a], uids=[10123]>'
+pturn 0
+FAKE_REG_BROKEN=1
+prun 600
+expect "live list: the dump unreadable: the list kept, nothing more told" "org.example.a 1" "$PRIV_LIST $(privs_n)"
+expect "live list: ... logged once" 1 "$(grep -c 'could not be read; Welcome keeps the one it took' "$LOGDIR/module.log")"
+FAKE_REG_BROKEN=0
+reg_set '<packages=[***, size=2], uids=[10123, 1010124]>'
+prun 300
+expect "live list: readable again: logged once" 1 "$(grep -c 'can be read again' "$LOGDIR/module.log")"
+expect "live list: names hidden: the packages of its uids told" \
+	"$(priv_args org.example.a,org.example.shared,org.example.shared2 "$NOW")" "$(last_priv)"
+step_check "live list: the log names no package" test -z "$(grep -F 'org.example' "$LOGDIR/module.log")"
+step_check "live list: status.json holds nothing of it" test -z "$(sed -n '/^status_write() {$/,/^}$/p' \
+	"$MODULE/lib/antumbra.sh" | grep -E 'PRIV|packages')"
+expect "live list: the method and the provider" "module_carrier content://org.antumbra.welcome.state" "$PRIV_METHOD $WORD_URI"
+TB=$REAL_TB
+
+# --- MOD10: PH3's NFLOG opt-in (nflog_group, fw) -------------------------------------------
+NFLOG_FILE=$LOGDIR/antumbra-nflog
+expect "nflog_group: no file: none" "" "$(nflog_group)"
+for v in 29 1 65535; do
+	printf '%s\n' "$v" >"$NFLOG_FILE"
+	expect "nflog_group: $v" "$v" "$(nflog_group)"
+done
+for v in 0 65536 029 abc '' '29 30' -1 999999 '2 9'; do
+	printf '%s\n' "$v" >"$NFLOG_FILE"
+	expect "nflog_group: [$v]: none" "" "$(nflog_group)"
+done
+printf '29\n' >"$NFLOG_FILE"
+FAKE_GATE_OWNER=bad
+expect "nflog_group: not root's alone: none" "" "$(nflog_group)"
+FAKE_GATE_OWNER=ok
+ln -s "$NFLOG_FILE" "$LOGDIR/nflog-link"
+NFLOG_FILE=$LOGDIR/nflog-link
+expect "nflog_group: a link: none" "" "$(nflog_group)"
+NFLOG_FILE=$LOGDIR/antumbra-nflog
+OLD_BIN=$BIN
+BIN=$LOGDIR/fwbin
+mkdir -p "$BIN"
+# shellcheck disable=SC2016 # the stand-in's line, expanded when it runs
+printf '%s\n' '#!/bin/sh' 'echo "$1 group=${ANTUMBRA_FW_NFLOG_GROUP-unset}"' >"$BIN/antumbra-fw"
+chmod +x "$BIN/antumbra-fw"
+expect "fw apply: the opt-in's group" "apply group=29" "$(fw apply)"
+expect "fw status: no group (only apply takes it)" "status group=" "$(fw status)"
+rm -f "$NFLOG_FILE"
+expect "fw apply: no opt-in: no group" "apply group=" "$(fw apply)"
+BIN=$OLD_BIN
+step_check "uninstall.sh deletes the opt-in" grep -q -F '/data/adb/antumbra-nflog' "$MODULE/uninstall.sh"
+step_check "no module script writes the opt-in" test -z "$(grep -n -E '^[^#]*>[^#]*antumbra-nflog' "$MODULE"/*.sh "$MODULE"/lib/*.sh)"
+
+# --- MOD10: PH3's measuring kit (tests/ph3-snapshot.sh) -------------------------------------
+KIT=$HERE/ph3-snapshot.sh
+KSH=${UNIT_SHELL:-sh}
+# red TEXT: TEXT through the kit's redaction pass (--redact, the host's awk).
+red() {
+	# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+	printf '%s\n' "$1" | $KSH "$KIT" --redact
+}
+rd() { expect "redact: $1" "$2" "$(red "$1")"; }
+rd 'inet6 2001:db8:1:2::abcd/64 scope global' 'inet6 [IPv6 global /64] scope global'
+rd '2A01:E0A:1::1 and 3fff::1' '[IPv6 global] and [IPv6 global]'
+rd 'fe80::1%rmnet_data0/64' '[IPv6 link-local /64]'
+rd 'fd00::1/8 ff02::1 ::1/128 ::/0 64:ff9b::/96 :: ::ffff:7' \
+	'[IPv6 unique-local /8] [IPv6 multicast] [IPv6 loopback /128] [IPv6 any /0] [IPv6 nat64 /96] [IPv6 unspecified] [IPv6 v4-mapped]'
+rd '10.1.2.3/30 100.64.1.2 198.51.100.7:443 192.0.0.4/29' \
+	'[IPv4 private 10/8 /30] [IPv4 shared 100.64/10] [IPv4 global]:443 [IPv4 special 192.0.0/24 /29]'
+rd '0.0.0.0/0 127.0.0.1/32 172.20.1.1 192.168.1.20/24 169.254.3.4 224.0.0.1' \
+	'[IPv4 any /0] [IPv4 loopback 127/8 /32] [IPv4 private 172.16/12] [IPv4 private 192.168/16 /24] [IPv4 link-local 169.254/16] [IPv4 multicast]'
+rd '::ffff:198.51.100.7' '[IPv6 v4-mapped][IPv4 global]'
+rd '490154203237518' '[number]'
+rd '001010123456789' '[number]'
+rd 'imei=490154203237518 IMSI: 001010123456789 iccid=8900100000000000001F mImsi=001010123456789' \
+	'imei=[redacted] IMSI: [redacted] iccid=[redacted] mImsi=[redacted]'
+rd 'ICCID 8900100000000000001F' 'ICCID [redacted]'
+# Shapes a dump may hold: numbers in groups, keys with a suffix, a value
+# after a space, MCC and MNC labels, dotted MAC addresses.
+rd 'mLine1Number=+1 555-123-4567 phone (555) 123-4567 imei 35-209900-176148-1' \
+	'mLine1Number=[redacted] [number] phone [number] imei [redacted]'
+rd 'tel 35-209900-176148-1, +44 20 7946 0958' 'tel [number], [number]'
+rd 'mMccStr=310 mMncStr=260 mOperatorAlphaLongRaw=T-Op mOperatorAlphaShortRaw=TO' \
+	'mMccStr=[redacted] mMncStr=[redacted] mOperatorAlphaLongRaw=[redacted] mOperatorAlphaShortRaw=[redacted]'
+rd 'cid 0x1a2b3c lac 4660 gci=00101-12345-ab ecgi: 001010123456' 'cid [redacted] lac [redacted] gci=[redacted] ecgi: [redacted]'
+rd 'pcscf ims.mnc260.mcc310.3gppnetwork.org' 'pcscf ims.mnc[redacted].mcc[redacted].3gppnetwork.org'
+rd 'hwaddr aabb.ccdd.eeff mEid=89049032000001000000123456789012 imeisv:3569380356438091' \
+	'hwaddr [mac] mEid=[redacted] imeisv:[redacted]'
+rd 'mCellIdentity=CellIdentityNr:{ mNci=123456789012 mPci=1 mTac=12 }' 'mCellIdentity=[redacted]'
+rd '::FFFF:CB00:7105 2001:0db8:85a3:0000:0000:8a2e:0370:7334/64 [2001:db8::1]:443' \
+	'[IPv6 v4-mapped] [IPv6 global /64] [[IPv6 global]]:443'
+rd ' 1234K  5678K ACCEPT 10 -1 id: -1, netId: 0 up 0 d 3 h 25 min' ' 1234K  5678K ACCEPT 10 -1 id: -1, netId: 0 up 0 d 3 h 25 min'
+rd '+0987654321 0987654321 tel:+0987654321 sip:+0987654321@ims.example.org;user=phone' \
+	'[number] [uri] [uri];user=phone'
+rd 'mCallIncomingNumber=0987654321, line1Number: 0987654321' 'mCallIncomingNumber=[redacted], line1Number: [redacted]'
+rd 'SSID: "TestNet", BSSID: 02:00:00:00:01:00' 'SSID: [redacted], BSSID: [redacted]'
+rd 'ni{WIFI CONNECTED extra: "TestNet"} "Test Net"' 'ni{WIFI CONNECTED extra: [redacted]} [quoted]'
+rd 'MAC 02:11:22:33:44:55 hw 02-11-22-33-44-AA addr 0A:1B:2C:3D:4E:5F' 'MAC [mac] hw [mac] addr [mac]'
+rd 'CellIdentityLte:{ mCi=123456789 mPci=301 mTac=12345 } mCi=123456789 mTac=12345 mMcc=001 mMnc=01 mEarfcn=6300' \
+	'[cell] mCi=[redacted] mTac=[redacted] mMcc=[redacted] mMnc=[redacted] mEarfcn=[redacted]'
+rd 'mLatitude=12.345678 mLongitude=-98.765432 at 12.345678, -98.765432' \
+	'mLatitude=[redacted] mLongitude=[redacted] at [decimal], -[decimal]'
+rd 'mOperatorAlphaLong=TestOp, mOperatorNumeric=00101 subscriberId=001010123456789 eid=89049032' \
+	'mOperatorAlphaLong=[redacted], mOperatorNumeric=[redacted] subscriberId=[redacted] eid=[redacted]'
+rd '   12  1008 RETURN     all  --  lo     *       uid 10123 user 10 app 10150 netId 101 mtu 1500' \
+	'   12  1008 RETURN     all  --  lo     *       uid 10123 user 10 app 10150 netId 101 mtu 1500'
+rd '12345 1234K -j MARK --set-xmark 0x1000000/0x1000000 udp dpt:5060 limit: avg 20/sec burst 5' \
+	'12345 1234K -j MARK --set-xmark 0x1000000/0x1000000 udp dpt:5060 limit: avg 20/sec burst 5'
+rd 'network 102: IMS without INTERNET; transports CELLULAR; capabilities IMS&NOT_METERED' \
+	'network 102: IMS without INTERNET; transports CELLULAR; capabilities IMS&NOT_METERED'
+rd 'tcp dpts:32768:60999 multiport dports 59050:59060 phone 0: ims, IMS: cell' \
+	'tcp dpts:32768:60999 multiport dports 59050:59060 phone 0: ims, IMS: cell'
+# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+v=$(printf 'x\n' | $KSH "$KIT" --redact --sys "$LOGDIR/no-such-dir" 2>&1; echo "rc=$?")
+expect "kit: --redact with the host's awk when Android's is missing" "x rc=0" "$(printf '%s' "$v" | tr '\n' ' ')"
+# Without awk there is no report: an awk that changes nothing is refused.
+mkdir -p "$LOGDIR/badawk"
+printf '%s\n' '#!/bin/sh' 'cat' >"$LOGDIR/badawk/awk"
+chmod +x "$LOGDIR/badawk/awk"
+# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+v=$(printf '10.1.2.3\n' | $KSH "$KIT" --redact --sys "$LOGDIR/badawk" 2>/dev/null; echo "rc=$?")
+expect "kit: an awk that does not redact: nothing printed, status 1" "rc=1" "$(printf '%s' "$v" | tr '\n' ' ')"
+
+# The NFLOG summary from a capture as tcpdump writes it: a refusal going
+# out (IPv4, uid 10100, rmnet_data1, UDP 5060 to a global address) twice,
+# and an inbound IPv6 drop (no uid, from a global address).
+# shellcheck disable=SC2059 # an octal escape, built on purpose
+hexbin() { for _hb in "$@"; do printf "\\$(printf '%03o' "0x$_hb")"; done; }
+rechdr() { hexbin 00 00 00 00 00 00 00 00 "$(printf '%02x' $(($1 % 256)))" "$(printf '%02x' $(($1 / 256)))" 00 00 \
+	"$(printf '%02x' $(($1 % 256)))" "$(printf '%02x' $(($1 / 256)))" 00 00; }
+NF_R1='02 00 00 1d 08 00 01 00 08 00 03 00 14 00 0a 00 61 6e 74 75 6d 62 72 61 2d 72 65 6a 65 63 74 00
+08 00 05 00 00 00 00 05 08 00 0b 00 00 00 27 74 20 00 09 00 45 00 00 1c 00 00 40 00 40 11 00 00 0a 00 00 02
+c6 33 64 07 13 c4 13 c4 00 08 00 00'
+NF_R2='0a 00 00 1d 16 00 0a 00 61 6e 74 75 6d 62 72 61 2d 69 6e 36 2d 64 72 6f 70 00 00 00 08 00 04 00 00 00 00 05
+34 00 09 00 60 00 00 00 00 08 11 40 20 01 0d b8 00 00 00 00 00 00 00 00 00 00 00 01 20 01 0d b8 00 00 00 00 00 00
+00 00 00 00 00 02 13 c4 13 c4 00 08 00 00'
+NFCAP=$LOGDIR/nflog.pcap
+{
+	# shellcheck disable=SC2086 # one byte per word
+	hexbin d4 c3 b2 a1 02 00 04 00 00 00 00 00 00 00 00 00 00 01 00 00 ef 00 00 00
+	rechdr 80
+	# shellcheck disable=SC2086 # one byte per word
+	hexbin $NF_R1
+	rechdr 80
+	# shellcheck disable=SC2086 # one byte per word
+	hexbin $NF_R1
+	rechdr 88
+	# shellcheck disable=SC2086 # one byte per word
+	hexbin $NF_R2
+} >"$NFCAP"
+expect "nflog: the capture's size" 320 "$(wc -c <"$NFCAP" | tr -d ' ')"
+nfp() {
+	od -An -v -tx1 | (
+		# shellcheck disable=SC2034 # read by the kit
+		PH3_LIB=1
+		# shellcheck source=/dev/null # the kit's functions only (PH3_LIB)
+		. "$KIT"
+		# shellcheck disable=SC2034 # read by the kit
+		PH3_AWK=$(command -v awk)
+		ph3_nflog_parse "1=lo 5=rmnet_data1"
+	)
+}
+expect "nflog: by rule, uid, interface, protocol and port, the peer's kind; the busiest first" \
+	"2  antumbra-reject uid 10100 in - out rmnet_data1 udp/5060 peer IPv4 global|1  antumbra-in6-drop uid - in rmnet_data1 out - udp/5060 peer IPv6 global" \
+	"$(nfp <"$NFCAP" | sed 's/^ *//' | tr '\n' '|' | sed 's/|$//')"
+step_check "nflog: no address in the summary" test -z "$(nfp <"$NFCAP" | grep -E '198\.51|2001|0a 00|10\.0\.0')"
+expect "nflog: nothing captured" "nothing captured" "$(nfp </dev/null | sed 's/^ *//')"
+expect "nflog: not a capture" "nothing read: not a capture" "$(printf 'not a capture at all, 24 bytes long' | nfp | sed 's/^ *//')"
+
+# The whole kit, as root reads a phone, from stand-ins: Android's tools in
+# KS (each call logged), its files under KR, the module in KM. The dumps
+# hold every kind of identifier the report must never show.
+K=$LOGDIR/ph3
+KS=$K/sys KR=$K/root KM=$K/mod
+mkdir -p "$KS" "$KM/lib" "$KM/bin" "$KR/proc/net/netfilter" "$KR/proc/sys/net/netfilter/nf_log" \
+	"$KR/data/adb/antumbra/state/module" "$KR/data/system"
+cp "$MODULE/lib/antumbra.sh" "$KM/lib/"
+cp "$MODULE/module.prop" "$KM/"
+CALLS=$K/calls
+# shellcheck disable=SC2016 # the stand-ins' lines, expanded when they run
+{
+	printf '%s\n' '#!/bin/sh' "echo \"fw \$*\" >>$CALLS" 'echo state=live; echo ipv4=applied; echo ipv6=applied' >"$KM/bin/antumbra-fw"
+	printf '%s\n' '#!/bin/sh' 'exec "$@"' >"$KS/toybox"
+	printf '%s\n' '#!/bin/sh' "echo \"getprop \$*\" >>$CALLS" 'case $1 in' 'ro.build.version.release) echo 16 ;;' \
+		'ro.build.version.sdk) echo 36 ;;' 'ro.build.type) echo userdebug ;;' 'ro.debuggable) echo 1 ;;' \
+		'ro.hardware) echo qcom ;;' 'gsm.sim.state) echo LOADED ;;' 'ro.serialno) echo SERIAL123456789 ;;' 'esac' >"$KS/getprop"
+	printf '%s\n' '#!/bin/sh' "echo \"settings \$*\" >>$CALLS" '[ "$*" = "get global airplane_mode_on" ] && echo 0' >"$KS/settings"
+	printf '%s\n' '#!/bin/sh' "echo \"tcpdump \$*\" >>$CALLS" "[ \"\$2\" = nflog:29 ] && cat $NFCAP" >"$KS/tcpdump"
+	printf '%s\n' '#!/bin/sh' "echo \"ip \$*\" >>$CALLS" "f=$K/ip.\$5; [ -f \"\$f\" ] && cat \"\$f\"; exit 0" >"$KS/ip"
+	printf '%s\n' '#!/bin/sh' "echo \"dumpsys \$*\" >>$CALLS" '[ "$1" = -t ] && shift 2' \
+		"case \$* in" "telephony.registry) cat $K/registry ;;" "'connectivity networks') cat $K/connectivity ;;" \
+		"netd) cat $K/netd ;;" "'activity service com.android.phone/com.android.phone.TelephonyDebugService') cat $K/phone ;;" \
+		"*) echo \"Can't find service: \$1\"; exit 1 ;;" 'esac' >"$KS/dumpsys"
+	printf '%s\n' '#!/bin/sh' "echo \"cmd \$*\" >>$CALLS" 'case $* in' \
+		"'package list packages -s') printf 'package:%s\\n' android com.android.phone ;;" \
+		"'package list packages -3 -u') printf 'package:%s\\n' org.example.simapp org.example.hidden ;;" \
+		"'package list packages -3') printf 'package:%s\\n' org.example.simapp ;;" \
+		"'role get-role-holders --user 0 android.app.role.DIALER') echo com.android.dialer ;;" \
+		"'role get-role-holders --user 0 android.app.role.SMS') echo com.android.messaging ;;" \
+		'*) exit 255 ;;' 'esac' >"$KS/cmd"
+	printf '%s\n' '#!/bin/sh' "echo \"iptables \$*\" >>$CALLS" "fam=4; case \$0 in *ip6tables) fam=6 ;; esac" \
+		'[ "$1" = -w ] && shift' "case \$* in" "'-t '*' -S') f=$K/ipt\$fam.\$2.S ;;" \
+		"'-t '*' -L '*' -v -n') f=$K/ipt\$fam.\$2.L.\$4 ;;" "*) exit 2 ;;" 'esac' '[ -f "$f" ] && cat "$f"; exit 0' >"$KS/iptables"
+}
+cp "$KS/iptables" "$KS/ip6tables"
+chmod +x "$KS"/* "$KM/bin/antumbra-fw"
+ln -s "$(command -v awk)" "$KS/awk"
+for i in lo:unknown:65536:1 wlan0:up:1500:4 rmnet_data1:up:1500:6 rmnet_data2:up:1280:7 v4-rmnet_data2:up:1260:8 rmnet_ipa0:up:9000:5; do
+	n=${i%%:*} r=${i#*:}
+	mkdir -p "$KR/sys/class/net/$n" "$KR/proc/sys/net/ipv6/conf/$n"
+	echo "${r%%:*}" >"$KR/sys/class/net/$n/operstate"
+	r=${r#*:}
+	echo "${r%%:*}" >"$KR/sys/class/net/$n/mtu"
+	echo "${r#*:}" >"$KR/sys/class/net/$n/ifindex"
+	echo 02:11:22:33:44:55 >"$KR/sys/class/net/$n/address"
+	echo 1 >"$KR/proc/sys/net/ipv6/conf/$n/disable_ipv6"
+done
+echo 0 >"$KR/proc/sys/net/ipv6/conf/rmnet_data2/disable_ipv6"
+echo '12345.67 23456.78' >"$KR/proc/uptime"
+echo NONE >"$KR/proc/sys/net/netfilter/nf_log/2"
+: >"$KR/proc/net/netfilter/nfnetlink_log"
+printf 'phone\n' >"$KR/data/adb/antumbra-cell"
+printf '29\n' >"$KR/data/adb/antumbra-nflog"
+chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog"
+printf 'session_id=0123456789abcdef0123456789abcdef\ntor_mode=direct\nmac=new\ncell=phone\ngate=phone\n' \
+	>"$KR/data/adb/antumbra/state/module/session"
+cp "$PKG_LIST" "$KR/data/system/packages.list"
+printf '%s\n' '7: rmnet_data2    inet6 2001:db8:5:6::7/64 scope global dynamic noprefixroute \       valid_lft 86400sec preferred_lft 86400sec' \
+	'7: rmnet_data2    inet6 fe80::1234:5678:9abc:def0/64 scope link \       valid_lft forever preferred_lft forever' >"$K/ip.rmnet_data2"
+printf '%s\n' '6: rmnet_data1    inet 10.1.2.3/30 brd 10.1.2.3 scope global rmnet_data1\       valid_lft forever preferred_lft forever' \
+	'6: rmnet_data1    inet6 2001:db8:1:2::abcd/64 scope global \       valid_lft forever preferred_lft forever' >"$K/ip.rmnet_data1"
+printf '%s\n' '8: v4-rmnet_data2    inet 192.0.0.4/32 scope global v4-rmnet_data2\       valid_lft forever preferred_lft forever' \
+	>"$K/ip.v4-rmnet_data2"
+{
+	echo 'last known state:'
+	echo '  Phone Id=0'
+	printf '    %s\n' mCallState=0 mRingingCallState=0 mForegroundCallState=0 mBackgroundCallState=0 \
+		'mCallIncomingNumber=+0987654321' \
+		'mServiceState={mVoiceRegState=0(IN_SERVICE), mOperatorAlphaLong=TestOp, mMcc=001, mMnc=01}' \
+		'mCellIdentity=CellIdentityLte:{ mCi=123456789 mPci=301 mTac=12345 mEarfcn=6300 mMcc=001 mMnc=01}' \
+		'mCellInfo=[CellInfoLte:{mRegistered=YES mCellIdentity=CellIdentityLte:{ mCi=123456789 } mLatitude=12.345678}]' \
+		mECBMReason=0 mECBMDuration=0 mSCBMReason=0 mSCBMDuration=0
+	printf '    %s%s%s%s\n' 'mPreciseDataConnectionStates={Pair{2 [ApnSetting] IMS, 2, 00101, ims, , , , , , -1, ims, IPV6, IPV6, true, 0}= state: CONNECTED, transport: WWAN, id: 2, netId: 102, network type: LTE, APN Setting: [ApnSetting] IMS, 2, 00101, ims, , , , , , -1, ims, IPV6, IPV6, true, 0, false, 0, 0, 0, 0, 0, gid, 001010123, false, LTE, , 0, 1, false, false, 3, 12345, false, UNEDITED, link properties: {InterfaceName: rmnet_data2 LinkAddresses: [ 2001:db8:5:6::7/64 ] DnsAddresses: [ ] PcscfAddresses: [ 2001:db8:9::1 ] Domains: null MTU: 1280 Routes: [ ::/0 -> :: rmnet_data2 mtu 0 ]}, default QoS: null, fail cause: NONE, network validation status: unsupported, ' \
+		'Pair{1 [ApnSetting] Internet, 1, 00101, internet, , , , , , -1, default | supl, IPV4V6, IPV4V6, true, 0}= state: CONNECTED, transport: WWAN, id: 1, netId: 101, network type: LTE, APN Setting: [ApnSetting] Internet, 1, 00101, internet, , , , , , -1, default | supl, IPV4V6, IPV4V6, true, 0, false, 0, 0, 0, 0, 0, , , false, LTE, , 0, 1, false, false, 3, 12345, false, UNEDITED, ' \
+		'link properties: {InterfaceName: rmnet_data1 LinkAddresses: [ 10.1.2.3/30,2001:db8:1:2::abcd/64 ] DnsAddresses: [ /10.0.0.53 ] Domains: null MTU: 1500 Routes: [ 0.0.0.0/0 -> 10.1.2.1 rmnet_data1 mtu 0 ]}, default QoS: null, fail cause: NONE, network validation status: unsupported, ' \
+		'Pair{3 [ApnSetting] Emergency, 3, 00101, sos, , , , , , -1, emergency, IPV4V6, IPV4V6, true, 0}= state: DISCONNECTED, transport: WWAN, id: -1, netId: 0, network type: UNKNOWN, APN Setting: [ApnSetting] Emergency, 3, 00101, sos, , , , , , -1, emergency, IPV4V6, IPV4V6, true, 0, false, link properties: {LinkAddresses: [ ] DnsAddresses: [ ] Domains: null MTU: 0 Routes: [ ]}, default QoS: null, fail cause: NONE, network validation status: unsupported}'
+	echo '    mCarrierPrivilegeState=<packages=[org.example.simapp], uids=[1010150, 10150]>'
+	echo '    mCarrierServiceState=<package=org.example.simapp, uid=10150>'
+	echo '  mPhoneCapability=null'
+	echo '  mRadioPowerState=1'
+	echo 'local logs:'
+	echo '  notifyCallState: mCallIncomingNumber=+0987654329 imsi=001010123456789'
+} >"$K/registry"
+{
+	echo 'NetworkAgentInfo{network{100}  handle{432902426637}  ni{WIFI CONNECTED extra: "TestNet"}  created=2026-11-06T10:00:00Z  lp{{InterfaceName: wlan0 LinkAddresses: [ fe80::1:2:3:4/64,192.168.1.20/24 ] DnsAddresses: [ /192.168.1.1 ] Domains: null MTU: 0 Routes: [ ]}}  nc{[ Transports: WIFI Capabilities: NOT_METERED&INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&VALIDATED SSID: "TestNet" TransportInfo: <SSID: "TestNet", BSSID: 02:00:00:00:01:00, MAC: 02:11:22:33:44:55, IP: /192.168.1.20> ]}  factorySerialNumber=1}'
+	echo '  Nat464Xlat:'
+	echo '    mBaseIface: wlan0, mIface: null, mState: IDLE'
+	echo 'NetworkAgentInfo{network{102}  handle{438102426637}  ni{MOBILE[LTE] CONNECTED extra: ims}  lp{{InterfaceName: rmnet_data2 LinkAddresses: [ 2001:db8:5:6::7/64 ] DnsAddresses: [ ] PcscfAddresses: [ 2001:db8:9::1 ] Domains: null MTU: 1280 Routes: [ ] Stacked: [[ {InterfaceName: v4-rmnet_data2 LinkAddresses: [ 192.0.0.4/32 ] DnsAddresses: [ ] Domains: null MTU: 0 Routes: [ ]} ]]}}  nc{[ Transports: CELLULAR Capabilities: IMS&NOT_METERED&NOT_RESTRICTED&TRUSTED&NOT_VPN&NOT_ROAMING Specifier: <TelephonyNetworkSpecifier [mSubId = 1]> ]}  factorySerialNumber=2}'
+	echo 'NetworkAgentInfo{network{103}  handle{442402426637}  ni{MOBILE[LTE] CONNECTED extra: sos}  lp{{InterfaceName: rmnet_data3 LinkAddresses: [ ] Domains: null MTU: 0 Routes: [ ]}}  nc{[ Transports: CELLULAR Capabilities: EIMS&NOT_METERED&TRUSTED ]}  factorySerialNumber=3}'
+} >"$K/connectivity"
+printf '%s\n' 'Netd:' '  NetworkController' '    Default network: 100' '' '    Networks:' '      99 LOCAL lo' \
+	'        Required permission: NONE' '      100 PHYSICAL wlan0' '      101 PHYSICAL rmnet_data1' \
+	'      102 PHYSICAL rmnet_data2,v4-rmnet_data2' '        Required permission: SYSTEM' '' \
+	'    Interface <-> last network map:' '      Ifindex: 7 NetId: 102' >"$K/netd"
+{
+	printf '%s\n' 'GsmCdmaPhone extends:' ' mImei=490154203237518' ' mMeid=A0000012345678' ' getLine1Number()=+0987654321'
+	ims_fixture 2:WWAN
+	printf '%s\n' 'CarrierPrivilegesTracker:' 'CarrierPrivilegesTracker - phoneId: 0' 'CarrierPrivilegesTracker - Log Begin ----' \
+		'  2026-11-06T10:00:00 - Updating SIM-loaded rules: [cert: 0123456789ABCDEF0123456789ABCDEF01234567 pkg: org.example.simapp access: 0]' \
+		'CarrierPrivilegesTracker - Log End ----' \
+		'CarrierPrivilegesTracker - Privileged package info: {packageNames=[[hash]], uids=[10150], carrierServicePackageName=[hash], carrierServiceUid=10150}' \
+		'mSimIsReadyButNotLoaded: false' 'CarrierPrivilegesTracker - Test-override rules: null' \
+		'CarrierPrivilegesTracker - SIM-loaded rules: [cert: 0123456789ABCDEF0123456789ABCDEF01234567 pkg: org.example.simapp access: 0]' \
+		'CarrierPrivilegesTracker - Carrier config rules: []' 'mClearUiccRulesUptimeMillis: 0'
+} >"$K/phone"
+printf '%s\n' '-P PREROUTING ACCEPT' '-P INPUT ACCEPT' '-P FORWARD ACCEPT' '-P OUTPUT ACCEPT' '-P POSTROUTING ACCEPT' \
+	'-N ANTUMBRA_IN' '-N ANTUMBRA_POST' '-N nm_mdmprxy_mngl_pre_ex' '-A PREROUTING -j ANTUMBRA_IN' \
+	'-A PREROUTING -j nm_mdmprxy_mngl_pre_ex' '-A POSTROUTING -j ANTUMBRA_POST' '-A ANTUMBRA_IN -i lo -j RETURN' \
+	'-A ANTUMBRA_IN -m limit --limit 20/sec -j NFLOG --nflog-prefix antumbra-in-drop --nflog-group 29' '-A ANTUMBRA_IN -j DROP' \
+	'-A ANTUMBRA_POST -o lo -j RETURN' '-A ANTUMBRA_POST -j DROP' \
+	'-A nm_mdmprxy_mngl_pre_ex -d 198.51.100.7/32 -p udp -m udp --dport 4500 -j MARK --set-xmark 0x1000000/0x1000000' >"$K/ipt4.mangle.S"
+printf '%s\n' 'Chain ANTUMBRA_IN (1 references)' ' pkts bytes target     prot opt in     out     source               destination' \
+	'   12  1008 RETURN     all  --  lo     *       0.0.0.0/0            0.0.0.0/0' \
+	'    3   180 NFLOG      all  --  *      *       0.0.0.0/0            0.0.0.0/0            limit: avg 20/sec burst 5 nflog-prefix  antumbra-in-drop nflog-group 29' \
+	'    3   180 DROP       all  --  *      *       0.0.0.0/0            0.0.0.0/0' >"$K/ipt4.mangle.L.ANTUMBRA_IN"
+printf '%s\n' 'Chain nm_mdmprxy_mngl_pre_ex (1 references)' ' pkts bytes target     prot opt in     out     source               destination' \
+	'    0     0 MARK       udp  --  *      *       0.0.0.0/0            198.51.100.7         udp dpt:4500 MARK or 0x1000000' \
+	>"$K/ipt4.mangle.L.nm_mdmprxy_mngl_pre_ex"
+printf '%s\n' '-P INPUT ACCEPT' '-P FORWARD DROP' '-P OUTPUT ACCEPT' '-N ANTUMBRA_OUT' '-N ANTUMBRA_DOH' '-N ANTUMBRA_REJECT' \
+	'-A OUTPUT -j ANTUMBRA_OUT' '-A OUTPUT -j fw_OUTPUT' '-A ANTUMBRA_DOH -m conntrack --ctorigdst 203.0.113.9 -j ANTUMBRA_REJECT' \
+	'-A ANTUMBRA_REJECT -m limit --limit 20/sec -j NFLOG --nflog-prefix antumbra-reject --nflog-group 29' \
+	'-A ANTUMBRA_REJECT -j REJECT --reject-with icmp-port-unreachable' >"$K/ipt4.filter.S"
+printf '%s\n' 'Chain ANTUMBRA_DOH (1 references)' ' pkts bytes target     prot opt in     out     source               destination' \
+	'    1    60 ANTUMBRA_REJECT  all  --  *      *       0.0.0.0/0            0.0.0.0/0            ctorigdst 203.0.113.9' \
+	>"$K/ipt4.filter.L.ANTUMBRA_DOH"
+printf '%s\n' '-P INPUT ACCEPT' '-P FORWARD DROP' '-P OUTPUT ACCEPT' '-N ANTUMBRA_OUT' '-A OUTPUT -j ANTUMBRA_OUT' \
+	'-A ANTUMBRA_OUT -d 2001:db8:ffff::1/128 -j REJECT' >"$K/ipt6.filter.S"
+printf '%s\n' 'Chain ANTUMBRA_OUT (1 references)' ' pkts bytes target     prot opt in     out     source               destination' \
+	'    7   560 REJECT     all      *      *       ::/0                 2001:db8:ffff::1     reject-with icmp6-port-unreachable' \
+	>"$K/ipt6.filter.L.ANTUMBRA_OUT"
+# kit [ARGS...]: the kit run over the stand-ins; the report in $K/report, the status in KIT_RC.
+kit() {
+	# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+	$KSH "$KIT" --sys "$KS" --root "$KR" --moddir "$KM" "$@" >"$K/report" 2>"$K/kit.err"
+	KIT_RC=$?
+}
+has() { grep -q -x -F -- "$1" "$K/report"; }
+touch "$K/before"
+sleep 1
+kit
+expect "kit: status 0, nothing on standard error" "0 " "$KIT_RC $(cat "$K/kit.err")"
+expect "kit: every section" 9 "$(grep -c '^## ' "$K/report")"
+step_check "kit: the report's end" has '# end of report'
+step_check "kit: the phone" has 'android 16 (sdk 36), build type userdebug, debuggable 1, emulator no'
+step_check "kit: the firewall's state" has "module $(sed -n 's/^version=//p' "$MODULE/module.prop"), firewall live"
+step_check "kit: the session's choices" has 'Phone-mode gate now: phone; the session: tor_mode=direct cell=phone gate=phone '
+step_check "kit: the NFLOG opt-in" has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): group 29"
+step_check "kit: the time since boot, in large units" has 'up 0 d 3 h 25 min'
+step_check "kit: the registry's reading" has 'telephony registry: radio on, a call none, callback mode off'
+step_check "kit: a counter line" has '    3   180 NFLOG      all  --  *      *       [IPv4 any /0]            [IPv4 any /0]            limit: avg 20/sec burst 5 nflog-prefix  antumbra-in-drop nflog-group 29'
+step_check "kit: IPv6 counters" has '### IPv6 filter ANTUMBRA_OUT'
+step_check "kit: ... a global IPv6 address by its kind" has '    7   560 REJECT     all      *      *       [IPv6 any /0]                 [IPv6 global]     reject-with icmp6-port-unreachable'
+step_check "kit: NFLOG's group from the rules" has 'NFLOG rules loaded, group 29'
+step_check "kit: not listened without --listen" has 'not listened (--listen SECONDS listens)'
+step_check "kit: every rmnet interface" eval "has 'rmnet_data1: up, mtu 1500, IPv6 disabled 1, netd network 101 (PHYSICAL) ' &&
+	has 'rmnet_data2: up, mtu 1280, IPv6 disabled 0, netd network 102 (PHYSICAL) ' &&
+	has 'v4-rmnet_data2: up, mtu 1260, IPv6 disabled 1, netd network 102 (PHYSICAL) ' &&
+	has 'rmnet_ipa0: up, mtu 9000, IPv6 disabled 1, netd network none'"
+step_check "kit: their addresses by kind and prefix length" eval "has '  inet6 [IPv6 global /64] scope global' &&
+	has '  inet6 [IPv6 link-local /64] scope link' && has '  inet [IPv4 private 10/8 /30] scope global' &&
+	has '  inet [IPv4 special 192.0.0/24 /32] scope global'"
+step_check "kit: netd's networks" has "netd's networks: 99 LOCAL lo; 100 PHYSICAL wlan0; 101 PHYSICAL rmnet_data1; 102 PHYSICAL rmnet_data2,v4-rmnet_data2"
+step_check "kit: the IMS network and its interfaces" has 'network 102: IMS without INTERNET; transports CELLULAR; interfaces rmnet_data2,v4-rmnet_data2; capabilities IMS&NOT_METERED&NOT_RESTRICTED&TRUSTED&NOT_VPN&NOT_ROAMING'
+step_check "kit: the EIMS network" has 'network 103: EIMS without INTERNET; transports CELLULAR; interfaces rmnet_data3; capabilities EIMS&NOT_METERED&TRUSTED'
+step_check "kit: Wi-Fi, with nothing of its name or addresses" has 'network 100: with INTERNET; transports WIFI; interfaces wlan0; capabilities NOT_METERED&INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&VALIDATED'
+step_check "kit: the IMS registration (MOD11's parser)" grep -q '^IMS: cell ' "$K/report"
+step_check "kit: the IMS APN: asked IPv6, given IPv6 only" has 'phone 0: ims, CONNECTED, WWAN, LTE, netId 102: asked IPV6 (roaming IPV6), given IPv6 only; interface rmnet_data2; addresses [IPv6 global /64]'
+step_check "kit: the Internet APN: asked IPv4v6, given both" has 'phone 0: default+supl, CONNECTED, WWAN, LTE, netId 101: asked IPV4V6 (roaming IPV4V6), given IPv4 and IPv6; interface rmnet_data1; addresses [IPv4 private 10/8 /30],[IPv6 global /64]'
+step_check "kit: the emergency APN, not connected" has 'phone 0: emergency, DISCONNECTED, WWAN, UNKNOWN, netId 0: asked IPV4V6 (roaming IPV4V6), given no address; interface none; addresses none'
+KINDS='1 package (system 0; Welcome or the default phone or SMS app 0; installed by the person and hidden 0; installed, not hidden 1; unknown 0)'
+step_check "kit: the apps with carrier privileges by kind, uids by user and app id" has "phone 0: $KINDS, uids [user 10 app 10150, 10150]"
+step_check "kit: the carrier service by kind" has 'phone 0, carrier service: installed, not hidden, uid 10150'
+step_check "kit: the module's live list by kind" has "the module's live list for Welcome: $KINDS"
+step_check "kit: the package and role lists read, nothing else asked of cmd" test -z "$(grep '^cmd' "$CALLS" | grep -v -x -E \
+	'cmd (package list packages (-s|-3|-3 -u)|role get-role-holders --user 0 android\.app\.role\.(DIALER|SMS))')"
+step_check "kit: the rules by source" has 'phone 0, rules by source: the SIM (and an eSIM profile) 1, the carrier configuration 0, test overrides none; SIM ready but not loaded: false'
+step_check "kit: nm_mdmprxy's rules" has '-A nm_mdmprxy_mngl_pre_ex -d [IPv4 global /32] -p udp -m udp --dport 4500 -j MARK --set-xmark 0x1000000/0x1000000'
+step_check "kit: ... their counters" has '### IPv4 mangle nm_mdmprxy_mngl_pre_ex (counters)'
+step_check "kit: the order of the jumps (FW7)" eval "has 'IPv4 mangle PREROUTING (policy ACCEPT): ANTUMBRA_IN nm_mdmprxy_mngl_pre_ex ' &&
+	has 'IPv4 filter FORWARD (policy DROP): no rule' && has 'IPv4 filter OUTPUT (policy ACCEPT): ANTUMBRA_OUT fw_OUTPUT '"
+# Nothing that identifies the phone, the SIM, the line, a network or a place.
+leaks=
+for v in 490154203237518 A0000012345678 001010123 8900100000000 0987654321 0987654329 TestNet TestOp 02:00:00 02:11:22 \
+	2001:db8 fe80: fd00 10.1.2.3 10.0.0.53 192.168.1 198.51.100 203.0.113 192.0.0.4 123456789 12.345678 98.765 \
+	SERIAL123456789 0123456789ABCDEF 0123456789abcdef org.example 432902426637 mSubId; do
+	grep -q -i -F -- "$v" "$K/report" && leaks="$leaks $v"
+done
+expect "kit: no identifier, address, name or place in the report, and no package name" "" "$leaks"
+step_check "kit: no package name by default, not even the probe's" test -z "$(grep -E 'org\.example|com\.android|PRIVATE|NOT FOR SHARING' "$K/report")"
+step_check "kit: read only: iptables only -S and -L" test -z "$(grep '^iptables' "$CALLS" | grep -v -E '^iptables -w -t (raw|mangle|nat|filter) (-S|-L [A-Za-z0-9_]+ -v -n)$')"
+step_check "kit: read only: settings only read" test -z "$(grep '^settings' "$CALLS" | grep -v '^settings get global ')"
+step_check "kit: read only: the firewall only asked its state" test "$(grep '^fw' "$CALLS" | sort -u)" = 'fw status'
+step_check "kit: read only: dumpsys asked for the four dumps only" test -z "$(grep '^dumpsys' "$CALLS" | grep -v -E \
+	'^dumpsys -t 10 (telephony.registry|connectivity networks|netd|activity service com.android.phone/com.android.phone.TelephonyDebugService)$')"
+step_check "kit: read only: no tcpdump without --listen" test -z "$(grep '^tcpdump' "$CALLS")"
+step_check "kit: read only: nothing under the root written" test -z "$(find "$KR" -newer "$K/before")"
+step_check "kit: no property asked that names the phone" test -z "$(grep '^getprop' "$CALLS" | grep -v -E \
+	'^getprop (ro\.build\.version\.(release|sdk)|ro\.build\.type|ro\.debuggable|ro\.boot\.qemu|ro\.kernel\.qemu|ro\.hardware|gsm\.sim\.state)$')"
+step_check "kit: the lines of the kit's source call no writer" test -z "$(grep -n -E \
+	'^[^#]*(settings put|setprop|resetprop|cmd phone|iptables[^|]* -[ADIFZXNP] |content call|svc |am broadcast)' "$KIT")"
+step_check "kit: the phone process read with no call" has "the phone process's dump: read"
+# Calls first: the phone process is not dumped during a call (unless
+# --during-call), in callback mode or when the call state cannot be read.
+cp "$K/registry" "$K/registry.idle"
+nophone() { test -z "$(grep 'TelephonyDebugService' "$CALLS")"; }
+sed 's/^    mCallState=0$/    mCallState=2/' "$K/registry.idle" >"$K/registry"
+: >"$CALLS"
+kit
+step_check "kit in a call: status 0, every section" test "$KIT_RC $(grep -c '^## ' "$K/report")" = "0 9"
+step_check "kit in a call: the phone process not dumped" nophone
+step_check "kit in a call: ... and why" eval "has \"the phone process's dump: skipped (a call is on; --during-call reads it during PH3's ordinary call, never an emergency call)\" &&
+	grep -q -F 'IMS: skipped (a call is on' \"\$K/report\" && grep -q -F 'rules by source: skipped (a call is on' \"\$K/report\""
+: >"$CALLS"
+kit --during-call
+step_check "kit in a call with --during-call: the phone process dumped" eval '! nophone && has "the phone process'"'"'s dump: read"'
+sed 's/^    mECBMDuration=0$/    mECBMDuration=300000/' "$K/registry.idle" >"$K/registry"
+for a in '' --during-call; do
+	: >"$CALLS"
+	kit $a
+	step_check "kit in callback mode ${a:-without options}: the phone process not dumped" nophone
+	step_check "kit in callback mode ${a:-without options}: ... and why" has "the phone process's dump: skipped (emergency callback mode is on)"
+done
+grep -v '^    mSCBMDuration=' "$K/registry.idle" >"$K/registry"
+for a in '' --during-call; do
+	: >"$CALLS"
+	kit $a
+	step_check "kit, the call state unreadable ${a:-without options}: the phone process not dumped" nophone
+	step_check "kit, the call state unreadable ${a:-without options}: ... and why" has "the phone process's dump: skipped (the call state could not be read)"
+done
+cp "$K/registry.idle" "$K/registry"
+# --private-names: the names in a last section, marked as not for sharing.
+kit --private-names
+step_check "kit --private-names: a tenth section, last, not for sharing" eval "test \"\$(grep -c '^## ' \"\$K/report\")\" = 10 &&
+	grep '^## ' \"\$K/report\" | tail -n 1 | grep -q '^## PRIVATE: .*NOT FOR SHARING' && grep -q '^# NOT FOR SHARING' \"\$K/report\""
+step_check "kit --private-names: the names" eval "has 'phone 0: packages [org.example.simapp], uids [user 10 app 10150, 10150]' &&
+	has 'phone 0, carrier service: org.example.simapp, uid 10150' && has \"the module's live list for Welcome: org.example.simapp\""
+step_check "kit --private-names: still redacted" test -z "$(grep -E '490154203237518|0987654321|2001:db8' "$K/report")"
+# --listen: only when Android's default IPv4 logger is already nfnetlink_log.
+: >"$CALLS"
+kit --listen 3
+step_check "kit --listen: Android's default logger not nfnetlink_log: not listened, and why" \
+	grep -q -F 'not listened: tcpdump would make nfnetlink_log Android' "$K/report"
+step_check "kit --listen: ... no tcpdump" test -z "$(grep '^tcpdump' "$CALLS")"
+echo nfnetlink_log >"$KR/proc/sys/net/netfilter/nf_log/2"
+printf '   29 4294963 0 2 65535 100 1\n' >"$KR/proc/net/netfilter/nfnetlink_log"
+kit --listen 3
+step_check "kit --listen: the group has a listener already: not listened" has 'not listened: group 29 already has a listener'
+: >"$KR/proc/net/netfilter/nfnetlink_log"
+: >"$CALLS"
+kit --listen 3
+step_check "kit --listen: tcpdump on the group, to a pipe" test "$(grep '^tcpdump' "$CALLS")" = 'tcpdump -i nflog:29 -s 256 -U -w -'
+step_check "kit --listen: the summary" eval "has '       2  antumbra-reject uid 10100 in - out rmnet_ipa0 udp/5060 peer IPv4 global' &&
+	has '       1  antumbra-in6-drop uid - in rmnet_ipa0 out - udp/5060 peer IPv6 global'"
+echo NONE >"$KR/proc/sys/net/netfilter/nf_log/2"
+for a in 601 -1 x 07; do
+	kit --listen "$a"
+	expect "kit: --listen $a refused" "64 0" "$KIT_RC $(wc -c <"$K/report" | tr -d ' ')"
+done
+# The kit as root reads it, with busybox's awk (Android's is BWK awk; the
+# CI emulator runs that one).
+if command -v busybox >/dev/null 2>&1; then
+	kit
+	cp "$K/report" "$K/report.host"
+	rm -f "$KS/awk"
+	ln -s "$(command -v busybox)" "$KS/awk"
+	kit
+	expect "kit: busybox's awk gives the same report" "" "$(diff "$K/report.host" "$K/report")"
+fi
 
 echo "  $fails failed"
 [ "$fails" -eq 0 ]

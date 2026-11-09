@@ -356,7 +356,9 @@ class AppRulesTest {
     @Test
     fun thePlanIsAppliedAsItIs() {
         val pass = SourceScan.function(policies, "pass(")
-        assertTrue(pass.contains("AppRules.plan(apps, context.packageName, chosen, roles, privileged.orEmpty())"))
+        assertTrue(pass.contains("AppRules.plan(apps, context.packageName, chosen, roles, privileged.orEmpty() + live)"))
+        // MOD10's live list: the second source, read only when the default apps could be read (calls first).
+        assertTrue(pass.contains("val live = if (roles == null) emptySet() else LiveList.privileged(apps)"))
         assertTrue(pass.contains("val chosen = if (started) Session.locationApps() else null"))
         assertTrue(pass.contains("dpm.setApplicationHidden(admin, pkg, true)"))
         val set = SourceScan.function(policies, "setGrant(")

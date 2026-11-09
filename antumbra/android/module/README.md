@@ -30,7 +30,7 @@ folder). It has not been run under KernelSU.
 | `overlay/` | A static resource overlay that switches keepalive offload off. |
 | `META-INF/` | Recovery stub; the Magisk app replaces it. |
 | `build-module.sh` | Builds the zip, or installs on a running emulator. |
-| `tests/` | Unit tests, an end-to-end sandbox test, its stand-ins, and `build-test-tools.sh`, which builds its toybox, mksh and busybox from pinned sources. |
+| `tests/` | Unit tests, an end-to-end sandbox test, its stand-ins, `build-test-tools.sh`, which builds its toybox, mksh and busybox from pinned sources, and `ph3-snapshot.sh`, PH3's measuring kit (not in the zip; below, "PH3's measuring kit"). |
 
 ## What runs when
 
@@ -204,8 +204,12 @@ the person may set by hand for tor.
    every call reads `unknown`). At every turn it also reads this phone's
    Phone-mode gate (below, "The Phone-mode gate") and, when the gate, what
    it carries out or the radio changed, and every 5 minutes, tells
-   Welcome (below, "The module's word to Welcome: the cell radio"); a turn
-   that looked or told checks the ports again at once (step 8).
+   Welcome (below, "The module's word to Welcome: the cell radio"). And
+   the apps with carrier privileges, from the telephony registry's dump
+   every 5 minutes and soon after the SIM or the installed apps change,
+   go to Welcome when they change (below, "The module's word to Welcome:
+   the apps with carrier privileges"; MOD10). A turn that looked, read
+   that list or told Welcome checks the ports again at once (step 8).
 7. **Welcome's Start**: every 2 seconds for the first 3 minutes after the
    framework answers, then every 5,
    `content query --user 0 --uri content://org.antumbra.welcome.state/session
@@ -949,6 +953,97 @@ hotdog tree does not change it). `KeepaliveResourceUtil` accepts 0, so
 every request fails with `ERROR_UNSUPPORTED`. An app cannot replace a
 static overlay with an update.
 
+### The module's word to Welcome: the apps with carrier privileges (MOD10)
+
+Android gives an app carrier privileges from three sources
+(`CarrierPrivilegesTracker`): the SIM's own access rules (an eSIM
+profile's among them), the carrier configuration's certificate list, and
+test overrides. Such an app can read the SIM's identifiers and change
+carrier settings, so WEL9 refuses every app the person installed that has
+them. Welcome, as the device owner, can read only the carrier
+configuration; the other two are exposed only through `@SystemApi`. Root
+can read the tracker's whole set: it sends it, package names and uids, to
+the telephony registry, whose dump prints it for each phone
+(`TelephonyRegistry.dump`, `android16-release`):
+
+```
+    mCarrierPrivilegeState=<packages=[a.b, c.d], uids=[10123, 10124]>
+```
+
+The names are in clear on a debuggable build (LineageOS's userdebug
+builds, the emulator) and `[***, size=N]` otherwise; the uids always. So
+`priv_step` reads that dump (`priv_state`), maps the uids of a phone whose
+names are hidden to every package of their app id through
+`/data/system/packages.list` (`priv_list`; PackageManager writes it as
+`NAME UID ...` for native code), and tells Welcome the sorted list:
+
+```sh
+content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier \
+    --extra v:i:1 --extra packages:s:a.b,c.d --extra at:l:1234
+# Result: Bundle[{v=1}]
+```
+
+- **When.** At the first turn once the framework answers, every 5 minutes,
+  and 15 s after the SIM's state (`gsm.sim.state`, which the cell radio's
+  watch already reads at every turn) or `packages.list`'s time (an
+  install, an update, a removal; a `stat` every 30 s) changed: the tracker
+  updates the registry a moment after them. Never while a call, emergency
+  callback mode or the 5 minutes after either hold, or while the call state
+  cannot be read (`cell_hold`): no dump and no Java start then; the read
+  waits until the hold ends. Told only when the list differs from the one
+  Welcome took last (Welcome holds none at its start, so with no app
+  privileged nothing is ever sent), or when Welcome's process is another
+  one (`proc_of`: pid and start time) and the list is not empty. While
+  Welcome does not take it (one from before MOD10 answers "Unknown
+  method"), again every 5 minutes and at once when the list changes; the
+  refusal and the recovery are logged once each, never a package. Only
+  while Welcome is the device owner. A dump that cannot be read (no phone,
+  a phone without the line, a name or uid that is not one, more than 200
+  packages) changes nothing; that is logged once.
+- **In every mode, not only in Phone mode.** The SIM, and its access rules
+  with it, is read with the radio off as well: the radio's power is not
+  the card's, and Telephony reads the card while the modem is available,
+  so carrier privileges can exist outside Phone mode. A read costs one
+  native `dumpsys` every 5 minutes; nothing else is started while nothing
+  changes. PH3 shows on the phone whether the list holds anything outside
+  Phone mode (the kit, below, reads it in every mode).
+- **Welcome** takes it from uid 0 only, keeps it in memory as a second
+  `PrivilegeSource` beside the carrier configuration, runs a pass over
+  every app when it changes, and refuses the apps on it that WEL9 may
+  refuse: hidden, their data kept; never a system app, Welcome itself, or
+  the default phone or SMS app, and nothing when those cannot be read
+  (Welcome's README, "Apps: location, phone state and carrier
+  privileges"). Welcome never unhides an app, so a list that shrinks
+  refuses nothing more and lifts nothing.
+- **Emergency calls.** Nothing here touches calls, texts, the radio or
+  location: a dump, a `content call`, and in Welcome hiding apps the
+  person installed. It waits during and after calls so that no Java start
+  competes with one.
+- **Rejected:** reading `dumpsys activity service
+  com.android.phone/...TelephonyDebugService`'s `CarrierPrivilegesTracker`
+  part (it obfuscates the names as `Rlog.pii` hashes, and the dump is
+  large); `cmd phone has-carrier-privileges PACKAGE` for each app (a Java
+  start per app); a file in Welcome's data directory (as for the other
+  words).
+
+### PH3's NFLOG opt-in (MOD10)
+
+The firewall copies what it refuses (`ANTUMBRA_REJECT`, `ANTUMBRA_SQUAT`)
+and drops (the egress and inbound gates), and the first packet of each
+connection it passes into Tor, to an NFLOG group only when
+`ANTUMBRA_FW_NFLOG_GROUP` names one (`antumbra-fw`'s `nflog()`, rate
+limited to 20 a second per rule); the module named none until MOD10. For
+PH3's measurement only, the owner may write a group into the root-only
+file `/data/adb/antumbra-nflog` (a regular file of root's that neither
+group nor others may write, first line exactly 1 to 65535), and
+`fw apply` passes it (`nflog_group`) from the next start (or the next time
+the module loads the rule set again). NFLOG adds no verdict: what passes
+and what is refused stay the same, and `status` checks the rules as
+before. Only a process with `CAP_NET_ADMIN` can listen to a group, and
+with no listener the kernel drops the copies. As installed there is no
+file and no NFLOG rule; nothing in the module or Welcome writes it, and
+`uninstall.sh` deletes it.
+
 ### Wi-Fi calling and video calling off (MOD7)
 
 Android's `ImsManager` reads `persist.dbg.wfc_avail_ovr`,
@@ -1010,6 +1105,126 @@ On the CI emulator `prop_set` is `setprop` from adb's root shell, which
 init also stores (the emulator is wiped at every run); the module's
 scripts run there with the framework stopped, so the phone process starts
 after them.
+
+## PH3's measuring kit (MOD10)
+
+`tests/ph3-snapshot.sh` is not in the module's zip: the owner pushes it
+from the checkout and runs it as root on the phone, with the module
+installed, during PH3 (`docs/install.md`, the PH3 step), once the SIM is in
+Phone mode: during IMS registration, an ordinary call and a text each way,
+once with the IPv6 sweep as it is and once with MOD9 on.
+
+**Never run it during an emergency call or in the minutes after one.** The
+phone process's dump it reads (the IMS registration, the carrier-privilege
+rules) is heavy, and the kit cannot tell an emergency call from an
+ordinary one. It skips that dump, and says so ("skipped" and why), while
+the telephony registry shows emergency callback mode or its call state
+cannot be read, and during any call unless `--during-call` is given:
+that option is for PH3's ordinary call alone.
+
+```sh
+adb push antumbra/android/module/tests/ph3-snapshot.sh /data/local/tmp/
+adb shell "su -c 'sh /data/local/tmp/ph3-snapshot.sh'" >ph3-report.txt
+# with NFLOG (below), listening 2 minutes while PH3's ordinary call is made:
+adb shell "su -c 'sh /data/local/tmp/ph3-snapshot.sh --listen 120 --during-call'" >ph3-report-call.txt
+adb shell rm /data/local/tmp/ph3-snapshot.sh
+```
+
+It prints one report on standard output:
+
+- the phone (Android version, build type, whether it is the emulator), the
+  module's version, the firewall's state, this phone's Phone-mode gate,
+  the session's choices, the NFLOG opt-in, airplane mode, the SIM's state,
+  the radio and whether a call or callback mode is on, and whether the
+  phone process's dump was read or skipped (and why);
+- the counters of every `ANTUMBRA_` chain in the raw, mangle, nat and
+  filter tables, IPv4 and IPv6 (`iptables -L -v -n`; never `-Z`);
+- NFLOG: the group the rules carry, and with `--listen SECONDS` what the
+  firewall refused, by rule, uid, interface in and out, protocol and port,
+  and the kind of the peer (counts only);
+- every `rmnet` interface (`rmnet_data*`, `rmnet_ipa0`, 464XLAT's
+  `v4-rmnet_data*`): state, MTU, whether IPv6 is off, its netd network
+  (`dumpsys netd`'s `Networks:`), and each address's family, kind and
+  prefix length;
+- every network (`dumpsys connectivity networks`): its transports, its
+  interfaces (stacked ones too) and its capabilities, with IMS and EIMS
+  marked and whether it has INTERNET;
+- the IMS registration, by MOD11's own parser (`ims_state`) of the phone
+  process's dump (skipped as above);
+- each data connection (APN) in the registry: its types, state, transport,
+  network type, netId, the protocol it asked for (and roaming), and what it
+  was given (IPv4, IPv6, both, none, from its addresses), with its
+  interface;
+- the apps with carrier privileges for each phone, counted by kind and
+  never named (system; Welcome or the default phone or SMS app; installed
+  by the person and hidden, as WEL9 refuses them; installed and not
+  hidden; unknown: from `cmd package list packages -s`, `-3`, `-3 -u` and
+  `cmd role get-role-holders`), with their uids by user and app id; the
+  carrier service's kind; the module's live list for Welcome (the same
+  `priv_state` and `priv_list`) counted the same way; and how many rules
+  each source holds (the SIM's, the carrier configuration's, test
+  overrides; from the phone process's dump, skipped as above);
+- Qualcomm netmgrd's `nm_mdmprxy` rules and counters in every table, and
+  the order of the jumps in each built-in chain with its policy (FW7);
+- only with `--private-names`, a last section with the package names
+  (per phone, the carrier service, the live list), headed **PRIVATE ...
+  NOT FOR SHARING**, and the report's first line says so too: a carrier's
+  own app names the carrier, and so the country. Off by default.
+
+**Read only.** It changes nothing: no iptables change, no setting or
+property, no `cmd phone`, nothing told to Welcome, no radio, APN or IMS
+step, nothing dialled or texted, no file written; nothing reads the IMEI
+(no `iphonesubinfo`). It sources the installed module's library for its
+parsers and defines the library's every writer as a function that does
+nothing before it reads anything. The unit tests run it against
+stand-ins that log each call and check that only `-S`, `-L`, the four
+dumps and the package and role lists were asked, and that the phone
+process is not dumped in a call (without `--during-call`), in callback
+mode or with an unreadable call state.
+
+**Safe to share.** Every line goes through one redaction pass, an awk
+program run over the whole report before it is printed (`--redact` runs it
+alone over standard input, without root), and without a working awk there
+is no report at all. It replaces each IPv4 and IPv6 address by its kind and
+prefix length (`[IPv6 global /64]`, `[IPv4 private 10/8 /30]`,
+`[IPv4 shared 100.64/10]` for carrier-grade NAT, `[IPv6 link-local]`):
+carrier-assigned addresses identify the subscription; MAC addresses;
+`tel:` and `sip:` URIs; quoted strings (Wi-Fi names); runs of 7 digits or
+more, and numbers written in groups with a dash, a parenthesis or a
+leading plus (`+1 555-123-4567`, `(555) 123-4567`, `35-209900-176148-1`)
+with 7 digits or more (IMEI, IMSI, ICCID, phone numbers), so the report prints no number
+that long itself (counters in iptables' short form, uids by user and app
+id, the time since boot in days, hours and minutes); the values of
+identifier, cell and location keys (`imei`, `imsi`, `iccid`, `msisdn`,
+`number`, `mcc`, `mnc`, `ci`, `tac`, `earfcn`, `latitude`, `ssid`,
+`bssid`, `mac`, ...), also with a suffix (`mMccStr`,
+`mOperatorAlphaLongRaw`) and, for identifier and cell keys, after a space
+(`cid 0x1a2b3c`); MCC and MNC labels (`ims.mnc260.mcc310.3gppnetwork.org`
+keeps only `mnc` and `mcc`); dotted MAC addresses (`aabb.ccdd.eeff`); cell
+identity blocks; decimals with 4 fractional digits or more (coordinates).
+The sections themselves print only the fields named above; the pass is the
+second layer, and the unit tests feed it dumps that hold each of these.
+Carrier, APN and package names are not printed either (only with
+`--private-names`, above).
+
+**NFLOG.** With PH3's opt-in (`/data/adb/antumbra-nflog`, above) the
+rules carry a group from the next start, and `--listen SECONDS` (1 to 600)
+listens to it with Android's own `tcpdump -i nflog:GROUP`, writing to a
+pipe that `od` and awk read (DLT_NFLOG: the rule's prefix, the uid, the
+interfaces, the payload's protocol and port; the payload is never
+printed). libpcap opens an NFLOG capture by also making nfnetlink_log
+Android's default IPv4 kernel logger (`NFULNL_CFG_CMD_PF_UNBIND` and
+`_PF_BIND` for AF_INET), a change, so the kit listens only when
+`/proc/sys/net/netfilter/nf_log/2` already reads `nfnetlink_log`, and
+otherwise says how to set it: `echo nfnetlink_log
+>/proc/sys/net/netfilter/nf_log/2` as root, until the next start (nothing
+on Android logs through the default logger). It does not listen to a group
+that already has a listener (`/proc/net/netfilter/nfnetlink_log`).
+
+On the CI emulator (`ci/emulator-antumbra.sh`, check `ph3_snapshot`) it
+runs as above after WEL8's Phone checks, its report is kept in `logs/`
+and scanned again on the host; the emulator has no IMS and no `rmnet`
+interface, so this proves the mechanics only.
 
 ## Building
 
@@ -1247,7 +1462,25 @@ comment; `service.sh`'s `ims_guard` cut out of it (nothing due, nothing
 done; a 1 written during a call, in callback mode, in the 5 minutes after
 a call or with the call state not read left until the hold ends, the
 hold logged once, then written back with `resetprop -n` and no record;
-no time since boot: left). Under
+no time since boot: left). And MOD10: `priv_state` and `priv_list` against
+registry dumps (names in clear and hidden, two phones, packages of a uid's
+app id from `packages.list`, another user's uid, `packages.list`
+unreadable, each malformed line, a phone without the line, two lines, more
+than 200 packages; the number, the cell and the local logs never read);
+`priv_step` and `priv_tell` turn by turn (read at the first turn and every
+300 s, 15 s after a SIM change, within 45 s of an install; told only on a
+change or a new Welcome process with a list; nothing during a call,
+callback mode, the 5 minutes after or an unreadable call state; not while
+Welcome is not the device owner; a refusal retried after 300 s or at once
+on a change, logged once; an unreadable dump logged once, the list kept;
+no package in the log); `nflog_group` and `fw` (only `apply` gets the
+group; every value it refuses); and the kit: its redaction pass on each
+kind of identifier and address (and on lines it must leave alone), the
+NFLOG summary of a capture built byte by byte, and the whole kit over
+stand-ins for Android's tools and files (every section, nothing written,
+only reads asked, no identifier in the report; `--listen` only with
+nfnetlink_log already the default logger and the group free), with the
+host's awk and with busybox's. Under
 `sh`, dash, busybox and mksh (`MKSH=` names Android's).
 
 **`tests/e2e-host.sh`** (root, Linux): the module's real scripts with the
@@ -1631,6 +1864,11 @@ phone the rest.
   try every 5 minutes (12 an hour), and at once for an emergency word or a
   word of another kind. Each look also starts one `toybox pidof` and reads
   one `/proc` file (the phone process).
+- The live list (MOD10) costs one native `dumpsys telephony.registry`
+  every 5 minutes and 15 s after a SIM change or an install, a `stat` of
+  `packages.list` every 30 s and a `toybox pidof` per read; a `content
+  call` (a Java start) only when the list changes, which with no app
+  privileged is never.
 - The word on the cell radio (WEL8's `module_cell`) is one more
   `cmd device_policy list-owners` and `content call` (a Java start) at
   each change of the gate, the cell or the radio and every 5 minutes as a
@@ -1644,6 +1882,19 @@ phone the rest.
   the person changed one of those keys since.
 - API 36 only: LineageOS 24 (Android 17) needs a new release (or
   `ANTUMBRA_FORCE`).
+- MOD10's live list and kit are read from AOSP source and tested on
+  stand-ins and the CI emulator, whose SIM gives no app carrier
+  privileges and which has no IMS, no `rmnet` interface and no
+  `nm_mdmprxy`: on the phone, PH3 shows whether the registry's line reads
+  as expected, whether carrier privileges exist outside Phone mode, what
+  the APNs are given and which uids IMS uses. A new app with carrier
+  privileges can use them for up to about 45 s (an install) or 5 minutes
+  (a SIM's rules changing without a SIM state change) before Welcome
+  refuses it, and while a call holds the read; WEL9's carrier
+  configuration source is not delayed. The kit's awk is Android's
+  one-true-awk on the phone, tested here with mawk and busybox and on CI
+  with the emulator's own; NFLOG listening needs the opt-in, a restart and
+  the default logger set by hand.
 - Built against Magisk v31.0's documented behaviour (boot stages, busybox
   standalone mode, `resetprop`, removal order, read in its source); not
   yet run under Magisk or KernelSU.

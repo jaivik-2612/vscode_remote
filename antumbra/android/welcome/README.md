@@ -35,7 +35,7 @@ compileSdk and targetSdk 36 (Android 16, LineageOS 23.2), minSdk 34.
 | `app/src/main/java/org/antumbra/welcome/` | The app (one file per part; see below) |
 | `app/src/main/assets/builtin-bridges-obfs4.txt` | Tor Browser's built-in obfs4 bridges, written by `tools/builtin-bridges.sh` (not offered until lyrebird ships) |
 | `app/src/test/` | JVM unit tests: bridge checks, the provider's row, the status-page parser and the add-on rule, the policy lists, the lock task's features, when Quick power off waits (with the module's word on the last calls, MOD11), the two choices at Start and the module's word on the cell radio (WEL8), the radio line and the SIM states, that no identifier is read, the emergency card's number, lines, hook and Show my position (WEL10), the apps' location, phone state and carrier privileges and Location kept on for the chosen apps (WEL9), and the texts |
-| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` (with `--location-apps` in a session with apps chosen for location), `check-addon`, `check-module-word`, `check-choices`, `check-phone`, `check-module-cell`, `check-emergency-card`, `check-emergency-states`, `check-position` and `clear-position-test` (each with `--location-kept` in such a session), and WEL9's `check-app-grants`, `check-carrier`, `clear-carrier-test` and `choose-location`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
+| `ci/welcome-adb.sh` | Installs, provisions and drives the app over adb, by hand. The CI emulator job drives Welcome with its own script (`antumbra/android/ci/emulator-antumbra.sh`), using the same test tags and provider URI, and calls this one only for `check-emergency`, `check-power-menu`, `check-policies --keep-adb` (with `--location-apps` in a session with apps chosen for location), `check-addon`, `check-module-word`, `check-choices`, `check-phone`, `check-module-cell`, `check-emergency-card`, `check-emergency-states`, `check-position` and `clear-position-test` (each with `--location-kept` in such a session), WEL9's `check-app-grants`, `check-carrier`, `clear-carrier-test` and `choose-location`, and MOD10's `check-live-list`; the app lab (`emulator-apps.sh`, a session with Administration on) for `check-policies --admin --keep-adb` and `check-addon` |
 | `ci/test-welcome-adb.sh` | Runs `welcome-adb.sh` against a fake adb (no device needed) |
 | `ci/build-probes.sh` | WEL9's probe apps for the emulator job: six code-less APKs that ask for location and phone state, built with `aapt2`, `zipalign` and `apksigner` and signed with two keys made for the build (the welcome job runs it, not blocking) |
 | `tools/builtin-bridges.sh` | Rewrites or checks the built-in bridges from a pinned, checksummed source |
@@ -487,6 +487,35 @@ and Calls and texts with `gate` `phone` or `data`; without a word (an
 older module, no add-on), neither. It is kept in memory (`CellWatch`),
 never logged, written or handed out, and shown only as the Phone lines.
 
+### The module's live list of apps with carrier privileges (MOD10)
+
+A third method, the same rules (uid 0 only, checked before the method or
+the extras are looked at): the apps with carrier privileges as Android's
+`CarrierPrivilegesTracker` has them, from all three of its sources (the
+SIM's own access rules, an eSIM profile's among them; the carrier
+configuration; test overrides), which root reads from the telephony
+registry's dump (the module's README, "The module's word to Welcome: the
+apps with carrier privileges").
+
+```sh
+content call --user 0 --uri content://org.antumbra.welcome.state --method module_carrier \
+    --extra v:i:1 --extra packages:s:a.b,c.d --extra at:l:1234
+# Result: Bundle[{v=1}]
+```
+
+| Extra | Type | Values |
+|---|---|---|
+| `v` | int | `1` |
+| `packages` | string | package names joined by `,`, at most 200, each a valid name (segments of letters, digits and `_` joined by dots, each beginning with a letter); empty for none |
+| `at` | long | the module's read, in seconds since boot |
+
+Exactly these three, with these types. A malformed list is refused
+(`IllegalArgumentException`) and changes nothing: the list Welcome holds
+stays (here keeping it is the safe side, since the list can only make
+Welcome refuse more). Kept in memory (`LiveList`), never logged, written
+or handed out; Welcome holds none at its start, and the module tells a new
+Welcome process the list again when it is not empty.
+
 ## What Welcome reads from the status page
 
 `GET http://127.0.0.1:5380/status` (the DNS filter;
@@ -785,7 +814,15 @@ configuration's certificate list (`KEY_CARRIER_CERTIFICATE_STRING_ARRAY`),
 and test overrides. A device owner can read only the second (with
 `READ_PHONE_STATE`, which Welcome holds: `getConfigForSubId` for each SIM
 slot's subscription); the others are exposed only through `@SystemApi`,
-so MOD10's live list from root is the next `PrivilegeSource`. Welcome uses
+so the module, as root, reads the tracker's whole set and tells Welcome
+(MOD10's live list, method `module_carrier`, above): the second
+`PrivilegeSource` (`LiveList`, `CarrierWord.kt`). A pass refuses what
+either source names among the apps the person installed, and only those:
+never a system app, Welcome, or the default phone or SMS app, whatever a
+source says (`AppRules.plan` leaves them out before it looks at a source),
+and nothing at all while the default phone or SMS app cannot be read. A
+new or changed live list brings a pass over every app at once; each pass
+reads the list from memory. Welcome uses
 a slot's list as `CarrierPrivilegesTracker` does, only when a carrier's
 own configuration has been applied
 (`CarrierConfigManager.isConfigForIdentifiedCarrier`), and matches it as
@@ -857,10 +894,11 @@ user could be added, and its apps are not in Welcome's passes, which cover
 user 0. A gap, left as it is; AM4's Persistent Storage user needs the same
 passes.
 
-**What waits:** apps privileged by the SIM's own access rules or an eSIM
-profile (MOD10's list); nearby-device grants for every app and location
-grants of apps that came with the phone (WEL6); the messaging opt-in (AM4
-and PH3). WEL9 switches nothing cellular on: release behaves as debug,
+**What waits:** nearby-device grants for every app and location grants of
+apps that came with the phone (WEL6); the messaging opt-in (AM4 and PH3).
+Apps privileged by the SIM's own access rules or an eSIM profile come from
+MOD10's live list; whether the registry's line reads on the phone as on
+the emulator, and what it holds outside Phone mode, PH3 shows. WEL9 switches nothing cellular on: release behaves as debug,
 WEL8's `/data/adb/antumbra-cell` gate still holds, and Wi-Fi calling stays
 MOD7's. Residual: a newly installed app may ask the person for location or
 phone state in the moment before its own pass denies them.
@@ -880,7 +918,14 @@ Welcome or Location's Off cannot be put back), then after Start
 `welcome_location_grants` (only those two hold location, as chosen) and
 `welcome_location_new_install` (a probe installed during the session gets
 none); `check-policies --location-apps` and Show my position with
-`--location-kept`.
+`--location-kept`. MOD10's `welcome_live_list` (a warning until it has
+passed on CI once; `welcome-adb.sh check-live-list`): after Start, a
+probe installed and seen by Welcome's pass; the shell's list naming it and
+root's malformed one refused, and it not refused by them; then root's list
+naming it, `com.android.phone`, `com.android.settings`, Welcome and the
+default phone and SMS apps: only the probe refused (hidden, its data
+kept); root's empty list last, whatever happens. The emulator's SIM gives
+no app carrier privileges, so the module itself sends nothing there.
 
 ## SIM, cellular radio and VoLTE (WEL8)
 
@@ -1357,6 +1402,7 @@ $W check-position --source test                # WEL10 (adb root): a test-provid
 adb install -r one.apk                         # WEL9: any apps that ask for location (CI: welcome/ci/build-probes.sh)
 $W check-app-grants --denied org.example.one   # WEL9, before Start: no location, no phone state, POLICY_FIXED
 $W check-carrier --hash SHA256 --change PKG1 APK1 --install PKG2 APK2   # WEL9 (adb root): refused on the change and at install
+$W check-live-list --probe PKG APK             # MOD10 (adb root): refused on root's list; system apps and the default apps not
 $W choose-location --precise org.example.one   # WEL9, before Start: Location on for the apps chosen
 $W screenshot welcome.png
 $W check-choices --gate off                    # WEL8, before Start: the six attempts; the gate the module told Welcome
@@ -1508,7 +1554,10 @@ clears it with `cmd phone cc clear-values` whatever happens, also when
 killed; when slot 0's configuration is not a carrier's own
 (`carrier_config_applied_bool`, read first, before anything is changed),
 or the value does not read back, it says "not judged" and exits with
-status 3. `choose-location` taps rows by their test tags and reads
+status 3. `check-live-list` gives Welcome lists through its provider only
+(the shell's, a malformed one, root's, then root's empty list, also when
+it fails or is killed); Welcome never unhides the probe it refused.
+`choose-location` taps rows by their test tags and reads
 each back checked. None of them dials or writes a setting.
 
 ## Verified, and not yet
@@ -1782,7 +1831,11 @@ not be, another user's grants, a hidden or missing app, a carrier change
 or an install not refused, an app uninstalled instead of hidden, a value
 that is not cleared, Location going off in a session that keeps it), "not
 judged" when the value is not taken or slot 0's configuration is not a
-carrier's own, and clearing the value also when killed. Not yet: all of it on a device. On the emulator first:
+carrier's own, and clearing the value also when killed; and
+`check-live-list` (MOD10), failing with each fault (the shell's or a
+malformed list taken, the probe not refused or removed, a system app
+refused) and emptying the list each time, also when killed, and giving no
+list without root, during a call or without a default SMS app. Not yet: all of it on a device. On the emulator first:
 `setPermissionGrantState` at `LOCKED_BOOT_COMPLETED`, the carrier
 listener's call on `cmd phone cc`, `setApplicationHidden` of a privileged
 app, `dumpsys package`'s format, and Location kept on with the run's other
@@ -1838,9 +1891,12 @@ checks; on the phone (PH3): the carrier's own configuration and SIM rules.
   location permissions until WEL6, and can get the position whenever
   Location is on, all session long in a session with chosen apps; the
   phone's own GNSS stack may ask for assistance data through Tor (PH5).
-- **Carrier privileges from the SIM's own rules or an eSIM profile** are
-  not seen: a device owner can read only the carrier configuration's list
-  (MOD10 brings the live list from root).
+- **Carrier privileges from the SIM's own rules or an eSIM profile** come
+  only from MOD10's live list: a device owner can read only the carrier
+  configuration's list. Without the module (or with one from before
+  MOD10) they are not seen; with it, a newly privileged app keeps its
+  privileges until the module's next read (about 45 s after an install,
+  at most 5 minutes otherwise, later while a call holds the read).
 - **A newly installed app** may ask the person for location or phone
   state in the moment before its own pass denies them. A default phone or
   SMS app Welcome denied phone state before it became the default has the

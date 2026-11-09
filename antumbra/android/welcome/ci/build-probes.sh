@@ -29,7 +29,8 @@ command -v keytool >/dev/null || die "no keytool"
 # The probes: package and key. One, two and three are installed before
 # Start (one chosen precise, two approximate, three not chosen); late
 # during the session; carrier before the carrier configuration names key
-# b, carrierlate while it does.
+# b, carrierlate while it does; live after Start, for MOD10's live list
+# (root names it to Welcome, which refuses it).
 PROBES=(
     "org.antumbra.probe.one a"
     "org.antumbra.probe.two a"
@@ -37,6 +38,7 @@ PROBES=(
     "org.antumbra.probe.late a"
     "org.antumbra.probe.carrier b"
     "org.antumbra.probe.carrierlate b"
+    "org.antumbra.probe.live a"
 )
 
 work=$(mktemp -d)

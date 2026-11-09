@@ -72,7 +72,9 @@ stops it.
     `antumbra-netfilter-counters.txt`: `iptables-save -c` and
     `ip6tables-save -c` (every rule's packet and byte counters: which drop
     rules were hit), `/proc/net/stat/nf_conntrack`, and `nstat -asz` (or
-    `/proc/net/netstat`) with `/proc/net/snmp`
+    `/proc/net/netstat`) with `/proc/net/snmp`; and MOD10's
+    `antumbra-ph3-snapshot.txt`, the report of PH3's measuring kit as it
+    ran on the emulator
   - `build/`: one note per build job
 - `antumbra-android-apps-<run number>` (14 days, kept under 60 MB): the app
   lab's `apps.json` and `apps.md`, `screenshots/` (JPEGs 540 pixels wide:
@@ -376,7 +378,32 @@ that the captures must show traffic from the phone.
    cannot go red from a new step alone; the status screens of the other
    four sessions, a PIN- or PUK-locked SIM, two slots and IMS registration
    are the JVM tests' (one Start per boot, and the emulated SIM is
-   unlocked and reports no IMS).
+   unlocked and reports no IMS). Then MOD10, warnings until they have
+   passed on CI once (`mod10_level`), about a minute and 6 at most:
+   `welcome_live_list` (`welcome-adb.sh check-live-list` with the welcome
+   job's probe `org.antumbra.probe.live`, "not judged" without it: the
+   probe installed and seen by Welcome's pass; the module's live list
+   naming it, given as the shell user and malformed from root, refused,
+   and the probe still visible; then root's list naming it,
+   `com.android.phone`, `com.android.settings`, Welcome and the default
+   phone and SMS apps: the probe refused, hidden with its data kept, and
+   none of the others; root's empty list last, whatever happens; the
+   emulated SIM gives no app carrier privileges, so the module itself
+   tells Welcome nothing), then `ph3_snapshot`: PH3's measuring kit
+   (`module/tests/ph3-snapshot.sh`) pushed to `/data/local/tmp`, run as
+   root as the owner runs it on the phone (read only: it changes nothing
+   on the device), removed again, its report kept in
+   `logs/antumbra-ph3-snapshot.txt` (its standard error in
+   `-ph3-snapshot-errors.txt`). `ph3_snapshot_level` judges it: status 0,
+   all nine sections and the report's end, and nothing in it that looks
+   like an IPv4 address, an IPv6 address (eight groups, or fewer with
+   `::`, standing alone: not a time, a port range or a MAC address), a MAC
+   address (also dotted), 7 digits in a row or in groups (`+1 555-123-4567`),
+   an MCC or MNC label or a package name, nor
+   any of the device's own addresses (`ip -o addr`), its Wi-Fi MAC address
+   or the Wi-Fi network's name; the warning names the kind found, never
+   the value. The emulator has no IMS, no `rmnet` interface and no
+   `nm_mdmprxy`, so this proves the mechanics only.
 8. Wait (15 minutes at most) for `module.tor.bootstrap` = 100 in the
    filter's `/status` (through `adb forward`), or "Bootstrapped 100%" in
    `tor.log`. Screenshot of the status screen.

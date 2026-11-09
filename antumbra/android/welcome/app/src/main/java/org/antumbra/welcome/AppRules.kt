@@ -190,12 +190,13 @@ class GrantGate {
 
 /**
  * A list of apps with carrier privileges that Welcome can read. Android has
- * three (CarrierPrivilegesTracker): the SIM's own access rules (and an eSIM
- * profile's), the carrier configuration's certificate list, and test
- * overrides. A device owner can read only the carrier configuration
+ * three sources (CarrierPrivilegesTracker): the SIM's own access rules (and
+ * an eSIM profile's), the carrier configuration's certificate list, and
+ * test overrides. A device owner can read only the carrier configuration
  * ([CarrierConfigRules], through CarrierConfigSource); the others are
- * exposed only through @SystemApi, so MOD10's live list from root comes
- * here next.
+ * exposed only through @SystemApi, so MOD10's live list from root, the
+ * tracker's whole set, is the second source ([LiveList]). A pass refuses
+ * what either names, as far as [AppRules.plan] may refuse.
  */
 interface PrivilegeSource {
     /** The packages among [apps] this source gives carrier privileges; null when it could not be read. */

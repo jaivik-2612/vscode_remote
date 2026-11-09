@@ -34,7 +34,11 @@
 #      provider as root, while Welcome is the device owner (MOD11); and the
 #      module's word on the cell radio (this phone's Phone-mode gate, what
 #      the module carries out, the radio as it read it; WEL8's module_cell),
-#      so that Welcome offers only what the gate allows;
+#      so that Welcome offers only what the gate allows; and the apps with
+#      carrier privileges, from the telephony registry's dump every 5
+#      minutes and soon after the SIM or the installed apps change, to
+#      Welcome when they change (MOD10's live list, method module_carrier),
+#      which refuses those WEL9 may refuse;
 #   7. wait for the Welcome screen's Start (started=1 in its provider, and
 #      Welcome the device owner): offline keeps tor's network off; direct
 #      and bridges set the bridges, if any, and DisableNetwork 0 over tor's
@@ -641,15 +645,19 @@ while :; do
 	# shut down (shutdown_check has stored what the next start needs). After
 	# a look the module gives Welcome its word on the last calls (MOD11),
 	# then, when it changed and every 5 minutes, its word on the cell radio
-	# (WEL8). A turn in which it looked (two dumps, up to 8 s) or told
-	# Welcome a word (up to 10 s each) checks the ports again at once, so
-	# that none of it is added to the next turn's wait (cell_tell tells only
-	# in a turn that looked).
+	# (WEL8), and, every 5 minutes and soon after the SIM or the installed
+	# apps change, the apps with carrier privileges, which it tells Welcome
+	# when they change (MOD10; nothing during a call or the 5 minutes
+	# after). A turn in which it looked (two dumps, up to 8 s), read the
+	# carrier list (one dump, up to 4 s) or told Welcome a word (up to 10 s
+	# each) checks the ports again at once, so that none of it is added to
+	# the next turn's wait (cell_tell tells only in a turn that looked).
 	if [ "$SETTINGS_DONE" = 1 ] && [ "$SHUTDOWN_DONE" = 0 ]; then
 		cell_step "$NOW"
 		cell_tell "$NOW"
 		cell_offer_tell "$NOW"
-		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ]; } && ports_check
+		priv_step "$NOW"
+		{ [ "$CELL_LOOKED" = "$NOW" ] || [ "$CELL_OFFER_TOLD" = "$NOW" ] || [ "$PRIV_TURN" = "$NOW" ]; } && ports_check
 	fi
 
 	# 8c. The DNS filter, restarted after a pause that doubles from 2 to 64

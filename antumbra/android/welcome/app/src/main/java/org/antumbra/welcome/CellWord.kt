@@ -93,9 +93,9 @@ data class CellWord(
 
 /**
  * The provider's call: the uid first (root only, before the method or the
- * extras are looked at), then the method: "module_word" (MOD11) or
- * "module_cell" (WEL8). Any other method is refused and changes neither
- * word.
+ * extras are looked at), then the method: "module_word" (MOD11),
+ * "module_carrier" (MOD10's live list) or "module_cell" (WEL8). Any other
+ * method is refused and changes no word.
  */
 object ModuleCalls {
     fun receive(
@@ -104,11 +104,13 @@ object ModuleCalls {
         arg: String?,
         values: () -> Map<String, Any?>,
         word: (ModuleWord?) -> Unit,
+        carrier: (CarrierWord) -> Unit,
         cell: (CellWord?) -> Unit,
     ) {
         if (!ModuleWord.isAllowedWriter(uid)) throw SecurityException("uid $uid may not call $method")
         when (method) {
             ModuleWord.METHOD -> ModuleWord.receive(uid, method, arg, values, word)
+            CarrierWord.METHOD -> CarrierWord.receive(uid, method, arg, values, carrier)
             CellWord.METHOD -> CellWord.receive(uid, method, arg, values, cell)
             else -> throw IllegalArgumentException("Unknown method: $method")
         }

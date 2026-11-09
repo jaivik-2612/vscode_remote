@@ -1183,6 +1183,20 @@ phone)
 	clock_jump 300
 	check "phone: ... the radio off again after the hold (no Phone mode until the next start)" wait_until 30 switched_off
 	check "phone: ... never switched on by the module" eval '! new_cmd "connectivity airplane-mode disable"'
+	# MOD10: an app with carrier privileges from the SIM's own access rules
+	# (the registry's dump names it, as the tracker sends it there): told to
+	# Welcome at the next read (every 5 minutes; outside Phone mode too),
+	# once; the empty list told when it goes.
+	check "carrier: nothing told while no app has carrier privileges" test ! -s $T/welcome.carrier
+	echo '<packages=[org.example.simapp], uids=[10150]>' >$T/carrier.0
+	clock_jump 300
+	check "carrier: the live list told to Welcome" wait_until 30 eval \
+		'grep -q -E "^v:i:1 packages:s:org\.example\.simapp at:l:[0-9]+\$" $T/welcome.carrier'
+	clock_jump 300
+	check "carrier: ... once" wait_until 10 eval 'test "$(grep -c . $T/welcome.carrier)" = 1'
+	rm -f $T/carrier.0
+	clock_jump 300
+	check "carrier: the list empty again: told" wait_until 30 eval 'tail -n 1 $T/welcome.carrier | grep -q -E "^v:i:1 packages:s: at:l:[0-9]+\$"'
 	mark
 	/system/bin/setprop sys.shutdown.requested 0userrequested
 	check "phone: shutdown: enable_cellular_on_boot 0 stored" wait_until 20 new_setting 'put enable_cellular_on_boot 0'
@@ -1304,6 +1318,16 @@ check "module_cell: nothing but the five fields" test -z "$(grep -v -E \
 check "module_cell: status.json says nothing of the gate, the cell choice or the radio" \
 	test -z "$(status_json | grep -E '"gate"|"cell"|"radio"|gate:|phone_mode|"sim')"
 check "module_cell: the module's log names no word" test -z "$(grep -E 'gate:s|cell:s:|radio:s:' $A/log/module.log)"
+
+# Every scenario: MOD10's live list goes to Welcome's provider alone, holds
+# its three fields only, and neither status.json nor the log names an app.
+case $SCEN in
+phone) ;;
+*) check "carrier: no app with carrier privileges: nothing told" test ! -s $T/welcome.carrier ;;
+esac
+check "carrier: nothing but the three fields" test -z "$(grep -v -E \
+	'^v:i:1 packages:s:([A-Za-z][A-Za-z0-9_.]*(,[A-Za-z][A-Za-z0-9_.]*)*)? at:l:[0-9]+$' $T/welcome.carrier 2>/dev/null)"
+check "carrier: status.json and the log name no app" test -z "$(status_json | grep -F simapp; grep -F simapp $A/log/module.log)"
 
 check "module log has no shell errors" test -z "$(grep -i -E 'not found|syntax error|bad substitution|unexpected' $A/log/module.log)"
 echo "-- module.log --"

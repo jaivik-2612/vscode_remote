@@ -1941,8 +1941,115 @@ class Wel9EmulatorTest(unittest.TestCase):
             for pkg in re.findall(r"\borg\.[a-z.]+", code):
                 self.assertTrue(pkg.startswith("org.antumbra.probe."), pkg)
         names = re.findall(r"^PROBE_(?!DIR=)[A-Z_]+=(\S+)$", self.script(), re.M)
-        self.assertEqual(len(names), 6)
+        # WEL9's six and MOD10's live probe.
+        self.assertEqual(len(names), 7)
         self.assertTrue(all(n.startswith("org.antumbra.probe.") for n in names))
+        probes = read(os.path.join(CI, "..", "welcome", "ci", "build-probes.sh"))
+        for n in names:
+            self.assertIn('"%s a"' % n if not n.endswith(("carrier", "carrierlate")) else '"%s b"' % n, probes, n)
+
+
+class Mod10EmulatorTest(unittest.TestCase):
+    """emulator-antumbra.sh's MOD10 steps: Welcome's live-list check and PH3's
+    measuring kit, each a warning until it has passed on CI once, bounded,
+    in its place after WEL8's Phone checks, the kit's report kept in logs/
+    and scanned again on the host, naming only the kind of what it found."""
+
+    MOD10 = ("mod10_level", "welcome_live_list", "ph3_snapshot", "ph3_snapshot_level")
+    SECTIONS = ("The phone", "Firewall counters", "NFLOG", "Interfaces", "Networks", "IMS registration",
+                "Data connections", "Apps with carrier privileges", "Qualcomm")
+
+    def script(self):
+        return read(os.path.join(CI, "emulator-antumbra.sh"))
+
+    def fn(self, name):
+        text = self.script()
+        start = text.index("\n" + name + "() {") + 1
+        end = text.index("\n}\n", start) + 3 if not text[start:].split("\n", 1)[0].endswith("}") else text.index("\n", start) + 1
+        return text[start:end]
+
+    def bash(self, body, *args):
+        return subprocess.run(["bash", "-c", body, "probe"] + list(args), capture_output=True, text=True)
+
+    def test_every_check_warns_until_it_has_passed_once(self):
+        self.assertEqual(self.bash(self.fn("mod10_level") + "mod10_level").stdout.strip(), "warn")
+        code = "".join(self.fn(f) for f in self.MOD10)
+        checks = [l.strip() for l in code.splitlines() if re.search(r"(^|[;{(|&)]\s*)check ", l.strip())]
+        self.assertEqual(len(checks), 6)
+        for l in checks:
+            self.assertRegex(l, r'check (welcome_live_list|ph3_snapshot) (ok|"\$\(mod10_level\)")( |$)', l)
+        for word in ("abort", " fail ", "FAILED=1", "exit "):
+            self.assertNotIn(word, code)
+
+    def test_bounded_and_in_place(self):
+        live, snap = self.fn("welcome_live_list"), self.fn("ph3_snapshot")
+        self.assertIn('timeout -k 20 180 bash "$WELCOME_ADB" -s "$ANTUMBRA_SERIAL" check-live-list --probe "$PROBE_LIVE" "$apk" --wait 45', live)
+        self.assertIn('timeout -k 10 30 adb -s "$ANTUMBRA_SERIAL" push "$PH3_KIT" "$PH3_KIT_ON_DEVICE"', snap)
+        self.assertIn('timeout -k 10 120 adb -s "$ANTUMBRA_SERIAL" shell "sh $PH3_KIT_ON_DEVICE"', snap)
+        self.assertIn('ash "rm -f $PH3_KIT_ON_DEVICE"', snap)
+        self.assertIn("report=$LOGS/$SCEN-ph3-snapshot.txt", snap)
+        for l in (live + snap).splitlines():
+            if 'bash "$WELCOME_ADB"' in l or "adb -s" in l:
+                self.assertRegex(l, r"timeout -k \d+ \d+ (bash|adb)", l)
+        text = self.script()
+        self.assertIn("\nmodule_word\nphone_checks\nwelcome_live_list\nph3_snapshot\nif wait_bootstrap; then\n", text)
+        self.assertIn("PH3_KIT=$ANDROID_DIR/module/tests/ph3-snapshot.sh\n", text)
+        self.assertTrue(os.path.isfile(os.path.join(CI, "..", "module", "tests", "ph3-snapshot.sh")))
+        # The kit is run as it is on the phone: no option, nothing but its report kept.
+        self.assertNotIn("--listen", snap)
+        self.assertNotIn("--root", snap)
+
+    def test_not_judged_without_the_probe(self):
+        stubs = 'check() { echo "check $*"; }; timeout() { echo "timeout $*"; }; PROBE_DIR=; LOGS=/tmp; SCEN=s; PROBE_LIVE=p; '
+        fns = self.fn("mod10_level") + self.fn("welcome_live_list") + "wel9_apk() { return 1; }; "
+        r = self.bash(stubs + fns + "welcome_live_list")
+        self.assertEqual(r.stdout.splitlines(),
+                         ["check welcome_live_list warn not judged: the probe p was not built (the welcome job's build-probes.sh)"])
+
+    def level(self, report, rc="0", known=""):
+        with tempfile.NamedTemporaryFile("w", delete=False) as f:
+            f.write(report)
+        try:
+            return self.bash(self.fn("ph3_snapshot_level") + 'ph3_snapshot_level "$1" "$2" "$3"', f.name, rc, known).stdout.strip()
+        finally:
+            os.unlink(f.name)
+
+    def clean(self, extra=""):
+        lines = ["# Antumbra PH3 snapshot (MOD10, report format 1)"]
+        for n in self.SECTIONS:
+            lines += ["## " + n, "  inet6 [IPv6 global /64] scope global", "-j MARK --set-xmark 0x1000000/0x1000000",
+                      "tcp dpts:32768:60999 udp dpt:5060 netId 101 uid 10123 user 10 app 10150 up 0 d 3 h 25 min",
+                      "IMS: cell [IPv6 any /0] at 10:00:00 12345 1234K id: -1 phone 0: 1 package (system 0; unknown 0)",
+                      "callback mode: off; nf_log/2 reads NONE; mnc[redacted].mcc[redacted]; the phone process's dump: read"]
+        return "\n".join(lines + [extra, "# end of report", ""])
+
+    def test_the_report_is_judged_on_the_host_too(self):
+        self.assertEqual(self.level(self.clean()), "ok")
+        self.assertEqual(self.level(self.clean(), rc="1"), "warn the kit exited with 1")
+        self.assertEqual(self.level(self.clean().replace("## NFLOG\n", "")), "warn not every section")
+        self.assertEqual(self.level(self.clean().replace("# end of report", "")), "warn no end of report")
+        for extra, why in (("inet 10.0.2.15/24", "an IPv4 address"), ("2001:db8::1", "an IPv6 address"),
+                           ("fe80::5054:ff:fe12:3456", "an IPv6 address"), ("::1", "an IPv6 address"),
+                           ("02-15-b2-00-00-00", "a MAC address"), ("02:15:b2:00:00:00", "a MAC address"),
+                           ("2001:0db8:85a3:0000:0000:8a2e:0370:7334", "an IPv6 address"), ("[a::b]:443", "an IPv6 address"),
+                           ("hwaddr aabb.ccdd.eeff", "a MAC address"),
+                           ("imei 490154203237518", "a long number"), ("+0987654321", "a long number"),
+                           ("+1 555-123-4567", "a number in groups"), ("(555) 123-4567", "a number in groups"),
+                           ("imei 35-209900-176148-1", "a number in groups"),
+                           ("ims.mnc260.mcc310.3gppnetwork.org", "an MCC or MNC;a package name"),
+                           ("packages [org.example.simapp]", "a package name")):
+            self.assertEqual(self.level(self.clean(extra)), "warn " + why, extra)
+        self.assertEqual(self.level(self.clean("network AndroidWifi"), known="10.0.2.15 AndroidWifi"),
+                         "warn one of the device's own addresses or names")
+        # The reason names the kind, never the value.
+        self.assertNotIn("10.0.2.15", self.level(self.clean("10.0.2.15"), known="10.0.2.15"))
+        self.assertEqual(self.level(self.clean("10.0.2.15 02:15:b2:00:00:00"), rc="3"),
+                         "warn the kit exited with 3;an IPv4 address;a MAC address")
+        # A real IPv6 match: no time, port range or MAC address reads as one.
+        for text in ("10:00:00", "dpts:32768:60999", "02:15:b2:00:00:00", "phone 0: ims", "e::x", "::"):
+            self.assertNotIn("an IPv6 address", self.level(self.clean(text)), text)
+        for text in ("::1", "fe80::1", "64:ff9b::1", "2001:db8:1:2:3:4:5:6", "x 2001:db8:: y"):
+            self.assertEqual(self.level(self.clean(text)), "warn an IPv6 address", text)
 
 
 if __name__ == "__main__":

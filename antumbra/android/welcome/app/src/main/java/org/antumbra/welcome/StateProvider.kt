@@ -19,8 +19,10 @@ import android.os.Bundle
  * The module's words come in through [call], from uid 0 only: not even
  * the shell may give them. Method "module_word" (MOD11) on the last calls,
  * kept by [CallWatch]; method "module_cell" (WEL8) on the cell radio and
- * this phone's Phone-mode gate, kept by [CellWatch]. Both stay in memory,
- * and there is no way to read them back.
+ * this phone's Phone-mode gate, kept by [CellWatch]; method
+ * "module_carrier" (MOD10) with the apps that have carrier privileges, kept
+ * by [LiveList] (a pass over the apps when it changes). All stay in
+ * memory, and there is no way to read them back.
  */
 class StateProvider : ContentProvider() {
 
@@ -50,14 +52,14 @@ class StateProvider : ContentProvider() {
 
     /**
      * The module's words, given by root with 'content call --method
-     * module_word|module_cell --extra ...'. The binder's uid goes straight
+     * module_word|module_carrier|module_cell --extra ...'. The binder's uid goes straight
      * to [ModuleCalls.receive], the one check: any other caller gets a
      * SecurityException before the method or the extras are looked at; an
      * unknown method or a malformed word an IllegalArgumentException.
      * Answers only that the word was taken ({v=1}), never the word.
      */
     override fun call(method: String, arg: String?, extras: Bundle?): Bundle {
-        ModuleCalls.receive(Binder.getCallingUid(), method, arg, { extrasOf(extras) }, CallWatch::take, CellWatch::take)
+        ModuleCalls.receive(Binder.getCallingUid(), method, arg, { extrasOf(extras) }, CallWatch::take, { LiveList.takeFrom(context, it) }, CellWatch::take)
         return Bundle().apply { putInt("v", ModuleWord.VERSION) }
     }
 

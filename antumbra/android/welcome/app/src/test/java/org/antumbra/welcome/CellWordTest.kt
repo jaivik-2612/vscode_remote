@@ -66,13 +66,13 @@ class CellWordTest {
         for (uid in listOf(2000, 1000, 10123, 1002000, 2950, 2951, -1)) {
             var read = false
             assertThrows(SecurityException::class.java) {
-                ModuleCalls.receive(uid, CellWord.METHOD, null, { read = true; values() }, { error("word") }) { cell = it }
+                ModuleCalls.receive(uid, CellWord.METHOD, null, { read = true; values() }, { error("word") }, { error("carrier") }) { cell = it }
             }
             // Refused before the extras were even read.
             assertFalse("uid $uid", read)
             // And before the method was looked at: an unknown one is refused the same way.
             assertThrows(SecurityException::class.java) {
-                ModuleCalls.receive(uid, "anything", null, { read = true; values() }, { error("word") }) { cell = it }
+                ModuleCalls.receive(uid, "anything", null, { read = true; values() }, { error("word") }, { error("carrier") }) { cell = it }
             }
             assertFalse("uid $uid", read)
         }
@@ -83,12 +83,12 @@ class CellWordTest {
     fun rootGivesItAndAMalformedOneClearsIt() {
         var cell: CellWord? = null
         var word: ModuleWord? = ModuleWord(CallKind.NONE, 1, 0, ImsState.OFF, 0)
-        ModuleCalls.receive(0, CellWord.METHOD, null, { values(gate = "data") }, { word = it }) { cell = it }
+        ModuleCalls.receive(0, CellWord.METHOD, null, { values(gate = "data") }, { word = it }, { error("carrier") }) { cell = it }
         assertEquals(CellLevel.DATA, cell?.gate)
         // MOD11's word is untouched by a cell word.
         assertEquals(CallKind.NONE, word?.calls)
         assertThrows(IllegalArgumentException::class.java) {
-            ModuleCalls.receive(0, CellWord.METHOD, null, { values(gate = "everything") }, { word = it }) { cell = it }
+            ModuleCalls.receive(0, CellWord.METHOD, null, { values(gate = "everything") }, { word = it }, { error("carrier") }) { cell = it }
         }
         // The malformed word cleared it: Welcome offers nothing that needs the gate.
         assertNull(cell)
@@ -96,18 +96,19 @@ class CellWordTest {
         // An unknown method changes neither word.
         cell = CellWord(CellLevel.PHONE, null, RadioWord.OFF, 1)
         assertThrows(IllegalArgumentException::class.java) {
-            ModuleCalls.receive(0, "module_other", null, { values() }, { word = null }) { cell = null }
+            ModuleCalls.receive(0, "module_other", null, { values() }, { word = null }, { error("carrier") }) { cell = null }
         }
         assertEquals(CellLevel.PHONE, cell?.gate)
         assertEquals(CallKind.NONE, word?.calls)
         assertThrows(IllegalArgumentException::class.java) {
-            ModuleCalls.receive(0, CellWord.METHOD, "x", { values() }, { word = null }) { cell = it }
+            ModuleCalls.receive(0, CellWord.METHOD, "x", { values() }, { word = null }, { error("carrier") }) { cell = it }
         }
         // MOD11's word still goes through.
         ModuleCalls.receive(
             0, ModuleWord.METHOD, null,
             { mapOf("v" to 1, "calls" to "unknown", "at" to 5L, "until" to 0L, "ims" to "off", "ims_at" to 0L) },
             { word = it },
+            { error("carrier") },
         ) { error("cell") }
         assertEquals(CallKind.UNKNOWN, word?.calls)
     }
