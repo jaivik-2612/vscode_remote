@@ -35,6 +35,10 @@
 #   --sys DIR         Android's tools (default /system/bin); the unit tests'
 #                     stand-ins
 #   --root DIR        read /proc, /sys and /data under DIR (the unit tests)
+#   --owner UID       with --root only (the unit tests, run as any user):
+#                     the root-only files under DIR (the Phone-mode gate,
+#                     the NFLOG opt-in) must belong to UID instead of root;
+#                     their mode is checked as on the phone
 #
 # Read only: it changes nothing on the phone. No iptables change (never -Z:
 # the counters stay), no setting, no property, no 'cmd phone', nothing sent
@@ -74,6 +78,7 @@ PH3_LISTEN=0
 PH3_DURING_CALL=0
 PH3_NAMES=0
 PH3_HOLD=
+PH3_OWNER=
 PH3_MODDIR=/data/adb/modules/antumbra
 PH3_AWK=
 
@@ -490,6 +495,21 @@ ph3_readonly() {
 	status_write() { return 1; }
 }
 
+# ph3_owner_seam: --owner's check, for the unit tests alone (with --root):
+# the library's cell_gate_owner_ok with PH3_OWNER for root, the same mode
+# check (neither the group nor others may write). On the phone, without
+# --owner, the library's own check holds: root's files only.
+ph3_owner_seam() {
+	cell_gate_owner_ok() {
+		_go=$($TB stat -c '%u %a' "$1" 2>/dev/null) || return 1
+		case $_go in "$PH3_OWNER "*) ;; *) return 1 ;; esac
+		_go=${_go#"$PH3_OWNER "}
+		case $_go in '' | *[!0-7]*) return 1 ;; esac
+		case $_go in *[2367][0-7] | *[2367]) return 1 ;; esac
+		return 0
+	}
+}
+
 # --- The sections -------------------------------------------------------------------
 
 ph3_phone() {
@@ -834,7 +854,7 @@ ph3_main() {
 	_redact=0
 	while [ $# -gt 0 ]; do
 		case $1 in
-		--listen | --moddir | --sys | --root)
+		--listen | --moddir | --sys | --root | --owner)
 			if [ $# -lt 2 ]; then
 				echo "ph3-snapshot: $1 needs a value" >&2
 				return 64
@@ -844,6 +864,7 @@ ph3_main() {
 			--moddir) PH3_MODDIR=$2 ;;
 			--sys) PH3_SYS=$2 ;;
 			--root) PH3_ROOT=$2 ;;
+			--owner) PH3_OWNER=$2 ;;
 			esac
 			shift 2
 			;;
@@ -868,6 +889,19 @@ ph3_main() {
 	case $PH3_LISTEN in '' | *[!0-9]* | 0?*)
 		echo "ph3-snapshot: --listen takes 0 to 600 seconds" >&2
 		return 64
+		;;
+	esac
+	case $PH3_OWNER in
+	'') ;;
+	*[!0-9]* | 0?*)
+		echo "ph3-snapshot: --owner takes a uid" >&2
+		return 64
+		;;
+	*)
+		if [ -z "$PH3_ROOT" ]; then
+			echo "ph3-snapshot: --owner only with --root (the tests)" >&2
+			return 64
+		fi
 		;;
 	esac
 	if [ "$PH3_LISTEN" -gt 600 ]; then
@@ -899,6 +933,7 @@ ph3_main() {
 	. "$MODDIR/lib/antumbra.sh"
 	ph3_readonly
 	TB=$PH3_SYS/toybox
+	[ -z "$PH3_OWNER" ] || ph3_owner_seam
 	# The library's root-only files, under --root (the tests).
 	CELL_GATE_FILE=$PH3_ROOT$CELL_GATE_FILE
 	PH3_NFLOG_NAME=$NFLOG_FILE

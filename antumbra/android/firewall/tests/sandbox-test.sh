@@ -1005,24 +1005,55 @@ else
 	if required mksh+toybox; then fail shell-mksh+toybox "mksh not found"; else skip shell-mksh+toybox "mksh not found"; fi
 fi
 
-# --- Phase 7: a full relay list ---------------------------------------------------------
+# --- Phase 7: a full relay list and a long DoH list ------------------------------------
+#
+# 8000 relays and 3000 DoH addresses: an IPv4 rule set of about 800 KiB,
+# and tables whose dump is as long. More than Linux passes to a program as
+# one argument (128 KiB, MAX_ARG_STRLEN), so the firewall must never hand
+# such text to an external printf: mksh, Android's sh, has no builtin one
+# (the DoH list alone passed 128 KiB of rules at 1735 addresses). Applied
+# in /bin/sh and in each mksh variant.
 
-echo "== phase 7: 8000 relays"
+echo "== phase 7: 8000 relays, 3000 DoH addresses"
 echo "10101" >"$AD/state/fw-exempt.conf"
 python3 -I -c '
 for i in range(8000):
     print("203.0.%d.%d %d" % (i // 250, i % 250 + 1, 443 if i % 2 else 9001))
 ' >"$AD/state/fw-relays.conf"
-chmod 644 "$AD/state/fw-exempt.conf" "$AD/state/fw-relays.conf"
-start=$(date +%s.%N)
-fw apply >/dev/null 2>"$TMP/err"
-rc=$?
-end=$(date +%s.%N)
-check_rc relays-8000-apply 0 $rc
-echo "INFO apply with 8000 relays took $(python3 -I -c "print(round($end - $start, 2))") s"
-n=$(inp "$IPT4" -w -t nat -S ANTUMBRA_RELAYS | grep -c '^-A ')
-[ "$n" = 8000 ] && pass relays-8000-loaded || fail relays-8000-loaded "$n rules"
-rm -f "$AD/state/fw-exempt.conf" "$AD/state/fw-relays.conf"
+python3 -I -c '
+for i in range(3000):
+    print("198.18.%d.%d" % (i // 250, i % 250 + 1))
+' >"$AD/lists/doh-ipv4.txt"
+chmod 644 "$AD/state/fw-exempt.conf" "$AD/state/fw-relays.conf" "$AD/lists/doh-ipv4.txt"
+# big_case NAME PATH-PREFIX SHELL-COMMAND...: the long lists applied in that shell.
+big_case() {
+	name=$1
+	prefix=$2
+	shift 2
+	saved=("${FW_SHELL[@]}")
+	FW_SHELL=(env "PATH=${prefix:+$prefix:}$PATH" "$@")
+	start=$(date +%s.%N)
+	fw apply >/dev/null 2>"$TMP/err"
+	rc=$?
+	end=$(date +%s.%N)
+	check_rc "big-$name-apply" 0 $rc
+	echo "INFO $name: apply with 8000 relays and 3000 DoH addresses took $(python3 -I -c "print(round($end - $start, 2))") s"
+	if grep -q -i 'argument list too long' "$TMP/err"; then fail "big-$name-no-e2big" "$(head -n 2 "$TMP/err")"; else pass "big-$name-no-e2big"; fi
+	n=$(inp "$IPT4" -w -t nat -S ANTUMBRA_RELAYS | grep -c '^-A ')
+	[ "$n" = 8000 ] && pass "big-$name-relays-8000-loaded" || fail "big-$name-relays-8000-loaded" "$n rules"
+	n=$(inp "$IPT4" -w -t filter -S ANTUMBRA_DOH | grep -c -e '--ctorigdst ')
+	[ "$n" = 3000 ] && pass "big-$name-doh-3000-loaded" || fail "big-$name-doh-3000-loaded" "$n rules"
+	st=$(fw status 2>/dev/null | sed -n 's/^state=//p')
+	[ "$st" = live ] && pass "big-$name-live" || fail "big-$name-live" "state $st"
+	fw flush >/dev/null 2>&1
+	FW_SHELL=("${saved[@]}")
+}
+big_case sh '' sh
+if [ -n "$MKSH" ]; then
+	big_case mksh '' "$MKSH"
+	[ -z "$TOYBOX" ] || big_case mksh+toybox "$TMP/toy" "$MKSH"
+elif required mksh; then fail big-mksh "mksh not found"; else skip big-mksh "mksh not found"; fi
+rm -f "$AD/state/fw-exempt.conf" "$AD/state/fw-relays.conf" "$AD/lists/doh-ipv4.txt"
 fw flush >/dev/null 2>&1
 
 # --- Summary --------------------------------------------------------------------------------

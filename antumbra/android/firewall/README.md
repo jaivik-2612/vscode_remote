@@ -6,7 +6,12 @@ Other TCP is passed into tor's TransPort, DNS goes to the DNS filter, and
 everything else is refused, for apps, system services and root alike. It is
 a POSIX sh script that calls `iptables`, `ip6tables` and their `-restore`
 tools, so it runs under Android's mksh and toybox, under Magisk's busybox ash,
-and under dash or bash on Linux for the tests.
+and under dash or bash on Linux for the tests. It writes rule text and dumps
+of the tables to its pipes with the shell's own `print -r` (mksh) or
+`printf` builtin (the others), never with an external program: the rule set
+can be more than 128 KiB (the DoH list alone passed that at 1735 addresses),
+more than Linux passes to a program as one argument, and mksh has no `printf`
+builtin.
 
 The rules were written from scratch for Android. They are not a translation
 of Tails' rules or of the archived Debian Antumbra's `nftables.conf`, which
@@ -444,7 +449,8 @@ tampered arm chain rebuilt; a missing `-restore` tool; a missing
 tor's `run/`, a planted link not followed, a linked or app-owned directory
 refused); the same hash, the single-command paths and the directory checks
 from bash, dash, busybox (with busybox's tools), mksh and mksh with toybox's
-tools; and 8000 relays.
+tools; and 8000 relays with 3000 DoH addresses (a rule set and table dumps
+of several hundred KiB) from sh, mksh and mksh with toybox's tools.
 
 ```sh
 sudo tests/sandbox-test.sh                     # prints PASS/FAIL/SKIP per probe

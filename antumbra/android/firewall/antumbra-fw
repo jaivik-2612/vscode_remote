@@ -31,6 +31,20 @@ set -u
 set -f
 umask 022
 
+# put TEXT: TEXT and a newline on standard output; putn TEXT: without the
+# newline. Never through an exec: a rule set or a dump of the tables can
+# be more than 128 KiB (a long DoH list), more than Linux passes to a
+# program as one argument (MAX_ARG_STRLEN; exec fails with E2BIG,
+# "Argument list too long"), and mksh, Android's sh, has no printf
+# builtin (dash, bash and busybox ash have one).
+if [ -n "${KSH_VERSION:-}" ]; then
+	put() { print -r -- "$1"; }
+	putn() { print -rn -- "$1"; }
+else
+	put() { printf '%s\n' "$1"; }
+	putn() { printf '%s' "$1"; }
+fi
+
 # --- Settings ---------------------------------------------------------------
 
 ANTUMBRA_DIR=${ANTUMBRA_DIR:-/data/adb/antumbra}
@@ -140,17 +154,17 @@ first_rule() {
 refs_to_delete() {
 	_rs=$(ipt "$1" -t "$2" -S) || return 1
 	if [ "${4:-}" = applied ]; then
-		printf '%s\n' "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e '/ -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$/d' \
+		put "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e '/ -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$/d' \
 			-e "/ -[jg] $3\$/s/^-A /-D /p"
 	else
-		printf '%s\n' "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e "/ -[jg] $3\$/s/^-A /-D /p"
+		put "$_rs" | sed -n -e '/^-A ANTUMBRA_/d' -e "/ -[jg] $3\$/s/^-A /-D /p"
 	fi
 }
 
 # Applied (non-arm) Antumbra chains that exist in a table.
 applied_chains() {
 	_rs=$(ipt "$1" -t "$2" -S) || return 1
-	printf '%s\n' "$_rs" | sed -n -e '/^-N ANTUMBRA_ARM_/d' -e 's/^-N \(ANTUMBRA_[A-Z0-9_]*\)$/\1/p'
+	put "$_rs" | sed -n -e '/^-N ANTUMBRA_ARM_/d' -e 's/^-N \(ANTUMBRA_[A-Z0-9_]*\)$/\1/p'
 }
 
 # --- The firewall's own directory and its lock ------------------------------
@@ -276,7 +290,7 @@ arm_chain_slow() {
 		ipt "$_f" -t "$_t" -N "$_c" || return 1
 		_have=
 	fi
-	if [ "$(printf '%s\n' "$_have" | sed -n '/^-A /p')" != "$_want" ]; then
+	if [ "$(put "$_have" | sed -n '/^-A /p')" != "$_want" ]; then
 		ipt "$_f" -t "$_t" -I "$_c" 1 -j DROP || return 1
 		_n=0
 		while [ "$(ipt "$_f" -t "$_t" -S "$_c" | grep -c '^-A ')" -gt 1 ]; do
@@ -340,7 +354,7 @@ arm_family() {
 		return 1
 	}
 	if have "$_rst"; then
-		if _txt=$(arm_text "$_af" "$_mode") && printf '%s\n' "$_txt" | restore "$_af" && is_armed_family "$_af"; then
+		if _txt=$(arm_text "$_af" "$_mode") && put "$_txt" | restore "$_af" && is_armed_family "$_af"; then
 			return 0
 		fi
 		log "IPv$_af: iptables-restore failed; loading the arm set one rule at a time"
@@ -386,10 +400,10 @@ clean_list() {
 valid_lines() {
 	_all=$(clean_list "$1")
 	[ -n "$_all" ] || return 0
-	_ok=$(printf '%s\n' "$_all" | grep -E "^$2\$" | sed -E 's/[[:space:]]+/ /g' | sort -u)
-	_bad=$(printf '%s\n' "$_all" | grep -c -v -E "^$2\$")
+	_ok=$(put "$_all" | grep -E "^$2\$" | sed -E 's/[[:space:]]+/ /g' | sort -u)
+	_bad=$(put "$_all" | grep -c -v -E "^$2\$")
 	[ "$_bad" -gt 0 ] && log "$1: ignored $_bad invalid line(s)"
-	[ -n "$_ok" ] && printf '%s\n' "$_ok"
+	[ -n "$_ok" ] && put "$_ok"
 	return 0
 }
 
@@ -537,7 +551,7 @@ EOF
 	# any other loopback port), goes into Tor's TransPort.
 	nflog ANTUMBRA_NAT antumbra-redirect '-p tcp'
 	echo "-A ANTUMBRA_NAT -p tcp -j REDIRECT --to-ports $TRANS_PORT"
-	[ -n "$RELAYS" ] && printf '%s\n' "$RELAYS" |
+	[ -n "$RELAYS" ] && put "$RELAYS" |
 		sed 's|^\([0-9.]*\) \([0-9]*\)$|-A ANTUMBRA_RELAYS -d \1/32 -p tcp -m tcp --dport \2 -j ACCEPT|'
 	jumps 4 nat "$1" OUTPUT ANTUMBRA_NAT || return 1
 	echo COMMIT
@@ -640,12 +654,12 @@ EOF
 	# Never the LAN or loopback, whatever the list says.
 	echo '-A ANTUMBRA_RELAYS -d 127.0.0.0/8 -j ANTUMBRA_REJECT'
 	for _n in $LAN_NETS; do echo "-A ANTUMBRA_RELAYS -d $_n -j ANTUMBRA_REJECT"; done
-	[ -n "$RELAYS" ] && printf '%s\n' "$RELAYS" |
+	[ -n "$RELAYS" ] && put "$RELAYS" |
 		sed 's|^\([0-9.]*\) \([0-9]*\)$|-A ANTUMBRA_RELAYS -d \1/32 -p tcp -m tcp --dport \2 -j RETURN|'
 	echo '-A ANTUMBRA_RELAYS -j ANTUMBRA_REJECT'
 
 	# DNS-over-HTTPS servers, matched on the address the app asked for.
-	[ -n "$DOH" ] && printf '%s\n' "$DOH" |
+	[ -n "$DOH" ] && put "$DOH" |
 		sed 's|^\(.*\)$|-A ANTUMBRA_DOH -m conntrack --ctorigdst \1 -j ANTUMBRA_REJECT|'
 
 	jumps 4 filter "$1" OUTPUT ANTUMBRA_OUT || return 1
@@ -703,7 +717,7 @@ live_dump() {
 		for _dt in $(tables_of "$_df"); do
 			echo "# IPv$_df $_dt"
 			_out=$(ipt "$_df" -t "$_dt" -S) || return 1
-			printf '%s\n' "$_out" | grep -e 'ANTUMBRA_' -e '^-P FORWARD '
+			put "$_out" | grep -e 'ANTUMBRA_' -e '^-P FORWARD '
 		done
 	done
 	return 0
@@ -711,7 +725,7 @@ live_dump() {
 
 live_hash() {
 	_dump=$(live_dump) || return 1
-	printf '%s\n' "$_dump" | sha256sum | cut -d' ' -f1
+	put "$_dump" | sha256sum | cut -d' ' -f1
 }
 
 # Every chain of the restore input in file $3 has as many rules in the kernel
@@ -722,7 +736,7 @@ verify_family() {
 	_text=$2
 	_cur=
 	_s=
-	_plan=$(printf '%s\n' "$_text" | sed -n -e 's/^\*\([a-z]*\)$/T \1/p' -e 's/^:\(ANTUMBRA_[A-Z0-9_]*\) .*/C \1/p' \
+	_plan=$(put "$_text" | sed -n -e 's/^\*\([a-z]*\)$/T \1/p' -e 's/^:\(ANTUMBRA_[A-Z0-9_]*\) .*/C \1/p' \
 		-e 's/^-I \([A-Z]*\) 1 -j \(ANTUMBRA_[A-Z0-9_]*\)$/J \1 \2/p')
 	_ok=0
 	while read -r _k _a _b; do
@@ -730,14 +744,14 @@ verify_family() {
 		T)
 			_cur=$_a
 			_s=$(ipt "$_vf" -t "$_cur" -S) || { _ok=1; break; }
-			if printf '%s\n' "$_s" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
+			if put "$_s" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
 				log "IPv$_vf $_cur: an arm jump is still loaded"
 				_ok=1
 			fi
 			;;
 		C)
-			_want=$(printf '%s\n' "$_text" | sed -n "/^\*$_cur\$/,/^COMMIT\$/p" | grep -c "^-A $_a ")
-			_have=$(printf '%s\n' "$_s" | grep -c "^-A $_a ")
+			_want=$(put "$_text" | sed -n "/^\*$_cur\$/,/^COMMIT\$/p" | grep -c "^-A $_a ")
+			_have=$(put "$_s" | grep -c "^-A $_a ")
 			if [ "$_want" != "$_have" ]; then
 				log "IPv$_vf $_cur $_a: $_have rules loaded, $_want expected"
 				_ok=1
@@ -748,7 +762,7 @@ verify_family() {
 				log "IPv$_vf $_cur $_a: the jump to $_b is not the first rule"
 				_ok=1
 			fi
-			_n=$(printf '%s\n' "$_s" | grep -c -e "^-A [A-Z]* .*-[jg] $_b\$")
+			_n=$(put "$_s" | grep -c -e "^-A [A-Z]* .*-[jg] $_b\$")
 			if [ "$_n" != 1 ]; then
 				log "IPv$_vf $_cur: $_n jumps to $_b"
 				_ok=1
@@ -778,11 +792,11 @@ family_state() {
 	if [ "$_pre" = '-A PREROUTING -j ANTUMBRA_IN' ] && [ "$_post" = '-A POSTROUTING -j ANTUMBRA_POST' ] &&
 		[ "$_out" = '-A OUTPUT -j ANTUMBRA_OUT' ] && [ "$_nat" = '-A OUTPUT -j ANTUMBRA_NAT' ] &&
 		[ "$_fwd" = '-P FORWARD DROP' ] &&
-		! printf '%s\n' "$_all" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
+		! put "$_all" | grep -q -e ' -[jg] ANTUMBRA_ARM_[A-Z0-9_]*$'; then
 		echo applied
 	elif [ "$_pre" = '-A PREROUTING -j ANTUMBRA_ARM_IN' ] && [ "$_post" = '-A POSTROUTING -j ANTUMBRA_ARM_POST' ] &&
 		[ "$_out" = '-A OUTPUT -j ANTUMBRA_ARM_OUT' ] && [ "$_fwd" = '-P FORWARD DROP' ] &&
-		[ "$(printf '%s\n' "$_all" | grep '^-A ANTUMBRA_ARM_')" = "$(arm_rules)" ]; then
+		[ "$(put "$_all" | grep '^-A ANTUMBRA_ARM_')" = "$(arm_rules)" ]; then
 		echo armed
 	else
 		case "$_post" in '-A POSTROUTING -j ANTUMBRA_POST' | '-A POSTROUTING -j ANTUMBRA_ARM_POST') ;; *)
@@ -836,7 +850,7 @@ COMMIT
 "
 		done
 		if [ -n "$_txt" ]; then
-			printf '%s' "$_txt" | restore "$_ff" || log "IPv$_ff: could not delete the unused chains"
+			putn "$_txt" | restore "$_ff" || log "IPv$_ff: could not delete the unused chains"
 		fi
 	done
 	return 0
@@ -891,7 +905,7 @@ cmd_apply() {
 			_rc=1
 			break
 		fi
-		if ! printf '%s\n' "$_txt" | restore "$_af"; then
+		if ! put "$_txt" | restore "$_af"; then
 			log "IPv$_af: iptables-restore failed"
 			_rc=1
 			break

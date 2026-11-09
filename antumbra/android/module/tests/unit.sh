@@ -3617,9 +3617,20 @@ printf '%s\n' 'Chain ANTUMBRA_OUT (1 references)' ' pkts bytes target     prot o
 	'    7   560 REJECT     all      *      *       ::/0                 2001:db8:ffff::1     reject-with icmp6-port-unreachable' \
 	>"$K/ipt6.filter.L.ANTUMBRA_OUT"
 # kit [ARGS...]: the kit run over the stand-ins; the report in $K/report, the status in KIT_RC.
+# The root-only files under KR belong to whoever runs the tests (CI runs
+# them as an ordinary user): --owner names that uid for the kit's owner
+# check (the tests' seam; on the phone the check is root's, below).
+KOWN=$(id -u)
 kit() {
 	# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
-	$KSH "$KIT" --sys "$KS" --root "$KR" --moddir "$KM" "$@" >"$K/report" 2>"$K/kit.err"
+	$KSH "$KIT" --sys "$KS" --root "$KR" --moddir "$KM" --owner "$KOWN" "$@" >"$K/report" 2>"$K/kit.err"
+	KIT_RC=$?
+}
+# kit_as_phone: the kit without --owner, as on the phone: the files must
+# be root's.
+kit_as_phone() {
+	# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+	$KSH "$KIT" --sys "$KS" --root "$KR" --moddir "$KM" >"$K/report" 2>"$K/kit.err"
 	KIT_RC=$?
 }
 has() { grep -q -x -F -- "$1" "$K/report"; }
@@ -3633,6 +3644,26 @@ step_check "kit: the phone" has 'android 16 (sdk 36), build type userdebug, debu
 step_check "kit: the firewall's state" has "module $(sed -n 's/^version=//p' "$MODULE/module.prop"), firewall live"
 step_check "kit: the session's choices" has 'Phone-mode gate now: phone; the session: tor_mode=direct cell=phone gate=phone '
 step_check "kit: the NFLOG opt-in" has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): group 29"
+# The owner check holds: files of another owner, or that the group or
+# others may write, are refused; without --owner they must be root's.
+[ "$KOWN" = 0 ] && KOTHER=1 || KOTHER=0
+kit --owner "$KOTHER"
+step_check "kit: a gate and an opt-in of another owner refused" eval "has 'PH3'\''s NFLOG opt-in (/data/adb/antumbra-nflog): none' &&
+	grep -q '^Phone-mode gate now: off; ' \"\$K/report\""
+chmod 620 "$KR/data/adb/antumbra-nflog"
+chmod 602 "$KR/data/adb/antumbra-cell"
+kit
+step_check "kit: a gate and an opt-in the group or others may write refused" eval "has 'PH3'\''s NFLOG opt-in (/data/adb/antumbra-nflog): none' &&
+	grep -q '^Phone-mode gate now: off; ' \"\$K/report\""
+chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog"
+kit_as_phone
+if [ "$KOWN" = 0 ]; then
+	step_check "kit as on the phone (run as root): root's files taken" has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): group 29"
+else
+	step_check "kit as on the phone (run as uid $KOWN, not root): the files refused, not being root's" \
+		has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): none"
+fi
+kit
 step_check "kit: the time since boot, in large units" has 'up 0 d 3 h 25 min'
 step_check "kit: the registry's reading" has 'telephony registry: radio on, a call none, callback mode off'
 step_check "kit: a counter line" has '    3   180 NFLOG      all  --  *      *       [IPv4 any /0]            [IPv4 any /0]            limit: avg 20/sec burst 5 nflog-prefix  antumbra-in-drop nflog-group 29'
@@ -3743,6 +3774,14 @@ echo NONE >"$KR/proc/sys/net/netfilter/nf_log/2"
 for a in 601 -1 x 07; do
 	kit --listen "$a"
 	expect "kit: --listen $a refused" "64 0" "$KIT_RC $(wc -c <"$K/report" | tr -d ' ')"
+done
+# --owner is the tests' alone: never without --root.
+# shellcheck disable=SC2086 # the shell, maybe "busybox sh"
+v=$($KSH "$KIT" --sys "$KS" --moddir "$KM" --owner "$KOWN" 2>&1 >/dev/null; echo "rc=$?")
+expect "kit: --owner without --root refused" "ph3-snapshot: --owner only with --root (the tests) rc=64" "$(printf '%s' "$v" | tr '\n' ' ')"
+for a in x -1 01; do
+	kit --owner "$a"
+	expect "kit: --owner $a refused" "64 0" "$KIT_RC $(wc -c <"$K/report" | tr -d ' ')"
 done
 # The kit as root reads it, with busybox's awk (Android's is BWK awk; the
 # CI emulator runs that one).

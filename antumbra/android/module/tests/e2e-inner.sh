@@ -182,6 +182,10 @@ phone_start() {
 	[ -x $T/com.android.phone ] || cp /bin/sleep $T/com.android.phone
 	$T/com.android.phone 1000000 </dev/null >/dev/null 2>&1 &
 	echo $! >$T/phone.pid
+	# The background child is a copy of the shell until it has exec'd the
+	# stand-in (a busy host can take a moment): until then it has another
+	# name, and pidof does not find it. Wait for the exec, 5 s at most.
+	wait_until 5 eval 'test "$(/system/bin/toybox pidof com.android.phone 2>/dev/null)" = "$(cat $T/phone.pid)"' || :
 }
 phone_restart() {
 	kill "$(cat $T/phone.pid)" 2>/dev/null
