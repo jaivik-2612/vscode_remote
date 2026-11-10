@@ -10,11 +10,26 @@
 # /antumbra-test/radio. 'dumpsys activity service
 # com.android.phone/com.android.phone.TelephonyDebugService' (the phone
 # process's own dump, with the IMS registration) prints /antumbra-test/ims
-# when the test wrote one. Every call is logged to /antumbra-test/dumpsys.log.
+# when the test wrote one. 'dumpsys connectivity networks' prints
+# /antumbra-test/connectivity (the networks, one NetworkAgentInfo line
+# each), and is logged to /antumbra-test/connectivity.log instead (so that
+# the cell radio's tests see only their own dumps); while
+# /antumbra-test/connectivity-broken exists it answers as for a missing
+# service. Every other call is logged to /antumbra-test/dumpsys.log.
 # Before the framework is up, and while /antumbra-test/dumpsys-broken
 # exists, it answers as for a missing service.
 T=/antumbra-test
 [ "${1-}" = -t ] && shift 2
+if [ "${1-}" = connectivity ]; then
+	echo "$*" >>$T/connectivity.log
+	if [ ! -f $T/framework-up ] || [ -e $T/dumpsys-broken ] || [ -e $T/connectivity-broken ] ||
+		[ ! -f $T/connectivity ]; then
+		echo "Can't find service: connectivity"
+		exit 1
+	fi
+	cat $T/connectivity
+	exit 0
+fi
 echo "${1-}" >>$T/dumpsys.log
 if [ ! -f $T/framework-up ] || [ -e $T/dumpsys-broken ]; then
 	echo "Can't find service: ${1-}"

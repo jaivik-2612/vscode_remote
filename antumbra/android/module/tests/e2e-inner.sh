@@ -339,6 +339,22 @@ ip addr add 10.99.0.2/24 dev d0
 ip link set d1 up
 ip link set d0 up
 ip route add default via 10.99.0.1 dev d0
+# A stand-in for an IMS network's interface (MOD9): a dummy interface (a
+# veth pair where the kernel has no dummy driver), up, with no address.
+ip link add rmnet_data9 type dummy 2>/dev/null || ip link add rmnet_data9 type veth peer name r9
+ip link set rmnet_data9 up
+# conn_set [ims]: the networks 'dumpsys connectivity networks' shows (the
+# stand-in prints $T/connectivity): d0 with INTERNET, and with "ims" an
+# IMS network without INTERNET on rmnet_data9.
+conn_set() {
+	{
+		echo '  NetworkAgentInfo{network{100}  handle{429}  ni{WIFI CONNECTED extra: }  lp{{InterfaceName: d0 LinkAddresses: [ ] Domains: null MTU: 0 Routes: [ ]}}  nc{[ Transports: WIFI Capabilities: NOT_METERED&INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&VALIDATED ]}  factorySerialNumber=1}'
+		[ "${1-}" != ims ] ||
+			echo '  NetworkAgentInfo{network{102}  handle{438}  ni{MOBILE[LTE] CONNECTED extra: ims}  lp{{InterfaceName: rmnet_data9 LinkAddresses: [ ] DnsAddresses: [ ] Domains: null MTU: 1280 Routes: [ ]}}  nc{[ Transports: CELLULAR Capabilities: IMS&NOT_METERED&NOT_RESTRICTED&TRUSTED&NOT_VPN&NOT_ROAMING ]}  factorySerialNumber=2}'
+	} >$T/connectivity.new
+	mv -f $T/connectivity.new $T/connectivity
+}
+conn_set ims
 # Some test hosts boot with ipv6.disable=1; then the IPv6 checks are skipped.
 HAVE_IPV6=0
 [ -d /proc/sys/net/ipv6 ] && HAVE_IPV6=1
@@ -502,6 +518,10 @@ check "service: no Settings before the framework is up" test ! -s $T/settings.lo
 if [ "$HAVE_IPV6" = 1 ]; then
 	echo 0 >/proc/sys/net/ipv6/conf/d0/disable_ipv6
 	check "service: IPv6 switched off again on d0 after NetworkStack-style re-enable" wait_until 12 sysctl_is d0 disable_ipv6 1
+	# MOD9's switch is off (as installed): an IMS network's interface too.
+	echo 0 >/proc/sys/net/ipv6/conf/rmnet_data9/disable_ipv6
+	check "service: IMS switch off: IPv6 switched off again on an IMS network's interface" \
+		wait_until 12 sysctl_is rmnet_data9 disable_ipv6 1
 fi
 r=$(getconf DisableNetwork)
 check "service: tor keeps DisableNetwork=1 before Start ($r)" test "$r" = "250 DisableNetwork=1
@@ -1332,6 +1352,78 @@ esac
 check "carrier: nothing but the three fields" test -z "$(grep -v -E \
 	'^v:i:1 packages:s:([A-Za-z][A-Za-z0-9_.]*(,[A-Za-z][A-Za-z0-9_.]*)*)? at:l:[0-9]+$' $T/welcome.carrier 2>/dev/null)"
 check "carrier: status.json and the log name no app" test -z "$(status_json | grep -F simapp; grep -F simapp $A/log/module.log)"
+
+# MOD9: PH3's IMS switch. Off as installed: the connectivity dump is never
+# read. In one scenario, the switch written by hand, from the next start of
+# service.sh: IPv6 stays as "NetworkStack" set it on the IMS network's
+# interface, is switched off everywhere else, and "all" is not written;
+# switched off on it too once the network has gone, and when the dump
+# cannot be read.
+check "IMS switch off: the connectivity dump never read" test ! -s $T/connectivity.log
+# group_alive PGID: a process of that group still runs (zombies aside).
+group_alive() {
+	for _ga in /proc/[0-9]*/stat; do
+		read -r _ga_l <"$_ga" 2>/dev/null || continue
+		_ga_l=${_ga_l##*) }
+		# shellcheck disable=SC2086 # the fields, on purpose
+		set -- $_ga_l
+		[ "$1" != Z ] && [ "$3" = "$_gp" ] && return 0
+	done
+	return 1
+}
+gone() { case $(proc_field "$1" State) in "" | Z*) true ;; *) false ;; esac; }
+if [ "$SCEN" = direct ] && [ "$HAVE_IPV6" = 1 ]; then
+	printf 'on\n' >/data/adb/antumbra-ims-ipv6
+	chmod 600 /data/adb/antumbra-ims-ipv6
+	echo 0 >/proc/sys/net/ipv6/conf/rmnet_data9/disable_ipv6
+	check "IMS switch written during the run: not read before the next start" \
+		wait_until 12 sysctl_is rmnet_data9 disable_ipv6 1
+	# The next start: service.sh with its IPv6 guard, tor and the filter
+	# stopped (tor and the filter run in sessions of their own), the lock
+	# gone as at a reboot.
+	_gp=$(cat $A/state/module/service.lock/pid)
+	op=$(tor_pid)
+	od=$(dns_pid)
+	kill -TERM -- "-$_gp"
+	kill "$op" "$od"
+	check "IMS switch: service.sh, its IPv6 guard, tor and the filter stopped" \
+		wait_until 15 eval '! group_alive && gone "$op" && gone "$od"'
+	rm -rf $A/state/module/service.lock
+	mark
+	start_service
+	check "IMS switch: read at the start, logged" wait_until 30 new_log 'IMS switch (MOD9) on'
+	check "IMS switch: the IMS network's interface named once" \
+		wait_until 20 new_log 'IPv6 left as Android sets it on: rmnet_data9'
+	# "NetworkStack" switches IPv6 on everywhere at once ("all": every
+	# interface, and "default").
+	echo 0 >/proc/sys/net/ipv6/conf/all/disable_ipv6
+	check "IMS switch: IPv6 switched off again on d0 and default" \
+		wait_until 15 eval 'sysctl_is d0 disable_ipv6 1 && sysctl_is default disable_ipv6 1'
+	sleep 11
+	check "IMS switch: IPv6 left on on the IMS network's interface (rmnet_data9)" sysctl_is rmnet_data9 disable_ipv6 0
+	check "IMS switch: IPv6 kept on loopback" sysctl_is lo disable_ipv6 0
+	check "IMS switch: all not written" sysctl_is all disable_ipv6 0
+	check "IMS switch: d0's router advertisements still off" sysctl_is d0 accept_ra 0
+	check "IMS switch: the dump was read" test -s $T/connectivity.log
+	# The IMS network goes: its interface is switched off at the next sweep.
+	conn_set
+	check "IMS switch: the IMS network gone: IPv6 switched off on rmnet_data9" \
+		wait_until 15 sysctl_is rmnet_data9 disable_ipv6 1
+	check "IMS switch: the new set logged" wait_until 10 new_log 'IPv6 left as Android sets it on: no interface'
+	# It comes back, and "NetworkStack" switches IPv6 on on it: left on.
+	conn_set ims
+	echo 0 >/proc/sys/net/ipv6/conf/rmnet_data9/disable_ipv6
+	sleep 12
+	check "IMS switch: the IMS network back: IPv6 left on" sysctl_is rmnet_data9 disable_ipv6 0
+	# The dump cannot be read: nothing is left alone, "all" included.
+	touch $T/connectivity-broken
+	check "IMS switch: an unreadable dump fails closed: rmnet_data9 off, all written" \
+		wait_until 15 eval 'sysctl_is rmnet_data9 disable_ipv6 1 && sysctl_is all disable_ipv6 1'
+	check "IMS switch: the unreadable dump logged" wait_until 10 new_log 'connectivity dump could not be read'
+	check "IMS switch: IPv6 still on on loopback" sysctl_is lo disable_ipv6 0
+	check "IMS switch: each set logged once" test "$(grep -c 'IPv6 left as Android sets it on: rmnet_data9$' $A/log/module.log)" = 2
+	rm -f $T/connectivity-broken
+fi
 
 check "module log has no shell errors" test -z "$(grep -i -E 'not found|syntax error|bad substitution|unexpected' $A/log/module.log)"
 echo "-- module.log --"

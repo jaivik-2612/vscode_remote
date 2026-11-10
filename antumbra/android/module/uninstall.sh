@@ -26,7 +26,8 @@
 # early arm script in /data/adb/post-fs-data.d, the Phone-mode gate
 # (/data/adb/antumbra-cell, written by the install's PH3 step; WEL8) and
 # PH3's NFLOG opt-in (/data/adb/antumbra-nflog, written by hand for the
-# measurement; MOD10).
+# measurement; MOD10) and PH3's IMS switch (/data/adb/antumbra-ims-ipv6,
+# also written by hand; MOD9).
 #
 # Wi-Fi calling and video calling (MOD7): the module set their force-on
 # properties to 0 in memory only, never stored. During a boot nothing is
@@ -114,5 +115,6 @@ fi
 if ! grep -q ' /data/adb/antumbra ' /proc/mounts 2>/dev/null; then
 	rmdir /data/adb/antumbra 2>/dev/null
 fi
-rm -f /data/adb/antumbra-force /data/adb/antumbra-cell /data/adb/antumbra-nflog /data/adb/post-fs-data.d/antumbra-arm.sh
+rm -f /data/adb/antumbra-force /data/adb/antumbra-cell /data/adb/antumbra-nflog /data/adb/antumbra-ims-ipv6 \
+	/data/adb/post-fs-data.d/antumbra-arm.sh
 exit 0

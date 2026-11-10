@@ -50,7 +50,12 @@
 #               takes 127.0.0.1:9040 before Start (firewall back to armed,
 #               tor's network held off until the port is free); mobile data
 #               off for every SIM; no bridges; Start read without the cell
-#               column, module_cell refused, each logged once
+#               column, module_cell refused, each logged once; then
+#               PH3's IMS switch (MOD9) written and service.sh restarted:
+#               an IMS network's interface (rmnet_data9, a dummy) keeps
+#               IPv6 while d0 and default are switched off and "all" is
+#               not written, until the network goes or the dump cannot be
+#               read (with the switch off, every scenario sees it swept)
 #   offline     an update over a record made before the cell radio work
 #               (the keys it lacks added); calls and texts chosen without
 #               the Phone-mode gate: the radio stays off; tor stays off; an

@@ -37,8 +37,9 @@
 #   --root DIR        read /proc, /sys and /data under DIR (the unit tests)
 #   --owner UID       with --root only (the unit tests, run as any user):
 #                     the root-only files under DIR (the Phone-mode gate,
-#                     the NFLOG opt-in) must belong to UID instead of root;
-#                     their mode is checked as on the phone
+#                     the NFLOG opt-in, the IMS switch) must belong to UID
+#                     instead of root; their mode is checked as on the
+#                     phone
 #
 # Read only: it changes nothing on the phone. No iptables change (never -Z:
 # the counters stay), no setting, no property, no 'cmd phone', nothing sent
@@ -530,6 +531,13 @@ ph3_phone() {
 	else echo 'not started'; fi)"
 	_pp_g=$(nflog_group)
 	echo "PH3's NFLOG opt-in ($PH3_NFLOG_NAME): ${_pp_g:+group }${_pp_g:-none}"
+	if command -v ims_ipv6_switch >/dev/null 2>&1; then
+		_pp_g=off
+		[ "$(ims_ipv6_switch)" = 1 ] && _pp_g=on
+		echo "PH3's IMS switch ($PH3_IMS_NAME): $_pp_g (service.sh reads it at its start)"
+	else
+		echo "PH3's IMS switch: not in the installed module (one from before MOD9)"
+	fi
 	_pp_u=$(read_value "$PH3_ROOT/proc/uptime")
 	_pp_u=${_pp_u%%[. ]*}
 	case $_pp_u in '' | *[!0-9]*) _pp_u=0 ;; esac
@@ -641,7 +649,8 @@ ph3_ifaces() {
 
 ph3_networks() {
 	echo '## Networks (connectivity), IMS and EIMS marked'
-	ph3_dump connectivity networks | "$PH3_AWK" '
+	_pn_d=$(ph3_dump connectivity networks)
+	printf '%s\n' "$_pn_d" | "$PH3_AWK" '
 		/^ *NetworkAgentInfo[{]/ {
 			id = "?"; tr = "-"; cap = "-"; ifs = ""
 			if (match($0, /network[{][0-9]+[}]/)) id = substr($0, RSTART + 8, RLENGTH - 9)
@@ -662,6 +671,15 @@ ph3_networks() {
 		}
 		END { if (!n) print "no network (or the dump could not be read)" }
 	'
+	# What the library's reading (ims_ifaces) gives: the interfaces that
+	# PH3's IMS switch (MOD9) leaves IPv6 alone on, when it is on.
+	if ! command -v ims_ifaces >/dev/null 2>&1; then
+		echo "the IMS switch: not in the installed module (one from before MOD9)"
+	elif _pn_i=$(printf '%s\n' "$_pn_d" | ims_ifaces); then
+		echo "the IMS switch would leave IPv6 alone on: ${_pn_i:-no interface}"
+	else
+		echo "the IMS switch would leave IPv6 alone on: no interface (no network read: IPv6 off on every one)"
+	fi
 }
 
 ph3_ims() {
@@ -938,6 +956,8 @@ ph3_main() {
 	CELL_GATE_FILE=$PH3_ROOT$CELL_GATE_FILE
 	PH3_NFLOG_NAME=$NFLOG_FILE
 	NFLOG_FILE=$PH3_ROOT$NFLOG_FILE
+	PH3_IMS_NAME=${IMS_IPV6_FILE-}
+	IMS_IPV6_FILE=$PH3_ROOT${IMS_IPV6_FILE-}
 	PKG_LIST=$PH3_ROOT$PKG_LIST
 	# Calls first: whether the phone process may be dumped (ph3_hold).
 	ph3_hold 2>/dev/null

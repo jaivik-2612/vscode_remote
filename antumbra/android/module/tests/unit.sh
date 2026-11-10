@@ -3336,6 +3336,200 @@ step_check "live list: status.json holds nothing of it" test -z "$(sed -n '/^sta
 expect "live list: the method and the provider" "module_carrier content://org.antumbra.welcome.state" "$PRIV_METHOD $WORD_URI"
 TB=$REAL_TB
 
+# --- MOD9: PH3's IMS switch (ims_ipv6_switch, ims_ifaces, ims_ipv6_refresh) ----------------
+IMS_IPV6_FILE=$LOGDIR/antumbra-ims-ipv6
+expect "ims_ipv6_switch: no file: off" 0 "$(ims_ipv6_switch)"
+printf 'on\n' >"$IMS_IPV6_FILE"
+expect "ims_ipv6_switch: on" 1 "$(ims_ipv6_switch)"
+printf 'on' >"$IMS_IPV6_FILE"
+expect "ims_ipv6_switch: on, no newline" 1 "$(ims_ipv6_switch)"
+for v in off ON 1 yes ' on' 'on ' 'on on' '' 'onn'; do
+	printf '%s\n' "$v" >"$IMS_IPV6_FILE"
+	expect "ims_ipv6_switch: [$v]: off" 0 "$(ims_ipv6_switch)"
+done
+printf 'junk\non\n' >"$IMS_IPV6_FILE"
+expect "ims_ipv6_switch: 'on' on the second line only: off" 0 "$(ims_ipv6_switch)"
+printf 'on\n' >"$IMS_IPV6_FILE"
+FAKE_GATE_OWNER=bad
+expect "ims_ipv6_switch: not root's alone: off" 0 "$(ims_ipv6_switch)"
+FAKE_GATE_OWNER=ok
+ln -s "$IMS_IPV6_FILE" "$LOGDIR/ims-ipv6-link"
+IMS_IPV6_FILE=$LOGDIR/ims-ipv6-link
+expect "ims_ipv6_switch: a link to 'on': off" 0 "$(ims_ipv6_switch)"
+IMS_IPV6_FILE=$LOGDIR/ims-ipv6-dir
+mkdir "$IMS_IPV6_FILE"
+expect "ims_ipv6_switch: a directory: off" 0 "$(ims_ipv6_switch)"
+IMS_IPV6_FILE=$LOGDIR/antumbra-ims-ipv6
+step_check "uninstall.sh deletes the IMS switch" grep -q -F '/data/adb/antumbra-ims-ipv6' "$MODULE/uninstall.sh"
+step_check "no module script writes the IMS switch" \
+	test -z "$(grep -n -E '^[^#]*>[^#]*antumbra-ims-ipv6' "$MODULE"/*.sh "$MODULE"/lib/*.sh)"
+step_check "service.sh reads the IMS switch once, at its start" \
+	test "$(grep -c 'ims_ipv6_switch' "$MODULE/service.sh")" = 1
+step_check "post-fs-data.sh never turns the IMS switch on" test -z "$(grep -n 'IMS_IPV6' "$MODULE/post-fs-data.sh")"
+
+# The dump as Android 16 prints 'dumpsys connectivity networks' (one line a
+# network): Wi-Fi with INTERNET; IMS without INTERNET, with a stacked link;
+# EIMS; IMS with INTERNET (some carriers' Internet APN); MMS.
+nai() { # ID IFACE CAPABILITIES [STACKED]
+	printf '  NetworkAgentInfo{network{%s}  handle{4329%s}  ni{MOBILE[LTE] CONNECTED extra: x}  lp{{InterfaceName: %s LinkAddresses: [ ] DnsAddresses: [ ] Domains: null MTU: 1280 Routes: [ ]%s}}  nc{[ Transports: CELLULAR Capabilities: %s Specifier: <TelephonyNetworkSpecifier [mSubId = 1]> ]}  factorySerialNumber=%s}\n' \
+		"$1" "$1" "$2" "${4:+ Stacked: [[ {InterfaceName: $4 LinkAddresses: [ ] MTU: 0 Routes: [ ]} ]]}" "$3" "$1"
+}
+IMSD=$LOGDIR/connectivity
+{
+	echo 'NetworkAgentInfo{network{100}  handle{432902426637}  ni{WIFI CONNECTED extra: "TestNet"}  lp{{InterfaceName: wlan0 LinkAddresses: [ ] Domains: null MTU: 0 Routes: [ ]}}  nc{[ Transports: WIFI Capabilities: NOT_METERED&INTERNET&NOT_RESTRICTED&TRUSTED&NOT_VPN&VALIDATED SSID: "TestNet" ]}  factorySerialNumber=1}'
+	echo '  Nat464Xlat:'
+	echo '    mBaseIface: wlan0, mIface: null, mState: IDLE'
+	nai 102 rmnet_data2 'IMS&NOT_METERED&NOT_RESTRICTED&TRUSTED&NOT_VPN&NOT_ROAMING' v4-rmnet_data2
+	nai 103 rmnet_data3 'EIMS&NOT_METERED&TRUSTED'
+	nai 104 rmnet_data4 'IMS&INTERNET&NOT_METERED&TRUSTED'
+	nai 105 rmnet_data5 'MMS&NOT_METERED&TRUSTED'
+} >"$IMSD"
+expect "ims_ifaces: IMS without INTERNET (its stacked link too) and EIMS; not IMS with INTERNET, not MMS, not Wi-Fi" \
+	"rmnet_data2 v4-rmnet_data2 rmnet_data3" "$(ims_ifaces <"$IMSD")"
+ims_ifaces <"$IMSD" >/dev/null
+expect "ims_ifaces: a dump with networks: status 0" 0 "$?"
+v=$({
+	nai 106 'rmnet/../x' 'IMS&TRUSTED'
+	nai 107 'rmnet_data7;x' 'IMS&TRUSTED'
+	nai 108 .. 'IMS&TRUSTED'
+	nai 109 rmnet_data9 'IMS&TRUSTED'
+} | ims_ifaces)
+expect "ims_ifaces: a bad interface name dropped" rmnet_data9 "$v"
+v=$({
+	nai 110 lo 'IMS&TRUSTED'
+	nai 111 wlan1 'IMS&TRUSTED'
+	nai 112 all 'IMS&TRUSTED' default
+	nai 113 rmnet_data1 'IMS&TRUSTED'
+	nai 114 rmnet_data1 'EIMS&TRUSTED'
+	nai 115 rmnet_data6 'IMS&TRUSTED'
+	nai 116 rmnet_data6 'INTERNET&TRUSTED'
+} | ims_ifaces)
+expect "ims_ifaces: never lo, wlan*, all, default or an interface of a network with INTERNET; each once" rmnet_data1 "$v"
+v=$({
+	nai 117 rmnet_data2 'IMSX&TRUSTED'
+	nai 118 rmnet_data3 'XEIMS&TRUSTED'
+	printf '  NetworkAgentInfo{network{120}  lp{{InterfaceName: rmnet_data5 }}  nc{[ Transports: CELLULAR Capabilities: IMS&TRUST'
+} | ims_ifaces)
+expect "ims_ifaces: whole capability names only; a line cut short skipped" "" "$v"
+v=$(nai 121 rmnet_data8 'IMS&TRUSTED' | sed 's/Capabilities: IMS&TRUSTED /Capabilities: IMS&TRUSTED/' | ims_ifaces)
+expect "ims_ifaces: a capability list not ended by a space: skipped" "" "$v"
+v=$(nai 122 rmnet_data8 'IMS&TRUSTED' | sed 's/^  NetworkAgentInfo/  x NetworkAgentInfo/' | ims_ifaces; echo "rc=$?")
+expect "ims_ifaces: NetworkAgentInfo{ not at the start of the line: not a network" "rc=1" "$v"
+v=$(printf '' | ims_ifaces; echo "rc=$?")
+expect "ims_ifaces: an empty dump: nothing, status 1" "rc=1" "$v"
+v=$(printf '%s\n' "Can't find service: connectivity" | ims_ifaces; echo "rc=$?")
+expect "ims_ifaces: a failed dump: nothing, status 1" "rc=1" "$v"
+v=$(nai 123 rmnet_data2 'IMS&TRUSTED' | cut -c1-200 | ims_ifaces; echo "rc=$?")
+expect "ims_ifaces: the only line cut short: nothing, status 1" "rc=1" "$v"
+v=$(nai 124 wlan0 'INTERNET&TRUSTED' | ims_ifaces; echo "rc=$?")
+expect "ims_ifaces: no IMS network: nothing left alone, status 0" "
+rc=0" "$v"
+
+# ims_ipv6_refresh, with the dump from IMSD (status 1 while IMSD_BAD=1).
+OLD_LOGDIR=$LOGDIR
+LOGDIR=$LOGDIR/imslog
+mkdir -p "$LOGDIR"
+# conn_dump runs in a command substitution: it counts its calls in a file.
+conn_dump() {
+	echo x >>"$LOGDIR/conn_dump.calls"
+	[ "${IMSD_BAD:-0}" = 0 ] || {
+		echo "Can't find service: connectivity"
+		return 1
+	}
+	cat "$IMSD"
+}
+imsd_n() { if [ -f "$LOGDIR/conn_dump.calls" ]; then grep -c . "$LOGDIR/conn_dump.calls"; else echo 0; fi; }
+IMS_IPV6=0 IMS_IF='' IMS_IF_OK='' IMS_IF_AT=''
+ims_ipv6_refresh 100 0 log
+expect "ims_ipv6_refresh: switch off: no dump, nothing left alone" "0 - " "$(imsd_n) ${IMS_IF_OK:--} $IMS_IF"
+IMS_IPV6=1
+ims_ipv6_refresh 100 0 log
+expect "ims_ipv6_refresh: switch on: read" "1 1 rmnet_data2 v4-rmnet_data2 rmnet_data3" "$(imsd_n) $IMS_IF_OK $IMS_IF"
+ims_ipv6_refresh 101 2
+rc=$?
+expect "ims_ipv6_refresh: within AGE: not read again, status 1" "1 1" "$(imsd_n) $rc"
+ims_ipv6_refresh 102 2
+rc=$?
+expect "ims_ipv6_refresh: after AGE: read again, status 0" "2 0" "$(imsd_n) $rc"
+ims_ipv6_refresh 50 2
+expect "ims_ipv6_refresh: a clock gone back: read again" 3 "$(imsd_n)"
+ims_ipv6_refresh 60 0 log
+expect "ims_ipv6_refresh: the same set: logged once" 1 "$(grep -c 'left as Android sets it on: rmnet_data2 v4-rmnet_data2 rmnet_data3$' "$LOGDIR/module.log")"
+IMSD_BAD=1
+ims_ipv6_refresh 70 0 log
+expect "ims_ipv6_refresh: an unreadable dump: fails closed" "0 -" "$IMS_IF_OK ${IMS_IF:--}"
+ims_ipv6_refresh 80 0 log
+expect "ims_ipv6_refresh: unreadable: logged once" 1 "$(grep -c 'could not be read; IPv6 off on every interface' "$LOGDIR/module.log")"
+IMSD_BAD=0
+nai 124 wlan0 'INTERNET&TRUSTED' >"$IMSD"
+ims_ipv6_refresh 90 0 log
+expect "ims_ipv6_refresh: no IMS network" "1 -" "$IMS_IF_OK ${IMS_IF:--}"
+expect "ims_ipv6_refresh: three changes, three lines" 3 "$(grep -c 'IMS switch (MOD9)' "$LOGDIR/module.log")"
+: >"$IMSD"
+ims_ipv6_refresh 95 0
+expect "ims_ipv6_refresh: an empty dump: fails closed (not logged without 'log')" "0 3" \
+	"$IMS_IF_OK $(grep -c 'IMS switch (MOD9)' "$LOGDIR/module.log")"
+
+# ipv6_sweep and ipv6_pending on a stand-in for /proc/sys/net/ipv6/conf:
+# every interface with IPv6 and router advertisements on (as NetworkStack
+# leaves them), loopback included.
+v6_reset() {
+	rm -rf "$IPV6_CONF"
+	for i in all default lo d0 wlan0 rmnet_data2 rmnet_data9; do
+		mkdir -p "$IPV6_CONF/$i"
+		echo 0 >"$IPV6_CONF/$i/disable_ipv6"
+		echo 1 >"$IPV6_CONF/$i/accept_ra"
+		echo 1 >"$IPV6_CONF/$i/autoconf"
+	done
+}
+v6() { # the three values of each interface, "IFACE:DAU"
+	for i in all default lo d0 wlan0 rmnet_data2 rmnet_data9; do
+		printf '%s:%s%s%s ' "$i" "$(cat "$IPV6_CONF/$i/disable_ipv6")" "$(cat "$IPV6_CONF/$i/accept_ra")" \
+			"$(cat "$IPV6_CONF/$i/autoconf")"
+	done
+}
+OLD_IPV6_CONF=$IPV6_CONF
+IPV6_CONF=$LOGDIR/v6conf
+v6_reset
+IMS_IPV6=0 IMS_IF=rmnet_data2 IMS_IF_OK=1
+ipv6_sweep
+expect "ipv6_sweep: switch off: every interface and all off, loopback on" \
+	"all:100 default:100 lo:011 d0:100 wlan0:100 rmnet_data2:100 rmnet_data9:100 " "$(v6)"
+expect "ipv6_sweep: switched-off interfaces logged (not all, not default)" 4 "$(grep -c 'ipv6: switched off again on' "$LOGDIR/module.log")"
+v6_reset
+IMS_IPV6=1 IMS_IF=rmnet_data2 IMS_IF_OK=1
+ipv6_sweep
+expect "ipv6_sweep: switch on: the IMS interface and all left alone, the others off" \
+	"all:011 default:100 lo:011 d0:100 wlan0:100 rmnet_data2:011 rmnet_data9:100 " "$(v6)"
+ipv6_pending
+expect "ipv6_pending: nothing to switch off" 1 "$?"
+echo 0 >"$IPV6_CONF/rmnet_data2/disable_ipv6"
+ipv6_pending
+expect "ipv6_pending: the IMS interface on: nothing" 1 "$?"
+echo 0 >"$IPV6_CONF/d0/disable_ipv6"
+ipv6_pending
+expect "ipv6_pending: d0 switched on again: pending" 0 "$?"
+v6_reset
+IMS_IPV6=1 IMS_IF='' IMS_IF_OK=1
+ipv6_sweep
+expect "ipv6_sweep: switch on, no IMS network: all left alone, every interface off" \
+	"all:011 default:100 lo:011 d0:100 wlan0:100 rmnet_data2:100 rmnet_data9:100 " "$(v6)"
+v6_reset
+IMS_IPV6=1 IMS_IF=rmnet_data2 IMS_IF_OK=0
+ipv6_sweep
+expect "ipv6_sweep: switch on, the dump unreadable: fails closed, all too" \
+	"all:100 default:100 lo:011 d0:100 wlan0:100 rmnet_data2:100 rmnet_data9:100 " "$(v6)"
+v6_reset
+IMS_IPV6=1 IMS_IF=rmnet_data2 IMS_IF_OK=''
+ipv6_sweep
+expect "ipv6_sweep: switch on, not read yet: fails closed" \
+	"all:100 default:100 lo:011 d0:100 wlan0:100 rmnet_data2:100 rmnet_data9:100 " "$(v6)"
+IPV6_CONF=$OLD_IPV6_CONF
+expect "ipv6_sweep: /proc's tree on the phone" /proc/sys/net/ipv6/conf "$IPV6_CONF"
+LOGDIR=$OLD_LOGDIR
+IMS_IPV6=0 IMS_IF='' IMS_IF_OK='' IMS_IF_AT=''
+unset -f conn_dump nai v6_reset v6
+
 # --- MOD10: PH3's NFLOG opt-in (nflog_group, fw) -------------------------------------------
 NFLOG_FILE=$LOGDIR/antumbra-nflog
 expect "nflog_group: no file: none" "" "$(nflog_group)"
@@ -3539,7 +3733,8 @@ echo NONE >"$KR/proc/sys/net/netfilter/nf_log/2"
 : >"$KR/proc/net/netfilter/nfnetlink_log"
 printf 'phone\n' >"$KR/data/adb/antumbra-cell"
 printf '29\n' >"$KR/data/adb/antumbra-nflog"
-chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog"
+printf 'on\n' >"$KR/data/adb/antumbra-ims-ipv6"
+chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog" "$KR/data/adb/antumbra-ims-ipv6"
 printf 'session_id=0123456789abcdef0123456789abcdef\ntor_mode=direct\nmac=new\ncell=phone\ngate=phone\n' \
 	>"$KR/data/adb/antumbra/state/module/session"
 cp "$PKG_LIST" "$KR/data/system/packages.list"
@@ -3644,18 +3839,23 @@ step_check "kit: the phone" has 'android 16 (sdk 36), build type userdebug, debu
 step_check "kit: the firewall's state" has "module $(sed -n 's/^version=//p' "$MODULE/module.prop"), firewall live"
 step_check "kit: the session's choices" has 'Phone-mode gate now: phone; the session: tor_mode=direct cell=phone gate=phone '
 step_check "kit: the NFLOG opt-in" has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): group 29"
+step_check "kit: the IMS switch" has "PH3's IMS switch (/data/adb/antumbra-ims-ipv6): on (service.sh reads it at its start)"
+step_check "kit: the interfaces the IMS switch leaves alone (the library's reading)" \
+	has "the IMS switch would leave IPv6 alone on: rmnet_data2 v4-rmnet_data2 rmnet_data3"
 # The owner check holds: files of another owner, or that the group or
 # others may write, are refused; without --owner they must be root's.
 [ "$KOWN" = 0 ] && KOTHER=1 || KOTHER=0
 kit --owner "$KOTHER"
 step_check "kit: a gate and an opt-in of another owner refused" eval "has 'PH3'\''s NFLOG opt-in (/data/adb/antumbra-nflog): none' &&
+	grep -q -F 'IMS switch (/data/adb/antumbra-ims-ipv6): off ' \"\$K/report\" &&
 	grep -q '^Phone-mode gate now: off; ' \"\$K/report\""
-chmod 620 "$KR/data/adb/antumbra-nflog"
+chmod 620 "$KR/data/adb/antumbra-nflog" "$KR/data/adb/antumbra-ims-ipv6"
 chmod 602 "$KR/data/adb/antumbra-cell"
 kit
 step_check "kit: a gate and an opt-in the group or others may write refused" eval "has 'PH3'\''s NFLOG opt-in (/data/adb/antumbra-nflog): none' &&
+	grep -q -F 'IMS switch (/data/adb/antumbra-ims-ipv6): off ' \"\$K/report\" &&
 	grep -q '^Phone-mode gate now: off; ' \"\$K/report\""
-chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog"
+chmod 600 "$KR/data/adb/antumbra-cell" "$KR/data/adb/antumbra-nflog" "$KR/data/adb/antumbra-ims-ipv6"
 kit_as_phone
 if [ "$KOWN" = 0 ]; then
 	step_check "kit as on the phone (run as root): root's files taken" has "PH3's NFLOG opt-in (/data/adb/antumbra-nflog): group 29"

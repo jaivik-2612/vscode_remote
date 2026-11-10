@@ -2725,11 +2725,27 @@ priv_tell() {
 # ipv6_sweep: switch IPv6 off and router advertisements off on every
 # interface except loopback (Android needs ::1). Android's NetworkStack
 # switches IPv6 back on for each network it brings up, so this runs again
-# whenever an interface or address changes (ipv6_guard).
+# whenever an interface or address changes (ipv6_guard). With MOD9's
+# switch on (IMS_IPV6=1, service.sh only) and the connectivity dump read
+# (IMS_IF_OK=1), the interfaces in IMS_IF are left as Android sets them
+# (no disable_ipv6, accept_ra or autoconf write), and "all" is not
+# written, since writing it switches IPv6 off on every interface; "default"
+# and every other interface are switched off as before. Otherwise (the
+# switch off, as installed, or the dump unreadable) every interface and
+# "all" are. (IPV6_CONF: the unit tests' stand-in for /proc's tree.)
+IPV6_CONF=/proc/sys/net/ipv6/conf
 ipv6_sweep() {
-	for _is_d in /proc/sys/net/ipv6/conf/*; do
+	_is_keep=
+	_is_all=1
+	if [ "${IMS_IPV6:-0}" = 1 ] && [ "${IMS_IF_OK:-0}" = 1 ]; then
+		_is_all=0
+		_is_keep=" ${IMS_IF-} "
+	fi
+	for _is_d in "$IPV6_CONF"/*; do
 		_is_i=${_is_d##*/}
 		[ "$_is_i" = lo ] && continue
+		[ "$_is_i" = all ] && [ "$_is_all" = 0 ] && continue
+		case $_is_keep in *" $_is_i "*) continue ;; esac
 		[ -w "$_is_d/disable_ipv6" ] || continue
 		_is_v=$(read_value "$_is_d/accept_ra")
 		[ "$_is_v" = 0 ] || write_value "$_is_d/accept_ra" 0
@@ -2742,9 +2758,135 @@ ipv6_sweep() {
 		fi
 	done
 	# Writing 1 to "all" also switches loopback off; switch it back on.
-	[ "$(read_value /proc/sys/net/ipv6/conf/lo/disable_ipv6)" = 0 ] ||
-		write_value /proc/sys/net/ipv6/conf/lo/disable_ipv6 0
+	[ "$(read_value "$IPV6_CONF/lo/disable_ipv6")" = 0 ] ||
+		write_value "$IPV6_CONF/lo/disable_ipv6" 0
 	return 0
+}
+
+# --- MOD9: IPv6 left on for IMS, PH3's switch ---------------------------------------
+
+# For PH3's measurement only (module README, "PH3's IMS switch"): the
+# owner may write "on", by hand, into this root-only file; from the next
+# start of service.sh the IPv6 sweep then leaves alone the interfaces of
+# the networks with the IMS or EIMS capability and without INTERNET, as
+# 'dumpsys connectivity' shows them. It changes no firewall rule: the
+# firewall refuses IMS traffic as before (FW6 is a later step). As
+# installed there is no file and the sweep is as before.
+IMS_IPV6_FILE=/data/adb/antumbra-ims-ipv6
+
+# ims_ipv6_switch: 1 when IMS_IPV6_FILE is a regular file of root's that
+# neither its group nor others may write (cell_gate_owner_ok), not a link,
+# whose first line is exactly "on"; 0 otherwise. service.sh reads it once,
+# at its start (IMS_IPV6).
+ims_ipv6_switch() {
+	if [ -f "$IMS_IPV6_FILE" ] && [ ! -L "$IMS_IPV6_FILE" ] && cell_gate_owner_ok "$IMS_IPV6_FILE" &&
+		[ "$(read_value "$IMS_IPV6_FILE")" = on ]; then
+		echo 1
+	else
+		echo 0
+	fi
+}
+
+# conn_dump: 'dumpsys connectivity networks' (one line per network,
+# NetworkAgentInfo{...}), bounded as cell_dump is.
+conn_dump() { $TB timeout 4 /system/bin/dumpsys -t 3 connectivity networks 2>/dev/null; }
+
+# ims_ifaces: read 'dumpsys connectivity networks' on standard input and
+# print, on one line and separated by spaces, the interfaces (InterfaceName,
+# stacked links too) of the networks whose Capabilities include IMS or EIMS
+# and not INTERNET. An interface of a network with INTERNET is never
+# printed, nor lo, all, default or wlan*, nor a name other than
+# [A-Za-z0-9_.-] (and . and ..). Only whole lines count: a network's line
+# that starts with NetworkAgentInfo{ and whose capability list ends in a
+# space (a line cut short is skipped). Returns 1, printing nothing, when no
+# such line was read (the dump empty, cut short or not the right one): the
+# sweep then leaves nothing alone.
+ims_ifaces() {
+	_ii_n=0
+	_ii_keep=
+	_ii_net=
+	while IFS= read -r _ii_l; do
+		case $_ii_l in *'NetworkAgentInfo{'*) ;; *) continue ;; esac
+		_ii_h=${_ii_l%%NetworkAgentInfo\{*}
+		case $_ii_h in *[!' ']*) continue ;; esac
+		case $_ii_l in *'Capabilities: '*) ;; *) continue ;; esac
+		_ii_c=${_ii_l#*Capabilities: }
+		_ii_r=${_ii_c%%[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_\&]*}
+		case ${_ii_c#"$_ii_r"} in ' '*) ;; *) continue ;; esac
+		_ii_n=$((_ii_n + 1))
+		case "&$_ii_r&" in
+		*'&INTERNET&'*) _ii_k=net ;;
+		*'&IMS&'* | *'&EIMS&'*) _ii_k=ims ;;
+		*) continue ;;
+		esac
+		_ii_s=$_ii_l
+		while :; do
+			case $_ii_s in *'InterfaceName: '*) ;; *) break ;; esac
+			_ii_s=${_ii_s#*InterfaceName: }
+			_ii_i=${_ii_s%%[' 	']*}
+			case $_ii_i in
+			'' | . | .. | *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-]*) continue ;;
+			esac
+			if [ "$_ii_k" = net ]; then
+				_ii_net="$_ii_net $_ii_i"
+			else
+				_ii_keep="$_ii_keep $_ii_i"
+			fi
+		done
+	done
+	[ "$_ii_n" -gt 0 ] || return 1
+	_ii_o=
+	for _ii_i in $_ii_keep; do
+		case $_ii_i in lo | all | default | wlan*) continue ;; esac
+		case "$_ii_net " in *" $_ii_i "*) continue ;; esac
+		case "$_ii_o " in *" $_ii_i "*) continue ;; esac
+		_ii_o="$_ii_o $_ii_i"
+	done
+	printf '%s\n' "${_ii_o# }"
+}
+
+# ims_ipv6_refresh NOW AGE [log]: with the switch on (IMS_IPV6=1), read the
+# interfaces to leave alone again (IMS_IF, and IMS_IF_OK: 1 when the dump
+# was read, 0 when not: then nothing is left alone) unless the last reading
+# is younger than AGE seconds (then returns 1). With "log", a reading that
+# differs from the last one is logged (one line per change; the 10-second
+# loop alone logs, so that each change is logged once). Does nothing with
+# the switch off.
+ims_ipv6_refresh() {
+	[ "${IMS_IPV6:-0}" = 1 ] || return 0
+	if [ -n "${IMS_IF_AT-}" ] && [ "$1" -ge "$IMS_IF_AT" ] && [ $(($1 - IMS_IF_AT)) -lt "$2" ]; then
+		return 1
+	fi
+	IMS_IF_AT=$1
+	if _ir_d=$(conn_dump) && _ir_s=$(printf '%s\n' "$_ir_d" | ims_ifaces); then
+		_ir_ok=1
+	else
+		_ir_ok=0
+		_ir_s=
+	fi
+	if [ "${3-}" = log ] && { [ "$_ir_ok" != "${IMS_IF_OK-}" ] || [ "$_ir_s" != "${IMS_IF-}" ]; }; then
+		if [ "$_ir_ok" = 1 ]; then
+			log "ipv6: IMS switch (MOD9): IPv6 left as Android sets it on: ${_ir_s:-no interface}"
+		else
+			log "ipv6: IMS switch (MOD9): the connectivity dump could not be read; IPv6 off on every interface"
+		fi
+	fi
+	IMS_IF_OK=$_ir_ok
+	IMS_IF=$_ir_s
+}
+
+# ipv6_pending: true when the sweep would switch IPv6 off on an interface
+# now: one not left alone (IMS_IF) reads other than 1. Only Android's
+# NetworkStack switches IPv6 on; the sweep itself only switches it off.
+ipv6_pending() {
+	for _pe_d in "$IPV6_CONF"/*; do
+		_pe_i=${_pe_d##*/}
+		case $_pe_i in lo | all) continue ;; esac
+		case " ${IMS_IF-} " in *" $_pe_i "*) continue ;; esac
+		[ -w "$_pe_d/disable_ipv6" ] || continue
+		[ "$(read_value "$_pe_d/disable_ipv6")" = 1 ] || return 0
+	done
+	return 1
 }
 
 # --- Runtime directory ------------------------------------------------------------------

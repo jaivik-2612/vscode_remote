@@ -17,7 +17,9 @@
 #      prefix>';
 #   4. run/status.json;
 #   5. IPv6 off on every interface, again whenever NetworkStack switches it
-#      on; Wi-Fi calling and video calling kept off (MOD7: their force-on
+#      on (with PH3's IMS switch, MOD9, written by hand, not on those of
+#      IMS and EIMS networks without INTERNET); Wi-Fi calling and video
+#      calling kept off (MOD7: their force-on
 #      properties read every 30 seconds from the first turn and set to 0
 #      again if something wrote another value, but not during a call,
 #      callback mode or the 5 minutes after a call);
@@ -479,17 +481,40 @@ ports_check() {
 	fi
 }
 
+# PH3's IMS switch (MOD9; lib/antumbra.sh, IMS_IPV6_FILE), read once, here:
+# a change takes effect from the next start. Off as installed.
+IMS_IPV6=$(ims_ipv6_switch)
+IMS_IF=
+IMS_IF_OK=
+IMS_IF_AT=
+[ "$IMS_IPV6" = 1 ] &&
+	log "ipv6: IMS switch (MOD9) on: IPv6 left as Android sets it on the interfaces of IMS and EIMS networks without INTERNET"
+
 # ipv6_guard: switch IPv6 off at once whenever an interface or address
-# changes (ip monitor), and every 10 seconds in any case.
+# changes (ip monitor), and every 10 seconds in any case. With the IMS
+# switch on, the interfaces to leave alone are read again from the
+# connectivity dump before each sweep: every 10 seconds, and at a change
+# unless that loop read it less than 2 seconds before (a burst of changes,
+# most of them the sweep's own, reads it once); if Android has switched
+# IPv6 on somewhere meanwhile (ipv6_pending), the sweep waits those 2
+# seconds and reads it again, so that a network that has just come up is
+# seen before its interface is switched off. Only the 10-second loop logs
+# a new set.
 ipv6_guard() {
+	[ "$IMS_IPV6" = 1 ] && ims_ipv6_refresh "$(uptime_s)" 0 log
 	ipv6_sweep
 	if [ -x /system/bin/ip ]; then
 		/system/bin/ip -o monitor link address 2>/dev/null | while read -r _ig_line; do
+			if [ "$IMS_IPV6" = 1 ] && ! ims_ipv6_refresh "$(uptime_s)" 2 && ipv6_pending; then
+				sleep 2
+				ims_ipv6_refresh "$(uptime_s)" 2
+			fi
 			ipv6_sweep
 		done &
 	fi
 	while :; do
 		sleep 10
+		[ "$IMS_IPV6" = 1 ] && ims_ipv6_refresh "$(uptime_s)" 0 log
 		ipv6_sweep
 	done
 }

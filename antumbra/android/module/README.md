@@ -171,7 +171,8 @@ the person may set by hand for tor.
 5. **IPv6 guard**: NetworkStack switches IPv6 back on for every network it
    brings up. A background loop switches it off again on every interface
    whenever `ip monitor` reports a link or address change, and every 10
-   seconds in any case. **Wi-Fi calling and video calling** (MOD7): their
+   seconds in any case (with PH3's IMS switch on, not on the interfaces of
+   IMS and EIMS networks without INTERNET; below, "PH3's IMS switch"). **Wi-Fi calling and video calling** (MOD7): their
    two force-on properties read in the loop's first turn and every 30
    seconds, and set to 0 again, in memory only and without a record, if
    something wrote another value after post-fs-data (stored values are
@@ -1044,6 +1045,33 @@ with no listener the kernel drops the copies. As installed there is no
 file and no NFLOG rule; nothing in the module or Welcome writes it, and
 `uninstall.sh` deletes it.
 
+### PH3's IMS switch (MOD9)
+
+PH3 measures IMS once with the IPv6 sweep as it is and once with IPv6 left
+on for IMS. For that measurement only, the owner may write `on` into the
+root-only file `/data/adb/antumbra-ims-ipv6` (a regular file of root's that
+neither group nor others may write, not a link, first line exactly `on`;
+anything else is off). `service.sh` reads it once, at its start, and logs
+one line when it is on. Then the IPv6 guard reads `dumpsys connectivity
+networks` before each sweep (every 10 seconds, and at a link or address
+change, at most once in 2 seconds) and leaves alone the interfaces of the
+networks whose capabilities include IMS or EIMS and not INTERNET
+(`ims_ifaces`: their `InterfaceName`s, stacked links too, each checked
+against `[A-Za-z0-9_.-]`): no `disable_ipv6`, `accept_ra` or `autoconf`
+write, so IPv6 stays as Android's NetworkStack sets it there. `all` is not
+written (writing it switches IPv6 off on every interface); `default` and
+every other interface are switched off as before, and `lo`, `default`,
+`wlan*` and the interfaces of networks with INTERNET are never left alone.
+When the dump fails, is empty or holds no whole network line, nothing is
+left alone that time, `all` included (fail closed). Each new set is logged
+once. The firewall is unchanged: it still drops IPv6 and refuses IMS
+traffic (its IMS exemption is FW6). Nothing changes for calls, emergency
+calls, emergency location, the radio or the modem; the switch only makes
+the sweep leave those interfaces' IPv6 alone. As installed there is no
+file and the sweep is as before (the dump is never read); nothing in the
+module or Welcome writes it, and `uninstall.sh` deletes it. The kit
+(below) reports the switch and the interfaces it would leave alone.
+
 ### Wi-Fi calling and video calling off (MOD7)
 
 Android's `ImsManager` reads `persist.dbg.wfc_avail_ovr`,
@@ -1134,9 +1162,9 @@ It prints one report on standard output:
 
 - the phone (Android version, build type, whether it is the emulator), the
   module's version, the firewall's state, this phone's Phone-mode gate,
-  the session's choices, the NFLOG opt-in, airplane mode, the SIM's state,
-  the radio and whether a call or callback mode is on, and whether the
-  phone process's dump was read or skipped (and why);
+  the session's choices, the NFLOG opt-in, the IMS switch (MOD9), airplane
+  mode, the SIM's state, the radio and whether a call or callback mode is
+  on, and whether the phone process's dump was read or skipped (and why);
 - the counters of every `ANTUMBRA_` chain in the raw, mangle, nat and
   filter tables, IPv4 and IPv6 (`iptables -L -v -n`; never `-Z`);
 - NFLOG: the group the rules carry, and with `--listen SECONDS` what the
@@ -1148,7 +1176,8 @@ It prints one report on standard output:
   prefix length;
 - every network (`dumpsys connectivity networks`): its transports, its
   interfaces (stacked ones too) and its capabilities, with IMS and EIMS
-  marked and whether it has INTERNET;
+  marked and whether it has INTERNET; and the interfaces the IMS switch
+  would leave IPv6 alone on (the library's own reading, `ims_ifaces`);
 - the IMS registration, by MOD11's own parser (`ims_state`) of the phone
   process's dump (skipped as above);
 - each data connection (APN) in the registry: its types, state, transport,
@@ -1669,7 +1698,11 @@ phone the rest.
 - IPv6: between NetworkStack switching IPv6 on and the guard switching it
   off (events, at most 10 s), the interface has IPv6 on. The firewall
   drops all IPv6 on it meanwhile, router advertisements included, so no
-  global address is assigned; a link-local one can exist briefly.
+  global address is assigned; a link-local one can exist briefly. With
+  PH3's IMS switch on, the sweep waits for the connectivity dump (at most
+  4 s, and 2 s more when it was read just before), and an IMS interface
+  switched off before its network shows in the dump stays off until
+  Android switches IPv6 on there again.
 - The filter must bind `127.0.0.1:5335` before any other uid. It starts
   first in `service.sh`, but after zygote; if another uid holds the port,
   DNS stays off and the firewall stays armed (closed, not open).
