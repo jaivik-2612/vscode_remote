@@ -1052,6 +1052,43 @@ class DestinationsTest(TempDir):
                                               "250-version=0.4.9.3\n250 OK\n")
         self.assertEqual(a["destinations"]["status"], "not-recorded")
 
+    def test_forbidden(self):
+        self.assertEqual(la.forbidden_kind("xtrapath1.izatcloud.net."), "location assistance")
+        self.assertEqual(la.forbidden_kind("SUPL.google.com"), "location assistance")
+        self.assertEqual(la.forbidden_kind("path1.xtracloud.net"), "location assistance")
+        self.assertEqual(la.forbidden_kind("epdg.epc.mnc001.mcc001.pub.3gppnetwork.org"),
+                         "the mobile network's own names")
+        self.assertIsNone(la.forbidden_kind("google.com"))
+        self.assertIsNone(la.forbidden_kind("notizatcloud.net"))
+        self.assertIsNone(la.forbidden_kind("www.gstatic.com"))
+        # Blocked by the filter: listed, not reached, the run passes.
+        blocked = FILTER_LOG + ('antumbra-dnsfilter: 2026/10/11 06:38:21 query "xtrapath1.izatcloud.net." A -> blocked\n'
+                                'antumbra-dnsfilter: 2026/10/11 06:38:21 query "ims.mnc001.mcc001.3gppnetwork.org." '
+                                'NAPTR -> blocked\n')
+        extra = ["--filter-log", self.write("dnsfilter.log", blocked),
+                 "--expected-destinations", self.write("expected.txt", EXPECTED), "--destinations-mode", "learning",
+                 "--tor-streams", self.write("streams.txt", STREAMS)]
+        rc, a = self.analyse(base_frames(), extra=extra)
+        self.assertEqual((a["verdict"], rc), ("pass", 0), a["verdict_reasons"])
+        self.assertEqual(a["destinations"]["forbidden"], [])
+        # Forwarded by the filter, or resolved by tor: the run fails, in
+        # learning mode too, even when the expected list covers the name.
+        for log, streams in (
+                (FILTER_LOG + 'antumbra-dnsfilter: 2026/10/11 06:38:21 query "supl.google.com." A -> forwarded\n',
+                 STREAMS),
+                (FILTER_LOG, STREAMS + "650 STREAM 9 NEWRESOLVE 0 epdg.epc.mnc001.mcc001.pub.3gppnetwork.org:0 "
+                                       "PURPOSE=DNS_REQUEST\n")):
+            extra = ["--filter-log", self.write("dnsfilter.log", log),
+                     "--expected-destinations", self.write("expected.txt", EXPECTED + "name *.google.com\n"
+                                                           "name *.3gppnetwork.org\n"),
+                     "--destinations-mode", "learning", "--tor-streams", self.write("streams.txt", streams)]
+            rc, a = self.analyse(base_frames(), extra=extra)
+            self.assertEqual((a["verdict"], rc), ("fail", 1), a["verdict_reasons"])
+            self.assertEqual(len(a["destinations"]["forbidden"]), 1)
+            self.assertIn("must never leave the phone", a["verdict_reasons"][-1])
+        la.main(["report", "--in", self.path("a.json"), "--json", self.path("r.json"), "--md", self.path("r.md")])
+        self.assertIn("Must never leave the phone", read(self.path("r.md")))
+
 
 class CitoolTest(TempDir):
     XML = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><hierarchy rotation="0">

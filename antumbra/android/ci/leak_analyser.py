@@ -976,6 +976,30 @@ def event_time(events, name, after=None):
     return None
 
 
+# Names that must never be looked up through Tor, whatever the expected
+# list says: Qualcomm's and Google's location assistance (queue item DNS5;
+# they learn the chipset, the cell or the position) and the mobile
+# network's own names (DNS6; they tell an exit which carrier the phone is
+# on). The DNS filter blocks them all (lists/antumbra-extra.txt); a run in
+# which one reached tor fails in either mode.
+FORBIDDEN_NAMES = (
+    ("izatcloud.net", "location assistance"),
+    ("gpsonextra.net", "location assistance"),
+    ("xtracloud.net", "location assistance"),
+    ("supl.google.com", "location assistance"),
+    ("3gppnetwork.org", "the mobile network's own names"),
+)
+
+
+def forbidden_kind(name):
+    """The kind of FORBIDDEN_NAMES entry that covers name, or None."""
+    n = name.lower().rstrip(".")
+    for d, kind in FORBIDDEN_NAMES:
+        if n == d or n.endswith("." + d):
+            return kind
+    return None
+
+
 def destinations(args, notes, errors):
     """Names and destinations through Tor (see "Names and destinations
     through Tor" above), or None when neither record was given."""
@@ -1045,10 +1069,14 @@ def destinations(args, notes, errors):
         t["names"].update(normalise_name(h) for h in remapped)
 
     unexpected = []
+    forbidden = []
     name_rows = sorted(names.values(), key=lambda r: r["name"])
     for r in name_rows:
         r["types"] = sorted(r["types"])
         r["expected"] = name_expected(r["name"], expected["name"])
+        kind = forbidden_kind(r["name"])
+        if r["reached"] and kind:
+            forbidden.append("%s (%s)" % (repr(r["name"])[1:-1], kind))
         if r["reached"] and not r["expected"]:
             how = []
             if r["tor_resolves"]:
@@ -1076,7 +1104,7 @@ def destinations(args, notes, errors):
     if args.filter_log and not sources["filter_debug"]:
         notes.append("the DNS filter did not run with -debug-log-queries: the names it blocked are not listed")
     return {"mode": mode, "status": status, "sources": sources, "names": name_rows,
-            "targets": target_rows, "unexpected": unexpected,
+            "targets": target_rows, "unexpected": unexpected, "forbidden": forbidden,
             "expected_file": args.expected_destinations}
 
 
@@ -1626,6 +1654,11 @@ def analyse(args):
         elif dest is not None and dest["unexpected"]:
             notes.append("%d name(s) or destination(s) through Tor are not on the expected list "
                          "(learning mode: listed, not judged)" % len(dest["unexpected"]))
+        if dest is not None and dest.get("forbidden"):
+            if verdict in ("pass", "blind"):
+                verdict = "fail"
+            reasons.append("%d name(s) that must never leave the phone reached Tor: %s" % (
+                len(dest["forbidden"]), "; ".join(dest["forbidden"][:5])))
         if verdict == "pass":
             reasons.append("zero LEAK after arm (%d packets after arm, %d of them to the Tor network)"
                            % (sum(phase_counts.get("post-arm", {}).values()), tor_after_arm))
@@ -1928,6 +1961,12 @@ def destinations_md(d):
                      "an unexpected one fails the run" if d.get("mode") == "strict"
                      else "unexpected ones are listed, not judged yet"))
     lines.append("")
+    if d.get("forbidden"):
+        lines.append("**Must never leave the phone, but reached Tor (%d):**" % len(d["forbidden"]))
+        lines.append("")
+        for u in d["forbidden"][:100]:
+            lines.append("- " + _md_escape(u))
+        lines.append("")
     if d.get("unexpected"):
         lines.append("**Not on the expected list (%d):**" % len(d["unexpected"]))
         lines.append("")

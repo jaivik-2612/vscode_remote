@@ -15,13 +15,22 @@
 stats.lineageos.org
 
 # Qualcomm location assistance: XTRA satellite data and the izat location
-# services, which identify the chipset to Qualcomm's servers.
+# services, which identify the chipset to Qualcomm's servers. Newer XTRA
+# clients use xtracloud.net. A future module step may fetch this data
+# through Tor for the GNSS chip alone (MOD14); apps never reach it.
 izatcloud.net
 gpsonextra.net
+xtracloud.net
 
 # SUPL (assisted GPS) server set by AOSP; it learns the phone's cell and
 # position.
 supl.google.com
+
+# The mobile network's own names (IMS, ePDG, P-CSCF and the like, under
+# 3gppnetwork.org). They mean something only inside a carrier's network:
+# looked up at a Tor exit they fail anyway and tell the exit which carrier
+# the phone is on. Wi-Fi calling is off and the firewall refuses its tunnel.
+3gppnetwork.org
 
 # Remote key provisioning: Android fetching attestation keys from Google,
 # which ties the device to a Google request. The OnePlus 7T Pro's keystore

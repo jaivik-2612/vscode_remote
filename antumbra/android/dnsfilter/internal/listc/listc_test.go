@@ -404,4 +404,21 @@ func TestShippedSources(t *testing.T) {
 			t.Errorf("antumbra-extra.txt does not block %s", want)
 		}
 	}
+	// Location assistance (DNS5) and the mobile network's own names (DNS6)
+	// must stay blocked whatever the remote lists do, and allow.txt must
+	// not open them again.
+	allow, _, err := readDomainFile(filepath.Join(dir, "allow.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"izatcloud.net", "xtrapath1.izatcloud.net", "gpsonextra.net",
+		"xtrapath2.gpsonextra.net", "xtracloud.net", "path1.xtracloud.net", "supl.google.com",
+		"3gppnetwork.org", "epdg.epc.mnc001.mcc001.pub.3gppnetwork.org"} {
+		if !blocklist.Covers(sortedSet(own), want) {
+			t.Errorf("antumbra-extra.txt does not block %s", want)
+		}
+		if blocklist.Covers(sortedSet(allow), want) {
+			t.Errorf("allow.txt opens %s", want)
+		}
+	}
 }
