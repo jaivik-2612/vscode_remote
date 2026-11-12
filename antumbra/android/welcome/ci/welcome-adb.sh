@@ -1992,7 +1992,7 @@ cmd_check_position() {
             fi
         else
             left="no second search"
-            if [ "$en" = missing ]; then
+            if [ "$en" = missing ] || [ -z "$en" ]; then
                 problems+=("Show my position was not offered again (no position_button on the page)")
             else
                 problems+=("Show my position was not offered again (position_button shown, enabled=$en; status card: '$(view_row position_status | cut -f2 || true)')")
@@ -2212,13 +2212,23 @@ cmd_check_carrier() {
 # checked) and read back checked. locate may have scrolled to find the
 # row, and a tap while the page still moves lands where the row no longer
 # is (run 33: 'On for apps you choose' stayed unchosen after one tap), so
-# the row is located again once the page has settled before each tap, and
-# tapped at most three times.
+# the row is brought away from the screen's edges and located again once
+# the page has settled before each tap, and tapped at most three times.
 choose_row() {
-    local x y c _e try
+    local x y c _e try w h
+    read -r w h < <(screen_size)
     for try in 1 2 3; do
         read -r x y c _e < <(locate "$1") || return 1
         [ "$c" != true ] || return 0
+        # A row at the screen's edge may sit under the status or navigation
+        # bar, where a tap at its centre reaches the system bar instead
+        # (run 35: location_apps at [42,0][1038,158], never checked).
+        # Bring it to the middle with a slow drag that does not fling.
+        if [ "$y" -lt $((h / 6)) ]; then
+            a shell input swipe $((w / 2)) $((h * 4 / 10)) $((w / 2)) $((h * 4 / 10 + h / 2 - y)) 900
+        elif [ "$y" -gt $((h * 5 / 6)) ]; then
+            a shell input swipe $((w / 2)) $((h * 6 / 10)) $((w / 2)) $((h * 6 / 10 - (y - h / 2))) 900
+        fi
         sleep 1
         read -r x y c _e < <(locate "$1") || return 1
         [ "$c" != true ] || return 0
