@@ -2229,6 +2229,35 @@ choose_row() {
     [ "$c" = true ]
 }
 
+# row_state ID: what the screen shows of row ID when choosing it failed,
+# for the log: its attributes (or "not on screen"), the radio rows near
+# it and the focused window.
+row_state() {
+    local xml focus
+    xml=$(dump_ui || true)
+    focus=$(a shell dumpsys window 2>/dev/null | grep -m1 -oE 'mCurrentFocus=[^ ]+ [^ ]+ [^ }]+' || true)
+    printf '%s' "$xml" | python3 -I -c '
+import sys, xml.etree.ElementTree as ET
+want = sys.argv[1]
+try:
+    root = ET.fromstring(sys.stdin.read())
+except ET.ParseError:
+    print("no readable dump", end="")
+    sys.exit(0)
+keys = ("bounds", "checked", "selected", "checkable", "enabled", "clickable", "focused")
+rows = []
+mine = "not on screen"
+for n in root.iter("node"):
+    rid = n.get("resource-id", "")
+    if rid == want:
+        mine = " ".join("%s=%s" % (k, n.get(k)) for k in keys)
+    elif rid.startswith("location_"):
+        rows.append("%s checked=%s selected=%s" % (rid, n.get("checked"), n.get("selected")))
+print("%s: %s; other location rows: %s" % (want, mine, ", ".join(rows[:6]) or "none"), end="")
+' "$1"
+    printf '; %s' "${focus:-focus unknown}"
+}
+
 cmd_choose_location() {
     local off=false specs=() spec level pkg x y c _e
     while [ $# -gt 0 ]; do
@@ -2250,7 +2279,7 @@ cmd_choose_location() {
         say "choose-location: Location off"
         return 0
     fi
-    choose_row location_apps || die "choose-location: 'On for apps you choose' (location_apps) could not be chosen"
+    choose_row location_apps || die "choose-location: 'On for apps you choose' (location_apps) could not be chosen ($(row_state location_apps))"
     for spec in "${specs[@]}"; do
         read -r level pkg <<<"$spec"
         set_switch "location_app_$pkg" true
