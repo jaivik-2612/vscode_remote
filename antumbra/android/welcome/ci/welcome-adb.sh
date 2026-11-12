@@ -1972,6 +1972,7 @@ cmd_check_position() {
     fi
     # A second search, left: Location off within 10 s.
     if [ "$leave" != none ]; then
+        en=missing
         if read -r x y _c en < <(locate position_button) && [ "$en" = true ]; then
             a shell input tap "$x" "$y"
             if wait_location on 15; then
@@ -1991,7 +1992,11 @@ cmd_check_position() {
             fi
         else
             left="no second search"
-            problems+=("Show my position was not offered again")
+            if [ "$en" = missing ]; then
+                problems+=("Show my position was not offered again (no position_button on the page)")
+            else
+                problems+=("Show my position was not offered again (position_button shown, enabled=$en; status card: '$(view_row position_status | cut -f2 || true)')")
+            fi
         fi
         say "leave ($leave): $left"
     fi
@@ -2204,15 +2209,23 @@ cmd_check_carrier() {
 }
 
 # choose_row ID: radio row ID chosen by its test tag (tapped unless it is
-# checked) and read back checked.
+# checked) and read back checked. locate may have scrolled to find the
+# row, and a tap while the page still moves lands where the row no longer
+# is (run 33: 'On for apps you choose' stayed unchosen after one tap), so
+# the row is located again once the page has settled before each tap, and
+# tapped at most three times.
 choose_row() {
-    local x y c _e
-    read -r x y c _e < <(locate "$1") || return 1
-    if [ "$c" != true ]; then
-        a shell input tap "$x" "$y"
+    local x y c _e try
+    for try in 1 2 3; do
+        read -r x y c _e < <(locate "$1") || return 1
+        [ "$c" != true ] || return 0
         sleep 1
         read -r x y c _e < <(locate "$1") || return 1
-    fi
+        [ "$c" != true ] || return 0
+        a shell input tap "$x" "$y"
+        sleep 1
+    done
+    read -r x y c _e < <(locate "$1") || return 1
     [ "$c" = true ]
 }
 
