@@ -1,0 +1,99 @@
+#!/usr/bin/python3 -I
+"""Delete firmware files from target directories if missing from an initramfs."""
+
+import argparse
+from pathlib import Path
+import subprocess
+import sys
+
+
+def get_initramfs_files(initramfs_path: Path) -> set[str]:
+    """Use lsinitramfs to get a set of relative file paths in the initramfs."""
+    files_in_initramfs = set()
+
+    for line in subprocess.run(
+        ["/bin/lsinitramfs", str(initramfs_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.splitlines():
+        cleaned_path = line.strip().removeprefix("/")
+        if cleaned_path:
+            files_in_initramfs.add(cleaned_path)
+
+    return files_in_initramfs
+
+
+def clean_firmware_dirs(
+    firmware_dirs: list[Path], initramfs_path: Path, *, dry_run: bool = False
+) -> None:
+    """Remove files in firmware_dirs that do not exist inside initramfs_path."""
+    initramfs_files = get_initramfs_files(initramfs_path)
+    deleted_count = 0
+    deleted_total_size = 0
+    kept_count = 0
+
+    for firmware_dir in firmware_dirs:
+        resolved_dir = firmware_dir.resolve()
+
+        if not resolved_dir.is_dir():
+            print(
+                f"Warning: Directory '{resolved_dir}' does not exist or "
+                "is not a directory. Skipping.",
+                file=sys.stderr,
+            )
+            continue
+
+        for path in resolved_dir.rglob("*"):
+            if not path.is_file():
+                continue
+
+            if str(path).removeprefix("/") in initramfs_files:
+                kept_count += 1
+            else:
+                path_size = path.stat().st_size
+                print(f"Deleting: {path} ({path_size} bytes)")
+                deleted_total_size += path_size
+                if not dry_run:
+                    path.unlink()
+                deleted_count += 1
+
+    print(
+        f"\nSummary: Kept {kept_count} file(s). "
+        f"Deleted {deleted_count} unneeded firmware file(s) ({deleted_total_size} bytes)."
+    )
+
+
+def main() -> None:
+    """Parse command line arguments and execute firmware cleanup."""
+    parser = argparse.ArgumentParser(
+        description=(
+            "Delete firmware files from target directories "
+            "if they are missing from an initramfs."
+        )
+    )
+    parser.add_argument(
+        "-i",
+        "--initramfs",
+        type=Path,
+        required=True,
+        help="Path to the initramfs image file",
+    )
+    parser.add_argument(
+        "dirs",
+        type=Path,
+        nargs="+",
+        help="One or more firmware directories to clean (e.g. /lib/firmware/nvidia)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print files that would be deleted without removing them",
+    )
+
+    args = parser.parse_args()
+    clean_firmware_dirs(args.dirs, args.initramfs, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()

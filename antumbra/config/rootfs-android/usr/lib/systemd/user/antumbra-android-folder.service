@@ -1,0 +1,12 @@
+[Unit]
+# Runs at login (the folder with the Android launcher) and whenever
+# antumbra-android-folder.path sees Android's app entries change.
+Description=Gather Android apps in an "Android" folder of the app grid
+ConditionPathExists=/run/antumbra/android-enabled
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/antumbra-android-folder
+
+[Install]
+WantedBy=graphical-session.target

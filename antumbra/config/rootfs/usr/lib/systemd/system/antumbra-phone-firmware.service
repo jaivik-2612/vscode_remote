@@ -1,0 +1,19 @@
+[Unit]
+Description=Give the kernel this phone's own firmware (read-only, from its own partitions)
+# Before udev's coldplug loads the remoteproc and Wi-Fi drivers, which ask
+# for their firmware once (antumbra-phone-firmware, docs/architecture.md).
+DefaultDependencies=no
+Before=systemd-udevd.service systemd-udev-trigger.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+ConditionVirtualization=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# No mount namespacing or file-system sandboxing: the kernel's firmware
+# loader and tqftpserv resolve the links in the host's namespace.
+ExecStart=/usr/local/lib/antumbra-phone-firmware
+TimeoutStartSec=90
+
+[Install]
+WantedBy=sysinit.target

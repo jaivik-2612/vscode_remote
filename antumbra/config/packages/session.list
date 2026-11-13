@@ -1,0 +1,33 @@
+# Display manager, shell, Welcome screen runtime.
+greetd
+phoc
+phosh
+# phosh-session runs gnome-session (Phosh only recommends it, and the
+# build installs without recommends): without it the session exits at once.
+gnome-session-bin
+gnome-session-common
+squeekboard
+# Dark Mode and Night Light quick-setting tiles (phosh only recommends the
+# package). It also brings the evince libraries for its ticket-box
+# lock-screen plugin, which stays off: the lock-screen plugin list is empty
+# and locked (/etc/dconf/db/local.d/10-antumbra-shell).
+phosh-plugins
+phosh-mobile-settings
+feedbackd
+gnome-settings-daemon
+gnome-keyring
+gir1.2-gtk-4.0
+gir1.2-adw-1
+libadwaita-1-0
+xdg-desktop-portal
+xdg-desktop-portal-gnome
+pipewire
+pipewire-pulse
+wireplumber
+upower
+power-profiles-daemon
+
+# used by the Welcome screen (password hashing) and build hooks
+openssl
+dconf-cli
+libglib2.0-bin

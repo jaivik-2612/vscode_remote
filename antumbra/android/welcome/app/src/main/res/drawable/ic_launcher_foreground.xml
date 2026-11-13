@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Antumbra's mark: an annular eclipse, a light ring round a dark disc set
+     slightly off centre. 108 dp adaptive-icon canvas; the ring stays inside
+     the 66 dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="@color/primary"
+        android:pathData="M28,54a26,26 0,1 0,52 0a26,26 0,1 0,-52 0Z" />
+    <path
+        android:fillColor="@color/surface"
+        android:pathData="M34,52.5a22,22 0,1 0,44 0a22,22 0,1 0,-44 0Z" />
+</vector>

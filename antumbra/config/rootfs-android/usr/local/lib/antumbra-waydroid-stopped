@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Stop Waydroid's container service once its container has stopped
+# (antumbra-waydroid-stopped.service, started by the container's LXC
+# post-stop hook), so that the service's ExecStopPost closes the devices
+# Waydroid opened to every user. Waits for Waydroid's own clean-up first
+# (the container stopped and Android's root file system unmounted), for at
+# most a minute; leaves the service alone if the container runs again (a
+# restart, or a new session started meanwhile).
+set -u
+STATE="lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH"
+ROOTFS=/var/lib/waydroid/rootfs
+i=0
+while :; do
+    state="$(${STATE} 2>/dev/null || true)"
+    case "${state}" in
+        STOPPED|"") ;;
+        *) echo "the Android container is ${state} again; the container service stays"; exit 0 ;;
+    esac
+    if ! mountpoint -q "${ROOTFS}"; then break; fi
+    if [ "${i}" -ge 60 ]; then
+        echo "Android's root file system is still mounted; stopping the container service anyway"
+        break
+    fi
+    i=$((i + 1))
+    sleep 1
+done
+systemctl stop waydroid-container.service
+echo "Android stopped: Waydroid's container service stopped, its devices closed"

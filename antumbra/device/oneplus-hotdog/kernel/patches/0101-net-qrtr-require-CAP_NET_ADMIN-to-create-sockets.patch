@@ -1,0 +1,42 @@
+From: Antumbra build <antumbra@localhost>
+Subject: [PATCH] net: qrtr: require CAP_NET_ADMIN to create AF_QIPCRTR sockets
+
+QMI services exposed over QRTR carry no client authentication: any
+process that can open an AF_QIPCRTR socket can ask the modem's DMS
+service to go online, start the GNSS engine or read the sensor DSP.
+On a privacy-focused device the radio policy is enforced by root-owned
+services over this channel, so unprivileged processes must not reach it.
+
+In-kernel QRTR users (ath10k's WLFW client, the QRTR name service,
+the protection-domain mapper) create their sockets with kern=1 and are
+unaffected. The userspace daemons that need QRTR (rmtfs, tqftpserv,
+pd-mapper, qmicli from root-owned units) all run as root.
+
+Carried by the Antumbra project; not upstream.
+---
+ net/qrtr/af_qrtr.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+--- a/net/qrtr/af_qrtr.c
++++ b/net/qrtr/af_qrtr.c
+@@ -6,3 +6,4 @@
+ #include <linux/module.h>
++#include <linux/capability.h>
+ #include <linux/netlink.h>
+ #include <linux/qrtr.h>
+@@ -1266,6 +1267,15 @@ static int qrtr_create(struct net *net, struct socket *sock,
+ 	if (sock->type != SOCK_DGRAM)
+ 		return -EPROTOTYPE;
+ 
++	/*
++	 * Antumbra: QMI services reachable over QRTR (modem operating mode,
++	 * GNSS, sensor DSP) carry no client authentication, so creating an
++	 * AF_QIPCRTR socket is restricted to privileged processes. In-kernel
++	 * users (ath10k, pd-mapper, remoteproc helpers) pass kern=1.
++	 */
++	if (!kern && !ns_capable(net->user_ns, CAP_NET_ADMIN))
++		return -EPERM;
++
+ 	sk = sk_alloc(net, AF_QIPCRTR, GFP_KERNEL, &qrtr_proto, kern);
+ 	if (!sk)
+ 		return -ENOMEM;

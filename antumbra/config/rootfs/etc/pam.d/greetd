@@ -1,0 +1,10 @@
+# PAM stack greetd uses for the sessions a greeter creates over its IPC
+# (Debian's file is "@include login" plus optional keyring modules). The
+# Welcome screen starts the live user's session: that user has no password
+# of its own at that point (the Welcome screen sets one for the screen lock),
+# so authentication succeeds for that user only; everything else follows
+# the login stack.
+auth    [success=done default=ignore]   pam_succeed_if.so user = amnesia quiet_success
+@include login
+auth    optional   pam_gnome_keyring.so
+session optional   pam_gnome_keyring.so auto_start

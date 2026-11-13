@@ -1,0 +1,6 @@
+# Exceptions to the block list. Each entry unblocks the domain and every
+# name below it, whatever the sources say, so keep entries narrow: add the
+# exact host name that broke an app, never a whole platform (allowing
+# "github.com" would also unblock GitHub's own telemetry host).
+#
+# Empty for now. Format: one domain per line.

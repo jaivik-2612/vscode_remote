@@ -1,0 +1,11 @@
+[Unit]
+Description=Antumbra privacy self-check (late: modem and network)
+After=antumbra-modem-radio-off.service NetworkManager.service
+Wants=antumbra-modem-radio-off.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antumbra-selfcheck --late
+
+[Install]
+WantedBy=multi-user.target

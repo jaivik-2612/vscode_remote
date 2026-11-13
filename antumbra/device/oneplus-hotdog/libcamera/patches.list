@@ -1,0 +1,8 @@
+0003-libcamera-add-Samsung-S5K3M5-sensor-data.patch
+0004-libcamera-add-Sony-IMX586-sensor-data.patch
+0005-libcamera-software-isp-add-contrast-autofocus.patch
+0006-libcamera-add-Sony-IMX481-sensor-data.patch
+0007-libcamera-add-Sony-IMX471-sensor-data.patch
+0008-libcamera-software-isp-responsive-3a-and-af-windows.patch
+0009-libcamera-software-isp-preserve-requested-agc-state.patch
+0010-libcamera-software-isp-tighten-automatic-controls.patch

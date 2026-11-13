@@ -1,0 +1,393 @@
+name: Antumbra Live
+
+# A virtual Antumbra phone the owner uses from a browser (Safari on an
+# iPhone or iPad), started by hand only. One job:
+#
+#   1. The build: the Welcome APK, tor, the DNS filter and the module zip
+#      from the newest successful run of antumbra-android.yml on the
+#      Antumbra branch (its artifacts, kept 5 days): a push or a run by hand
+#      in this repository, of a commit that is on the branch; never a pull
+#      request's run, which a stranger's fork could make. Nothing is
+#      rebuilt: when they have expired, the summary says so and the run
+#      stops.
+#   2. The phone: the leak test's Android 16 image (android-36;default;x86_64,
+#      no Google services) with the app lab's 6 GB of memory and 12 GB of
+#      storage, on KVM, with its window (and the emulator's side toolbar) on
+#      a virtual X display. Set up as the app lab does it, up to just before
+#      Start (ci/emulator-live.sh): the module installed and its firewall
+#      live, F-Droid and Aptoide downloaded and checked on the runner exactly
+#      as the app lab checks them (applab.py fetch) and installed, Welcome
+#      as device owner. The owner presses Start.
+#   3. The screen in the browser: x11vnc (127.0.0.1 only), noVNC's core
+#      and two pages of our own served by websockify (127.0.0.1 only) and a
+#      Cloudflare quick tunnel (cloudflared, pinned by version and SHA-256;
+#      no account). Every WebSocket to the screen must carry a token derived
+#      from the repository secret ANTUMBRA_LIVE_PASSWORD (websockify's
+#      TokenFile plugin); without the secret, or with one shorter than 20
+#      characters, no tunnel is started. Before the link is published, a
+#      missing and a wrong password are tried through it and must get
+#      nothing; if that cannot be checked, the link is closed again.
+#   4. Time: the input "minutes" (default 60, at most 180) plus 20 minutes
+#      for the phone to start; the session then ends by itself. It also
+#      ends with End session on the page, or when the run is cancelled.
+#   5. The privacy check: packets are recorded as in the leak test, from
+#      before the module arms to the end of the session; analyse.sh judges
+#      them by the app lab's rules (destinations in learning mode), and
+#      live.py report writes the result into the summary and the artifact
+#      antumbra-live-<run number> (14 days): counts and leaks only, no
+#      capture, no names reached through Tor, no screenshots.
+#
+# The repository, its logs, summaries and artifacts are public: the link
+# may be seen, the password and the tokens never are (the secret is only in
+# the environment of the password check and of the link step, the tokens
+# are masked, and websockify's, cloudflared's and the leak analysis's logs
+# stay on the runner). ci/README.md, "Antumbra Live", has the owner's steps.
+#
+# How it starts. GitHub runs a workflow_dispatch (Run workflow) only for a
+# workflow on the default branch (main), and this file is not there: main
+# is not changed. So a session starts with a label on the open pull request
+# of the Antumbra branch (#8): "antumbra-live" for 60 minutes, or
+# "antumbra-live-30", "antumbra-live-120", "antumbra-live-180". GitHub runs
+# pull_request workflows from the pull request's own files. Only the
+# owner (or someone with write access) can add a label; the job runs only
+# for a pull request from this repository's Antumbra branch, never from a
+# fork. Remove the label and add it again for another session. If this
+# file is ever on main too, Run workflow (with its minutes) works as well;
+# then the job checks out the Antumbra branch itself for the scripts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: 'Minutes with the phone, after it has started (10 to 180)'
+        type: number
+        required: true
+        default: 60
+  pull_request:
+    types: [labeled]
+
+permissions:
+  actions: read
+  contents: read
+
+# One session at a time; a second one waits for the first to end. Separate
+# from antumbra-android.yml's group.
+concurrency:
+  group: antumbra-live
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ANTUMBRA_BRANCH: claude/tails-mobile-privacy-os-c71ate
+  CLOUDFLARED_VERSION: 2026.9.3
+  # cloudflared-linux-amd64 of release 2026.9.3, as its release notes list it.
+  CLOUDFLARED_SHA256: 77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2
+  ANTUMBRA_SERIAL: emulator-5554
+  ANTUMBRA_CI_IMAGE: android-36;default;x86_64
+
+jobs:
+  live:
+    name: Antumbra Live (a virtual phone in the browser)
+    # By hand (if this file is on main), or a label "antumbra-live" or
+    # "antumbra-live-<minutes>" on a pull request from this repository's
+    # Antumbra branch (never a fork's).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (startsWith(github.event.label.name, 'antumbra-live') &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'claude/tails-mobile-privacy-os-c71ate')
+    runs-on: ubuntu-24.04
+    # The minutes, 20 for the phone to start, and about 60 for the rest
+    # (downloads, the end of the session, the analysis, the artifact). A
+    # label's minutes are read in a step, so its runs get the longest limit;
+    # the session still ends at its own time.
+    timeout-minutes: ${{ github.event_name != 'workflow_dispatch' && 260 || inputs.minutes <= 30 && 110 || inputs.minutes <= 60 && 140 || inputs.minutes <= 90 && 170 || inputs.minutes <= 120 && 200 || 260 }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref_name == env.ANTUMBRA_BRANCH && github.sha || env.ANTUMBRA_BRANCH }}
+          persist-credentials: false
+
+      - name: Directories and the session's length
+        env:
+          MINUTES: ${{ inputs.minutes }}
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          # A label: "antumbra-live" is 60 minutes, "antumbra-live-<n>" n.
+          if [ -z "$MINUTES" ]; then
+            case $LABEL in
+              antumbra-live-[0-9]*) MINUTES=${LABEL#antumbra-live-} ;;
+              *) MINUTES=60 ;;
+            esac
+          fi
+          m=$(python3 -B -I antumbra/android/ci/live.py minutes "$MINUTES")
+          {
+            echo "ANTUMBRA_CI_OUT=$RUNNER_TEMP/report"
+            echo "ANTUMBRA_CAPTURE_DIR=$RUNNER_TEMP/capture"
+            echo "ANTUMBRA_MODULE_TREE=$RUNNER_TEMP/module-tree"
+            echo "ANTUMBRA_WELCOME_APK=$RUNNER_TEMP/welcome/app-debug.apk"
+            echo "ANTUMBRA_APPLAB_DL=$RUNNER_TEMP/stores"
+            echo "ANTUMBRA_LIVE_DIR=$RUNNER_TEMP/live-private"
+            echo "ANTUMBRA_LIVE_WEB=$RUNNER_TEMP/live-web"
+            echo "ANTUMBRA_LIVE_MINUTES=$m"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/report" "$RUNNER_TEMP/capture" "$RUNNER_TEMP/module-tree" "$RUNNER_TEMP/stores"
+          echo "The session: $m minutes once the phone has started."
+
+      # Refuses to go on (and so never starts the tunnel) without a usable
+      # password. Prints a sentence, never the value.
+      - name: 'The password (secret ANTUMBRA_LIVE_PASSWORD): set, 20 characters or more'
+        env:
+          ANTUMBRA_LIVE_PASSWORD: ${{ secrets.ANTUMBRA_LIVE_PASSWORD }}
+        run: |
+          if ! msg=$(python3 -B -I antumbra/android/ci/live.py secret-check); then
+            { echo "## Antumbra Live: not started"; echo; echo "$msg"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$msg"
+            exit 1
+          fi
+          echo "$msg"
+
+      - name: The newest successful build of Antumbra Android on the Antumbra branch
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          stop() {
+            { echo "## Antumbra Live: not started"; echo; echo "$1"; } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::$1"
+            exit 1
+          }
+          # This repository's own runs only (a push, or a run by hand, both of
+          # which need write access), of a commit that is on the branch: a
+          # pull request's run, even one whose branch has the same name, can
+          # come from a stranger's fork with its own workflow file.
+          runs=$(gh api "repos/$GH_REPO/actions/workflows/antumbra-android.yml/runs?branch=$ANTUMBRA_BRANCH&status=success&per_page=30" \
+            --jq '.workflow_runs[] | select(.head_repository.full_name == env.GH_REPO and .repository.full_name == env.GH_REPO
+                    and (.event == "push" or .event == "workflow_dispatch") and .head_branch == env.ANTUMBRA_BRANCH)
+                  | [.id, .run_number, .head_sha, .created_at] | @tsv') ||
+            stop "The list of Antumbra Android runs could not be read."
+          run=
+          while IFS=$'\t' read -r id number sha created; do
+            [ -n "$id" ] || continue
+            # The commit is on the branch: the branch is ahead of it, or it is the branch's tip.
+            st=$(gh api "repos/$GH_REPO/compare/$sha...$ANTUMBRA_BRANCH" --jq .status 2>/dev/null) || continue
+            if [ "$st" = identical ] || [ "$st" = ahead ]; then
+              run=$(printf '%s\t%s\t%s\t%s' "$id" "$number" "$sha" "$created")
+              break
+            fi
+            echo "Run #$number ($sha) is not on $ANTUMBRA_BRANCH any more ($st): skipped."
+          done <<<"$runs"
+          [ -n "$run" ] || stop "Antumbra Android has no successful run on $ANTUMBRA_BRANCH (a push or a run by hand in this repository), so there is nothing to put on the phone."
+          IFS=$'\t' read -r id number sha created <<<"$run"
+          arts=$(gh api "repos/$GH_REPO/actions/runs/$id/artifacts?per_page=100" \
+            --jq '.artifacts[] | [.name, (.expired | tostring)] | @tsv') ||
+            stop "The files of Antumbra Android run #$number could not be listed."
+          missing=()
+          for a in module welcome tor dnsfilter; do
+            n="antumbra-android-$a-$number"
+            st=$(awk -F '\t' -v n="$n" '$1 == n { print $2 }' <<<"$arts")
+            [ "$st" = false ] || missing+=("$n")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            stop "The newest successful build (Antumbra Android run #$number, ${created%%T*}) is older than the 5 days its files are kept: they have expired (${missing[*]}). Nothing is rebuilt here. A new build is needed: ask Claude for one (any change under antumbra/android/ on the branch starts it). When that run has passed, start Antumbra Live again."
+          fi
+          {
+            echo "id=$id"
+            echo "number=$number"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+          echo "ANTUMBRA_LIVE_BUILD=The build: Antumbra Android run #$number (commit ${sha:0:12}, ${created%%T*})." >> "$GITHUB_ENV"
+          echo "Antumbra Android run #$number ($id), commit $sha, $created"
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-module-${{ steps.build.outputs.number }}
+          path: ${{ runner.temp }}/module
+          run-id: ${{ steps.build.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-welcome-${{ steps.build.outputs.number }}
+          path: ${{ runner.temp }}/welcome
+          run-id: ${{ steps.build.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-tor-${{ steps.build.outputs.number }}
+          path: ${{ runner.temp }}/tor
+          run-id: ${{ steps.build.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: antumbra-android-dnsfilter-${{ steps.build.outputs.number }}
+          path: ${{ runner.temp }}/dns
+          run-id: ${{ steps.build.outputs.id }}
+          github-token: ${{ github.token }}
+
+      # The emulator gets the module zip as it is (build-module.sh --emulator
+      # --zip); the unpacked copy gives the leak analyser tor's fallback
+      # directories. Its tor and filter must be the build's.
+      - name: The module zip, and its tor and DNS filter against the build's
+        run: |
+          zip=$(ls "$RUNNER_TEMP"/module/antumbra-module-*.zip)
+          echo "ANTUMBRA_MODULE_ZIP=$zip" >> "$GITHUB_ENV"
+          unzip -q "$zip" -d "$ANTUMBRA_MODULE_TREE"
+          same() { [ "$(sha256sum <"$1" | cut -d ' ' -f 1)" = "$(sha256sum <"$2" | cut -d ' ' -f 1)" ]; }
+          same "$ANTUMBRA_MODULE_TREE/bin/x86_64/tor" "$RUNNER_TEMP/tor/x86_64/tor" ||
+            { echo "::error::the module's x86_64 tor is not the build's"; exit 1; }
+          same "$ANTUMBRA_MODULE_TREE/bin/x86_64/antumbra-dnsfilter" "$RUNNER_TEMP/dns/dnsfilter/x86_64/antumbra-dnsfilter" ||
+            { echo "::error::the module's x86_64 DNS filter is not the build's"; exit 1; }
+          [ -f "$ANTUMBRA_WELCOME_APK" ] || { echo "::error::no Welcome APK"; exit 1; }
+          for f in "$zip" "$ANTUMBRA_WELCOME_APK" "$RUNNER_TEMP/tor/x86_64/tor" "$RUNNER_TEMP/dns/dnsfilter/x86_64/antumbra-dnsfilter"; do
+            echo "$(sha256sum <"$f" | cut -d ' ' -f 1)  ${f#"$RUNNER_TEMP"/}"
+          done
+
+      # Ubuntu's packages from the runner's apt: the screen's servers, and
+      # the X libraries the emulator's window (Qt's xcb plugin) loads.
+      - name: Packages for the screen and the emulator's window
+        timeout-minutes: 8
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends xvfb x11vnc novnc websockify xdotool x11-utils \
+            libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+            libxcb-render-util0 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxcb-xfixes0 libgl1 libegl1 \
+            libpulse0 libnss3
+          dpkg-query -W xvfb x11vnc novnc websockify
+
+      # With websockify installed, test_live.py also checks a real websockify
+      # with the token plugin: strangers get nothing.
+      - name: Test Antumbra Live's helper
+        run: python3 -B -m unittest discover -s antumbra/android/ci/tests -p 'test_live.py' -v
+
+      - name: cloudflared ${{ env.CLOUDFLARED_VERSION }} (SHA-256 checked)
+        run: |
+          d="$RUNNER_TEMP/cloudflared"
+          mkdir -p "$d"
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$d/cloudflared" \
+            "https://github.com/cloudflare/cloudflared/releases/download/$CLOUDFLARED_VERSION/cloudflared-linux-amd64"
+          echo "$CLOUDFLARED_SHA256  $d/cloudflared" | sha256sum -c -
+          chmod +x "$d/cloudflared"
+          "$d/cloudflared" --version
+          echo "CLOUDFLARED=$d/cloudflared" >> "$GITHUB_ENV"
+
+      # apksigner and aapt2 check every APK before it goes near the phone.
+      - name: Build tools 36.0.0
+        timeout-minutes: 5
+        run: bash antumbra/android/ci/sdk-install.sh build-tools
+
+      # The app lab's own download and checks (applab.py fetch), for the two
+      # stores only: F-Droid's client checked against F-Droid's index and
+      # its pinned certificate, Aptoide's against Aptoide's metadata.
+      - name: Download and check F-Droid and Aptoide (on the runner)
+        timeout-minutes: 8
+        run: |
+          bt="${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools/36.0.0"
+          python3 -B -I antumbra/android/ci/applab.py fetch --catalogue /dev/null --stores fdroid,aptoide \
+            --out "$ANTUMBRA_APPLAB_DL" --apksigner "$bt/apksigner" --aapt2 "$bt/aapt2" --abi x86_64 --sdk 36 \
+            --budget 360
+          python3 -B -I antumbra/android/ci/applab.py plan "$ANTUMBRA_APPLAB_DL/downloads.json" | cut -f 1-5,7
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: The screen (Xvfb, x11vnc and websockify, all on 127.0.0.1)
+        run: bash antumbra/android/ci/live-stream.sh start
+
+      # Writes the token file, tries a missing and a wrong password through
+      # the tunnel, and puts the link, the start and the end time in this
+      # step's summary, which shows as soon as the step ends.
+      - name: The link (Cloudflare quick tunnel), checked, in the summary
+        id: tunnel
+        timeout-minutes: 10
+        env:
+          ANTUMBRA_LIVE_PASSWORD: ${{ secrets.ANTUMBRA_LIVE_PASSWORD }}
+        run: bash antumbra/android/ci/live-stream.sh tunnel
+
+      # The app lab's emulator, with a window: no -no-window, and DISPLAY is
+      # the virtual screen. The script holds the session until its end time.
+      - name: 'The phone: set up, then yours until the end time'
+        id: phone
+        timeout-minutes: ${{ github.event_name != 'workflow_dispatch' && 225 || inputs.minutes <= 30 && 75 || inputs.minutes <= 60 && 105 || inputs.minutes <= 90 && 135 || inputs.minutes <= 120 && 165 || 225 }}
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d  # v2.38.0
+        env:
+          ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/live.pcap
+        with:
+          api-level: 36
+          target: default
+          arch: x86_64
+          profile: pixel_6
+          cores: 3
+          ram-size: 6144M
+          disk-size: 12G
+          emulator-build: 16428233
+          force-avd-creation: true
+          disable-animations: true
+          # Keys typed in the browser reach Android only through a hardware
+          # keyboard (the profile has none); emulator-live.sh keeps Android's
+          # own keyboard on as well. The app lab and the leak test do not set it.
+          enable-hw-keyboard: true
+          emulator-boot-timeout: 600
+          emulator-options: >-
+            -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -camera-back none -camera-front none -feature -WiFiPacketStream
+            -tcpdump ${{ runner.temp }}/capture/live.pcap
+          script: bash antumbra/android/ci/emulator-live.sh
+
+      # After a cancel or a time-out of the step above the emulator may
+      # still run: the evidence is collected here. Nothing to do otherwise.
+      - name: The end of the session (after a cancel)
+        if: always() && steps.tunnel.outcome == 'success'
+        timeout-minutes: 15
+        env:
+          ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/live.pcap
+        run: bash antumbra/android/ci/emulator-live.sh finish
+
+      - name: Close the link and the screen
+        if: always()
+        run: bash antumbra/android/ci/live-stream.sh stop || true
+
+      # Its log stays on the runner: the leak analyser's reasons name tor's
+      # connections, which may be the owner's bridges. live.py report
+      # writes what is public.
+      - name: Privacy check of the session (leak analysis)
+        if: always() && steps.tunnel.outcome == 'success'
+        timeout-minutes: 15
+        env:
+          ANTUMBRA_CI_DESTINATIONS: learning
+        run: |
+          bash antumbra/android/ci/analyse.sh >"$ANTUMBRA_LIVE_DIR/analyse.log" 2>&1
+          echo "analyse.sh: exit $? (its log stays on the runner; the verdict is in the next step)"
+
+      # Counts and leaks only: the artifact is public. No capture goes in,
+      # not even a small one: a leaked lookup in it would name what the
+      # owner did.
+      - name: The session's report (job summary)
+        if: always() && steps.tunnel.outcome == 'success'
+        timeout-minutes: 5
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+          BUILD_NUMBER: ${{ steps.build.outputs.number }}
+        run: |
+          out="$RUNNER_TEMP/live-report"
+          python3 -B -I antumbra/android/ci/live.py report "$ANTUMBRA_CI_OUT" --out "$out" \
+            --run "$RUN_NUMBER" --build "$BUILD_NUMBER" >> "$GITHUB_STEP_SUMMARY"
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v6
+        if: always() && steps.tunnel.outcome == 'success'
+        with:
+          name: antumbra-live-${{ github.run_number }}
+          path: ${{ runner.temp }}/live-report
+          retention-days: 14
+          overwrite: true
+          if-no-files-found: warn

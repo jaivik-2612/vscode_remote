@@ -1,0 +1,786 @@
+{
+ "packages": {
+  "app.organicmaps": {
+   "metadata": {
+    "name": {
+     "en-US": "Organic Maps\u30fbOffline Map & GPS"
+    },
+    "preferredSigner": "e216fc386c327ec88d056026f1dea27be2bc3f9d7ee956e4361c4b64ec459fe9"
+   },
+   "versions": {
+    "654a736d43317084f13560281fe7013f869800610e9d6036b6789d9c9e07f8bc": {
+     "added": 1791057188587,
+     "file": {
+      "name": "/app.organicmaps_26092932.apk",
+      "sha256": "654a736d43317084f13560281fe7013f869800610e9d6036b6789d9c9e07f8bc",
+      "size": 63797784
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "e216fc386c327ec88d056026f1dea27be2bc3f9d7ee956e4361c4b64ec459fe9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 26092932,
+      "versionName": "2026.09.29-32-FDroid"
+     }
+    },
+    "c1fc03a8bad4dac3c400c50764a929ec7a07b02ba572336bfdd9e722a4f96519": {
+     "added": 1788603314159,
+     "file": {
+      "name": "/app.organicmaps_26082718.apk",
+      "sha256": "c1fc03a8bad4dac3c400c50764a929ec7a07b02ba572336bfdd9e722a4f96519",
+      "size": 64105378
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "e216fc386c327ec88d056026f1dea27be2bc3f9d7ee956e4361c4b64ec459fe9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 26082718,
+      "versionName": "2026.08.27-18-FDroid"
+     }
+    },
+    "db8ca5ec2e2a879470c8fd36a46a83a04c93a70488e46b881d9622bf1420c329": {
+     "added": 1785201403136,
+     "file": {
+      "name": "/app.organicmaps_26072306.apk",
+      "sha256": "db8ca5ec2e2a879470c8fd36a46a83a04c93a70488e46b881d9622bf1420c329",
+      "size": 64045154
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "e216fc386c327ec88d056026f1dea27be2bc3f9d7ee956e4361c4b64ec459fe9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 26072306,
+      "versionName": "2026.07.23-6-FDroid"
+     }
+    }
+   }
+  },
+  "com.github.libretube": {
+   "metadata": {
+    "name": {
+     "en-US": "LibreTube"
+    },
+    "preferredSigner": "a86631e8cc555838e8dfc29019fb0f7dac333ef1cda1139c424d1a08d68a030b"
+   },
+   "versions": {
+    "792b1e37e7bd6a26d8da1c826a68677465c333633cb2198224cc96c84257d615": {
+     "added": 1787506623262,
+     "file": {
+      "name": "/com.github.libretube_72.apk",
+      "sha256": "792b1e37e7bd6a26d8da1c826a68677465c333633cb2198224cc96c84257d615",
+      "size": 9253519
+     },
+     "manifest": {
+      "signer": {
+       "sha256": [
+        "a86631e8cc555838e8dfc29019fb0f7dac333ef1cda1139c424d1a08d68a030b"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 26,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 72,
+      "versionName": "32.1"
+     }
+    },
+    "80878a8fc2aa22ec9383f5176b0f5376116d04911bb72cbf606c0d8ee2a4c947": {
+     "added": 1780094298321,
+     "file": {
+      "name": "/com.github.libretube_70.apk",
+      "sha256": "80878a8fc2aa22ec9383f5176b0f5376116d04911bb72cbf606c0d8ee2a4c947",
+      "size": 9187236
+     },
+     "manifest": {
+      "signer": {
+       "sha256": [
+        "a86631e8cc555838e8dfc29019fb0f7dac333ef1cda1139c424d1a08d68a030b"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 26,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 70,
+      "versionName": "31.4"
+     }
+    },
+    "e9e16130198700cdf55f54e3f67c93f38b2d54c6489ada0d8e59eaf2d67ef053": {
+     "added": 1779878558873,
+     "file": {
+      "name": "/com.github.libretube_69.apk",
+      "sha256": "e9e16130198700cdf55f54e3f67c93f38b2d54c6489ada0d8e59eaf2d67ef053",
+      "size": 9187236
+     },
+     "manifest": {
+      "signer": {
+       "sha256": [
+        "a86631e8cc555838e8dfc29019fb0f7dac333ef1cda1139c424d1a08d68a030b"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 26,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 69,
+      "versionName": "31.3"
+     }
+    }
+   }
+  },
+  "im.vector.app": {
+   "metadata": {
+    "name": {
+     "en-US": "Element Classic"
+    },
+    "preferredSigner": "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+   },
+   "versions": {
+    "200922768ae13afcaad98739965a27277e76925e9eb0f51612129417f5d9d09b": {
+     "added": 1782509917855,
+     "file": {
+      "name": "/im.vector.app_40106603.apk",
+      "sha256": "200922768ae13afcaad98739965a27277e76925e9eb0f51612129417f5d9d09b",
+      "size": 74204116
+     },
+     "manifest": {
+      "nativecode": [
+       "x86"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106603,
+      "versionName": "1.6.60"
+     }
+    },
+    "54a3108546721f9bd48aba284b0098712f000d442c7fa1413781d34489b03aa8": {
+     "added": 1782509917855,
+     "file": {
+      "name": "/im.vector.app_40106604.apk",
+      "sha256": "54a3108546721f9bd48aba284b0098712f000d442c7fa1413781d34489b03aa8",
+      "size": 73778195
+     },
+     "manifest": {
+      "nativecode": [
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106604,
+      "versionName": "1.6.60"
+     }
+    },
+    "6ce8ee6c3a5a76ab2928f3f3b6e3934c352a3fd6bf76b7ff3dc291c6cbd928de": {
+     "added": 1785314920943,
+     "file": {
+      "name": "/im.vector.app_40106624.apk",
+      "sha256": "6ce8ee6c3a5a76ab2928f3f3b6e3934c352a3fd6bf76b7ff3dc291c6cbd928de",
+      "size": 73778195
+     },
+     "manifest": {
+      "nativecode": [
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106624,
+      "versionName": "1.6.62"
+     }
+    },
+    "a095baabc2912bec9d3be2b5653e8aff9fcf10984b79e954a744aaf5762414f0": {
+     "added": 1785314920943,
+     "file": {
+      "name": "/im.vector.app_40106623.apk",
+      "sha256": "a095baabc2912bec9d3be2b5653e8aff9fcf10984b79e954a744aaf5762414f0",
+      "size": 74200020
+     },
+     "manifest": {
+      "nativecode": [
+       "x86"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106623,
+      "versionName": "1.6.62"
+     }
+    },
+    "e565711fb35d12a2c286c374ef6187e3f3c2c3debc9ef70920906a6c5a26622a": {
+     "added": 1785314920943,
+     "file": {
+      "name": "/im.vector.app_40106621.apk",
+      "sha256": "e565711fb35d12a2c286c374ef6187e3f3c2c3debc9ef70920906a6c5a26622a",
+      "size": 69440636
+     },
+     "manifest": {
+      "nativecode": [
+       "armeabi-v7a"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106621,
+      "versionName": "1.6.62"
+     }
+    },
+    "ff73751599211c709c1e691d1a2b7412df0bab979ffbe8ff0d4b7f31c6a444c9": {
+     "added": 1785314920943,
+     "file": {
+      "name": "/im.vector.app_40106622.apk",
+      "sha256": "ff73751599211c709c1e691d1a2b7412df0bab979ffbe8ff0d4b7f31c6a444c9",
+      "size": 72422482
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a"
+      ],
+      "signer": {
+       "sha256": [
+        "b15d9b673b55b9fe656190794d872e59ec5b85b3bfb8a76b9442f17eae2887c9"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 40106622,
+      "versionName": "1.6.62"
+     }
+    }
+   }
+  },
+  "net.osmand.plus": {
+   "metadata": {
+    "name": {
+     "en-US": "OsmAnd~"
+    },
+    "preferredSigner": "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+   },
+   "versions": {
+    "1102dd904cf098bfbac2c4f1bac963d16cbe0d77d56ace50db5641cd6562cf86": {
+     "added": 1791325491585,
+     "file": {
+      "name": "/net.osmand.plus_540901.apk",
+      "sha256": "1102dd904cf098bfbac2c4f1bac963d16cbe0d77d56ace50db5641cd6562cf86",
+      "size": 159410315
+     },
+     "manifest": {
+      "nativecode": [
+       "armeabi-v7a"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 540901,
+      "versionName": "5.4.9"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "247cb0a10959ebe9d254e00ab42580f7d728ece3e2e5e2e0d28106012a0eeaef": {
+     "added": 1791325491585,
+     "file": {
+      "name": "/net.osmand.plus_540903.apk",
+      "sha256": "247cb0a10959ebe9d254e00ab42580f7d728ece3e2e5e2e0d28106012a0eeaef",
+      "size": 161831037
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 540903,
+      "versionName": "5.4.9"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "724a47eebf161fa2dd64770084f6ec6fb4a22ddc54facc1996b29a47f7f1125a": {
+     "added": 1791325491585,
+     "file": {
+      "name": "/net.osmand.plus_540902.apk",
+      "sha256": "724a47eebf161fa2dd64770084f6ec6fb4a22ddc54facc1996b29a47f7f1125a",
+      "size": 184220248
+     },
+     "manifest": {
+      "nativecode": [
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 540902,
+      "versionName": "5.4.9"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "c66480c9288a9cb87b73c618db75df83bb0bf4484ac57a5714e98f828a0d8950": {
+     "added": 1791814260868,
+     "file": {
+      "name": "/net.osmand.plus_541001.apk",
+      "sha256": "c66480c9288a9cb87b73c618db75df83bb0bf4484ac57a5714e98f828a0d8950",
+      "size": 159430795
+     },
+     "manifest": {
+      "nativecode": [
+       "armeabi-v7a"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 541001,
+      "versionName": "5.4.10"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "ca05d8f4ec364f84bde1946738e898abfb392234905eef1dc0ec597d4580b112": {
+     "added": 1791814260868,
+     "file": {
+      "name": "/net.osmand.plus_541003.apk",
+      "sha256": "ca05d8f4ec364f84bde1946738e898abfb392234905eef1dc0ec597d4580b112",
+      "size": 161855613
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 541003,
+      "versionName": "5.4.10"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "d33ba6f7f73f82adf3cc08fa7114fb771e714dc8deab2d11b90e87050e17633a": {
+     "added": 1791814260868,
+     "file": {
+      "name": "/net.osmand.plus_541002.apk",
+      "sha256": "d33ba6f7f73f82adf3cc08fa7114fb771e714dc8deab2d11b90e87050e17633a",
+      "size": 184244824
+     },
+     "manifest": {
+      "nativecode": [
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "38294eaac95c3bb5a994692cd7758f8bcdbffb40819af6e806eb7fe482324dcd"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 36
+      },
+      "versionCode": 541002,
+      "versionName": "5.4.10"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    }
+   }
+  },
+  "org.fdroid.fdroid": {
+   "metadata": {
+    "name": {
+     "en-US": "F-Droid"
+    },
+    "preferredSigner": "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"
+   },
+   "versions": {
+    "19d51fad482239f6df6a99120e34513667e9a86d136dafdc4a211a68c3327b52": {
+     "added": 1791814260868,
+     "file": {
+      "name": "/org.fdroid.fdroid_2000052.apk",
+      "sha256": "19d51fad482239f6df6a99120e34513667e9a86d136dafdc4a211a68c3327b52",
+      "size": 12569951
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 37
+      },
+      "versionCode": 2000052,
+      "versionName": "2.0.2"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "83d3fe522281c3cb89fce3bc05038f81b3c3b32c108536941f184c5f9bb53778": {
+     "added": 1790715170525,
+     "file": {
+      "name": "/org.fdroid.fdroid_2000051.apk",
+      "sha256": "83d3fe522281c3cb89fce3bc05038f81b3c3b32c108536941f184c5f9bb53778",
+      "size": 12537183
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 24,
+       "targetSdkVersion": 37
+      },
+      "versionCode": 2000051,
+      "versionName": "2.0.1"
+     },
+     "releaseChannels": [
+      "Beta"
+     ]
+    },
+    "985f5181d48bb6bafd54083a048b391271e0ab28385881cc41294fb01a222762": {
+     "added": 1771544233000,
+     "file": {
+      "name": "/org.fdroid.fdroid_1023052.apk",
+      "sha256": "985f5181d48bb6bafd54083a048b391271e0ab28385881cc41294fb01a222762",
+      "size": 12426276
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 23,
+       "targetSdkVersion": 30
+      },
+      "versionCode": 1023052,
+      "versionName": "1.23.2"
+     }
+    }
+   }
+  },
+  "org.schabi.newpipe": {
+   "metadata": {
+    "name": {
+     "en-US": "NewPipe"
+    },
+    "preferredSigner": "cb84069bd68116bafae5ee4ee5b08a567aa6d898404e7cb12f9e756df5cf5cab"
+   },
+   "versions": {
+    "11c320613aebaf2132897f44dc9fa02bd05100b3edaacad11ceaa250889ff5d4": {
+     "added": 1785080297767,
+     "file": {
+      "name": "/org.schabi.newpipe_1014.apk",
+      "sha256": "11c320613aebaf2132897f44dc9fa02bd05100b3edaacad11ceaa250889ff5d4",
+      "size": 11507122
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "964dfa418e66390110b0c061a0497cbbd7395b8b2526bee4dece95597eb5e9d4"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 23,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1014,
+      "versionName": "0.29.0"
+     }
+    },
+    "1765284f67c09c983b025954da4f142419e93cc510f39f735700b670b04ba3ff": {
+     "added": 1785080297767,
+     "file": {
+      "name": "/org.schabi.newpipe_1014_cb84069.apk",
+      "sha256": "1765284f67c09c983b025954da4f142419e93cc510f39f735700b670b04ba3ff",
+      "size": 11507122
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "cb84069bd68116bafae5ee4ee5b08a567aa6d898404e7cb12f9e756df5cf5cab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 23,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1014,
+      "versionName": "0.29.0"
+     }
+    },
+    "18447bfb1e06d113edc88df93f471827280de06f6f3d4dc42f56f28b9c1bab79": {
+     "added": 1787313768252,
+     "file": {
+      "name": "/org.schabi.newpipe_1015_cb84069.apk",
+      "sha256": "18447bfb1e06d113edc88df93f471827280de06f6f3d4dc42f56f28b9c1bab79",
+      "size": 11507122
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "cb84069bd68116bafae5ee4ee5b08a567aa6d898404e7cb12f9e756df5cf5cab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 23,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1015,
+      "versionName": "0.29.1"
+     }
+    },
+    "1d66d19eedbab969b1be2e44e0ea35f5f8921cbe83b5c5ac810767ca1a84b7e8": {
+     "added": 1787313768252,
+     "file": {
+      "name": "/org.schabi.newpipe_1015.apk",
+      "sha256": "1d66d19eedbab969b1be2e44e0ea35f5f8921cbe83b5c5ac810767ca1a84b7e8",
+      "size": 11507122
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "964dfa418e66390110b0c061a0497cbbd7395b8b2526bee4dece95597eb5e9d4"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 23,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1015,
+      "versionName": "0.29.1"
+     }
+    },
+    "88a1c99ca48394af431b24379783165860aaab3f7f45cce9ca6b8a7d2139a4d6": {
+     "added": 1781219316644,
+     "file": {
+      "name": "/org.schabi.newpipe_1013.apk",
+      "sha256": "88a1c99ca48394af431b24379783165860aaab3f7f45cce9ca6b8a7d2139a4d6",
+      "size": 10901946
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "964dfa418e66390110b0c061a0497cbbd7395b8b2526bee4dece95597eb5e9d4"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1013,
+      "versionName": "0.28.8"
+     }
+    },
+    "d9fb2540b3a2a0b059c73a296f0cda1c06738426d013c626dbf088aea66629b3": {
+     "added": 1781219316644,
+     "file": {
+      "name": "/org.schabi.newpipe_1013_cb84069.apk",
+      "sha256": "d9fb2540b3a2a0b059c73a296f0cda1c06738426d013c626dbf088aea66629b3",
+      "size": 10901946
+     },
+     "manifest": {
+      "nativecode": [
+       "arm64-v8a",
+       "armeabi-v7a",
+       "x86",
+       "x86_64"
+      ],
+      "signer": {
+       "sha256": [
+        "cb84069bd68116bafae5ee4ee5b08a567aa6d898404e7cb12f9e756df5cf5cab"
+       ]
+      },
+      "usesSdk": {
+       "minSdkVersion": 21,
+       "targetSdkVersion": 35
+      },
+      "versionCode": 1013,
+      "versionName": "0.28.8"
+     }
+    }
+   }
+  }
+ },
+ "repo": {
+  "address": "https://f-droid.org/repo",
+  "mirrors": [
+   {
+    "isPrimary": true,
+    "url": "https://f-droid.org/repo"
+   },
+   {
+    "url": "http://fdroidorg6cooksyluodepej4erfctzk7rrjpjbbr6wx24jh3lqyfwyd.onion/fdroid/repo"
+   },
+   {
+    "countryCode": "DE",
+    "url": "https://ftp.fau.de/fdroid/repo"
+   },
+   {
+    "countryCode": "US",
+    "url": "https://mirror.fcix.net/fdroid/repo"
+   }
+  ],
+  "timestamp": 1791818227459
+ }
+}

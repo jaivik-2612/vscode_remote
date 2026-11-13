@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Android
+GenericName=Android apps
+Comment=Android 13 in a container (Waydroid); its traffic goes through Tor
+Exec=/usr/local/lib/antumbra-android-launch
+Icon=waydroid
+Categories=X-WayDroid-App;
+Keywords=Android;Waydroid;apps;F-Droid;
+X-Purism-FormFactor=Workstation;Mobile;

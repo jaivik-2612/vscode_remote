@@ -1,0 +1,17 @@
+[Unit]
+# Started by antumbra-apply-welcome-settings when the user turned Android
+# apps on at the Welcome screen; prepares Waydroid offline from the images
+# in the root filesystem and starts its container service. Android itself
+# boots when the user's session starts it (antumbra-android-session.service).
+Description=Prepare Android apps (Waydroid) for this session
+ConditionPathExists=/run/antumbra/android-enabled
+Requires=nftables.service antumbra-create-netns.service
+After=nftables.service antumbra-create-netns.service apparmor.service
+Wants=antumbra-waydroid-provision.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+UMask=0022
+ExecStart=/usr/local/lib/antumbra-waydroid
+TimeoutStartSec=15min

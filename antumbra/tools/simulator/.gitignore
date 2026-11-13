@@ -1,0 +1,9 @@
+# The repository root ignores every icons/ directory (a web app's build
+# output); the simulator's app icons are source.
+!/assets/icons/
+# Build and test outputs
+/antumbra-simulator.html
+/shots/
+/test/.page-script.js
+/test/log-*.txt
+/test/results-*.json

@@ -1,0 +1,61 @@
+Antumbra changes to the packaging of Debian libcamera 0.7.2-1 for the
+optional trixie rebuild (build/libcamera.sh, ANTUMBRA_LIBCAMERA_LOCAL=1).
+build/libcamera.sh applies it with patch -p1 to the unpacked source package,
+before it adds the port's patches to debian/patches/series.
+
+- Drop libtensorflow-lite-dev: it is not in trixie, and the trixie-backports
+  0.7.1 package drops it the same way (it only feeds a Raspberry Pi AWB
+  option).
+- Complete the pkg.libcamera.nopython and pkg.libcamera.noqt build profiles
+  (debian/control already marks their build dependencies): with them the
+  Python bindings and qcam are not built, so a cross build needs neither a
+  cross Python nor Qt. The image ships neither.
+
+--- a/debian/control
++++ b/debian/control
+@@ -19,7 +19,6 @@
+                libpisp-dev [arm64 armel armhf],
+                libpython3-dev <!pkg.libcamera.nopython>,
+                libsdl2-dev <!pkg.libcamera.nosdl>,
+-               libtensorflow-lite-dev [arm64 armhf],
+                libtiff-dev,
+                libudev-dev [linux-any],
+                libyaml-dev,
+@@ -151,6 +150,7 @@
+ Package: python3-libcamera
+ Architecture: linux-any
+ Section: python
++Build-Profiles: <!pkg.libcamera.nopython>
+ Depends: ${misc:Depends},
+          ${python3:Depends},
+          ${shlibs:Depends}
+--- a/debian/rules
++++ b/debian/rules
+@@ -14,10 +14,18 @@
+ ifneq (,$(filter i386,$(DEB_HOST_ARCH)))
+ QCAM=disabled
+ # See https://bugs.debian.org/1076986
++else ifneq (,$(filter pkg.libcamera.noqt,$(DEB_BUILD_PROFILES)))
++QCAM=disabled
+ else
+ QCAM=enabled
+ endif
+ 
++ifneq (,$(filter pkg.libcamera.nopython,$(DEB_BUILD_PROFILES)))
++PYCAMERA=disabled
++else
++PYCAMERA=enabled
++endif
++
+ %:
+ 	dh $@
+ 
+@@ -26,7 +34,7 @@
+                --libexecdir=libexec/${DEB_HOST_MULTIARCH} \
+ 		-Dgstreamer=enabled \
+ 		-Dlibunwind=disabled \
+-		-Dpycamera=enabled \
++		-Dpycamera=$(PYCAMERA) \
+ 		-Dqcam=$(QCAM) \
+ 		-Dtest=true \
+ 		$(CONFFLAGS) \

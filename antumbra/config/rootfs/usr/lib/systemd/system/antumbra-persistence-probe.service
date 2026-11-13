@@ -1,0 +1,13 @@
+[Unit]
+Description=Record whether a Persistent Storage volume exists
+DefaultDependencies=no
+After=local-fs.target systemd-udev-settle.service
+Before=greetd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/antumbra-persistence status --quiet
+
+[Install]
+WantedBy=multi-user.target

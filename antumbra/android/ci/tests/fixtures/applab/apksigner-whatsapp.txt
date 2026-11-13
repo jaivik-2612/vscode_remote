@@ -1,0 +1,44 @@
+Verifies
+Verified using v1 scheme (JAR signing): true
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): true
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate DN: CN=WhatsApp LLC, O=WhatsApp LLC, L=Menlo Park, ST=California, C=US
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-256 digest: fb920d381bee1b2093f27dc8f13d994da629dc91887d0529b35c9a2dc4f4a6c2
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate SHA-1 digest: 8b0debf9516af037c9be2f539584b97fe9781764
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) certificate MD5 digest: 0d200010f949baaa30c3764458066452
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) key algorithm: RSA
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) key size (bits): 4096
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key SHA-256 digest: da20616489af7f02458b5e488c3fcf7f51f7cce20360a7b7da978d23666bf660
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key SHA-1 digest: 3bb0b191c6eddc01c5de12d53c7d6dd2984900c1
+Signer (minSdkVersion=33, maxSdkVersion=2147483647) public key MD5 digest: ed9e83e29ff322fd64c94340295856bb
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate DN: CN=Brian Acton, OU=Engineering, O=WhatsApp Inc., L=Santa Clara, ST=California, C=US
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-256 digest: 3987d043d10aefaf5a8710b3671418fe57e0e19b653c9df82558feb5ffce5d44
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate SHA-1 digest: 38a0f7d505fe18fec64fbf343ecaaaf310dbd799
+Signer (minSdkVersion=24, maxSdkVersion=32) certificate MD5 digest: 556c6019249bbc0cab70495178d3a9d1
+Signer (minSdkVersion=24, maxSdkVersion=32) key algorithm: DSA
+Signer (minSdkVersion=24, maxSdkVersion=32) key size (bits): 1024
+Signer (minSdkVersion=24, maxSdkVersion=32) public key SHA-256 digest: f1de30ca96948e887cf743c792498851ad019a294169d93202b4ce772656540f
+Signer (minSdkVersion=24, maxSdkVersion=32) public key SHA-1 digest: 41688e3470d2c4d31648d4f48d2e629cabc0d97d
+Signer (minSdkVersion=24, maxSdkVersion=32) public key MD5 digest: a74d85e579e7fe060d97d4b062d5794d
+Signer #1 in lineage certificate DN: CN=Brian Acton, OU=Engineering, O=WhatsApp Inc., L=Santa Clara, ST=California, C=US
+Signer #1 in lineage certificate SHA-256 digest: 3987d043d10aefaf5a8710b3671418fe57e0e19b653c9df82558feb5ffce5d44
+Signer #1 in lineage certificate SHA-1 digest: 38a0f7d505fe18fec64fbf343ecaaaf310dbd799
+Signer #1 in lineage certificate MD5 digest: 556c6019249bbc0cab70495178d3a9d1
+Has installed data capability: true
+Has shared UID capability    : true
+Has permission capability    : true
+Has rollback capability      : true
+Has auth capability          : true
+Signer #2 in lineage certificate DN: CN=WhatsApp LLC, O=WhatsApp LLC, L=Menlo Park, ST=California, C=US
+Signer #2 in lineage certificate SHA-256 digest: fb920d381bee1b2093f27dc8f13d994da629dc91887d0529b35c9a2dc4f4a6c2
+Signer #2 in lineage certificate SHA-1 digest: 8b0debf9516af037c9be2f539584b97fe9781764
+Signer #2 in lineage certificate MD5 digest: 0d200010f949baaa30c3764458066452
+Has installed data capability: true
+Has shared UID capability    : true
+Has permission capability    : true
+Has rollback capability      : false
+Has auth capability          : true

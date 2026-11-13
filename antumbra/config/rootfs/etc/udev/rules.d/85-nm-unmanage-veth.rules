@@ -1,0 +1,3 @@
+ENV{INTERFACE}=="veth*", ENV{NM_UNMANAGED}="1"
+# The Android container's bridge is configured by antumbra-create-netns only
+ENV{INTERFACE}=="waydroid-tor", ENV{NM_UNMANAGED}="1"

@@ -1,0 +1,136 @@
+#!/usr/bin/python3 -I
+"""
+Detects if action is needed to keep using Tails on current hardware.
+
+The output is guaranteed to be valid JSON, and will be an object with these fields:
+
+- action_needed: a boolean. always present.
+- os: a list of string.
+"""
+
+import enum
+import json
+import logging
+import os
+import subprocess
+import sys
+
+from tailslib.uefi_ca import Detection
+
+log = logging.getLogger("tails-uefi-ca-detect")
+
+
+class UefiState(enum.Enum):
+    SECURE_BOOT_DISABLED = 1
+    GOOD = 2
+    BAD = 3
+
+    def __repr__(self):
+        # The standard representation includes the numerical value, which is redundant here
+        # Let's have a shorter one, this will prove handy when writing doctests
+        class_name = self.__class__.__name__
+        value = self.name
+        return f"<{class_name}.{value}>"
+
+
+def detect_secure_boot_enabled() -> UefiState | None:
+    try:
+        output = subprocess.check_output(
+            ["/usr/bin/mokutil", "--sb-state"],
+            env={"LC_ALL": "C"},
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        log.exception("Error invoking mokutil")
+
+    return parse_secure_boot_enabled(output)
+
+
+def parse_secure_boot_enabled(output: str) -> UefiState | None:
+    """
+    Returns UefiState.SECURE_BOOT_DISABLED if we're sure that's the case, None otherwise
+    >>> parse_secure_boot_enabled("SecureBoot disabled")
+    <UefiState.SECURE_BOOT_DISABLED>
+    >>> parse_secure_boot_enabled("SecureBoot enabled")
+    >>> parse_secure_boot_enabled("EFI variables are not supported on this system")
+    <UefiState.SECURE_BOOT_DISABLED>
+    """
+    # UEFI enabled, but SecureBoot disabled
+    if "SecureBoot disabled" in output:
+        return UefiState.SECURE_BOOT_DISABLED
+    # UEFI disabled (booting from MBR)
+    if "EFI variables are not supported on this system" in output:
+        return UefiState.SECURE_BOOT_DISABLED
+    return None
+
+
+def detect_uefi_ca() -> UefiState | None:
+    """
+    Returns None if mokutil fails, a UefiState otherwise.
+    """
+    try:
+        output = subprocess.check_output(
+            ["/usr/bin/mokutil", "--db", "--short"],
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        log.exception("Error invoking mokutil")
+        return None
+    else:
+        return parse_uefi_ca(output)
+
+
+def parse_uefi_ca(output: str) -> UefiState:
+    """
+    >>> parse_uefi_ca("\\n\\n").name
+    'SECURE_BOOT_DISABLED'
+    >>> old = "3590bfd89 Microsoft Corporation UEFI CA 2011\\n"
+    >>> new = "b5eeb4a670 Microsoft UEFI CA 2023\\n"
+    >>> parse_uefi_ca(old).name
+    'BAD'
+    >>> parse_uefi_ca(old + new).name
+    'GOOD'
+    """
+    if not output.strip():
+        return UefiState.SECURE_BOOT_DISABLED
+    if "Microsoft UEFI CA 2023" in output:
+        return UefiState.GOOD
+    return UefiState.BAD
+
+
+def output(d: Detection):
+    json.dump(d.asdict(), sys.stdout)
+
+
+def no_action_needed() -> int:
+    d = Detection(action_needed=False)
+    output(d)
+    return 0
+
+
+def main() -> int:
+    if sys.argv[1:] == ["--doctest"]:
+        import doctest
+
+        ret = doctest.testmod(verbose=False)
+        print(sys.argv[0], "doctest:", ret)
+        return 1 if ret.failed else 0
+
+    if os.getuid() != 0:
+        print(f"{sys.argv[0]} must be run as root", file=sys.stderr)
+        sys.exit(1)
+
+    sb_state = detect_secure_boot_enabled()
+    if sb_state == UefiState.SECURE_BOOT_DISABLED:
+        return no_action_needed()
+
+    uefi_state = detect_uefi_ca()
+    if uefi_state in [UefiState.GOOD, UefiState.SECURE_BOOT_DISABLED]:
+        return no_action_needed()
+
+    output(Detection(action_needed=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

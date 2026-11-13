@@ -1,0 +1,12 @@
+[Unit]
+# Waits for Android to boot (the user's session starts it), applies
+# Antumbra's settings inside it (no captive-portal checks, no Private DNS,
+# no network time) and exits.
+Description=Apply Antumbra's privacy settings inside Android
+ConditionPathExists=/run/antumbra/android-enabled
+Requires=antumbra-waydroid.service
+After=antumbra-waydroid.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/lib/antumbra-waydroid-provision

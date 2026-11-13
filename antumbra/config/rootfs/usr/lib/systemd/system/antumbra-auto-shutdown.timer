@@ -1,0 +1,12 @@
+[Unit]
+Description=Power off after being locked for too long
+Documentation=file:///usr/share/doc/antumbra/architecture.md
+
+[Timer]
+# Started when the session locks, stopped when it unlocks (antumbra-lock-watch).
+# WakeSystem makes it fire even from suspend (CLOCK_BOOTTIME_ALARM via the
+# PMIC RTC). Override with a drop-in to change the delay.
+OnActiveSec=18h
+WakeSystem=yes
+AccuracySec=1min
+Unit=antumbra-auto-shutdown.service

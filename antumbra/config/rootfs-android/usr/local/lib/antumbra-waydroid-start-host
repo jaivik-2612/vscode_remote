@@ -1,0 +1,142 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# LXC start-host hook of the Waydroid container: lxc.hook.start-host in the
+# config_3 template that Waydroid generates the container's configuration
+# from (set by config/hooks/56-session-android.sh). LXC runs it in the
+# host's namespaces once the container's network exists and before
+# Android's init runs; a non-zero exit aborts the start (LXC 6.0, start.c).
+#
+# It lets Android start only on its Tor-only network: the firewall rules
+# that redirect the container's traffic to Tor and reject everything else,
+# the bridge with its address, no route from the bridge to the host's
+# loopback, and a container configuration attached to that bridge. And only
+# without the phone's identifiers: the generic kernel command line instead
+# of the host's (which carries the serial number), every hardware
+# identifier in sysfs and procfs that exists now masked (antumbra-waydroid
+# writes the masks again before each start of the container service) and
+# hidden in the container's own view, every device but cameras. Any doubt
+# fails closed. Finally it switches forwarding off on the bridge again, in case
+# something switched ip_forward off and on since boot, and rejects .onion
+# virtual addresses inside the container's own network namespace (LXC_PID
+# is the container's first process): Tor answers Android's lookups of
+# .onion names with addresses in 127.192.0.0/10 (AutomapHostsOnResolve),
+# which inside the container are Android's own loopback, where any app
+# listening on that port would receive the connection. Android's netd uses
+# iptables-legacy and leaves this nft table alone; Android's root could
+# remove it, as it could anything here.
+set -u
+BRIDGE=waydroid-tor
+CONFIG="${LXC_CONFIG_FILE:-/var/lib/waydroid/lxc/waydroid/config}"
+
+fail() {
+    logger -t antumbra-waydroid -p daemon.err -- "Android container start refused: $*"
+    echo "antumbra-waydroid-start-host: refused: $*" >&2
+    exit 1
+}
+has() { printf '%s\n' "$1" | grep -qE -- "$2"; }
+
+nat="$(nft list chain ip antumbra-nat android 2>/dev/null)" || fail "the firewall's Android nat chain is missing"
+has "${nat}" 'udp dport 53 .*redirect to :5354' || fail "Android's DNS is not redirected to Tor"
+has "${nat}" 'meta l4proto tcp .*redirect to :9041' || fail "Android's TCP is not redirected to Tor"
+pre="$(nft list chain ip antumbra-nat prerouting 2>/dev/null)" || fail "the firewall's nat prerouting chain is missing"
+has "${pre}" "iifname \"${BRIDGE}\" jump android" || fail "the bridge's traffic does not enter the Android nat chain"
+fwd="$(nft list chain inet antumbra forward 2>/dev/null)" || fail "the firewall's forward chain is missing"
+has "${fwd}" 'policy drop' || fail "the forward chain does not drop by default"
+has "${fwd}" "iifname \"${BRIDGE}\" jump android_reject" || fail "forwarding from the bridge is not rejected"
+has "${fwd}" "oifname \"${BRIDGE}\" jump android_reject" || fail "forwarding to the bridge is not rejected"
+inp="$(nft list chain inet antumbra input 2>/dev/null)" || fail "the firewall's input chain is missing"
+has "${inp}" 'policy drop' || fail "the input chain does not drop by default"
+has "${inp}" "iifname \"${BRIDGE}\" jump android_reject" || fail "the host is reachable from the bridge"
+
+ip -4 -o addr show dev "${BRIDGE}" 2>/dev/null | grep -q ' 10\.200\.2\.1/30 ' || fail "${BRIDGE} is missing or has the wrong address"
+[ "$(cat "/proc/sys/net/ipv4/conf/${BRIDGE}/route_localnet" 2>/dev/null)" = "0" ] || fail "${BRIDGE} routes to the host's loopback (route_localnet)"
+
+[ -r "${CONFIG}" ] || fail "no container configuration at ${CONFIG}"
+grep -Eq '^lxc\.net\.0\.type[[:space:]]*=[[:space:]]*veth[[:space:]]*$' "${CONFIG}" || fail "the container's network is not a veth pair"
+grep -Eq "^lxc\\.net\\.0\\.link[[:space:]]*=[[:space:]]*${BRIDGE}[[:space:]]*\$" "${CONFIG}" || fail "the container is not attached to ${BRIDGE}"
+if grep -Eq '^lxc\.net\.[1-9]' "${CONFIG}"; then fail "the container has a second network interface"; fi
+
+# Identifiers (antumbra-waydroid prepares both, config_3 binds the command line)
+CMDLINE=/run/antumbra/android-cmdline
+grep -qxF "lxc.mount.entry = ${CMDLINE} proc/cmdline none bind,create=file 0 0" "${CONFIG}" \
+    || fail "the container would see the host's kernel command line"
+[ -f "${CMDLINE}" ] || fail "no generic kernel command line for the container (${CMDLINE})"
+if grep -q 'androidboot\.' "${CMDLINE}"; then fail "${CMDLINE} names androidboot values"; fi
+# LXC's device list allows nothing until an "a" rule turns it into a deny list.
+[ "$(grep -E '^lxc\.cgroup2\.devices\.' "${CONFIG}")" = "$(printf '%s\n' 'lxc.cgroup2.devices.allow = a' 'lxc.cgroup2.devices.deny = c 81:* rwm')" ] \
+    || fail "the container's device rules are not exactly: allow a, then deny V4L2"
+case "${LXC_PID:-}" in
+    '' | *[!0-9]*) fail "no container PID (LXC_PID)" ;;
+esac
+# The container's own view. LXC has made its mounts in the container's
+# mount namespace and switched to its root before it runs this hook
+# (lxc_setup() in the child, then the start-host hook in the parent: LXC
+# 6.0, start.c), and /proc/LXC_PID/root is that root: a path under it is
+# what Android will find. (nsenter --mount would run the command from
+# Android's root file system, where nothing of the host's can run, and
+# nothing of Android's before its init.)
+VIEW="/proc/${LXC_PID}/root"
+[ -d "${VIEW}/sys/devices" ] || fail "cannot see the container's /sys/devices"
+# Hardware identifiers, as antumbra-waydroid finds and masks them (its
+# MASKED_NAMES, UEVENT_MARKERS, HIDDEN_DIR_MARKERS and MASKED_PROC): every
+# one there now must have its mask. Masks of devices that have gone since
+# are optional entries, which LXC skips; so does it one it fails to mount,
+# so each mask is also looked for in the container's view. Each line: the
+# kind, then the path.
+identifiers="$(
+    find /sys/devices \( -name serial_number -o -name serial -o -name vpd_pg80 -o -name vpd_pg83 -o -name wwid -o -name cid -o -name uuid -o -name eeprom \) -type f 2>/dev/null \
+        | sed 's/^/file /'
+    find /sys/devices \( -name partition -o -name serial_number \) -type f 2>/dev/null | while IFS= read -r marker; do
+        uevent="${marker%/*}/uevent"
+        if [ -f "${uevent}" ] && [ ! -L "${uevent}" ]; then printf 'file %s\n' "${uevent}"; fi
+    done
+    find /sys/devices \( -name nvmem -o -name since_epoch \) -type f 2>/dev/null | sed 's/^/dir /; s|/[^/]*$||'
+    if [ -f /proc/driver/rtc ]; then printf 'file %s\n' /proc/driver/rtc; fi
+)"
+hidden="$(printf '%s\n' "${identifiers}" | sed -n 's/^dir //p')"
+# under_hidden PATH: PATH is inside a directory hidden whole (whose own
+# check shows it empty), so not in the container at all: a nested nvmem
+# provider or RTC, whose mask LXC cannot mount.
+under_hidden() {
+    while IFS= read -r dir; do
+        [ -n "${dir}" ] || continue
+        case "$1" in "${dir}"/*) return 0 ;; esac
+    done <<HIDDEN
+${hidden}
+HIDDEN
+    return 1
+}
+# masked_in_view KIND PATH: the container sees nothing at PATH: a file is
+# /dev/null (bound there) or reads empty, a directory has nothing in it.
+masked_in_view() {
+    set -- "$1" "${VIEW}$2"
+    case "$1" in
+        file)
+            if [ -c "$2" ]; then [ "$(stat -L -c %t:%T -- "$2")" = 1:3 ]; return; fi
+            [ -f "$2" ] && [ "$(head -c 1 -- "$2" && echo .)" = . ] ;;
+        *) [ -d "$2" ] && [ "$(ls -A -- "$2" && echo .)" = . ] ;;
+    esac
+}
+count=0
+while read -r kind path; do
+    [ -n "${path}" ] || continue
+    case "${path}" in *[[:space:]\\]*) fail "cannot check the mask of ${path}" ;; esac
+    case "${kind}" in
+        file) entry="lxc.mount.entry = /dev/null ${path#/} none bind,ro,optional 0 0" ;;
+        *) entry="lxc.mount.entry = tmpfs ${path#/} tmpfs ro,nosuid,nodev,noexec,mode=0555,size=4k,optional 0 0" ;;
+    esac
+    grep -qxF "${entry}" "${CONFIG}" || fail "${path} is not masked in the container"
+    under_hidden "${path}" || masked_in_view "${kind}" "${path}" \
+        || fail "${path} is readable in the container: its mask did not take effect"
+    count=$((count + 1))
+done <<EOF
+${identifiers}
+EOF
+
+sysctl -q "net.ipv4.conf.${BRIDGE}.forwarding=0" || fail "could not switch forwarding off on ${BRIDGE}"
+
+printf '%s\n' 'table ip antumbra_onion {}' 'flush table ip antumbra_onion' \
+    'table ip antumbra_onion { chain output { type filter hook output priority filter; policy accept; ip daddr 127.192.0.0/10 reject; }; }' \
+    | nsenter --target "${LXC_PID}" --net nft -f - || fail "could not block .onion virtual addresses inside Android"
+logger -t antumbra-waydroid -p daemon.info -- "Android container checked: Tor only, ${count} hardware identifiers hidden in its view"
+exit 0

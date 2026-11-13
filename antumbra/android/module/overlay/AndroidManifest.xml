@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later
+
+     Antumbra: a static resource overlay for the Connectivity module's
+     resources (com.android.connectivity.resources, in the Tethering APEX).
+
+     It turns hardware keepalive offload off. With offload, an app can ask
+     ConnectivityManager for NAT-T or TCP keepalives to an address of its
+     choice; the Wi-Fi firmware then sends those packets by itself, from the
+     phone's real address, without passing through iptables or Tor (pivot
+     checks: "Hardware keepalive offload bypasses netfilter").
+
+     The module installs it as /product/overlay/AntumbraConnectivity.apk.
+     Android enables static overlays on system partitions at boot; an app
+     cannot replace a static overlay with an update. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.antumbra.overlay.connectivity"
+    android:versionCode="1"
+    android:versionName="1">
+
+    <overlay
+        android:targetPackage="com.android.connectivity.resources"
+        android:targetName="ServiceConnectivityResourcesConfig"
+        android:isStatic="true"
+        android:priority="900" />
+
+    <application android:hasCode="false" />
+</manifest>

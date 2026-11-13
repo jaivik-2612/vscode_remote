@@ -1,0 +1,10 @@
+[Desktop Entry]
+# Antumbra: hides Debian's /usr/share/applications/Waydroid.desktop (this
+# directory comes first in XDG_DATA_DIRS). Its first-run dialog offers to
+# download Android images from the Internet; Antumbra's own "Android"
+# launcher (antumbra-android.desktop) opens the preinstalled ones.
+Type=Application
+Name=Waydroid
+Exec=waydroid
+Icon=waydroid
+NoDisplay=true

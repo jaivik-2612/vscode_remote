@@ -1,0 +1,15 @@
+# Antumbra takes only these packages from trixie-backports; everything else
+# stays on trixie (backports' own priority is 100). Copied into the chroot
+# before the first package is installed (build/rootfs.sh) and kept in the
+# image for the same effect at runtime.
+
+Explanation: the camera: libcamera 0.7 and the PipeWire stack built against it
+Explanation: (trixie's libspa-0.2-libcamera links libcamera 0.4)
+Package: libcamera* gstreamer1.0-libcamera pipewire* libpipewire-0.3-* libspa-0.2-* wireplumber libwireplumber-0.5-* gstreamer1.0-pipewire
+Pin: release n=trixie-backports
+Pin-Priority: 500
+
+Explanation: Android apps (Waydroid), only in builds with ANTUMBRA_ANDROID=1
+Package: waydroid python3-gbinder libgbinder* libglibutil*
+Pin: release n=trixie-backports
+Pin-Priority: 500

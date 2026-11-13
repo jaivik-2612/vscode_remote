@@ -1,0 +1,33 @@
+# Antumbra: what decides the output of build-tor.sh, for CI caching.
+#
+# 'build-tor.sh --print-cache-key --abi <abi>' prints a key built from the
+# SHA-256 of every file listed below as 'file', plus the ABI list, the API
+# level, the pinned NDK revision and the build host's OS and machine. A CI
+# job can use that line directly as its cache key, for example:
+#   key=$(antumbra/android/tor/build-tor.sh --print-cache-key --abi all)
+#
+# A cached OUT directory is safe to reuse when the key matches: build-tor.sh
+# writes nothing else there.
+#
+# Files whose content changes the binaries (paths relative to this folder):
+file build-tor.sh
+file sources.lock
+file cache-key.txt
+# The patches named by 'patch' records in sources.lock are added to the key
+# automatically.
+#
+# Also part of the key, read from sources.lock or the command line:
+#   - tor, OpenSSL, libevent and zlib versions and SHA-256 (sources.lock)
+#   - NDK revision (sources.lock 'ndk'); a different NDK fails the build
+#     unless --allow-other-ndk is given, and then the key no longer matches
+#     the binaries
+#   - API level (sources.lock 'api', or --api)
+#   - SOURCE_DATE_EPOCH (sources.lock 'epoch')
+#   - ABIs (--abi)
+#
+# Deliberately not part of the key, because they do not change the binaries:
+#   torrc.in, render-torrc.sh  (the module renders the torrc when it packages)
+#   check-tor-binary.sh, hostcheck-tor.sh, README.md  (tests and notes)
+#   keys/  (public keys for the signature checks; the SHA-256 pins decide
+#           which tarballs are built)
+#   --jobs, --work, --downloads, --signatures, --host-check, --keep-work

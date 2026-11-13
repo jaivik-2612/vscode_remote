@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# LXC post-stop hook of the Waydroid container: lxc.hook.post-stop in the
+# config_base template, ahead of Waydroid's own "/dev/null" entry (set by
+# config/hooks/56-session-android.sh). LXC runs it as root in the host's
+# namespaces, inside waydroid-container.service, once the container has
+# stopped: "waydroid session stop", logout, Android shutting down, or a
+# start the start-host hook refused.
+#
+# Waydroid opened the binder devices (0666) and the GPU render node, the
+# DMA-BUF heaps and the framebuffers (0777) to every user, and only
+# stopping its container service closes them again (ExecStopPost in its
+# drop-in). That stop cannot happen from here: it would kill Waydroid's own
+# clean-up, which runs in the same service. antumbra-waydroid-stopped.service
+# waits for that clean-up, then stops the service; the next
+# "waydroid session start" starts it again through D-Bus.
+# While the whole system stops, systemd is stopping the container service
+# already (its ExecStopPost runs), and refuses to start anything new.
+if [ "$(systemctl is-system-running 2>/dev/null)" = stopping ]; then exit 0; fi
+systemctl --no-block start antumbra-waydroid-stopped.service \
+    || logger -t antumbra-waydroid -p daemon.warning -- "could not start antumbra-waydroid-stopped.service"
+# Waydroid's "/dev/null" hook comes next and fails, as it always did.
+exit 0

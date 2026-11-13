@@ -1,0 +1,43 @@
+{
+ "data": {
+  "aab": null,
+  "file": {
+   "added": "2026-10-03 00:25:16",
+   "filesize": 148660262,
+   "hardware": {
+    "cpus": [
+     "x86",
+     "x86-64",
+     "armeabi-v7a",
+     "arm64-v8a"
+    ],
+    "sdk": 23
+   },
+   "malware": {
+    "rank": "TRUSTED"
+   },
+   "md5sum": "eed17f28a633f93ebbf548f389cece72",
+   "path": "https://pool.apk.aptoide.com/aplicationpaidprofree/com-whatsapp-263907133-76931191-eed17f28a633f93ebbf548f389cece72.apk",
+   "path_alt": "https://pool.apk.aptoide.com/aplicationpaidprofree/com-whatsapp-263907133-76931191-eed17f28a633f93ebbf548f389cece72.apk",
+   "signature": {
+    "owner": "CN=WhatsApp LLC, O=WhatsApp LLC, L=Menlo Park, ST=California, C=US",
+    "sha1": "8B:0D:EB:F9:51:6A:F0:37:C9:BE:2F:53:95:84:B9:7F:E9:78:17:64"
+   },
+   "vercode": 263907133,
+   "vername": "2.26.39.71"
+  },
+  "id": 76931191,
+  "name": "WhatsApp Messenger",
+  "obb": null,
+  "package": "com.whatsapp",
+  "size": 148660262,
+  "store": {
+   "id": 2360723,
+   "name": "aplicationpaidprofree"
+  },
+  "updated": "2026-10-12 16:56:56"
+ },
+ "info": {
+  "status": "OK"
+ }
+}

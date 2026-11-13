@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Antumbra's icon theme (docs/architecture.md, "Interface theme"): the
+# status-bar and quick-setting icons phosh asks for (battery, Wi-Fi signal,
+# Bluetooth, Dark Mode, Night Light), drawn from Material Symbols
+# (Apache-2.0; provenance and hashes in SOURCES). Every other icon comes
+# from Adwaita.
+[Icon Theme]
+Name=Antumbra
+Comment=Material Symbols status icons over Adwaita
+Inherits=Adwaita,hicolor
+Directories=symbolic/status
+
+[symbolic/status]
+Context=Status
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

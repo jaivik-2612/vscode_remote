@@ -1,0 +1,6 @@
+id=antumbra
+name=Antumbra
+version=0.1.0
+versionCode=1
+author=Antumbra
+description=Tor-only firewall, tracker-blocking DNS filter and in-memory network state for LineageOS 23.2 on the OnePlus 7T Pro. Needs the Antumbra Welcome app as device owner.
