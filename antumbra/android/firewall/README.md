@@ -370,6 +370,20 @@ that mentions `ANTUMBRA_`, plus the FORWARD policies. The hash describes what
 the kernel holds, not what was sent to it, and it is the same for the same
 configuration on every run, shell and userland (the test checks this).
 
+### Next to Qualcomm's netmgrd
+
+On a Qualcomm phone, netmgrd loads its own `nm_mdmprxy` rules for the
+modem's traffic (IKE and IMS) at any time: jumps to its chains inserted at
+the top of mangle PREROUTING and POSTROUTING and filter OUTPUT, a
+PREROUTING `ACCEPT` for UDP port 4500, and possibly FORWARD's policy set to
+ACCEPT. `status` then no longer reports `live`, because it checks that
+Antumbra's jumps are the first rules of those chains and that FORWARD's
+policy is DROP; the module's guard sees that within 30 seconds and runs
+`apply` again, which puts Antumbra's jumps first and FORWARD back to DROP
+and leaves netmgrd's rules and chains in place, behind Antumbra's. The
+sandbox test's phase 8 loads such rules after `apply` and checks each
+step, and that nothing leaves the phone while they are first.
+
 ## What this firewall does not cover
 
 - **Packets below netfilter.** `AF_PACKET` sockets (root and system daemons
@@ -449,8 +463,9 @@ tampered arm chain rebuilt; a missing `-restore` tool; a missing
 tor's `run/`, a planted link not followed, a linked or app-owned directory
 refused); the same hash, the single-command paths and the directory checks
 from bash, dash, busybox (with busybox's tools), mksh and mksh with toybox's
-tools; and 8000 relays with 3000 DoH addresses (a rule set and table dumps
-of several hundred KiB) from sh, mksh and mksh with toybox's tools.
+tools; 8000 relays with 3000 DoH addresses (a rule set and table dumps
+of several hundred KiB) from sh, mksh and mksh with toybox's tools; and
+Qualcomm netmgrd's rules (below).
 
 ```sh
 sudo tests/sandbox-test.sh                     # prints PASS/FAIL/SKIP per probe

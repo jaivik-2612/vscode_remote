@@ -1056,6 +1056,68 @@ elif required mksh; then fail big-mksh "mksh not found"; else skip big-mksh "mks
 rm -f "$AD/state/fw-exempt.conf" "$AD/state/fw-relays.conf" "$AD/lists/doh-ipv4.txt"
 fw flush >/dev/null 2>&1
 
+# --- Phase 8: Qualcomm's netmgrd puts its own rules first (FW7) ---------------------------
+#
+# On the phone, netmgrd loads nm_mdmprxy rules for the modem's own traffic
+# (IKE and IMS) at any time, inserted at the top of built-in chains, and
+# may set FORWARD's policy to ACCEPT. Then Antumbra's jumps are no longer
+# the first rules: 'status' must stop reporting live (the module's guard
+# then loads the rule set again within 30 s), nothing may leave the phone
+# meanwhile, and 'apply' must put Antumbra's jumps first again and FORWARD
+# back to DROP while it keeps netmgrd's rules.
+
+echo "== phase 8: netmgrd's rules ahead of Antumbra's (FW7)"
+NM_HASH=$(fw apply 2>/dev/null)
+check_rc nm-apply-exit 0 $?
+nm_load() {
+	inp "$IPT4" -w -t mangle -N nm_mdmprxy_mngl_pre_ex
+	inp "$IPT4" -w -t mangle -A nm_mdmprxy_mngl_pre_ex -d 192.0.2.10/32 -p udp -m udp --dport 4500 -j MARK --set-xmark 0x1000000/0x1000000
+	inp "$IPT4" -w -t mangle -I PREROUTING 1 -j nm_mdmprxy_mngl_pre_ex
+	inp "$IPT4" -w -t mangle -I PREROUTING 1 -p udp -m udp --dport 4500 -j ACCEPT
+	inp "$IPT4" -w -t mangle -N nm_mdmprxy_mngl_post
+	inp "$IPT4" -w -t mangle -A nm_mdmprxy_mngl_post -p udp -m udp --sport 4500 -j MARK --set-xmark 0x1000000/0x1000000
+	inp "$IPT4" -w -t mangle -I POSTROUTING 1 -j nm_mdmprxy_mngl_post
+	inp "$IPT4" -w -t filter -N nm_mdmprxy_doze_mode_skip
+	inp "$IPT4" -w -t filter -A nm_mdmprxy_doze_mode_skip -p udp -m udp --sport 4500 -j RETURN
+	inp "$IPT4" -w -t filter -I OUTPUT 1 -j nm_mdmprxy_doze_mode_skip
+	inp "$IPT4" -w -P FORWARD ACCEPT
+}
+nm_load
+out=$(fw status 2>/dev/null)
+rc=$?
+[ "$rc" != 0 ] && [ "$(status_field "$out" state)" != live ] && pass nm-status-not-live || fail nm-status-not-live "exit $rc: $out"
+[ "$(status_field "$out" ipv4)" != applied ] && pass nm-status-names-ipv4 || fail nm-status-names-ipv4 "$out"
+[ "$(status_field "$out" ipv6)" = applied ] && pass nm-status-ipv6-untouched || fail nm-status-ipv6-untouched "$out"
+tx0=$(tx)
+expect nm-app-net-still-redirected '^ok transport orig=198\.51\.100\.1:443$' 10100 tcp 198.51.100.1 443
+not_logged nm-app-net-not-reached net-443
+expect nm-app-udp-still-refused '^err ' 10100 udp 198.51.100.1 4500 --sport 4500 --timeout 1
+expect nm-root-udp-still-refused '^err ' 0 udp 198.51.100.1 123 --timeout 1
+tx1=$(tx)
+[ "$tx1" = "$tx0" ] && pass nm-nothing-left-the-phone || fail nm-nothing-left-the-phone "$((tx1 - tx0)) packets sent"
+# What the module's guard does when status is no longer live.
+H=$(fw apply 2>/dev/null)
+check_rc nm-reapply-exit 0 $?
+out=$(fw status 2>/dev/null)
+check_rc nm-reapply-status-exit 0 $?
+[ "$(status_field "$out" state)" = live ] && pass nm-reapply-live || fail nm-reapply-live "$out"
+[ "$H" = "$NM_HASH" ] && pass nm-reapply-same-hash || fail nm-reapply-same-hash "$H, before $NM_HASH"
+first=$(inp "$IPT4" -w -t mangle -S PREROUTING | sed -n 2p)$(inp "$IPT4" -w -t mangle -S POSTROUTING | sed -n 2p)$(inp "$IPT4" -w -t filter -S OUTPUT | sed -n 2p)
+[ "$first" = '-A PREROUTING -j ANTUMBRA_IN-A POSTROUTING -j ANTUMBRA_POST-A OUTPUT -j ANTUMBRA_OUT' ] &&
+	pass nm-reapply-jumps-first || fail nm-reapply-jumps-first "$first"
+[ "$(inp "$IPT4" -w -S FORWARD | sed -n 1p)" = '-P FORWARD DROP' ] && pass nm-reapply-forward-drop || fail nm-reapply-forward-drop
+n=$(count_jumps 4 mangle nm_mdmprxy_mngl_pre_ex)$(count_jumps 4 mangle nm_mdmprxy_mngl_post)$(count_jumps 4 filter nm_mdmprxy_doze_mode_skip)$(inp "$IPT4" -w -t mangle -S PREROUTING | grep -c -e '--dport 4500 -j ACCEPT$')
+[ "$n" = 1111 ] && pass nm-rules-kept || fail nm-rules-kept "counts $n"
+expect nm-reapply-app-redirected '^ok transport orig=198\.51\.100\.1:443$' 10100 tcp 198.51.100.1 443
+fw flush >/dev/null 2>&1
+inp "$IPT4" -w -t mangle -D PREROUTING -j nm_mdmprxy_mngl_pre_ex
+inp "$IPT4" -w -t mangle -D PREROUTING -p udp -m udp --dport 4500 -j ACCEPT
+inp "$IPT4" -w -t mangle -D POSTROUTING -j nm_mdmprxy_mngl_post
+inp "$IPT4" -w -t filter -D OUTPUT -j nm_mdmprxy_doze_mode_skip
+for c in nm_mdmprxy_mngl_pre_ex nm_mdmprxy_mngl_post; do inp "$IPT4" -w -t mangle -F "$c"; inp "$IPT4" -w -t mangle -X "$c"; done
+inp "$IPT4" -w -t filter -F nm_mdmprxy_doze_mode_skip
+inp "$IPT4" -w -t filter -X nm_mdmprxy_doze_mode_skip
+
 # --- Summary --------------------------------------------------------------------------------
 
 echo "== $PASSES passed, $FAILS failed, $SKIPS skipped"
