@@ -59,11 +59,39 @@ does not protect against.
   as an optional VPN with exceptions), crDroid (one maintainer, not a privacy
   base), AXP.OS (Android 13 only for `hotdog`), DivestOS (ended December
   2024), GrapheneOS and CalyxOS (no support for this phone) do not fit.
-- **LineageOS 24 (Android 17)** may reach `hotdog` before the install: the
-  device trees had LineageOS 24 commits in September 2026. A weekly check
-  watches for it, with a go/no-go in W12 (`queue.md`). Major upgrades go
-  through `adb sideload` **[verified, wiki upgrade page]**, and the module
-  requires API 36 until a release says otherwise.
+- **LineageOS 24.0 (Android 17) is the base for the install (OS1).** The
+  wiki lists 24.0 as `hotdog`'s current branch and 23.2 as previously
+  supported; the download API lists weekly signed 24.0 builds from
+  2026-11-06 (the latest 2026-11-13) and no 23.2 build after 2026-10-09
+  **[verified 2026-11-16, wiki device data and download API]**. 23.2 gets no
+  more security merges, so the install uses 24.0; this document still
+  describes 23.2 where it has not been re-checked yet (OS1's list in
+  `queue.md`). The hardware line is unchanged: 2G, 3G and 4G LTE, no 5G.
+- **What Android 17 changes for Antumbra** (read in AOSP
+  `android17-release`, 2026-11-16):
+  - Telecom no longer keeps call analytics: `dumpsys telecom` prints no
+    `Analytics:` section and `dumpCallAnalytics()` returns an empty list
+    (`TelecomServiceImpl`). MOD6's holds and MOD11's word read that record,
+    so on 24.0 every radio-off step would be held for the whole boot and
+    Quick power off would wait after every call. The emergency call
+    diagnostic logger that remains (`EmergencyCallDiagnosticLogger`) is no
+    replacement: its in-memory log is never written, and it saves a
+    DropBox entry only for a failed or short emergency call.
+  - The replacement (MOD15): Android's call log. Telecom writes each
+    ended call there with its start time and duration, and by default
+    never writes an emergency call (`CallLogManager.okayToLogCall`: only
+    when the carrier configuration's
+    `allow_emergency_numbers_in_call_log_bool` is true). The module, as
+    root, matches each call it saw in the telephony registry's call state to
+    a call-log row: a row whose number is not on the phone's emergency
+    number list makes the call positively ordinary and gives its end; no
+    row, or a number on that list, leaves it unknown, and unknown keeps
+    every hold. The numbers are compared in memory only, never stored or
+    logged.
+  - Emulator images exist for Android 17: `system-images;android-37.0`
+    with `default` and `aosp_atd` (no Google services), and `google_apis`
+    (x86_64 and arm64) **[verified 2026-11-16, sdkmanager]**. CI moves to
+    them with CI16; the Android 16 jobs stay until 24.0 passes there.
 
 ## 3. The parts and the shared contract
 
