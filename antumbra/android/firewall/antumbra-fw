@@ -615,6 +615,9 @@ EOF
 	echo '-A ANTUMBRA_TOR -o lo -j ANTUMBRA_REJECT'
 	echo '-A ANTUMBRA_TOR -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN'
 	for _n in $LAN_NETS; do echo "-A ANTUMBRA_TOR -d $_n -j ANTUMBRA_REJECT"; done
+	# TCP only: tor and its transports (obfs4, WebTunnel, meek) speak TCP.
+	# A UDP transport, if ever wanted, is a choice made here on purpose.
+	echo '-A ANTUMBRA_TOR ! -p tcp -j ANTUMBRA_REJECT'
 	echo "-A ANTUMBRA_TOR -j CONNMARK --set-xmark $CTMARK/$CTMARK"
 
 	# The DNS filter: tor's DNSPort and nothing else.

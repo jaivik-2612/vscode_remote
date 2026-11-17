@@ -266,8 +266,12 @@ only where no translation can have happened.
      192.0.0.0/24, 192.168/16, 198.18/15, multicast 224/4 and 240/4
      (including broadcast). A compromised or misconfigured tor cannot talk to
      the router;
-   - anything else to the Internet (TCP, UDP or ICMP) is allowed, and its
-     connection gets the mark that opens the egress gate.
+   - anything else that is not TCP is refused (FW5): tor and its
+     transports (obfs4, WebTunnel, meek) speak only TCP, so UDP and ICMP
+     from tor's uid never reach the Internet; a UDP transport, if one is
+     ever chosen, is allowed here on purpose;
+   - any other TCP connection to the Internet is allowed, and it gets the
+     mark that opens the egress gate.
 4. **The DNS filter (2951) goes to `ANTUMBRA_DNSF`:** UDP and TCP to
    127.0.0.1:9053, tor's DNSPort, and nothing else. A bug in the filter's DNS
    parser cannot be turned into a direct connection.

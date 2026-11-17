@@ -523,8 +523,11 @@ tx1=$(tx)
 echo "-- tor (2950) and the network stack's DHCP (1073)"
 tx0=$(tx)
 expect tor-net-tcp '^ok net-443 ' 2950 tcp 198.51.100.1 443
-expect tor-net-udp '^ok net-123$' 2950 udp 198.51.100.1 123
-expect tor-net-ping '^ok echo-reply$' 2950 ping 198.51.100.1
+expect tor-net-udp-refused '^err ' 2950 udp 198.51.100.1 123 --timeout 1
+not_logged tor-net-udp-not-reached net-123
+expect tor-net-udp-443-refused '^err ' 2950 udp 198.51.100.1 443 --timeout 1
+not_logged tor-net-udp-443-not-reached net-443-udp
+expect tor-net-ping-refused '^err ' 2950 ping 198.51.100.1
 [ "$(tx)" -gt "$tx0" ] && pass tor-traffic-leaves || fail tor-traffic-leaves
 expect tor-lan-refused '^err ECONNREFUSED$' 2950 tcp 192.168.77.1 80
 not_logged tor-lan-not-reached lan-80
