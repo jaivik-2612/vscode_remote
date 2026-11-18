@@ -374,6 +374,18 @@ that mentions `ANTUMBRA_`, plus the FORWARD policies. The hash describes what
 the kernel holds, not what was sent to it, and it is the same for the same
 configuration on every run, shell and userland (the test checks this).
 
+### Any new uplink
+
+The rules name no interface: Wi-Fi, the SIM's mobile data, a USB or
+Bluetooth tether, a satellite modem or any other network the phone joins is
+one more interface, and the same rules apply to it. The sandbox test's
+phase 9 adds a second uplink with its own gateway and a host reachable only
+through it: an app's TCP to that host goes into tor's TransPort, its UDP,
+root's UDP and the DNS filter's uid are refused, nothing but tor's TCP leaves
+on that interface, and nothing comes in. Switching IPv6 off on a new
+interface is the module's job (its IPv6 guard sweeps every interface as it
+appears; the module e2e test checks it on a new `rmnet_data9`).
+
 ### Next to Qualcomm's netmgrd
 
 On a Qualcomm phone, netmgrd loads its own `nm_mdmprxy` rules for the

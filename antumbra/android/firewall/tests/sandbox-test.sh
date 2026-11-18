@@ -129,6 +129,7 @@ skip_v6() {
 ID=$$
 P=afwp$ID
 U=afwu$ID
+S=afws$ID # phase 9's second uplink (a satellite or any other new network)
 VP=afp$ID
 VU=afu$ID
 TMP=$(mktemp -d /tmp/afw-test.XXXXXX) || die "mktemp failed"
@@ -166,6 +167,7 @@ cleanup() {
 	wait 2>/dev/null
 	ip netns del "$P" 2>/dev/null
 	ip netns del "$U" 2>/dev/null
+	ip netns del "$S" 2>/dev/null
 	for u in $CREATED_USERS; do
 		userdel "$u" 2>/dev/null
 		groupdel "$u" 2>/dev/null
@@ -1120,6 +1122,60 @@ inp "$IPT4" -w -t filter -D OUTPUT -j nm_mdmprxy_doze_mode_skip
 for c in nm_mdmprxy_mngl_pre_ex nm_mdmprxy_mngl_post; do inp "$IPT4" -w -t mangle -F "$c"; inp "$IPT4" -w -t mangle -X "$c"; done
 inp "$IPT4" -w -t filter -F nm_mdmprxy_doze_mode_skip
 inp "$IPT4" -w -t filter -X nm_mdmprxy_doze_mode_skip
+
+# --- Phase 9: a second uplink (FW8) ---------------------------------------------------------
+#
+# Any new network the phone joins (a satellite modem, a USB or Bluetooth
+# tether, a second SIM) is one more interface. The firewall names no
+# interface, so it must treat the new one as it treats Wi-Fi: only tor's
+# TCP leaves through it, apps go into tor's TransPort, nothing comes in.
+# Here a second veth pair leads to its own gateway, and a host behind it,
+# 192.0.2.50, is reachable only that way.
+
+echo "== phase 9: a second uplink (FW8)"
+VQ=afq$ID
+VS=afs$ID
+ins() { ip netns exec "$S" "$@"; }
+ip netns add "$S" || die "cannot create the second uplink's namespace"
+ip link add "$VQ" type veth peer name "$VS" || die "cannot create the second uplink's veth pair"
+ip link set "$VQ" netns "$P"
+ip link set "$VS" netns "$S"
+ins ip link set lo up
+inp ip link set "$VQ" up
+ins ip link set "$VS" up
+inp ip addr add 203.0.113.2/24 dev "$VQ"
+ins ip addr add 203.0.113.1/24 dev "$VS"
+ins ip addr add 192.0.2.50/32 dev lo
+inp ip route add 192.0.2.50/32 via 203.0.113.1 dev "$VQ"
+MAC_Q=$(inp cat "/sys/class/net/$VQ/address")
+MAC_S=$(ins cat "/sys/class/net/$VS/address")
+inp ip neigh replace 203.0.113.1 lladdr "$MAC_S" dev "$VQ" nud permanent
+ins ip neigh replace 203.0.113.2 lladdr "$MAC_Q" dev "$VS" nud permanent
+start_serve "$S" 0 second-uplink tcp:sat-443:192.0.2.50:443 udp:sat-123:192.0.2.50:123
+wait_ready
+txq() { inp cat "/sys/class/net/$VQ/statistics/tx_packets"; }
+fw apply >/dev/null 2>&1
+check_rc uplink2-apply 0 $?
+[ "$(fw status 2>/dev/null | sed -n 's/^state=//p')" = live ] && pass uplink2-live || fail uplink2-live
+q0=$(txq)
+expect uplink2-app-redirected '^ok transport orig=192\.0\.2\.50:443$' 10100 tcp 192.0.2.50 443
+not_logged uplink2-app-not-reached sat-443
+expect uplink2-app-udp-refused '^err ' 10100 udp 192.0.2.50 123 --timeout 1
+not_logged uplink2-app-udp-not-reached sat-123
+expect uplink2-root-udp-refused '^err ' 0 udp 192.0.2.50 123 --timeout 1
+expect uplink2-dns-filter-uid-refused '^err ' 2951 tcp 192.0.2.50 443 --timeout 1
+expect uplink2-tor-udp-refused '^err ' 2950 udp 192.0.2.50 123 --timeout 1
+not_logged uplink2-tor-udp-not-reached sat-123
+q1=$(txq)
+[ "$q1" = "$q0" ] && pass uplink2-nothing-but-tor-leaves || fail uplink2-nothing-but-tor-leaves "$((q1 - q0)) packets sent"
+expect uplink2-tor-tcp '^ok sat-443 ' 2950 tcp 192.0.2.50 443
+[ "$(txq)" -gt "$q1" ] && pass uplink2-tor-leaves-there || fail uplink2-tor-leaves-there
+token uplink2-inbound
+out=$(ins python3 -I -B "$PROBE" tcp 203.0.113.2 8080 "$TOK" --timeout 1 2>&1 | tail -n 1)
+if [[ $out =~ ^err ]]; then pass uplink2-inbound-refused; else fail uplink2-inbound-refused "got '$out'"; fi
+not_logged uplink2-inbound-not-reached phone-service
+fw flush >/dev/null 2>&1
+stop_serve second-uplink
 
 # --- Summary --------------------------------------------------------------------------------
 
