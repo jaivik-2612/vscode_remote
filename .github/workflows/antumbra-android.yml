@@ -73,6 +73,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # CI13: nothing that must never be built into Antumbra (modem
+      # diagnostics or NV writes, IMEI hooks, diag over USB, tor relay
+      # settings, a Snowflake proxy, a power menu without its emergency item,
+      # VoLTE's force-on cleared, forbidden apps in the curated lists).
+      # Not blocking until it has passed on CI once, like every new check.
+      - name: Build guard (CI13)
+        continue-on-error: true
+        run: |
+          (cd antumbra/android/ci/tests && python3 -B -m unittest -v test_build_guard)
+          python3 -B antumbra/android/ci/build_guard.py antumbra/android
+
       - name: Install the shells antumbra-fw must run under
         run: |
           sudo apt-get update -qq

@@ -1085,6 +1085,28 @@ whole seconds, for the page and the metrics alike. A screen counts as
 changed when more than 2% of its pixels differ at full size, the status
 bar left out. Tests: `tests/test_daily.py`.
 
+## The build guard (CI13)
+
+`build_guard.py` scans the Android tree for what must never be built into
+Antumbra and exits 1 on any finding: modem diagnostic or NV-write code;
+IMEI-related hooks; `diag` in a USB configuration; relay settings in tor's
+configuration (`ORPort`, `DirPort`, `BridgeRelay`, `ExitRelay`,
+`ServerTransportPlugin`, under `module/` and `tor/`: tor is a client only);
+a Snowflake proxy; an overlay whose power menu drops the emergency item; a
+module file naming `persist.dbg.volte_avail_ovr`; and, in the curated app
+lists, satellite-messenger or satellite-terminal companion apps,
+radio-firmware flashers and Snowflake. Tests, fixtures and documentation are
+not scanned, and comment lines are skipped. An app whose radio region
+differs from the configured one cannot be told from its package name; that
+check belongs to the curated repository (APP1). `tests/test_build_guard.py`
+breaks each rule with a synthetic file. The firewall job runs both, not
+blocking until they have passed on CI once.
+
+```sh
+python3 -B ci/build_guard.py                  # the tree; exit 1 on a finding
+(cd ci/tests && python3 -B -m unittest -v test_build_guard)
+```
+
 ## Running the pieces by hand
 
 ```sh
