@@ -1099,8 +1099,8 @@ radio-firmware flashers and Snowflake. Tests, fixtures and documentation are
 not scanned, and comment lines are skipped. An app whose radio region
 differs from the configured one cannot be told from its package name; that
 check belongs to the curated repository (APP1). `tests/test_build_guard.py`
-breaks each rule with a synthetic file. The firewall job runs both, not
-blocking until they have passed on CI once.
+breaks each rule with a synthetic file. The firewall job runs both, and
+fails on a finding (since run 40).
 
 ```sh
 python3 -B ci/build_guard.py                  # the tree; exit 1 on a finding

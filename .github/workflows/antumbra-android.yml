@@ -77,9 +77,8 @@ jobs:
       # diagnostics or NV writes, IMEI hooks, diag over USB, tor relay
       # settings, a Snowflake proxy, a power menu without its emergency item,
       # VoLTE's force-on cleared, forbidden apps in the curated lists).
-      # Not blocking until it has passed on CI once, like every new check.
+      # Blocking since run 40, its first pass on CI.
       - name: Build guard (CI13)
-        continue-on-error: true
         run: |
           (cd antumbra/android/ci/tests && python3 -B -m unittest -v test_build_guard)
           python3 -B antumbra/android/ci/build_guard.py antumbra/android
