@@ -1,0 +1,16 @@
+# Build outputs and caches: never committed.
+/build/
+/app/build/
+/.gradle/
+/.kotlin/
+/local.properties
+/captures/
+/.idea/
+*.iml
+*.apk
+*.aab
+# gradlew is a script that downloads the pinned Gradle; no wrapper jar.
+/gradle/wrapper/gradle-wrapper.jar
+# Gradle can also export the keyring in binary form; only the armored
+# verification-keyring.keys is used and committed.
+/gradle/verification-keyring.gpg

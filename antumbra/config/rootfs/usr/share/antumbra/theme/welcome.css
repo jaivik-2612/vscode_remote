@@ -1,0 +1,78 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ *
+ * The Welcome screen's look (antumbra-welcome loads this file at
+ * APPLICATION priority and forces the dark scheme, so the surfaces below
+ * are the Material 3 dark ones). docs/architecture.md, "Interface theme".
+ * The accent and palette come from apps.css, imported here so the Welcome
+ * screen looks the same with or without the per-user gtk.css stub.
+ */
+
+@import url("apps.css");
+
+:root {
+  --window-bg-color: var(--antumbra-surface);
+  --window-fg-color: var(--antumbra-on-surface);
+  --view-bg-color: var(--antumbra-surface);
+  --view-fg-color: var(--antumbra-on-surface);
+  --headerbar-bg-color: var(--antumbra-surface);
+  --headerbar-fg-color: var(--antumbra-on-surface);
+  --headerbar-backdrop-color: var(--antumbra-surface);
+  --headerbar-shade-color: transparent;
+  --card-bg-color: var(--antumbra-surface-container);
+  --card-fg-color: var(--antumbra-on-surface);
+  --popover-bg-color: var(--antumbra-surface-container-high);
+  --popover-fg-color: var(--antumbra-on-surface);
+  --dialog-bg-color: var(--antumbra-surface-container-high);
+  --dialog-fg-color: var(--antumbra-on-surface);
+}
+
+/* Headline: Material 3 "headline small" in a 64px top bar. */
+headerbar {
+  min-height: 64px;
+}
+
+headerbar .title {
+  font-size: 24px;
+  font-weight: 400;
+}
+
+/* Section titles in the primary colour, as Android's settings do. */
+preferencesgroup label.heading {
+  color: var(--antumbra-primary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Grouped rows on a tonal card with large corners. */
+list.boxed-list {
+  border-radius: 24px;
+  box-shadow: none;
+}
+
+list.boxed-list > row:first-child {
+  border-top-left-radius: 24px;
+  border-top-right-radius: 24px;
+}
+
+list.boxed-list > row:last-child {
+  border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
+}
+
+row .subtitle {
+  color: var(--antumbra-on-surface-variant);
+}
+
+/* A failed privacy self-check: Material 3's error container. */
+banner > revealer > widget {
+  background-color: #93000a;
+  color: #ffdad6;
+}
+
+/* The Start button: a large filled pill. */
+button.pill.suggested-action {
+  min-height: 24px;
+  padding: 14px 48px;
+  font-size: 16px;
+  font-weight: 500;
+}

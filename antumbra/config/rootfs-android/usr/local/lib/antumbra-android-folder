@@ -1,0 +1,59 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Gather Android apps into an "Android" folder of Phosh's app grid.
+
+Waydroid writes ~/.local/share/applications/waydroid.<package>.desktop for
+every Android app with a launcher. Phosh 0.46 fills a folder only from an
+explicit list of desktop IDs (the "apps" key of
+org.gnome.desktop.app-folders.folder), not by category, so this rewrites
+that list: Antumbra's "Android" launcher first, then every visible
+Waydroid entry. Run by antumbra-android-folder.service
+at login and whenever the entries change.
+"""
+import os
+import re
+
+from gi.repository import Gio
+
+FOLDER = "Android"
+FOLDER_PATH = f"/org/gnome/desktop/app-folders/folders/{FOLDER}/"
+LAUNCHER = "antumbra-android.desktop"
+ENTRY = re.compile(r"^waydroid\.[A-Za-z0-9_.]+\.desktop$")
+
+
+def android_apps():
+    apps_dir = os.path.join(os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share"), "applications")
+    try:
+        names = sorted(os.listdir(apps_dir))
+    except OSError:
+        return []
+    apps = []
+    for name in names:
+        if not ENTRY.match(name):
+            continue
+        try:
+            with open(os.path.join(apps_dir, name), encoding="utf-8") as f:
+                hidden = any(line.strip() == "NoDisplay=true" for line in f)
+        except OSError:
+            continue
+        if not hidden:
+            apps.append(name)
+    return apps
+
+
+def main():
+    apps = [LAUNCHER] + android_apps()
+    folder = Gio.Settings.new_with_path("org.gnome.desktop.app-folders.folder", FOLDER_PATH)
+    if folder.get_string("name") != FOLDER:
+        folder.set_string("name", FOLDER)
+    if folder.get_strv("apps") != apps:
+        folder.set_strv("apps", apps)
+    folders = Gio.Settings.new("org.gnome.desktop.app-folders")
+    children = folders.get_strv("folder-children")
+    if FOLDER not in children:
+        folders.set_strv("folder-children", children + [FOLDER])
+    Gio.Settings.sync()
+
+
+if __name__ == "__main__":
+    main()

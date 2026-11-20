@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Antumbra device-tree overrides for the OnePlus 7T Pro (hotdog).
+ *
+ * build/kernel.sh appends this file to arch/arm64/boot/dts/qcom/
+ * sm8150-oneplus-hotdog.dts after the port's patches are applied, and
+ * refuses to build if a referenced label is missing.
+ */
+
+/*
+ * The sensor DSP is not used: Antumbra ships no sensor daemon, and the
+ * SLPI firmware would otherwise run with the microphones' ultrasonic
+ * path available to it. Keeping the node disabled means slpi.mbn is
+ * never loaded (see docs/architecture.md, section 9.3).
+ */
+&remoteproc_slpi {
+	status = "disabled";
+};
+
+/*
+ * No kernel log survives a reboot: the port's ramoops region would keep
+ * console output (Wi-Fi BSSIDs, firewall log lines) in DRAM across
+ * resets. CONFIG_PSTORE is also disabled in the kernel fragment.
+ */
+/delete-node/ &ramoops;

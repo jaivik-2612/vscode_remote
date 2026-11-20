@@ -1,0 +1,106 @@
+[[!meta title="Random numbers"]]
+
+As [[mentioned in the PELD spec|contribute/design#spec-entropy]], it
+is not so easy to get good pseudo-random numbers in the context of
+a Live system. This document describes how Tails behaves in this area.
+
+[[!toc levels=2]]
+
+# Entropy sources
+
+Tails uses the Linux kernel's entropy gathering facilities.
+
+# Entropy pool initialization
+
+The Linux kernel initializes its RNG with various sources, including:
+
+* Hardware RNGs (if available)
+* CPU instructions like RDSEED, RDRAND, or RDTSC
+* interrupt timings, including input events (keyboard, mouse, etc.)
+
+If the entropy pool is not initialized the first time random numbers
+are requested, the kernel will block and generate entropy from cycle 
+counter jitter (that's not supported on all architectures, but it is on
+x86), which takes about a second. There was some scepticism about the
+quality of this jitter entropy in the past (for example [by Theodore Ts'o](https://lkml.org/lkml/2013/10/28/598) 
+and [Linus Torvalds](https://lkml.org/lkml/2019/9/19/854)) but there 
+hasn't been much discussion about it since it was introduced in 
+Linux 5.4 ([a publication by the German Federal Office for Information Security](https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/Studies/LinuxRNG/LinuxRNG_EN_V5_0.pdf)
+validates the jitter entropy as a good source of entropy).
+
+Some sources, like interrupt timings, are continuously mixed into the 
+entropy pool, which is used to periodically reseed the kernel's RNG.
+[This reseeding is done more often during boot](https://git.kernel.org/pub/scm/linux/kernel/git/crng/random.git/commit/?id=7a7ff644aeaf), 
+because it's unclear how good the entropy sources are during early boot,
+and mixing in more entropy is a good way to ensure that the entropy pool
+is well-seeded.
+
+The userland can also mix in some entropy by [writing to
+`/dev/urandom` or `/dev/random`](https://github.com/torvalds/linux/blob/a93289b830ce783955b22fbe5d1274a464c05acf/drivers/char/random.c#L1352-L1353). 
+In Debian, [`systemd-random-seed.service`](https://www.freedesktop.org/software/systemd/man/latest/systemd-random-seed.service.html)
+is used to write a random seed to `/var/lib/systemd/random-seed` during
+shutdown and load it into the kernel entropy pool during boot.
+
+That doesn't work in Tails, because of the read-only root filesystem.
+Instead of `systemd-random-seed.service`, Tails uses custom scripts
+executed in the initramfs during boot and before shutdown. The random
+seed is not stored on the filesystem, but in an otherwise unused sector
+on the device, at logical block address (LBA) 34 (that's the first
+sector after the [GPT](https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_entries_(LBA_2-33))).
+
+This solves the problem that the root filesystem is read-only in Tails
+and has multiple advantages:
+
+* The filesystem is not changed, therefore easier to verify.
+* It doesn't require persistence to be set up.
+* The entropy pool is seeded earlier during the boot process (in the
+  initramfs `init-top` stage).
+
+The scripts do basically the same `systemd-random-seed.service` does
+([see the source code](https://github.com/systemd/systemd/blob/56932080194c8489ada31e7191b1fa391603aa63/src/random-seed/random-seed.c#L398)).
+
+During boot:
+
+1. Read the seed from the location it was stored at.
+2. Write the seed to `/dev/urandom`, which causes it to be mixed in with
+   the existing bytes in the entropy pool.
+3. Update the seed with random bytes from `/dev/urandom` to ensure that
+   some entropy is saved for the next boot, even if the system is not
+   shutting down properly.
+
+During shutdown:
+
+* Update the seed with random bytes from `/dev/urandom` to save the
+  entropy gathered during the session.
+
+Sources to learn more about the Linux kernel's RNG and its recent
+changes:
+
+* All articles in [this LWN kernel index entry](https://lwn.net/Kernel/Index/#Random_numbers),
+  especially:
+  * [The article on the jitter entropy introduced in Linux 5.4](https://lwn.net/Articles/802360/).
+  * [The article on uniting /dev/random and /dev/urandom](https://lwn.net/Articles/884875/).
+* [A summary of recent changes to the kernel's RNG by co-maintainer Jason A. Donenfeld](https://www.zx2c4.com/projects/linux-rng-5.17-5.18/).
+* [An analysis of the Linux RNG by the German Federal Office for Information Security](https://www.bsi.bund.de/SharedDocs/Downloads/EN/BSI/Publications/Studies/LinuxRNG/LinuxRNG_EN_V5_0.pdf).
+* The section headers of the [kernel's random.c](https://github.com/torvalds/linux/blob/master/drivers/char/random.c).
+
+## Initialization during installation
+
+When creating a new Tails device, Tails Cloner writes a random seed to 
+LBA 34 to initialize the seed for the first boot.
+
+However, this is not the case for Tails installed from a USB image,
+which is the most common use case.
+
+## Possible disadvantages
+
+On [[!tails_ticket 11897]], the concern was raised that writing to the
+Tails device on each boot might allow a sophisticated attacker with
+physical access to the device to determine how many times it has been
+booted due to the wear leveling of the flash memory.
+
+We try to mitigate this by writing the random seed a random number of
+times (1 to 500) during first boot. This should make it harder to
+determine the number of boots by looking at the wear leveling of the
+flash memory. Concerns that this might not be enough if the device uses
+static wear leveling have been raised on [[!tails_ticket 11897]].

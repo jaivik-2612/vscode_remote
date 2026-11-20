@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Antumbra CI: the names and destinations the ANTUMBRA scenario expects the
+# phone to reach through Tor (leak_analyser.py --expected-destinations).
+# Every name the system looks up and every destination asked of tor's
+# TransPort is listed in leak-report.md; one that is not below is
+# "unexpected". In learning mode (ANTUMBRA_CI_DESTINATIONS=learning, the
+# default while this list is being learned from the first runs) it is
+# listed and noted; in strict mode it fails the run.
+#
+#   name PATTERN      a name, or *.NAME for NAME and every name under it
+#   target HOST:PORT  an address or name and a port; either may be *
+#
+# Add an entry only with the reason next to it. Android's own background
+# services (connectivity checks, network time, location assistance) are
+# switched off by the module and must not appear here.
+
+# The CI's tracker test: asked of the filter directly and through Android's
+# resolver (ping). The two trackers must be blocked; the control name must
+# resolve through Tor.
+name doubleclick.net
+name stats.lineageos.org
+name check.torproject.org
+
+# The CI's probes (emulator-antumbra.sh, probes_live): TCP from root and
+# from an app to the emulator host's ports and to loopback ports. The
+# firewall passes them into tor's TransPort, which must refuse them.
+target 10.0.2.2:80
+target 10.0.2.2:5000
+target 10.0.2.2:49152
+target 127.0.0.1:9052
+target 127.0.0.1:47000

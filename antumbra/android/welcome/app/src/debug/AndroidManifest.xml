@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: testOnly lets 'adb shell dpm remove-active-admin
+     org.antumbra.welcome/.AdminReceiver' remove a test device owner without
+     a factory reset. It also means 'adb install' needs '-t'. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:testOnly="true"
+        tools:ignore="HardcodedDebugMode" />
+</manifest>

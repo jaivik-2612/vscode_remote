@@ -1,0 +1,40 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Antumbra's privacy settings inside Android, applied as root once Android
+# has booted (antumbra-waydroid-provision.service). Android's data is
+# amnesic unless kept in Persistent Storage, so they are applied in every
+# session. Its traffic can only reach Tor anyway; these stop Android from
+# sending what it would otherwise send through Tor:
+#   captive_portal_mode 0  no connectivity checks to Google's generate_204
+#                          servers each time the network comes up
+#   private_dns_mode off   no DNS over TLS: in strict mode every app's
+#                          lookups would share one connection through Tor,
+#                          linking them (opportunistic mode is refused by the
+#                          firewall and falls back to plain DNS anyway)
+#   auto_time 0, auto_time_zone 0
+#                          no network time: the host keeps the clock
+set -u
+log() { logger -t antumbra-waydroid -p daemon.info -- "$*"; echo "$*"; }
+in_android() { lxc-attach -P /var/lib/waydroid/lxc -n waydroid --clear-env -- "$@"; }
+
+# The container starts with the user's session; wait for it, then for
+# Android's boot to complete.
+booted() {
+    [ "$(lxc-info -P /var/lib/waydroid/lxc -n waydroid -sH 2>/dev/null)" = "RUNNING" ] || return 1
+    [ "$(in_android /system/bin/getprop sys.boot_completed 2>/dev/null | tr -d '\r\n')" = "1" ]
+}
+until booted; do sleep 5; done
+
+fail=0
+for setting in captive_portal_mode=0 private_dns_mode=off auto_time=0 auto_time_zone=0; do
+    key="${setting%%=*}"; value="${setting#*=}"
+    waydroid shell -- settings put global "${key}" "${value}" >/dev/null 2>&1
+    got="$(waydroid shell -- settings get global "${key}" 2>/dev/null | tr -d '\r' | tail -n 1)"
+    if [ "${got}" = "${value}" ]; then
+        log "Android setting ${key} = ${value}"
+    else
+        log "could not set Android setting ${key} (reads '${got}')"
+        fail=1
+    fi
+done
+exit "${fail}"

@@ -1,0 +1,34 @@
+#!/bin/sh
+
+set -eu -o pipefail
+
+echo "Deleting unused firmware files"
+
+# Some hardware devices, such as graphics cards, may be needed during
+# early boot ⇒ in order to support them, the corresponding kernel
+# module and firmware need to be included in the initramfs, so that
+# they can loaded during early boot, while in initramfs land.
+# initramfs-tools is responsible for ensuring that's the case.
+# In particular it adds the "nouveau" and "amdgpu" modules, and the
+# corresponding firmware, to the initramfs.
+#
+# The underlying theory here is that initramfs-tools adds to the
+# initramfs any firmware needed by the modules included in the
+# initramfs (and that no firmware is dynamically loaded later, without
+# being listed with MODULE_FIRMWARE() in the kernel code).
+#
+# If this theory is correct, it follows that if a firmware file for
+# such a module is *not* in the initramfs, then it won't ever be used,
+# and we can thus delete it from the rootfs.
+#
+# If, on top of that, we were ready to break hotplugging of GPUs, we
+# could simply delete the entire /lib/firmware/{amdgpu,nvidia} from
+# the rootfs, regardless of inclusion in the initramfs. That's not
+# what we're doing here.
+
+INITRD="$(/bin/ls -1 /boot/initrd.img-* | tail -n 1)"
+
+/usr/local/lib/tails-delete-unused-firmware \
+    --initramfs "$INITRD" \
+    /lib/firmware/amdgpu \
+    /lib/firmware/nvidia

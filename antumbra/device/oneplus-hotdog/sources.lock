@@ -1,0 +1,123 @@
+# Pinned external inputs for the Antumbra build (KEY=VALUE, read by
+# build/lib/common.sh lock_get). Change a pin only together with the
+# corresponding SHA-256. Patch hashes live in kernel/port-patches.sha256.
+
+# Kernel tree the port is based on
+KERNEL_GIT_URL=https://gitlab.com/sm8150-mainline/linux.git
+KERNEL_GIT_TAG=v6.17.0-sm8150
+KERNEL_GIT_COMMIT=379d8fe35c7ca685a650bd82fd023af0ea3f0de0
+
+# The hotdog port: 27 patches and the kernel configuration they were built with
+PORT_REPO=https://github.com/Sr-0w/hotdog-linux-bringup
+PORT_TAG=v0.2.0-alpha.2
+PORT_PATCH_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/device/testing/linux-oneplus-hotdog-mainline617-clean
+PORT_KERNEL_CONFIG=config-oneplus-hotdog-mainline617-clean.aarch64
+PORT_KERNEL_CONFIG_SHA256=3d6b53abc795b7fff07fb87c7f1ca2da43d0401809a358366f5225cde09dc72e
+
+# Optional patched libcamera (build/libcamera.sh, only with
+# ANTUMBRA_LIBCAMERA_LOCAL=1; the default image uses trixie-backports' 0.7.1).
+# Debian's 0.7.2-1 source package, the release the port's patches target,
+# pinned by its .dsc, which pins the two tarballs by SHA-256. The Debian pool
+# drops it once unstable moves on; snapshot.debian.org keeps it.
+LIBCAMERA_DSC_URL=https://deb.debian.org/debian/pool/main/libc/libcamera/libcamera_0.7.2-1.dsc
+LIBCAMERA_DSC_SNAPSHOT_URL=https://snapshot.debian.org/archive/debian/20260711T022200Z/pool/main/libc/libcamera/libcamera_0.7.2-1.dsc
+LIBCAMERA_DSC_SHA256=b162125bb8d26641b3b71ed32d344a06ae7fb4e732043db7a081615ffd039983
+LIBCAMERA_LOCAL_VERSION=0.7.2-1~antumbra1
+# The port's libcamera patches and tuning files (hashes in libcamera/patches.sha256)
+PORT_LIBCAMERA_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/temp/libcamera
+
+# Hardware-validated slot-B companions from the port's release (not rebuilt here)
+DTBO_URL=https://github.com/Sr-0w/hotdog-linux-bringup/releases/download/v0.2.0-alpha.2/oneplus-7t-pro-hotdog-v0.2.0-alpha.2-dtbo.img
+DTBO_SHA256=d23564d42c989c2b86f760937cb6ea8d570074b20b74bd8c0bc0b94d2ba0d8cd
+DTBO_SIZE=25165824
+VBMETA_URL=https://github.com/Sr-0w/hotdog-linux-bringup/releases/download/v0.2.0-alpha.2/oneplus-7t-pro-hotdog-v0.2.0-alpha.2-vbmeta-disabled.img
+VBMETA_SHA256=e1d9ee620f4fac7939042396de966bea0b735bf11cea8ccc9b346f4d0fee0d50
+VBMETA_SIZE=65536
+
+# avbtool (Apache-2.0, AOSP external/avb), used only to add the unsigned
+# hash footer the bootloader expects
+AVBTOOL_URL=https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT
+AVBTOOL_URL_FORMAT=base64
+AVBTOOL_SHA256=e5a664a38db623da00f080219bc0ee60a640a9dc4a872803616fae4938ac749b
+
+# mkbootimg and unpack_bootimg (Apache-2.0, AOSP system/tools/mkbootimg):
+# pinned scripts, because distribution packages of mkbootimg vary and
+# Ubuntu 24.04's is missing its gki module
+MKBOOTIMG_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/mkbootimg.py?format=TEXT
+MKBOOTIMG_SHA256=37d84b3d162e0bc62e36c1f4e1c63c85ea0caa9f29be023eb2f8efe006ad948c
+UNPACK_BOOTIMG_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/unpack_bootimg.py?format=TEXT
+UNPACK_BOOTIMG_SHA256=a9d260978a63bd06a24b6347e7dee8a28ff96639793caea15dff6aa491316308
+GKI_CERT_URL=https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/gki/generate_gki_certificate.py?format=TEXT
+GKI_CERT_SHA256=1bb1feec68a13da18d581aa2c631798f86f6bc10b55d587b2dd31446a0f8a203
+
+# Tor Browser for Linux aarch64 (alpha channel: the only aarch64 build)
+TORBROWSER_VERSION=16.0a13
+TORBROWSER_URL=https://dist.torproject.org/torbrowser/16.0a13/tor-browser-linux-aarch64-16.0a13.tar.xz
+TORBROWSER_SIG_URL=https://dist.torproject.org/torbrowser/16.0a13/tor-browser-linux-aarch64-16.0a13.tar.xz.asc
+TORBROWSER_SHA256=4dba033e7c5fb00f8d23fb5412a0825cd13aee565d31fc84b329d0927ac6ccf7
+TORBROWSER_SIGNING_KEY_FPR=EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
+TORBROWSER_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/EF6E286DDA85EA2A4BA7DE684E2C6E8793298290
+
+# Android apps (fetched only with ANTUMBRA_ANDROID=1). Waydroid's LineageOS
+# 20.0 (Android 13) images of 2026-09-27, VANILLA system (no Google apps)
+# and MAINLINE vendor, as listed by Waydroid's OTA channel
+# (https://ota.waydro.id/system/lineage/waydroid_<variant>/VANILLA.json and
+# https://ota.waydro.id/vendor/waydroid_<variant>/MAINLINE.json; the files
+# are on SourceForge). Waydroid itself checks only the zip's SHA-256 from
+# that JSON; the build checks it, the zip's size, and the size and CRC-32
+# the zip records for each image. *_IMG_SHA256 pins the extracted image,
+# checked on every run, cached or not (for arm64: computed on 2026-10-05 by
+# streaming each pinned zip through funzip, whose CRC-32 check passed). The
+# device profile picks the variant (WAYDROID_IMAGE_VARIANT in device.conf).
+WAYDROID_ARM64_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64/lineage-20.0-20260927-VANILLA-waydroid_arm64-system.zip/download
+WAYDROID_ARM64_SYSTEM_SHA256=5fb8179ed4455f45919c5a2bfbfdd1591619295994ad321217f03bb1dcfc53a7
+WAYDROID_ARM64_SYSTEM_SIZE=912267974
+WAYDROID_ARM64_SYSTEM_IMG_SIZE=1994985472
+WAYDROID_ARM64_SYSTEM_IMG_CRC32=70723829
+WAYDROID_ARM64_SYSTEM_IMG_SHA256=ba4da2882999bc09a63eab5f2b02a77cdce13df0b72b98fea58a4d7ccb125f4d
+WAYDROID_ARM64_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64/lineage-20.0-20260927-MAINLINE-waydroid_arm64-vendor.zip/download
+WAYDROID_ARM64_VENDOR_SHA256=20a49c11961a5ac7295320f578764eeab3c982b217f1bfde7473adfc22e747ae
+WAYDROID_ARM64_VENDOR_SIZE=147678746
+WAYDROID_ARM64_VENDOR_IMG_SIZE=421634048
+WAYDROID_ARM64_VENDOR_IMG_CRC32=7fac583f
+WAYDROID_ARM64_VENDOR_IMG_SHA256=c5371756f0f97ca56c0d114de14b352eaf926e81c4664d2b3e9862a0ab47642d
+WAYDROID_ARM64_ONLY_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_arm64_only/lineage-20.0-20260927-VANILLA-waydroid_arm64_only-system.zip/download
+WAYDROID_ARM64_ONLY_SYSTEM_SHA256=a7806741ea8ca5be917d0c66b031d97a60abb7a95031ca5b35c40620b6273ccd
+WAYDROID_ARM64_ONLY_SYSTEM_SIZE=733009660
+WAYDROID_ARM64_ONLY_SYSTEM_IMG_SIZE=1633239040
+WAYDROID_ARM64_ONLY_SYSTEM_IMG_CRC32=9a76ad02
+WAYDROID_ARM64_ONLY_SYSTEM_IMG_SHA256=890bb709c06c68e95f7d35809996f3142bac67db741fc824b5f8617b0f5c13dd
+WAYDROID_ARM64_ONLY_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_arm64_only/lineage-20.0-20260927-MAINLINE-waydroid_arm64_only-vendor.zip/download
+WAYDROID_ARM64_ONLY_VENDOR_SHA256=bd502c53ada5019e0fad3beb6feb248ce45c9ea500870f4725e0d12624baef0a
+WAYDROID_ARM64_ONLY_VENDOR_SIZE=77357342
+WAYDROID_ARM64_ONLY_VENDOR_IMG_SIZE=235610112
+WAYDROID_ARM64_ONLY_VENDOR_IMG_CRC32=565ba6b5
+WAYDROID_ARM64_ONLY_VENDOR_IMG_SHA256=ad424225175307bbdd098b777962f05d208794bac67b9c1771ee1a2078fd4cc6
+
+# F-Droid 2.0.1 (versionCode 2000051), installed into Android on its first
+# start in a session. Verified by SHA-256, by F-Droid's OpenPGP signature
+# (key vendored in keys/f-droid.asc; the URL is only a fallback) and by the
+# SHA-256 of the certificate in the APK's signature block.
+FDROID_APK_URL=https://f-droid.org/repo/org.fdroid.fdroid_2000051.apk
+FDROID_APK_SHA256=83d3fe522281c3cb89fce3bc05038f81b3c3b32c108536941f184c5f9bb53778
+FDROID_APK_SIZE=12537183
+FDROID_SIG_URL=https://f-droid.org/repo/org.fdroid.fdroid_2000051.apk.asc
+FDROID_SIGNING_KEY_FPR=37D2C98789D8311948394E3E41E7044E1DBA2E89
+FDROID_SIGNING_KEY_URL=https://keys.openpgp.org/vks/v1/by-fingerprint/37D2C98789D8311948394E3E41E7044E1DBA2E89
+FDROID_APK_CERT_SHA256=43238d512c1e5eb2d6569f4a3afbf5523418b82e0a3ed1552770abb9a9c9ccab
+
+# Debian base
+DEBIAN_SUITE=trixie
+DEBIAN_MIRROR=https://deb.debian.org/debian
+# Packages pinned in config/rootfs/etc/apt/preferences.d/antumbra-backports
+# (the camera stack, Android support) come from this suite.
+DEBIAN_BACKPORTS=trixie-backports
+# Set to a snapshot.debian.org timestamp (YYYYMMDDTHHMMSSZ) for a
+# reproducible package set; empty uses the live mirror.
+DEBIAN_SNAPSHOT=
+
+# Proprietary device firmware (never redistributed by Antumbra; see docs/legal.md)
+FIRMWARE_GIT_URL=https://github.com/sm8150-linux-mainline/firmware-oneplus-hotdog
+FIRMWARE_GIT_COMMIT=5e5c534784a848bc39a02c421cc5273d79678fb3
+# Protection-domain maps and the NFC configuration come from the port's packaging
+PORT_FIRMWARE_BASE_URL=https://raw.githubusercontent.com/Sr-0w/hotdog-linux-bringup/v0.2.0-alpha.2/aports/device/testing/firmware-oneplus-hotdog

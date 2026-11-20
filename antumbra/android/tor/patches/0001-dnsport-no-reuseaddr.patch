@@ -1,0 +1,30 @@
+Antumbra: do not set SO_REUSEADDR on tor's UDP listener (DNSPort).
+
+On Linux, two UDP sockets that both set SO_REUSEADDR may bind the same
+address and port, whatever their uids, and the one bound last receives the
+datagrams. tor sets SO_REUSEADDR on every listener, so while tor holds
+DNSPort 127.0.0.1:9053 any app on the phone could bind it too and receive
+the DNS filter's queries (every name the phone looks up). Without the flag
+on tor's socket, such a bind fails with EADDRINUSE. TCP listeners keep the
+flag: they need it to rebind after TIME_WAIT, and Linux does not let another
+socket bind a port that a TCP socket is listening on (SO_REUSEPORT under the
+same uid aside, which tor does not set).
+
+Checked by hostcheck-tor.sh ("cannot share ... while tor holds it").
+
+--- a/src/core/mainloop/connection.c
++++ b/src/core/mainloop/connection.c
+@@ -1537,7 +1537,12 @@
+       goto err;
+     }
+ 
+-    if (make_socket_reuseable(s) < 0) {
++    /* Antumbra: TCP listeners only. On Linux, SO_REUSEADDR on a UDP socket
++     * lets any other process, under any uid, bind the same address and
++     * port while tor holds it, and take the datagrams sent to it (the DNS
++     * filter's queries to DNSPort). UDP has no TIME_WAIT for it to help
++     * with. */
++    if (is_stream && make_socket_reuseable(s) < 0) {
+       log_warn(LD_NET, "Error setting SO_REUSEADDR flag on %s: %s",
+                conn_type_to_string(type),
+                tor_socket_strerror(errno));

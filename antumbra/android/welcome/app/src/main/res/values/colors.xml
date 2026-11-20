@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The few palette colours that views outside Compose need (window and
+     launcher icon). Same values as ui/Theme.kt. -->
+<resources>
+    <color name="surface">#FF141218</color>
+    <color name="primary">#FFCEBDFE</color>
+</resources>

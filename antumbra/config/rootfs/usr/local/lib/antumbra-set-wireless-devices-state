@@ -1,0 +1,8 @@
+#!/bin/sh
+# Tails' tails-set-wireless-devices-state: soft-block every radio, then
+# unblock Wi-Fi only. Bluetooth and NFC additionally have their drivers
+# blocklisted; rfkill is defence in depth, not the control.
+set -e
+[ -e /dev/rfkill ] || exit 0
+rfkill block all
+rfkill unblock wifi

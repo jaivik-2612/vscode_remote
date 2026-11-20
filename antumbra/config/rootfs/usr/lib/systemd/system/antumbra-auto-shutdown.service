@@ -1,0 +1,6 @@
+[Unit]
+Description=Power off (locked for too long)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl poweroff
