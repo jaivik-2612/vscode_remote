@@ -6,7 +6,7 @@
 > before the first install, and read everything before starting.
 
 The procedure unlocks the bootloader (which erases the phone), installs
-official LineageOS 23.2, installs Magisk, then the Antumbra module, then the
+official LineageOS 24.0 (Android 17), installs Magisk, then the Antumbra module, then the
 Welcome app as device owner, and ends with a packet capture that checks that
 only Tor leaves the phone.
 
@@ -33,8 +33,8 @@ only Tor leaves the phone.
   as in Settings: a phone that once ran another system can show another
   model there.
 - The latest Android 12 (OxygenOS 12) firmware before LineageOS is installed
-  (section 3). LineageOS requires it, even though LineageOS 23.2 is Android
-  16.
+  (section 3). LineageOS requires it, even though LineageOS 24.0 is Android
+  17.
 - Charged above 60%.
 - **No SIM card from LineageOS's first boot on** (decision D3: no SIM,
   Wi-Fi only). LineageOS switches mobile data on for a SIM it has not seen
@@ -73,7 +73,7 @@ checked:
 
 | File | From | Check |
 |---|---|---|
-| `lineage-23.2-<date>-nightly-hotdog-signed.zip`, and the same build's `boot.img`, `dtbo.img`, `vbmeta.img`, `recovery.img` | https://download.lineageos.org/devices/hotdog/builds | the SHA-256 the page lists (also in https://download.lineageos.org/api/v2/devices/hotdog/builds); keep a copy, since LineageOS keeps only the last few builds |
+| `lineage-24.0-<date>-nightly-hotdog-signed.zip`, and the same build's `boot.img`, `dtbo.img`, `vbmeta.img`, `recovery.img` | https://download.lineageos.org/devices/hotdog/builds | the SHA-256 the page lists (also in https://download.lineageos.org/api/v2/devices/hotdog/builds); keep a copy, since LineageOS keeps only the last few builds |
 | Magisk v31.0 APK | https://github.com/topjohnwu/Magisk/releases/tag/v31.0 | SHA-256 to be recorded when it is staged (W15); not another version |
 | `antumbra-module-<version>.zip` | Antumbra's release | its SHA-256 and signature; keep an unpacked copy on the computer: section 9 needs its `bin/arm64-v8a/tor` |
 | Welcome APK, the build decision D9 chose (release or testOnly, section 8) | Antumbra's release | its SHA-256 and signature |
@@ -166,7 +166,7 @@ page (https://wiki.lineageos.org/devices/hotdog/fw_update) flashes the
 Android 12 firmware images to both slots from LineageOS Recovery's fastboot
 mode; it is the fallback if the firmware turns out to be older than required.
 
-## 4. Install official LineageOS 23.2
+## 4. Install official LineageOS 24.0
 
 From the LineageOS wiki, in this order. Do not continue after anything fails.
 Check first that the SIM tray is empty: LineageOS's first boot would
@@ -195,7 +195,7 @@ otherwise go online over mobile data, in the clear.
 4. *Apply update*, *Apply from ADB*, then:
 
    ```sh
-   adb -d sideload lineage-23.2-<date>-nightly-hotdog-signed.zip
+   adb -d sideload lineage-24.0-<date>-nightly-hotdog-signed.zip
    ```
 
    A signature failure means the file is damaged or not official: download
@@ -271,7 +271,11 @@ v31.0, the version Antumbra has read and tested against, not the newest.
 
 2. In the Magisk app: *Modules*, *Install from storage*, choose the zip.
    The installer refuses any phone that is not a `hotdog` running LineageOS
-   on Android 16, and any file whose SHA-256 differs from the zip's list.
+   on the Android version its release names, and any file whose SHA-256
+   differs from the zip's list. Today's module names Android 16 (API 36):
+   the release for 24.0 (Android 17, API 37) comes after MOD15 (the call
+   record Android 17 no longer keeps) and CI16 (the leak test on Android 17),
+   and the install waits for it.
 3. Restart. From now on the firewall is armed before Android starts, saved
    Wi-Fi networks live only in RAM, mobile data is stored as off for every
    SIM Android knows, and the network stays closed until the Welcome
@@ -520,7 +524,7 @@ would a SIM with mobile data on (Requirements). Until Welcome has an update
 flow of its own, the Magisk app must be reachable for step 2: it is, after
 Start.
 
-**Major upgrades** (for example 23.2 to 24) are not offered by the Updater;
+**Major upgrades** (for example 24 to 25) are not offered by the Updater;
 they go through `adb sideload` from a computer, in LineageOS Recovery, whose
 adb does not depend on Android's USB debugging
 (https://wiki.lineageos.org/devices/hotdog/upgrade/). The sideload replaces
