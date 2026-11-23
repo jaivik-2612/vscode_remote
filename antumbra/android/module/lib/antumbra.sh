@@ -962,7 +962,10 @@ CELL_HELD=         # the hold last logged
 # The module's word to Welcome (MOD11; cell_note, cell_forget, cell_tell).
 CELL_LIVE=         # Telecom's numbers of the calls not over at the last look: listed, or not ended ("3,4", "-")
 CELL_FROM=         # CELL_ID before the last look: the calls numbered since are read once more
-CELL_XN=           # Analytics entries without a TC@ number at the last look
+CELL_XN=           # Analytics entries (Android 17: event-log records) without a TC@ number at the last look
+CELL_WIN=          # Android 17: the zones of the calls in the next look's scope, "ID:LO:HI:N,..." (telecom_state17)
+CELL_WALL=         # Android 17: the wall clock (s) when the last readable look's dump ended
+CELL_API=          # ro.build.version.sdk, once read (cell_android17)
 CELL_PHONE=        # the phone process at the last look, "PID:START" ("-": not running; empty: unread)
 CELL_EM_AT=        # uptime of the last look that saw an emergency sign, or of the look after (renewed by calls)
 CELL_UNK_AT=       # the same for a doubt (something the module could not read or classify)
@@ -979,6 +982,8 @@ CELL_IMS_NEXT=0    # uptime of the next reading
 # The last look: CL_CALL and CL_CBM are 0, 1 or unknown; CL_ID is a number
 # or empty; CL_RADIO is on, off, wait or unknown. CL_KIND is telecom_state's
 # KIND (e, u, o, -) or unknown; CL_LIVE and CL_XN are its LIVE and XN;
+# CL_WIN and CL_WALL telecom_state17's WIN and WALL (Android 17; empty on
+# Android 16);
 # CL_ALONE is 1 when the registry shows a call that Telecom does not list;
 # CL_PHONE is phone_proc's "PID:START", or "-".
 CL_CALL=unknown
@@ -988,6 +993,8 @@ CL_RADIO=unknown
 CL_KIND=unknown
 CL_LIVE=
 CL_XN=
+CL_WIN=
+CL_WALL=
 CL_ALONE=0
 CL_PHONE=-
 # The session's choice ("off", "phone" or "data"; service.sh's
@@ -1339,6 +1346,577 @@ telecom_state() {
 		}
 }
 
+# --- Android 17's call record (MOD15) ---------------------------------------
+# Android 17's Telecom keeps no call analytics: 'dumpsys telecom' prints no
+# Analytics section and dumpCallAnalytics() returns an empty list
+# (TelecomServiceImpl, android17-release). What it still prints: the calls
+# listed now (mCalls) and, last, its event log ("Historical Events:", the
+# last 10 calls' records, oldest first: a heading "CallTC@<n> [...]" at two
+# spaces, its events at four, "HH:mm:ss.SSS - NAME ..."). A call's record
+# gets LOG_CALL when Telecom writes the call to Android's call log,
+# SKIP_CALL_LOG when it does not (CallLogManager.logCall: an emergency call
+# unless the carrier configuration's allow_emergency_numbers_in_call_log_bool
+# is true, an unloggable number), and DESTROYED once Telecom has removed the
+# call (CallsManager.removeCall). The call log's row holds the call's start
+# (date, milliseconds since the epoch: its creation) and its duration
+# (seconds). telecom_state17 reads these, and the call log and the phone's
+# emergency number list (cell_match17), and prints telecom_state's line.
+
+# The line cell_telecom17 adds after a dump that dumpsys finished (exit 0):
+# Telecom prints its event log last and nothing after it, so without this
+# line a dump cut short could look complete. Telecom cannot print it: its
+# top-level lines are its own headings, and every line inside a section,
+# a value's own line breaks included, is indented (IndentingPrintWriter).
+TS17_END=ANTUMBRA-END-OF-TELECOM-DUMP
+# The line cell_calllog adds after a query that 'content' finished (exit 0).
+TS17_LOG_END=ANTUMBRA-END-OF-CALL-LOG
+# Android's awk (BWK awk, /system/bin/awk on every Android since 8; the
+# tests run the host's).
+CELL_AWK=/system/bin/awk
+# The first API level whose Telecom keeps no call analytics (Android 17).
+CELL_API17=37
+
+# cell_android17: true when the module reads calls the Android 17 way
+# (ro.build.version.sdk at least CELL_API17; read once). An unreadable level
+# reads the Android 16 way, whose parser refuses Android 17's dump (no
+# Analytics): unknown, a hold.
+cell_android17() {
+	if [ -z "$CELL_API" ]; then
+		_ca=$(getprop ro.build.version.sdk 2>/dev/null) || _ca=
+		case $_ca in '' | *[!0-9]* | ?????*) return 1 ;; esac
+		CELL_API=$_ca
+	fi
+	[ "$CELL_API" -ge "$CELL_API17" ]
+}
+
+# cell_wall: the wall clock in whole seconds since the epoch (10 digits;
+# status 1 otherwise).
+cell_wall() {
+	_cw=$($TB date +%s 2>/dev/null) || return 1
+	case $_cw in [1-9]?????????) ;; *) return 1 ;; esac
+	case $_cw in *[!0-9]*) return 1 ;; esac
+	echo "$_cw"
+}
+
+# num_ge A B: true if A >= B, both decimal digits without leading zeros
+# (compared as text: 10 and 13 digits do not fit mksh's arithmetic).
+num_ge() {
+	[ "${#1}" = "${#2}" ] || {
+		[ "${#1}" -gt "${#2}" ]
+		return
+	}
+	_ng_a=$1
+	_ng_b=$2
+	while [ -n "$_ng_a" ]; do
+		_ng_x=${_ng_a%"${_ng_a#?}"}
+		_ng_y=${_ng_b%"${_ng_b#?}"}
+		if [ "$_ng_x" != "$_ng_y" ]; then
+			[ "$_ng_x" -gt "$_ng_y" ]
+			return
+		fi
+		_ng_a=${_ng_a#?}
+		_ng_b=${_ng_b#?}
+	done
+	return 0
+}
+
+# cell_telecom17: Telecom's dump, then TS17_END if dumpsys finished.
+cell_telecom17() { cell_dump telecom && echo "$TS17_END"; }
+
+# cell_emergency_list: the telephony registry's copy of the phone's
+# emergency number list, the line "{<phone>=[[EmergencyNumber: <number>,
+# ...], ...], ...}" (TelephonyRegistry's dump prints mEmergencyNumberList,
+# the map TelephonyManager.getEmergencyNumberList() gives, the list each
+# phone's EmergencyNumberTracker keeps: the SIM's, the network's, the
+# modem's and Android's database's). It stays in the pipe.
+cell_emergency_list() {
+	cell_dump telephony.registry | sed -n '/^last known state:/,/^local logs:/s/^  mEmergencyNumberList=//p'
+}
+
+# cell_calllog MS: Android's call log from MS (milliseconds since the
+# epoch) on, as root: one "Row: N date=..., duration=..., number=..." line
+# per call, then TS17_LOG_END if 'content' finished. It stays in the pipe.
+cell_calllog() {
+	$TB timeout 6 /system/bin/content query --user 0 --uri content://call_log/calls \
+		--projection date:duration:number --where "date>=$1" 2>/dev/null && echo "$TS17_LOG_END"
+}
+
+# cell_match17 NOW ID:LO:HI...: for each call ID, whether Android's call log
+# shows it as an ordinary call: print "ID o" or "ID u", one line each. o
+# only if the emergency number list reads (one line, at least one number)
+# and the call log reads to its end, and exactly one row starts in the
+# call's zone (from LO + 1 to before HI, whole seconds: after the end of the
+# look before the one that first counted the call, before the start of that
+# look), its number is not on the list (digits, '+', '*', '#' and the
+# separators " -()." only; neither equal to a listed number nor ending in
+# one, '+' left out), and it ended (date plus duration) by NOW + 1. The
+# numbers never leave the pipe and awk: only the IDs and letters are
+# printed, and awk's errors are dropped.
+cell_match17() {
+	_cm_now=$1
+	shift
+	_cm_min=
+	for _cm_z in "$@"; do
+		_cm_lo=${_cm_z#*:}
+		_cm_lo=${_cm_lo%%:*}
+		if [ -z "$_cm_min" ] || num_ge "$_cm_min" "$_cm_lo"; then _cm_min=$_cm_lo; fi
+	done
+	# shellcheck disable=SC2016 # awk's own fields and functions
+	{
+		echo "N $_cm_now"
+		for _cm_z in "$@"; do
+			_cm_r=${_cm_z#*:}
+			echo "Z ${_cm_z%%:*} ${_cm_r%%:*} ${_cm_r#*:}"
+		done
+		echo '--E'
+		cell_emergency_list
+		echo '--L'
+		cell_calllog "${_cm_min}000"
+	} | $CELL_AWK -v logend="$TS17_LOG_END" '
+function emlike(n,   d, e, k) {
+	d = n
+	gsub(/[- ().]/, "", d)
+	if (d !~ /^[+]?[0-9*#]+$/) return 1
+	gsub(/[+]/, "", d)
+	for (e in em) {
+		k = length(e)
+		if (d == e) return 1
+		if (length(d) > k && substr(d, length(d) - k + 1) == e) return 1
+	}
+	return 0
+}
+BEGIN { sec = "N"; nz = 0; bad = 0; el = 0; ebad = 0; ne = 0; nrows = 0; nores = 0; lend = 0; lbad = 0; gotn = 0 }
+sec == "N" && /^N [1-9][0-9]*$/ { na = ($2 + 1) * 1000; gotn = 1; sec = "Z"; next }
+sec == "Z" && /^Z [0-9]+ [1-9][0-9]* [1-9][0-9]*$/ {
+	nz++; zid[nz] = $2; zlo[nz] = ($3 + 1) * 1000; zhi[nz] = $4 * 1000; zc[nz] = 0; zem[nz] = 1; zend[nz] = 0
+	next
+}
+sec == "Z" && $0 == "--E" { sec = "E"; next }
+sec == "E" && $0 == "--L" { sec = "L"; next }
+sec == "E" {
+	el++
+	line = $0
+	if (line !~ /^[{].*[}]$/) ebad = 1
+	while (match(line, /[[]EmergencyNumber: [^,]*,/)) {
+		num = substr(line, RSTART + 18, RLENGTH - 19)
+		if (num !~ /^[+]?[0-9*#]+$/) ebad = 1
+		gsub(/[+]/, "", num)
+		if (num == "") ebad = 1
+		em[num] = 1
+		ne++
+		line = substr(line, RSTART + RLENGTH)
+	}
+	next
+}
+sec == "L" && lend { lbad = 1; next }
+sec == "L" && $0 == logend { lend = 1; next }
+sec == "L" && $0 == "No result found." { nores++; next }
+sec == "L" && /^Row: [0-9]+ date=[0-9]+, duration=[0-9]+, number=/ {
+	s = $0
+	sub(/^Row: [0-9]+ date=/, "", s)
+	d = s
+	sub(/,.*$/, "", d)
+	s = substr(s, length(d) + 1)
+	if (substr(s, 1, 11) != ", duration=") { lbad = 1; next }
+	s = substr(s, 12)
+	u = s
+	sub(/,.*$/, "", u)
+	s = substr(s, length(u) + 1)
+	if (substr(s, 1, 9) != ", number=") { lbad = 1; next }
+	s = substr(s, 10)
+	if (d !~ /^[1-9][0-9]+$/ || length(d) < 10 || length(d) > 13 || u !~ /^[0-9]+$/ || length(u) > 9) { lbad = 1; next }
+	nrows++
+	dd = d + 0
+	ee = dd + u * 1000
+	x = emlike(s)
+	for (i = 1; i <= nz; i++) {
+		if (dd >= zlo[i] && dd < zhi[i]) { zc[i]++; zem[i] = x; zend[i] = ee }
+	}
+	next
+}
+sec == "L" { lbad = 1; next }
+{ bad = 1 }
+END {
+	okall = gotn && !bad && sec == "L" && lend && !lbad && el == 1 && !ebad && ne > 0
+	if (nrows > 0 && nores > 0) okall = 0
+	if (nrows == 0 && nores != 1) okall = 0
+	for (i = 1; i <= nz; i++) {
+		v = "u"
+		if (okall && zc[i] == 1 && !zem[i] && zend[i] <= na) v = "o"
+		print zid[i], v
+	}
+}' 2>/dev/null
+}
+
+# telecom_state17 [SINCE [LIVE [XN [FROM [WIN [WALL [START]]]]]]]: Android
+# 17's telecom_state. Reads 'dumpsys telecom' and TS17_END (cell_telecom17)
+# on standard input and prints telecom_state's "CALLS LASTID KIND LIVE XN",
+# then WIN and WALL for the next look: "ID:LO:HI:N,..." (the zones of the
+# calls in its scope, "-" for none) and the wall clock after the dump (or
+# "-"). SINCE, LIVE, XN and FROM are as for telecom_state; WIN and WALL are
+# the last readable look's (cell_note), START the wall clock just before
+# this dump. Returns 1 when
+# the dump lacks CallsManager, its mCalls list, the event log ("Historical
+# Events:" or "No Historical Events Logged.") or TS17_END, has anything after
+# TS17_END, has an Analytics section (a format this does not know), or
+# dumpsys says it gave up ("DUMP TIMEOUT").
+#
+# The records stand in for Analytics' entries: LASTID is the highest number
+# listed or recorded, XN counts the records whose id is not TC@<number>, and
+# the scope is telecom_state's, with "ended" read as "not listed, and its
+# record has DESTROYED". A call's zone is fixed at the look that first
+# counts it: from the end of the last readable look (WALL) to the start of
+# this one (START), none if START is not after WALL (the clock set back); a
+# call can only have started then, and the zones of two looks never
+# overlap while the clock runs on. N is how many numbers that look first counted. KIND
+# per call:
+#   listed now: as telecom_state (e for ecall or ecbm in its prop=, u for
+#     another id than TC@<number> or no prop=); the listing cannot tell an
+#     emergency number, so the call is read again once it has ended;
+#   not listed, ended: o only if its record has exactly one LOG_CALL and no
+#     SKIP_CALL_LOG, it was the only number its look first counted (N 1),
+#     its zone is known and cell_match17 says o; u otherwise (an emergency
+#     call Telecom did not log, one logged with a number on the list, no
+#     row or two in the zone, a call log or list that cannot be read, a call
+#     the module first counted at its first look of the boot);
+#   not listed, not ended (no DESTROYED: being set up, or dropped before
+#     Telecom listed it): u at every look, and in LIVE, until its record
+#     ends or leaves the event log;
+#   no record (a call in scope, or a number above FROM or SINCE without
+#     one): u, as are a record twice and a record's event outside one.
+# The call log and the emergency number list are read only when a call may
+# be o. Nothing but numbers and these letters is printed; the dump's
+# numbers and the call log's never leave the pipes.
+telecom_state17() {
+	_t7_since=${1-}
+	_t7_prev=${2-}
+	_t7_xprev=${3-}
+	_t7_from=${4-}
+	_t7_win=${5-}
+	_t7_pa=${6-}
+	_t7_nb=${7-}
+	_t7_t='[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9]'
+	# Any line after the end line first: AFTER, and nothing else.
+	sed -n -e "/^$TS17_END\$/,\${/^$TS17_END\$/!{s/.*/AFTER/p;d;};}" \
+		-e '/^  mCalls: *$/,/^ \{0,2\}[^ ]/{/^    \[Call id=/p;}' \
+		-e 's/^\(CallsManager:\) *$/\1/p' -e 's/^\(Analytics:\) *$/\1/p' \
+		-e 's/^  \(mCalls:\) *$/\1/p' -e 's/^\*\*\* .*DUMP TIMEOUT.*$/DUMP TIMEOUT/p' \
+		-e 's/^\(Historical Events:\) *$/\1/p' -e 's/^No Historical Events Logged\. *$/Historical Events:/p' \
+		-e "s/^$TS17_END\$/END/p" \
+		-e "/^Historical Events: *\$/,/^[^ ]/{s/^  Call \{0,1\}\(TC@[0-9][0-9]*\) \[.*\$/REC \1/p;s/^  SelfMgd Call \{0,1\}\(TC@[0-9][0-9]*\) \[.*\$/REC \1/p;s/^  External Call \{0,1\}\(TC@[0-9][0-9]*\) \[.*\$/REC \1/p;s/^  [A-Za-z].*\$/REC x/p;s/^    $_t7_t - \([A-Z_]*\)\$/EV \1/p;s/^    $_t7_t - \([A-Z_]*\)[ :(].*\$/EV \1/p;}" |
+		{
+			_t7_have=,
+			_t7_n=0
+			_t7_last=0
+			_t7_live=
+			_t7_recs=,
+			_t7_tot=0
+			_t7_xn=0
+			_t7_e=0
+			_t7_u=0
+			_t7_cur=
+			_t7_end=0
+			_t7_cl=0
+			_t7_cs=0
+			_t7_cd=0
+			while IFS= read -r _t7_line; do
+				# Nothing after the end.
+				[ "$_t7_end" = 0 ] || exit 1
+				_t7_id=
+				case $_t7_line in
+				CallsManager: | mCalls: | 'Historical Events:')
+					case $_t7_have in *",${_t7_line%:},"*) exit 1 ;; esac
+					_t7_have="$_t7_have${_t7_line%:},"
+					continue
+					;;
+				Analytics: | 'DUMP TIMEOUT' | AFTER) exit 1 ;;
+				END)
+					_t7_end=1
+					continue
+					;;
+				'    [Call id='*)
+					_t7_n=$((_t7_n + 1))
+					case $_t7_line in *'[Call id=TC@'[0-9]*)
+						_t7_id=${_t7_line#*id=TC@}
+						_t7_id=${_t7_id%%[!0-9]*}
+						;;
+					esac
+					_t7_x=${_t7_line#'    [Call id='}
+					_t7_x=${_t7_x%%,*}
+					if [ -n "$_t7_id" ] && [ "$_t7_x" = "TC@$_t7_id" ]; then
+						_t7_live=${_t7_live:+$_t7_live,}$_t7_id
+					else
+						_t7_u=1
+					fi
+					case $_t7_line in
+					*' prop=['*']'*)
+						_t7_p=${_t7_line##*' prop=['}
+						_t7_p=${_t7_p%%']'*}
+						case " $_t7_p " in *' ecall '* | *' ecbm '*) _t7_e=1 ;; esac
+						;;
+					*) _t7_u=1 ;;
+					esac
+					;;
+				'REC '* | 'EV '*)
+					case $_t7_have in *',Historical Events,'*) ;; *) exit 1 ;; esac
+					case $_t7_line in
+					'EV '*)
+						if [ -z "$_t7_cur" ]; then
+							_t7_u=1
+							continue
+						fi
+						case ${_t7_line#EV } in
+						LOG_CALL) _t7_cl=$((_t7_cl + 1)) ;;
+						SKIP_CALL_LOG) _t7_cs=$((_t7_cs + 1)) ;;
+						DESTROYED) _t7_cd=$((_t7_cd + 1)) ;;
+						esac
+						continue
+						;;
+					esac
+					# A new record: the last one first.
+					if [ -n "$_t7_cur" ] && [ "$_t7_cur" != x ]; then
+						if [ "$_t7_cd" = 0 ]; then
+							_t7_k=p
+						elif [ "$_t7_cl" = 1 ] && [ "$_t7_cs" = 0 ]; then
+							_t7_k=c
+						else
+							_t7_k=u
+						fi
+						_t7_recs="$_t7_recs$_t7_cur:$_t7_k,"
+					fi
+					_t7_tot=$((_t7_tot + 1))
+					_t7_cl=0
+					_t7_cs=0
+					_t7_cd=0
+					_t7_cur=x
+					_t7_x=${_t7_line#REC }
+					case $_t7_x in TC@[0-9]*)
+						_t7_v=${_t7_x#TC@}
+						case $_t7_v in *[!0-9]*) ;; *) _t7_cur=$_t7_v ;; esac
+						;;
+					esac
+					if [ "$_t7_cur" = x ]; then
+						_t7_xn=$((_t7_xn + 1))
+					else
+						# A record twice: unknown, and its kind u.
+						case $_t7_recs in *",$_t7_cur:"*)
+							_t7_u=1
+							_t7_recs="$_t7_recs$_t7_cur:u,"
+							;;
+						esac
+						_t7_id=$_t7_cur
+					fi
+					;;
+				esac
+				[ -n "$_t7_id" ] || continue
+				# Shell arithmetic may be 32 bits (mksh).
+				[ "${#_t7_id}" -le 9 ] || exit 1
+				[ "$_t7_id" -le "$_t7_last" ] || _t7_last=$_t7_id
+			done
+			[ "$_t7_end" = 1 ] || exit 1
+			case $_t7_have in *,CallsManager,*) ;; *) exit 1 ;; esac
+			case $_t7_have in *,mCalls,*) ;; *) exit 1 ;; esac
+			case $_t7_have in *',Historical Events,'*) ;; *) exit 1 ;; esac
+			if [ -n "$_t7_cur" ] && [ "$_t7_cur" != x ]; then
+				if [ "$_t7_cd" = 0 ]; then
+					_t7_k=p
+				elif [ "$_t7_cl" = 1 ] && [ "$_t7_cs" = 0 ]; then
+					_t7_k=c
+				else
+					_t7_k=u
+				fi
+				_t7_recs="$_t7_recs$_t7_cur:$_t7_k,"
+			fi
+			# The wall clock after the dump.
+			_t7_na=$(cell_wall) || _t7_na=-
+			# The scope, as telecom_state's.
+			_t7_s=$_t7_since
+			case $_t7_s in
+			'') _t7_s=0 ;;
+			*[!0-9]* | ??????????*)
+				_t7_s=0
+				_t7_u=1
+				;;
+			esac
+			_t7_f=$_t7_from
+			case $_t7_f in
+			'') _t7_f=$_t7_s ;;
+			*[!0-9]* | ??????????*)
+				_t7_f=$_t7_s
+				_t7_u=1
+				;;
+			esac
+			if [ "$_t7_f" -gt "$_t7_s" ]; then
+				_t7_f=$_t7_s
+				_t7_u=1
+			fi
+			if [ "$_t7_s" -gt "$_t7_last" ]; then
+				_t7_s=0
+				_t7_f=0
+				_t7_u=1
+			fi
+			# The zone of the calls this look counts first: after WALL,
+			# before START; none without both, or START not after WALL.
+			_t7_zn=$((_t7_last - _t7_s))
+			_t7_zone=-:-
+			case $_t7_pa:$_t7_nb in
+			[1-9]?????????:[1-9]?????????)
+				case $_t7_pa$_t7_nb in *[!0-9]*) ;; *)
+					if [ "$_t7_pa" != "$_t7_nb" ] && num_ge "$_t7_nb" "$_t7_pa"; then
+						_t7_zone=$_t7_pa:$_t7_nb
+					fi
+					;;
+				esac
+				;;
+			esac
+			_t7_in=0
+			_t7_c=0
+			_t7_cf=0
+			_t7_keep=$_t7_live
+			_t7_cand=,
+			_t7_r=${_t7_recs#,}
+			while [ -n "$_t7_r" ]; do
+				_t7_one=${_t7_r%%,*}
+				_t7_r=${_t7_r#*,}
+				_t7_v=${_t7_one%:*}
+				_t7_k=${_t7_one#*:}
+				_t7_l=0
+				case ,$_t7_live, in *",$_t7_v,"*) _t7_l=1 ;; esac
+				# Not listed and not ended: read again at the next look.
+				if [ "$_t7_l" = 0 ] && [ "$_t7_k" = p ]; then
+					case ,$_t7_keep, in *",$_t7_v,"*) ;; *) _t7_keep=${_t7_keep:+$_t7_keep,}$_t7_v ;; esac
+				fi
+				if [ "$_t7_v" -gt "$_t7_s" ]; then
+					_t7_c=$((_t7_c + 1))
+				else
+					[ "$_t7_v" -le "$_t7_f" ] || _t7_cf=$((_t7_cf + 1))
+					# Ended, it stays in scope only above FROM (or in LIVE).
+					[ "$_t7_l" = 1 ] || [ "$_t7_k" = p ] || [ "$_t7_v" -gt "$_t7_f" ] || continue
+				fi
+				_t7_in=1
+				[ "$_t7_l" = 0 ] || continue
+				case $_t7_k in
+				c) _t7_cand="$_t7_cand$_t7_v," ;;
+				*) _t7_u=1 ;;
+				esac
+			done
+			[ "$_t7_c" = "$_t7_zn" ] || _t7_u=1
+			[ "$_t7_cf" = $((_t7_s - _t7_f)) ] || _t7_u=1
+			# The calls not over at the last look (LIVE) and those listed
+			# now, by their records.
+			case $_t7_prev in '' | -) _t7_r= ;; *) _t7_r=$_t7_prev ;; esac
+			_t7_r=$_t7_r${_t7_live:+,$_t7_live}
+			_t7_r=${_t7_r#,}
+			while [ -n "$_t7_r" ]; do
+				_t7_one=${_t7_r%%,*}
+				case $_t7_r in *,*) _t7_r=${_t7_r#*,} ;; *) _t7_r= ;; esac
+				_t7_in=1
+				case $_t7_one in '' | *[!0-9]* | ??????????*)
+					_t7_u=1
+					continue
+					;;
+				esac
+				case $_t7_recs in
+				*",$_t7_one:"*)
+					case ,$_t7_live, in *",$_t7_one,"*) continue ;; esac
+					_t7_k=${_t7_recs#*",$_t7_one:"}
+					_t7_k=${_t7_k%%,*}
+					case $_t7_k in
+					c) case $_t7_cand in *",$_t7_one,"*) ;; *) _t7_cand="$_t7_cand$_t7_one," ;; esac ;;
+					*) _t7_u=1 ;;
+					esac
+					;;
+				*) _t7_u=1 ;;
+				esac
+			done
+			[ "$_t7_n" = 0 ] || _t7_in=1
+			# Records the numbers do not cover.
+			if [ -n "$_t7_xprev" ]; then
+				[ "$_t7_xn" = "$_t7_xprev" ] || _t7_u=1
+			else
+				[ "$_t7_xn" = 0 ] || _t7_u=1
+			fi
+			[ "$_t7_tot" -lt 10 ] || [ "$_t7_xn" = 0 ] || _t7_u=1
+			# Each ended call that may be ordinary: its zone, then the
+			# call log. A call counted first now has this look's zone.
+			_t7_m=
+			_t7_r=${_t7_cand#,}
+			while [ -n "$_t7_r" ]; do
+				_t7_one=${_t7_r%%,*}
+				_t7_r=${_t7_r#*,}
+				if [ "$_t7_one" -gt "$_t7_s" ]; then
+					_t7_z=$_t7_zone:$_t7_zn
+				else
+					_t7_z=-:-:0
+					case ,$_t7_win, in *",$_t7_one:"*)
+						_t7_z=,$_t7_win
+						_t7_z=${_t7_z#*",$_t7_one:"}
+						_t7_z=${_t7_z%%,*}
+						;;
+					esac
+				fi
+				case $_t7_z in
+				[1-9]?????????:[1-9]?????????:1) _t7_m="$_t7_m $_t7_one:${_t7_z%:1}" ;;
+				*) _t7_u=1 ;;
+				esac
+			done
+			if [ -n "$_t7_m" ]; then
+				if [ "$_t7_na" = - ]; then
+					_t7_u=1
+				else
+					set -f
+					# shellcheck disable=SC2086 # one word per call
+					_t7_o=$(cell_match17 "$_t7_na" $_t7_m) || _t7_o=
+					set +f
+					for _t7_z in $_t7_m; do
+						case "
+$_t7_o
+" in
+						*"
+${_t7_z%%:*} o
+"*) ;;
+						*) _t7_u=1 ;;
+						esac
+					done
+				fi
+			fi
+			# The zones for the next look: the calls it reads again
+			# (counted first now) and those not over.
+			_t7_w=
+			_t7_r=${_t7_recs#,}${_t7_live:+$_t7_live,}${_t7_keep:+$_t7_keep,}
+			while [ -n "$_t7_r" ]; do
+				_t7_one=${_t7_r%%,*}
+				_t7_r=${_t7_r#*,}
+				_t7_v=${_t7_one%%:*}
+				case $_t7_v in '' | *[!0-9]* | ??????????*) continue ;; esac
+				case ,$_t7_w in *",$_t7_v:"*) continue ;; esac
+				if [ "$_t7_v" -gt "$_t7_s" ]; then
+					_t7_z=$_t7_zone:$_t7_zn
+				else
+					case ,$_t7_keep, in *",$_t7_v,"*) ;; *) continue ;; esac
+					_t7_z=-:-:0
+					case ,$_t7_win, in *",$_t7_v:"*)
+						_t7_z=,$_t7_win
+						_t7_z=${_t7_z#*",$_t7_v:"}
+						_t7_z=${_t7_z%%,*}
+						;;
+					esac
+				fi
+				_t7_w=${_t7_w:+$_t7_w,}$_t7_v:$_t7_z
+			done
+			if [ "$_t7_e" = 1 ]; then
+				_t7_kind=e
+			elif [ "$_t7_u" = 1 ]; then
+				_t7_kind=u
+			elif [ "$_t7_in" = 1 ]; then
+				_t7_kind=o
+			else
+				_t7_kind=-
+			fi
+			echo "$_t7_n $_t7_last $_t7_kind ${_t7_keep:--} $_t7_xn ${_t7_w:--} $_t7_na"
+		}
+}
+
 # registry_state: read 'dumpsys telephony.registry' on standard input and
 # print "BUSY CBM RADIO": BUSY 1 if any phone is not idle (mCallState not
 # 0, or a precise state other than idle (0), disconnected (7) or not valid
@@ -1406,9 +1984,11 @@ ecbm_value() {
 
 # cell_dump SERVICE: Android's dumpsys of SERVICE, bounded: dumpsys gives
 # the service 3 seconds, and the whole call ends after 4 (a look, two
-# dumps, takes at most 8). A dump cut short reads as unknown: a hold
-# (telecom_state needs the end of Analytics, registry_state the radio
-# power, which each dump prints after everything they read).
+# dumps, takes at most 8; on Android 17, after a call, up to 10 more for the
+# emergency number list and the call log). A dump cut short reads as
+# unknown: a hold (telecom_state needs the end of Analytics, telecom_state17
+# the line cell_telecom17 adds once dumpsys has finished, registry_state the
+# radio power, which each dump prints after everything they read).
 cell_dump() { $TB timeout 4 /system/bin/dumpsys -t 3 "$1" 2>/dev/null; }
 
 # airplane_get: print airplane mode, 1 or 0; returns 1 if it cannot be read.
@@ -1564,7 +2144,8 @@ cell_phone_mode() {
 
 # cell_look: one look at the call state, the radio and the phone process
 # (sets CL_*). The calls in scope for CL_KIND follow the last readable look
-# (CELL_ID, CELL_LIVE, CELL_XN, CELL_FROM).
+# (CELL_ID, CELL_LIVE, CELL_XN, CELL_FROM; on Android 17 also CELL_WIN and
+# CELL_WALL: telecom_state17).
 cell_look() {
 	CL_CALL=unknown
 	CL_CBM=unknown
@@ -1573,9 +2154,17 @@ cell_look() {
 	CL_KIND=unknown
 	CL_LIVE=
 	CL_XN=
+	CL_WIN=
+	CL_WALL=
 	CL_ALONE=0
 	CL_PHONE=$(phone_proc) || CL_PHONE=-
-	_cl_t=$(cell_dump telecom | telecom_state "$CELL_ID" "$CELL_LIVE" "$CELL_XN" "$CELL_FROM") || _cl_t=
+	if cell_android17; then
+		_cl_w=$(cell_wall) || _cl_w=-
+		_cl_t=$(cell_telecom17 | telecom_state17 "$CELL_ID" "$CELL_LIVE" "$CELL_XN" "$CELL_FROM" \
+			"$CELL_WIN" "$CELL_WALL" "$_cl_w") || _cl_t=
+	else
+		_cl_t=$(cell_dump telecom | telecom_state "$CELL_ID" "$CELL_LIVE" "$CELL_XN" "$CELL_FROM") || _cl_t=
+	fi
 	_cl_r=$(cell_dump telephony.registry | registry_state) || _cl_r=
 	if _cl_e=$(getprop ril.cdma.inecmmode 2>/dev/null); then
 		_cl_e=$(ecbm_value "$_cl_e")
@@ -1593,13 +2182,15 @@ cell_look() {
 		if [ -n "$_cl_t" ]; then
 			CL_CALL=$1
 			set -f
-			# shellcheck disable=SC2086 # five words on purpose
+			# shellcheck disable=SC2086 # five words on purpose (seven on Android 17)
 			set -- $_cl_t
 			set +f
 			CL_ID=$2
 			CL_KIND=$3
 			CL_LIVE=$4
 			CL_XN=$5
+			CL_WIN=${6-}
+			CL_WALL=${7-}
 			if [ "$1" != 0 ]; then
 				CL_CALL=1
 			elif [ "$CL_CALL" = 1 ]; then
@@ -1686,6 +2277,10 @@ cell_note() {
 		CELL_ID=$CL_ID
 		CELL_LIVE=$CL_LIVE
 		CELL_XN=$CL_XN
+		# Android 17: the zones, and when this dump ended ("-": the
+		# clock could not be read, so the next look's calls have no zone).
+		CELL_WIN=$CL_WIN
+		CELL_WALL=$CL_WALL
 	fi
 	if [ "$CL_RADIO" = on ] && [ "$CELL_RADIO" != on ] && ! cell_mine "$1"; then
 		_cn_event=1

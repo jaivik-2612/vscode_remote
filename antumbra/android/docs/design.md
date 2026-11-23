@@ -72,22 +72,32 @@ does not protect against.
   - Telecom no longer keeps call analytics: `dumpsys telecom` prints no
     `Analytics:` section and `dumpCallAnalytics()` returns an empty list
     (`TelecomServiceImpl`). MOD6's holds and MOD11's word read that record,
-    so on 24.0 every radio-off step would be held for the whole boot and
-    Quick power off would wait after every call. The emergency call
+    so without a replacement every radio-off step would be held for the
+    whole boot on 24.0 and Quick power off would wait after every call. The emergency call
     diagnostic logger that remains (`EmergencyCallDiagnosticLogger`) is no
     replacement: its in-memory log is never written, and it saves a
     DropBox entry only for a failed or short emergency call.
-  - The replacement (MOD15): Android's call log. Telecom writes each
-    ended call there with its start time and duration, and by default
-    never writes an emergency call (`CallLogManager.okayToLogCall`: only
-    when the carrier configuration's
-    `allow_emergency_numbers_in_call_log_bool` is true). The module, as
-    root, matches each call it saw in the telephony registry's call state to
-    a call-log row: a row whose number is not on the phone's emergency
-    number list makes the call positively ordinary and gives its end; no
-    row, or a number on that list, leaves it unknown, and unknown keeps
-    every hold. The numbers are compared in memory only, never stored or
-    logged.
+  - The replacement (MOD15, built): Android's call log. Telecom writes
+    each ended call there with its start time and duration, and by
+    default never writes an emergency call (`CallLogManager.okayToLogCall`:
+    only when the carrier configuration's
+    `allow_emergency_numbers_in_call_log_bool` is true). From API level 37
+    the module, as root, counts the calls from Telecom's listed calls and
+    its event log (`Historical Events:`, whose records say `LOG_CALL`,
+    `SKIP_CALL_LOG` and `DESTROYED` per call), gives each call the time
+    between two looks in which it began, and matches it to a call-log row
+    (`content query` on `content://call_log/calls`). A call is positively
+    ordinary only when Telecom logged it once and did not skip it, it was
+    the only call that look counted, exactly one row starts in its time,
+    and that row's number is not on the phone's emergency number list (the
+    telephony registry's `mEmergencyNumberList`); its end is the row's
+    start plus its duration. No row, two rows, a number on the list, an
+    unreadable dump, log or list leaves it unknown, and unknown keeps every
+    hold. The numbers are compared in the pipe and `awk` only, never stored
+    or logged. Android 16 keeps the analytics path unchanged; the
+    installer's API 36 gate stays until CI16. Read from source and tested
+    on stand-ins; the Android 17 emulator (CI16) and the phone must show
+    the real dumps and call log.
   - Emulator images exist for Android 17: `system-images;android-37.0`
     with `default` and `aosp_atd` (no Google services), and `google_apis`
     (x86_64 and arm64) **[verified 2026-11-16, sdkmanager]**. CI moves to
@@ -618,7 +628,7 @@ a public repository must never run on pull-request triggers.
 | Magisk app hidden outside updates | `welcome/` | todo |
 | Unsafe Browser as its own app, captive-portal detection always off | `welcome/`, new app | detection off done; the switch shown but disabled; the app W11 |
 | Quick power off powers off, not restarts; never bound to the power button | `welcome/`, `module/` | the name and the rule done (WEL12); powering off todo (v0 restarts) |
-| Quick power off never cuts an emergency call short or switches off in a callback window; it waits during any call, in callback mode and 5 minutes after a call, unless the module, as root, knows that call was ordinary (Phone mode only: outside it every call reads unknown) | `welcome/` (`CallWatch`), `module/` (the word, private to Welcome) | built (WEL7, MOD11) with unit and sandbox tests (the e2e `phone` scenario reads an ordinary call); relaxes only in Phone mode (WEL8), which the gate keeps off on the phone until PH3; Android 16 only (Android 17 keeps no record the module can read, so it waits after every call); the emulator check `welcome_module_word` fails since run 20 |
+| Quick power off never cuts an emergency call short or switches off in a callback window; it waits during any call, in callback mode and 5 minutes after a call, unless the module, as root, knows that call was ordinary (Phone mode only: outside it every call reads unknown) | `welcome/` (`CallWatch`), `module/` (the word, private to Welcome) | built (WEL7, MOD11) with unit and sandbox tests (the e2e `phone` scenario reads an ordinary call); relaxes only in Phone mode (WEL8), which the gate keeps off on the phone until PH3; on Android 17 the module reads the call log instead (MOD15, read from source and tested on stand-ins only); the emulator check `welcome_module_word` fails since run 20 |
 | System records moved to RAM (section 9) | `module/` | W8 |
 | Hidden networks refused; passphrase field without learning, `FLAG_SECURE` | `welcome/` | W10 |
 | Exempt apps: relays and bridges only, fail closed when stale | `firewall/`, helper | chain exists, empty (W9) |

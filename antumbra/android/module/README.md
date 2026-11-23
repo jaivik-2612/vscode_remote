@@ -793,7 +793,7 @@ cannot tell; then ordinary.
 | Word | The module says it | Welcome |
 |---|---|---|
 | `emergency` | an emergency call in scope, or callback mode (calls or texts, `ril.cdma.inecmmode` or the registry) now; until 5 minutes after the look that saw the sign, or the look after it, or the last call-like event since (a call or its end, the call counter moving, the radio or airplane mode switched by something else) | waits as before, and at least until the word's end (at most 5 minutes after the look), even for a call it did not see |
-| `unknown` | any call outside a Phone-mode session (before Start, a session that keeps the radio off, before the module's switch-on, while the fail-safe holds the radios: the cell radio is off there, so a carrier call is an emergency call, a Wi-Fi call or follows a switch-on by something else, and the dump cannot tell a carrier call from a VoIP call at every moment); anything it cannot read or classify: the state unreadable, a dump cut short included (Telecom prints the newest entry last, so its dump counts only up to the end of Analytics, `Hardware Version:`, and never when `dumpsys` says it gave up); a call without its entry; an entry without exactly one `endTime: <number>`, one `isEmergency: true` or `false` and one `callProperties` line; a call read again that is not listed now and whose entry has not ended (at every look until it is listed or ended, or its entry is gone); a listed call whose id is not `TC@<number>` or without `prop=`; not one entry per number since the look before the last; entries Telecom did not number appearing (a conference part, some VoIP calls); Telecom restarted; a call in the registry that Telecom does not list; the radio switched on, or airplane mode off, by something else (an emergency text switches the radio on and starts no call); the phone process not running, or restarted; the time since boot unreadable; until 5 minutes after the look after it, or after the last call-like event since. Always on Android 17 | exactly as before |
+| `unknown` | any call outside a Phone-mode session (before Start, a session that keeps the radio off, before the module's switch-on, while the fail-safe holds the radios: the cell radio is off there, so a carrier call is an emergency call, a Wi-Fi call or follows a switch-on by something else, and the dump cannot tell a carrier call from a VoIP call at every moment); anything it cannot read or classify: the state unreadable, a dump cut short included (Telecom prints the newest entry last, so its dump counts only up to the end of Analytics, `Hardware Version:`, and never when `dumpsys` says it gave up); a call without its entry; an entry without exactly one `endTime: <number>`, one `isEmergency: true` or `false` and one `callProperties` line; a call read again that is not listed now and whose entry has not ended (at every look until it is listed or ended, or its entry is gone); a listed call whose id is not `TC@<number>` or without `prop=`; not one entry per number since the look before the last; entries Telecom did not number appearing (a conference part, some VoIP calls); Telecom restarted; a call in the registry that Telecom does not list; the radio switched on, or airplane mode off, by something else (an emergency text switches the radio on and starts no call); the phone process not running, or restarted; the time since boot unreadable; until 5 minutes after the look after it, or after the last call-like event since. On Android 17, also every case that section below names | exactly as before |
 | `ordinary` | in a Phone-mode session only: a call in the last 5 minutes, every call at every look classified as an ordinary call (each read again after it ended), and none of the above | skips the 5-minute wait after the call it saw end, but only while the word is at most 30 s old and its look came after that end |
 | `none` | none of this in the last 5 minutes | exactly as before |
 
@@ -899,7 +899,9 @@ look that saw an emergency sign and of the last doubt (renewed by each
 call-like event while kept), and MOD6's last call-like event, each
 forgotten once 5 minutes have passed; the numbers of the calls not over
 at the last look (listed, or with an entry that had not ended), a count
-of Telecom's unnumbered entries, the last word told
+of Telecom's unnumbered entries (on Android 17, of unnumbered event-log
+records, and the zones of the calls in scope with the end of the last
+readable dump), the last word told
 and the time and kind of the last try Welcome refused. `CELL_ID`,
 Telecom's own call counter, its value at the look before (`CELL_FROM`),
 and the phone process's pid and start time (`CELL_PHONE`) stay for the
@@ -909,11 +911,77 @@ last word and the end of the longest emergency wait in memory only.
 Android's own copies (Telecom's analytics and event log, the registry, the
 call log) are unchanged.
 
-**Android 17** (LineageOS 24.0, OS1) no longer prints Telecom's analytics,
-and nothing else root can read says a call was not an emergency call: there
-`telecom_state` reads nothing (as for the holds, below in "Known gaps"),
-the word is always `unknown`, and Quick power off waits after every call,
-as before MOD11.
+**Android 17** (LineageOS 24.0, OS1; MOD15). Telecom keeps no call
+analytics there: `dumpsys telecom` prints no `Analytics:` section and
+`dumpCallAnalytics()` returns an empty list (`TelecomServiceImpl` on
+`android17-release`). The replacement is Android's call log, read with
+Telecom's own event log. From API level 37 (`ro.build.version.sdk`, read
+once; an unreadable level takes the Android 16 path, whose parser refuses
+Android 17's dump, so the state reads unknown and every hold holds),
+`cell_look` reads the calls with `telecom_state17`, which prints
+`telecom_state`'s line, so the holds and the word are decided as above.
+It reads:
+
+- **Telecom's dump**, to its end. Telecom prints its event log last and
+  nothing after it, so `cell_telecom17` adds a line of its own once
+  `dumpsys` has finished; a dump without that line, with anything after
+  it, with `DUMP TIMEOUT`, or with an `Analytics:` section (a format this
+  path does not know) reads unknown. In the dump: the calls listed now
+  (`mCalls`, read as on Android 16: `ecall` or `ecbm` in `prop=` is an
+  emergency sign, another id than `TC@<n>` or no `prop=` a doubt), and
+  the event log, `Historical Events:` (the last 10 calls, each a heading
+  `CallTC@<n> [...]` and its events). A call's record gets `LOG_CALL` when
+  Telecom writes the call to the call log, `SKIP_CALL_LOG` when it does
+  not (`CallLogManager.logCall`: an emergency call, unless the carrier
+  configuration's `allow_emergency_numbers_in_call_log_bool` is true, or
+  an unloggable number), and `DESTROYED` once Telecom has removed it. The
+  records stand in for the analytics' entries: they give Telecom's highest
+  call number and one record per number, a call "ended" is one not
+  listed whose record has `DESTROYED`, and the scope is the one above.
+- **The call log**, as root: `content query --user 0 --uri
+  content://call_log/calls --projection date:duration:number --where
+  "date>=<ms>"`, then a line of the module's once `content` has finished.
+  Telecom writes each ended call it logs with its start (`date`, the
+  call's creation, in milliseconds) and its duration (seconds).
+- **The emergency number list**: the telephony registry's
+  `mEmergencyNumberList` (the map `TelephonyManager.getEmergencyNumberList`
+  gives: each phone's `EmergencyNumberTracker` list, the SIM's, the
+  network's, the modem's and the database's numbers), from the registry's
+  `last known state`.
+
+**How a call is matched.** Each call gets a zone at the look that first
+counts it: from the end of the last readable look's dump to the start of
+this one, in whole wall-clock seconds. A call counted then can only have
+started in that time, and two looks' zones never overlap while the clock
+runs on (a clock set back gives no zone). An ended call reads ordinary
+only if all of these hold: its record has exactly one `LOG_CALL`, no
+`SKIP_CALL_LOG` and `DESTROYED`; it was the only call number its look
+first counted; its zone is known (not the module's first look of the
+boot, a clock readable before and after); the emergency number list reads
+(one line, at least one number); the call log reads to its end; exactly
+one row starts in the zone; that row's number is a phone number (digits,
+`+`, `*`, `#` and the separators ` -().` only) and neither equal to a
+listed number nor ending in one; and the row's end (`date` plus
+`duration`) is not after the look. Anything else reads unknown: an
+emergency call Telecom did not log (the default), one logged by a carrier
+setting (its number is on the list), no row or two in the zone, a row
+outside it (a few seconds off is enough), an unreadable call log or list,
+a call that is not listed and has not ended (read again at every look, as
+on Android 16), a call whose record is gone (more than 10 calls since),
+two calls first counted at one look. The call log and the list are read
+only when a call may be ordinary, at the look that reads it ended and at
+the next, so up to twice per call. A listed call is read as on Android 16
+while it lasts and decided again once it has ended; an emergency call in
+progress holds as any call does. Ordinary, and its end from the row, is
+only ever known after the call; the word then follows the rules above
+(Welcome counts an `ordinary` only from a look after the end).
+
+**Numbers.** The call log's and the list's numbers are compared inside
+the pipe and `awk` (`cell_match17`), which prints only the call numbers
+Telecom gave (`TC@<n>`'s n) and a letter each; `awk`'s errors are dropped.
+No phone number is kept, logged, written or told to Welcome. The module
+keeps, for the calls in scope, Telecom's call numbers and their zones
+(wall-clock seconds), and the time the last readable dump ended.
 
 ### `restricted_networking_mode`: on LineageOS only
 
@@ -1389,7 +1457,26 @@ last look whose entry is gone, `FROM` above `SINCE`, not a number or of
 ten digits: unknown; `FROM` 0 reads every call again; `cell_note`'s
 `FROM`: 0 at the first look and after the counter went down, the last
 counter otherwise, unchanged by an unreadable look; `LIVE`: a kept call
-over now is a call-like event); `phone_proc` itself on this host's
+over now is a call-like event); `telecom_state17` (MOD15) against
+Android 17-shaped dumps, call logs and emergency number lists (a call
+listed now as on Android 16, its zone kept; an ordinary call ended with
+its row in the zone: ordinary, at that look and the next, then out of
+scope; one that began and ended between two looks: ordinary; an emergency
+call not logged, the default: unknown, the call log not read; one logged
+by a carrier setting, its number `112`, `+112`, `1-1-2`, `00112` or `911`
+on the list: unknown; a number that is none (empty, `NULL`, a SIP
+address): unknown; a row a few seconds or more outside the zone, a row
+that ends after the look, two rows: unknown; an unreadable, empty,
+doubled or cut list: unknown; a call log cut, with an error, an odd row,
+a row after its end, a broken line: unknown; a record with `LOG_CALL`
+twice, with `SKIP_CALL_LOG` too, with neither, or not ended: unknown,
+the last kept in `LIVE`; no zone (first look, no clock, the clock set
+back), two calls at one look, a number without a record, a record twice,
+an unnumbered record, Telecom restarted: unknown; the dump cut, with a
+line after its end, `DUMP TIMEOUT`, without CallsManager, `mCalls` or the
+event log, with Analytics: refused; Android 16's parser refuses Android
+17's dump and the other way round; no phone number in the output;
+`cell_look` and `cell_note` on API 37 and 36); `phone_proc` itself on this host's
 processes (through a stand-in `toybox pidof`: a running process's pid and
 start time, a name with `) ` in it, two processes, none, an odd answer,
 a name `/proc` has (`self`), and the process gone before its stat is
@@ -1740,12 +1827,14 @@ phone the rest.
   only the phone process part, new since, is not `phone=yes` (until it has
   passed on CI once). No call has been parsed on a device yet. **Android
   17 (LineageOS 24.0, OS1) prints no Analytics**
-  (`TelecomServiceImpl.dump` on `android17-release`; `Analytics.java` is
-  gone): there every look reads unknown, every radio-off and airplane step
-  (the fail-safe's included) is held for the whole boot, and once anything
-  switches the radio on it stays on until the next start. OS1 needs
-  another call counter there, such as the event log's `CallTC@<n>`
-  descriptions under `Historical Events:` plus the listed calls.
+  (`TelecomServiceImpl.dump` on `android17-release`): there the module
+  reads the event log, the call log and the registry's emergency number
+  list instead (MOD15, above in "The module's word to Welcome: the last
+  calls"). Those layouts were read in `android17-release`'s source
+  (`Call.getDescription`, `EventManager`, `CallLogManager`,
+  `TelephonyRegistry`, `EmergencyNumber.toString`) and tested on
+  stand-ins only: no Android 17 dump, call log or `content` answer has
+  been seen yet (CI16 on the emulator, PH3 on the phone).
 - **Phone mode (WEL8) has run only in the sandbox and, from its first run
   on, on the emulator** (calls and texts, the gate written as root). On a
   phone it waits for the gate, which PH3 writes; until then nothing on
@@ -1792,9 +1881,20 @@ phone the rest.
   `endTime: 0`: in Phone mode the word then stays `unknown` while Telecom
   keeps that entry (its last 100 calls), so Quick power off waits after
   every call until then (the safe side).
-- On Android 17 no root-readable dump says a call was not an emergency
-  call: the word is always `unknown` and Quick power off waits after every
-  call, as before.
+- On Android 17 (MOD15), what the call log cannot show: a row another
+  app with `WRITE_CALL_LOG` (a dialer) writes or deletes; a row that
+  Telecom writes after the look that reads the call ended (the write is
+  asynchronous: that call reads unknown, the safe side); `ecall` that the
+  network sets after the last look that listed the call (Android 16 reads
+  it in the analytics entry; the end of an emergency call identified only
+  then is not seen as one); a forged line in Telecom's event log (an
+  event's text with a line break is indented as an event; a record twice
+  reads unknown). A call whose row starts with its connect time (a
+  carrier's missed-call text, earlier than the call's creation) and every
+  call while the clock is set back read unknown. `content` as root on the
+  call log, the registry's list, `/system/bin/awk` (BWK awk; the tests run
+  the host's awk and busybox's) and the dumps' layouts must be checked on
+  the Android 17 emulator and the phone.
 - An emergency text without callback mode is not seen as such (outside
   Phone mode it reads unknown, because the radio comes on; in Phone mode
   the radio is on already). In Phone mode, after an ordinary call, a

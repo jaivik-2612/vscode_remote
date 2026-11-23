@@ -550,6 +550,395 @@ fails "telecom_state: Android 17, a later look" tel_17 1 1 0
 r=$(telecom_fixture 1 RINGING | sed 's/id=TC@1,/id=XY-1,/' | telecom_state)
 expect "telecom_state: a call with an unusual id still counts (and cannot be classified)" "1 1 u - 0" "$r"
 
+# --- telecom_state17: Android 17's call record (MOD15) ---------------------------
+# In a subshell (t17_tests): the stand-ins below (the clock, the call log,
+# cell_dump) do not reach the tests after it; the failures count does.
+t17_tests() (
+# Recorded-style stand-ins, in the layout of android17-release's Telecom
+# (TelecomServiceImpl's dump: CallsManager's mCalls, then its event log,
+# "Historical Events:"), the telephony registry's mEmergencyNumberList and
+# 'content query' on the call log. Numbers: 112 (on the list) and the fake
+# +10000000001 (not).
+# t17_fixture [CALL...]: the dump, with the records in T17_RECS ("N:KIND"
+# each: log (logged and ended), skip (not logged, ended), open (not ended),
+# log2 (LOG_CALL twice), both (LOG_CALL and SKIP_CALL_LOG), none (neither,
+# ended), sm:N or ext:N (a self-managed or external call, logged and
+# ended), x (a record whose id is not TC@<number>)) and the listed calls
+# (telecom_fixture's STATE[:voip|:ecall|:ecbm|:noprop][@N]); then TS17_END
+# unless T17_CUT is 1, and T17_TAIL after it.
+T17_RECS=
+T17_CUT=0
+T17_TAIL=
+t17_rec() { # HEADING KIND
+	echo "  $1 [Nov 23, 2026, 10:00:00 AM](MO - outgoing)(User=UserHandle{0})"
+	printf '  \tTarget PhoneAccount: ComponentInfo{com.android.phone/com.android.services.telephony.TelephonyConnectionService}, ***, UserHandle{0} (Phone)\n'
+	printf '  \tTo address: tel:*** Presentation: Allowed\n'
+	echo '    10:00:00.001 - CREATED:PCR.oR@AAA'
+	echo '    10:00:00.200 - SET_DIALING (ComponentInfo{com.android.phone/com.android.services.telephony.TelephonyConnectionService}, ***, UserHandle{0}):CSW.sD@AAc'
+	echo '    10:00:00.300 - INFO (a note that names LOG_CALL and DESTROYED)'
+	case $2 in open) ;; *)
+		echo '    10:00:10.000 - SET_DISCONNECTED (disconnected set explicitly> DisconnectCause [ Code: (LOCAL) Label: () Description: () Reason: (LOCAL) Tone: (-1) ]):CSW.sDc@AAg'
+		;;
+	esac
+	case $2 in
+	log) echo '    10:00:10.010 - LOG_CALL (number=tel:***,postDial=null,pres=1,code=LOCAL)' ;;
+	log2) printf '    10:00:10.010 - LOG_CALL (number=tel:***)\n    10:00:10.011 - LOG_CALL (number=tel:***)\n' ;;
+	skip) echo '    10:00:10.010 - SKIP_CALL_LOG' ;;
+	both) printf '    10:00:10.010 - LOG_CALL (number=tel:***)\n    10:00:10.011 - SKIP_CALL_LOG\n' ;;
+	esac
+	case $2 in open) ;; *) echo '    10:00:10.020 - DESTROYED' ;; esac
+	echo '    Timings (average for this call, milliseconds):'
+	echo '      bind_cs: 10.00'
+}
+t17_fixture() {
+	echo 'Init Path: On boot'
+	echo 'TelecomUI package: com.android.server.telecom'
+	echo 'CallsManager: '
+	echo '  mCalls: '
+	_t7f_i=0
+	for _t7f_s in "$@"; do
+		_t7f_i=$((_t7f_i + 1))
+		_t7f_n=$_t7f_i
+		case $_t7f_s in *@*)
+			_t7f_n=${_t7f_s#*@}
+			_t7f_s=${_t7f_s%@*}
+			;;
+		esac
+		_t7f_v=false
+		_t7f_p=', prop=[]'
+		case $_t7f_s in
+		*:voip) _t7f_v=true ;;
+		*:ecall) _t7f_p=', prop=[ HD ecall]' ;;
+		*:ecbm) _t7f_p=', prop=[ ecbm]' ;;
+		*:noprop) _t7f_p= ;;
+		esac
+		_t7f_s=${_t7f_s%%:*}
+		printf '    [Call id=TC@%s, state=%s, tpac=ComponentInfo{com.android.phone/com.android.services.telephony.TelephonyConnectionService}, ***, UserHandle{0}, cmgr=null, handle=tel:***, vidst=A, childs(0), has_parent(false), cap=[ hld mut]%s], voip=%s\n' \
+			"$_t7f_n" "$_t7f_s" "$_t7f_p" "$_t7f_v"
+	done
+	echo '  mCallAudioManager:'
+	echo '    [Call id=TC@77, state=ACTIVE] listed by another section'
+	echo '  mInCallController:'
+	echo 'PhoneAccountRegistrar: '
+	echo '  mPhoneAccounts:'
+	echo 'Flag Configurations (framework - com.android.server.telecom): '
+	printf '\tenableCallLog: true\n'
+	echo 'TransactionManager: '
+	if [ "$T17_RECS" = none ]; then
+		echo 'No Historical Events Logged.'
+	else
+		echo 'Historical Events:'
+		for _t7f_r in $T17_RECS; do
+			case $_t7f_r in
+			x) t17_rec 'CallTC@4_1' log ;;
+			sm:*) t17_rec "SelfMgd CallTC@${_t7f_r#sm:}" log ;;
+			ext:*) t17_rec "External CallTC@${_t7f_r#ext:}" log ;;
+			*) t17_rec "CallTC@${_t7f_r%%:*}" "${_t7f_r#*:}" ;;
+			esac
+		done
+	fi
+	[ "$T17_CUT" = 1 ] || echo "$TS17_END"
+	[ -z "$T17_TAIL" ] || echo "$T17_TAIL"
+}
+# The stand-ins telecom_state17 reads: the wall clock (FAKE_WALL), the
+# telephony registry with each line of $LOGDIR/em17 as an
+# mEmergencyNumberList line (and one in its local logs, which does not
+# count), the call log ($LOGDIR/log17; the query's start goes to
+# $LOGDIR/log17.from) and, for cell_look, Telecom's dump.
+FAKE_WALL=1700000041
+cell_wall() {
+	[ "$FAKE_WALL" != - ] || return 1
+	echo "$FAKE_WALL"
+}
+cell_dump() {
+	case $1 in
+	telecom)
+		# shellcheck disable=SC2086 # the listed calls, one word each
+		t17_fixture $C17_CALLS | sed "/^$TS17_END\$/d"
+		;;
+	telephony.registry)
+		registry_fixture 1 '0 0 0 0 0 0' - | sed '/^  mEmergencyNumberList=/d;/^local logs:/,$d'
+		sed 's/^/  mEmergencyNumberList=/' "$LOGDIR/em17" 2>/dev/null
+		echo 'local logs:'
+		echo '  mEmergencyNumberList={0=[[EmergencyNumber: 999, countryIso=zz]]}'
+		;;
+	esac
+}
+C17_CALLS=
+cell_calllog() {
+	echo "$1" >"$LOGDIR/log17.from"
+	cat "$LOGDIR/log17" 2>/dev/null
+}
+CELL_AWK='awk'
+EM17='{0=[[EmergencyNumber: 112, countryIso=zz, mnc=, src=database|modem_config, routing=EMERGENCY, categories=, urns=], [EmergencyNumber: 911, countryIso=zz, mnc=, src=database, routing=UNKNOWN, categories=POLICE|AMBULANCE, urns=]]}'
+log17() { # ROW... ("DATE DURATION NUMBER"; none: no rows): a call log read to its end
+	if [ "$#" = 0 ]; then
+		echo 'No result found.'
+	else
+		_l7_i=0
+		for _l7_r in "$@"; do
+			# shellcheck disable=SC2086 # three words
+			set -- $_l7_r
+			echo "Row: $_l7_i date=$1, duration=$2, number=${3-}"
+			_l7_i=$((_l7_i + 1))
+		done
+	fi
+	echo "$TS17_LOG_END"
+}
+# t17 [CALL...] -- ARG...: telecom_state17 with these ARGs on t17_fixture's dump.
+t17() {
+	_t7a=
+	while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
+		_t7a="$_t7a $1"
+		shift
+	done
+	[ "$#" = 0 ] || shift
+	# shellcheck disable=SC2086 # the listed calls, one word each
+	t17_fixture $_t7a | telecom_state17 "$@"
+}
+t17_reset() {
+	T17_RECS='' T17_CUT=0 T17_TAIL='' FAKE_WALL=1700000041
+	printf '%s\n' "$EM17" >"$LOGDIR/em17"
+	log17 >"$LOGDIR/log17"
+	rm -f "$LOGDIR/log17.from"
+}
+# The look before: 1700000000 at its end. This look starts at 1700000010
+# and ends at FAKE_WALL; the call TC@1 first counted at the look before
+# that has the zone 1700000000:1700000010.
+W1=1:1700000000:1700000010:1
+ORD='1700000005123 30 +10000000001'
+t17_reset
+expect "telecom_state17: no calls, an empty event log" "0 0 - - 0 - 1700000041" "$(T17_RECS=none t17)"
+expect "telecom_state17: no calls, no records" "0 0 - - 0 - 1700000041" "$(t17)"
+# A call listed now: as today.
+T17_RECS=1:open
+expect "telecom_state17: a call listed now counts, with its zone" "1 1 o 1 0 $W1 1700000011" \
+	"$(FAKE_WALL=1700000011 t17 ACTIVE -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a listed call with ecall is an emergency call" "1 1 e 1 0 $W1 1700000011" \
+	"$(FAKE_WALL=1700000011 t17 ACTIVE:ecall -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a listed call with ecbm is an emergency call" "1 1 e 1 0 $W1 1700000011" \
+	"$(FAKE_WALL=1700000011 t17 ACTIVE:ecbm -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a listed call without prop= cannot be told" "1 1 u 1 0 $W1 1700000011" \
+	"$(FAKE_WALL=1700000011 t17 ACTIVE:noprop -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a call still listed at the next look keeps its zone" "1 1 o 1 0 $W1 1700000041" \
+	"$(t17 ACTIVE -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: a call listed at the first look has no zone" "1 1 o 1 0 1:-:-:1 1700000041" \
+	"$(t17 ACTIVE -- '' '' '' '' '' '' 1700000040)"
+r=$(t17_fixture ACTIVE | sed 's/id=TC@1,/id=XY-1,/' | telecom_state17 0 - 0 0 - 1700000000 1700000010)
+expect "telecom_state17: a listed call with an unusual id cannot be told" "1 1 u 1 0 1:1700000000:1700000010:1 1700000041" "$r"
+# A call seen before, not listed now: the call log.
+T17_RECS=1:log
+log17 "$ORD" >"$LOGDIR/log17"
+expect "telecom_state17: an ordinary call ended, its row in the zone: ordinary" "0 1 o - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: the call log is read from the zone's start" 1700000000000 "$(cat "$LOGDIR/log17.from")"
+expect "telecom_state17: ... the same, not in LIVE: ordinary" "0 1 o - 0 - 1700000041" \
+	"$(t17 -- 1 - 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: ... and then out of scope" "0 1 - - 0 - 1700000071" \
+	"$(FAKE_WALL=1700000071 t17 -- 1 - 0 1 - 1700000041 1700000070)"
+expect "telecom_state17: a logged call that began and ended between two looks: ordinary" \
+	"0 1 o - 0 $W1 1700000041" "$(t17 -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: the same, a self-managed call's record" "0 1 o - 0 - 1700000041" \
+	"$(T17_RECS=sm:1 t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+# Every other case: unknown.
+log17 >"$LOGDIR/log17"
+rm -f "$LOGDIR/log17.from"
+T17_RECS=1:skip
+expect "telecom_state17: an emergency call not logged (the default): unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: ... the same, not in LIVE: still unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 - 0 0 "$W1" 1700000011 1700000040)"
+if [ -e "$LOGDIR/log17.from" ]; then bad "telecom_state17: a call Telecom did not log: the call log read"; else ok "telecom_state17: a call Telecom did not log: the call log is not read"; fi
+log17 "$ORD" >"$LOGDIR/log17"
+expect "telecom_state17: not logged, another call's row in its zone: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+T17_RECS=1:log
+for n in 112 +112 '1-1-2' 00112 911; do
+	log17 "1700000005123 30 $n" >"$LOGDIR/log17"
+	expect "telecom_state17: an emergency call logged by a carrier setting ($n, on the list): unknown" \
+		"0 1 u - 0 - 1700000041" "$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+for n in '' NULL 'sip:someone@example.org' '+1000000000a'; do
+	log17 "1700000005123 30 $n" >"$LOGDIR/log17"
+	expect "telecom_state17: a row whose number is not a phone number ($n): unknown" \
+		"0 1 u - 0 - 1700000041" "$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+for d in 1699999945123 1700000000999 1700000010000 1700000065123; do
+	log17 "$d 30 +10000000001" >"$LOGDIR/log17"
+	expect "telecom_state17: a row outside the zone (date $d): unknown" "0 1 u - 0 - 1700000041" \
+		"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+log17 '1700000001000 30 +10000000001' >"$LOGDIR/log17"
+expect "telecom_state17: a row at the zone's first millisecond: ordinary" "0 1 o - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+log17 '1700000005123 37 +10000000001' >"$LOGDIR/log17"
+expect "telecom_state17: a row that ends after the look: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+log17 "$ORD" '1700000006000 3 +10000000002' >"$LOGDIR/log17"
+expect "telecom_state17: two rows in the zone: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+log17 "$ORD" >"$LOGDIR/log17"
+for v in '' x 'not a list' '{}' '{0=[]}' '{0=[[EmergencyNumber: 1x2, countryIso=zz]]}' \
+	"$EM17
+$EM17" '{0=[[EmergencyNumber: 112, countryIso=zz'; do
+	printf '%s\n' "$v" >"$LOGDIR/em17"
+	[ -n "$v" ] || : >"$LOGDIR/em17"
+	expect "telecom_state17: an unreadable emergency number list ($(printf '%s' "$v" | head -c 20)): unknown" \
+		"0 1 u - 0 - 1700000041" "$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+printf '%s\n' "$EM17" >"$LOGDIR/em17"
+log17 "$ORD" | sed '$d' >"$LOGDIR/log17"
+expect "telecom_state17: a call log not read to its end: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+for v in '' 'Error while accessing provider:call_log' "Row: 0 date=1700000005123, number=+10000000001
+$TS17_LOG_END" "Row: 0 date=1700000005123, duration=30, number=+10000000001
+$TS17_LOG_END
+Row: 1 date=1700000005124, duration=30, number=+10000000002" "No result found.
+Row: 0 date=1700000005123, duration=30, number=+10000000001
+$TS17_LOG_END" "Row: 0 date=1700000005123, duration=30, number=+1000
+0000001
+$TS17_LOG_END" "$TS17_LOG_END"; do
+	printf '%s\n' "$v" >"$LOGDIR/log17"
+	expect "telecom_state17: an unreadable call log ($(printf '%s' "$v" | head -n 1 | head -c 24)): unknown" \
+		"0 1 u - 0 - 1700000041" "$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+log17 "$ORD" >"$LOGDIR/log17"
+for k in log2 both none open; do
+	exp="0 1 u - 0 - 1700000041"
+	[ "$k" != open ] || exp="0 1 u 1 0 $W1 1700000041"
+	expect "telecom_state17: a record that does not say logged once and ended ($k): unknown" "$exp" \
+		"$(T17_RECS=1:$k t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+done
+expect "telecom_state17: a call not listed and not ended stays in LIVE, unknown" "0 1 u 1 0 $W1 1700000071" \
+	"$(T17_RECS=1:open FAKE_WALL=1700000071 t17 -- 1 1 0 0 "$W1" 1700000041 1700000070)"
+expect "telecom_state17: a call in LIVE whose record is gone: unknown" "0 0 u - 0 - 1700000041" \
+	"$(T17_RECS='' t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: a call without its zone: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 - 1700000011 1700000040)"
+expect "telecom_state17: a call whose look counted two: unknown" "0 1 u - 0 - 1700000041" \
+	"$(t17 -- 1 1 0 0 1:1700000000:1700000010:2 1700000011 1700000040)"
+expect "telecom_state17: a call between two looks, no clock at the look before: unknown" "0 1 u - 0 1:-:-:1 1700000041" \
+	"$(t17 -- 0 - 0 0 - - 1700000010)"
+expect "telecom_state17: ... the clock set back: no zone, unknown" "0 1 u - 0 1:-:-:1 1700000041" \
+	"$(t17 -- 0 - 0 0 - 1700000020 1700000010)"
+expect "telecom_state17: ... no clock after the dump: unknown" "0 1 u - 0 $W1 -" \
+	"$(FAKE_WALL=- t17 -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: the module's first look, a call over: unknown" "0 1 u - 0 1:-:-:1 1700000041" \
+	"$(t17 -- '' '' '' '' '' '' 1700000040)"
+expect "telecom_state17: two calls between two looks, one row: unknown" \
+	"0 2 u - 0 1:1700000000:1700000010:2,2:1700000000:1700000010:2 1700000041" \
+	"$(T17_RECS='1:log 2:skip' t17 -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a number without its record (event log overrun): unknown" \
+	"0 2 u - 0 2:1700000000:1700000010:2 1700000041" "$(T17_RECS=2:log t17 -- 0 - 0 0 - 1700000000 1700000010)"
+expect "telecom_state17: a record twice: unknown" "0 1 u - 0 - 1700000041" \
+	"$(T17_RECS='1:log 1:log' t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: a record whose id is not TC@<number>: unknown" "0 1 u - 1 - 1700000041" \
+	"$(T17_RECS='1:log x' t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)"
+expect "telecom_state17: ... and at the next look, with the same count" "0 1 - - 1 - 1700000071" \
+	"$(T17_RECS='1:log x' FAKE_WALL=1700000071 t17 -- 1 - 1 1 - 1700000041 1700000070)"
+expect "telecom_state17: Telecom restarted (SINCE above LASTID): unknown" "0 1 u - 0 1:1700000000:1700000010:1 1700000041" \
+	"$(t17 -- 5 - 0 5 - 1700000000 1700000010)"
+for o in o u; do
+	r=$(t17 -- 1 1 0 0 "$W1" 1700000011 1700000040)
+	case $r in *10000000001* | *112*) bad "telecom_state17 prints a phone number ($r)" ;; *) ok "telecom_state17 prints no phone number ($o)" ;; esac
+	log17 '1700000005123 30 112' >"$LOGDIR/log17"
+done
+r=$(cell_match17 1700000041 1:1700000000:1700000010 2:1700000020:1700000030)
+expect "cell_match17: only the ids and letters" "1 u
+2 u" "$r"
+log17 "$ORD" '1700000025000 2 +10000000002' >"$LOGDIR/log17"
+r=$(cell_match17 1700000041 1:1700000000:1700000010 2:1700000020:1700000030)
+expect "cell_match17: two calls, two zones, a row each" "1 o
+2 o" "$r"
+expect "cell_match17: the call log from the earliest zone" 1700000000000 "$(cat "$LOGDIR/log17.from")"
+# The dump itself.
+log17 "$ORD" >"$LOGDIR/log17"
+T17_RECS=1:log
+t17_ended() { t17 -- 1 1 0 0 "$W1" 1700000011 1700000040; }
+T17_CUT=1
+fails "telecom_state17: the dump cut short (no end line)" t17_ended
+T17_TAIL='*** SERVICE telecom DUMP TIMEOUT (3000ms) EXPIRED ***'
+fails "telecom_state17: dumpsys gave up" t17_ended
+T17_CUT=0
+T17_TAIL=x
+fails "telecom_state17: a line after the end line" t17_ended
+T17_TAIL=''
+expect "telecom_state17: ... and without it, read" "0 1 o - 0 - 1700000041" "$(t17_ended)"
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_without() { t17_fixture | sed "/^$1/d" | telecom_state17 1 1 0 0 "$W1" 1700000011 1700000040; }
+fails "telecom_state17: no CallsManager" t17_without 'CallsManager:'
+fails "telecom_state17: no mCalls" t17_without '  mCalls:'
+fails "telecom_state17: no event log" t17_without 'Historical Events:'
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_analytics() { t17_fixture | sed 's/^TransactionManager: $/Analytics:/' | telecom_state17 1 1 0 0 "$W1" 1700000011 1700000040; }
+fails "telecom_state17: an Analytics section (Android 16's format)" t17_analytics
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_on16() { t17_fixture ACTIVE | telecom_state; }
+fails "telecom_state: Android 17's dump (the Android 16 path)" t17_on16
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_a16() { telecom_fixture 1 | telecom_state17 1 1 0 0 "$W1" 1700000011 1700000040; }
+fails "telecom_state17: Android 16's dump" t17_a16
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_empty() { printf '' | telecom_state17; }
+fails "telecom_state17: empty input" t17_empty
+# shellcheck disable=SC2317,SC2329 # called through fails
+t17_missing() { printf '%s\n' "Can't find service: telecom" "$TS17_END" | telecom_state17; }
+fails "telecom_state17: a missing service" t17_missing
+expect "cell_emergency_list: the registry's line, from its last known state" "$EM17" "$(cell_emergency_list)"
+expect "num_ge: equal" yes "$(num_ge 1700000000 1700000000 && echo yes || echo no)"
+expect "num_ge: greater, same length" yes "$(num_ge 1700000010 1700000009 && echo yes || echo no)"
+expect "num_ge: smaller, same length" no "$(num_ge 1699999999999 1700000000000 && echo yes || echo no)"
+expect "num_ge: longer" yes "$(num_ge 10000000000 9999999999 && echo yes || echo no)"
+expect "num_ge: shorter" no "$(num_ge 999 1000 && echo yes || echo no)"
+# cell_look on Android 17 (ro.build.version.sdk 37): the dump, its end line,
+# the clock before it; cell_note keeps WIN and WALL for the next look.
+(
+	CELL_API=37 CELL_ID=1 CELL_LIVE=1 CELL_XN=0 CELL_FROM=0 CELL_WIN=$W1 CELL_WALL=1700000011
+	FAKE_WALL=1700000040
+	T17_RECS=1:log C17_CALLS=''
+	cell_look
+	echo "$CL_KIND $CL_ID $CL_LIVE $CL_WIN"
+) >"$LOGDIR/c17" 2>&1
+expect "cell_look on Android 17: the call over, its row: ordinary" "o 1 - -" "$(cat "$LOGDIR/c17")"
+(
+	CELL_API=37 CELL_ID=0 CELL_LIVE=- CELL_XN=0 CELL_FROM=0 CELL_WIN=- CELL_WALL=1700000000
+	FAKE_WALL=1700000010
+	T17_RECS=1:open C17_CALLS=ACTIVE
+	cell_look
+	cell_note 100
+	echo "$CL_KIND $CELL_ID $CELL_LIVE $CELL_WIN $CELL_WALL"
+) >"$LOGDIR/c17" 2>&1
+expect "cell_look and cell_note on Android 17: a call listed, its zone and the clock kept" \
+	"o 1 1 1:1700000000:1700000010:1 1700000010" "$(cat "$LOGDIR/c17")"
+(
+	CELL_API=36 CELL_ID=1 CELL_LIVE=1 CELL_XN=0 CELL_FROM=0
+	T17_RECS=1:log C17_CALLS=''
+	cell_look
+	echo "$CL_KIND $CL_CALL"
+) >"$LOGDIR/c17" 2>&1
+expect "cell_look on Android 16 with Android 17's dump: unknown (the Analytics path)" "unknown unknown" "$(cat "$LOGDIR/c17")"
+(
+	CELL_API=
+	# shellcheck disable=SC2317,SC2329 # called by cell_android17
+	getprop() { [ "$1" = ro.build.version.sdk ] && echo 37; }
+	cell_android17 && echo "17 $CELL_API" || echo 16
+	CELL_API=
+	# shellcheck disable=SC2317,SC2329 # called by cell_android17
+	getprop() { [ "$1" = ro.build.version.sdk ] && echo 36; }
+	cell_android17 && echo 17 || echo "16 $CELL_API"
+	CELL_API=
+	# shellcheck disable=SC2317,SC2329 # called by cell_android17
+	getprop() { return 1; }
+	cell_android17 && echo 17 || echo "16 unread:$CELL_API"
+) >"$LOGDIR/c17" 2>&1
+expect "cell_android17: by the API level, read once" "17 37
+16 36
+16 unread:" "$(cat "$LOGDIR/c17")"
+echo "$fails" >"$LOGDIR/fails17"
+)
+t17_tests
+fails=$(cat "$LOGDIR/fails17")
+
 rs() { registry_fixture "$@" | registry_state; }
 I='0 0 0 0 0 0'
 expect "registry_state: two idle phones, radio off" "0 0 off" "$(rs 0 "$I")"
