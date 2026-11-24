@@ -559,16 +559,37 @@ jobs:
         include:
           - name: Android 16 leak test
             suffix: ''
+            api-level: '36'
             image-api: '36'
             target: default
             optional: false
+            limits: ''
           # LineageOS 23.2 is Android 16 QPR2 (36.1), which Google publishes
           # only with Google APIs. Not blocking.
           - name: Android 16 QPR2, google_apis, not blocking
             suffix: '-qpr2'
+            api-level: '36'
             image-api: '36.1'
             target: google_apis
             optional: true
+            limits: ''
+          # CI16: LineageOS 24.0, the January install's base, is Android 17.
+          # Google's plain image (no Google services), next to the Android 16
+          # job. Not blocking until it has passed once; the module installs
+          # here only because customize.sh lets API 37 through on the
+          # emulator (the phone stays on Android 16 until then).
+          - name: Android 17 leak test, not blocking
+            suffix: '-a17'
+            api-level: '37'
+            image-api: '37.0'
+            target: default
+            optional: true
+            limits: >-
+              Android 17 emulator: its modem is simulated, so there is no real
+              SIM and no IMS. MOD15's call record (call log and emergency number
+              list), VoLTE, the IMS IPv6 exemption and the cell radio's holds
+              during a call are not exercised here; a test call needs the phone
+              (PH3). The app lab stays on Android 16.
     env:
       ANTUMBRA_SERIAL: emulator-5554
       ANTUMBRA_CI_IMAGE: android-${{ matrix.image-api }};${{ matrix.target }};x86_64
@@ -649,7 +670,7 @@ jobs:
         env:
           ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/baseline.pcap
         with:
-          api-level: 36
+          api-level: ${{ matrix.api-level }}
           system-image-api-level: ${{ matrix.image-api }}
           target: ${{ matrix.target }}
           arch: x86_64
@@ -683,7 +704,7 @@ jobs:
         env:
           ANTUMBRA_CAPTURE: ${{ runner.temp }}/capture/antumbra.pcap
         with:
-          api-level: 36
+          api-level: ${{ matrix.api-level }}
           system-image-api-level: ${{ matrix.image-api }}
           target: ${{ matrix.target }}
           arch: x86_64
@@ -705,6 +726,16 @@ jobs:
         if: ${{ !cancelled() }}
         timeout-minutes: 10
         run: bash antumbra/android/ci/analyse.sh
+
+      # CI16: a job on another Android version says plainly what it cannot
+      # check, in the job summary and in the artifact (limits.txt).
+      - name: What this job cannot check
+        if: ${{ !cancelled() && matrix.limits != '' }}
+        env:
+          LIMITS: ${{ matrix.limits }}
+        run: |
+          printf '%s\n' "$LIMITS" > "$ANTUMBRA_CI_OUT/limits.txt"
+          printf '**Not checked here:** %s\n\n' "$LIMITS" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Job summary
         if: ${{ !cancelled() }}

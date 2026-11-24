@@ -14,7 +14,7 @@ going. Every job has a time limit.
 | `welcome` | ubuntu-24.04 | `./gradlew assembleDebug`, WEL9's probe apps (`ci/build-probes.sh`, not blocking, an artifact of their own), then `testDebugUnitTest lintDebug`, `tools/builtin-bridges.sh --check`, shellcheck of `gradlew`, `ci/welcome-adb.sh`, `ci/test-welcome-adb.sh`, `ci/build-probes.sh` and `tools/builtin-bridges.sh`, and `ci/test-welcome-adb.sh` |
 | `module` | ubuntu-24.04 | shellcheck (`-s sh -x`) of every module script, `module/tests/unit.sh`, then `build-module.sh` with the outputs of the jobs above |
 | `module-e2e` | ubuntu-24.04 | `module/tests/e2e-host.sh` as root: the module's boot scripts on Linux with the real firewall, tor, DNS filter and `antumbra-run`, under Android 16's toybox and mksh and Magisk's busybox, built from the pins in `module/tests/build-test-tools.sh` (cached by that file's hash) |
-| `emulator` | ubuntu-24.04 with KVM | the two scenarios below, the leak analysis, the job summary, `verdict.json` and the artifact; twice: Android 16 (`android-36;default`, blocking) and Android 16 QPR2 (`android-36.1;google_apis`, the Android version of LineageOS 23.2, with Google services; `continue-on-error`) |
+| `emulator` | ubuntu-24.04 with KVM | the two scenarios below, the leak analysis, the job summary, `verdict.json` and the artifact; twice: Android 16 (`android-36;default`, blocking) and Android 16 QPR2 (`android-36.1;google_apis`, the Android version of LineageOS 23.2, with Google services; `continue-on-error`); and Android 17 (`android-37.0;default`, the Android version of LineageOS 24.0; `continue-on-error` until it has passed once, CI16) |
 | `app-lab` | ubuntu-24.04 with KVM | the app lab (below): real app stores and apps on a virtual phone with more memory, under Antumbra, through Tor; what each did, and the leak analysis of the whole run; `continue-on-error`, never blocking |
 
 `module` needs `firewall`, `dnsfilter`, `tor` and `welcome`; `module-e2e`
@@ -35,7 +35,9 @@ stops it.
 ## Artifacts
 
 - `antumbra-android-<run number>` (14 days, kept under 40 MB by
-  `citool.py pack`; `antumbra-android-qpr2-<run number>` for the QPR2 run):
+  `citool.py pack`; `antumbra-android-qpr2-<run number>` for the QPR2 run,
+  `antumbra-android-a17-<run number>` for the Android 17 run, which also
+  holds `limits.txt`, what that run cannot check):
   - `summary.md`: the job summary
   - `verdict.json`: the final verdict, every problem behind it, and the
     warnings (written before the upload; the job's last step fails on it)
@@ -645,9 +647,12 @@ artifact is uploaded and fails the job afterwards with `summary.py --check`.
 - What goes through Tor is not in the capture; tor's STREAM events and the
   filter's query log list it (see above), the emulator only.
 - The emulator runs Android 16 QPR0 (and, not blocking, QPR2 with Google
-  services) on a 6.x kernel, not LineageOS 23.2 on the phone's 4.14
+  services, and Android 17) on a 6.x kernel, not LineageOS 23.2 on the phone's 4.14
   kernel, and is rooted with `adb root`, not Magisk: the module is started
-  by hand after boot.
+  by hand after boot. On Android 17 the module installs only because
+  `customize.sh` lets API 37 through on the emulator; the phone stays on
+  Android 16 until that run has passed. Its modem is simulated (no real SIM,
+  no IMS), so MOD15's call record is not exercised there.
 - Not covered yet (`docs/queue.md`): a reboot with the module (a
   Magisk-rooted emulator, Magisk's `avd.sh` on a `google_apis` image, for
   the true boot path), Magisk's Safe Mode and a start without the module,

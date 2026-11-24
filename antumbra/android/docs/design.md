@@ -574,7 +574,8 @@ a public repository must never run on pull-request triggers.
   keepalive offload or IPA; a 6.x GKI kernel, not 4.14; Android 16 QPR0
   (`default`), while LineageOS 23.2 is QPR2, which Google publishes only as
   `google_apis` 36.1 (a secondary run does the same test on it, without
-  blocking the workflow); `adb root` instead of Magisk, whose own CI boots
+  blocking the workflow), and LineageOS 24.0 is Android 17 (a third run on
+  `android-37.0;default`, CI16, not blocking until it has passed once); `adb root` instead of Magisk, whose own CI boots
   rooted Android 36, 36.1 and 37.0 emulators on the same runners
   **[verified, Magisk's workflow and `avd.sh`]**. The phone capture after the
   install (`install.md`, section 9: the same analyser, judging every packet

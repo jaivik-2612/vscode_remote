@@ -4383,5 +4383,17 @@ if command -v busybox >/dev/null 2>&1; then
 	expect "kit: busybox's awk gives the same report" "" "$(diff "$K/report.host" "$K/report")"
 fi
 
+# --- customize.sh's API gate (CI16): Android 16 anywhere it installs,
+# Android 17 only on the emulator ----------------------------------------------
+eval "$(sed -n '/^antumbra_api_gate() {$/,/^}$/p' "$HERE/../customize.sh")"
+expect "api gate: Android 16 on the phone" ok "$(antumbra_api_gate 36 0)"
+expect "api gate: Android 16 on the emulator" ok "$(antumbra_api_gate 36 1)"
+expect "api gate: Android 17 on the emulator, for CI16" emulator "$(antumbra_api_gate 37 1)"
+expect "api gate: Android 17 on the phone is refused" no "$(antumbra_api_gate 37 0)"
+expect "api gate: Android 15 refused" no "$(antumbra_api_gate 35 1)"
+expect "api gate: Android 18 refused, even on the emulator" no "$(antumbra_api_gate 38 1)"
+expect "api gate: an empty level refused" no "$(antumbra_api_gate '' 1)"
+expect "api gate: an odd emulator flag is the phone's" no "$(antumbra_api_gate 37 yes)"
+
 echo "  $fails failed"
 [ "$fails" -eq 0 ]

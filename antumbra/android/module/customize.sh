@@ -10,8 +10,9 @@
 # lib/emu-install.sh provides the same things.
 #
 # It refuses to install on anything but the OnePlus 7T Pro (hotdog) on
-# LineageOS, or the Android emulator, on Android 16, unless ANTUMBRA_FORCE=1
-# is in the environment or the file /data/adb/antumbra-force exists (only
+# LineageOS, or the Android emulator, on Android 16 (the emulator also on
+# Android 17, for CI), unless ANTUMBRA_FORCE=1 is in the environment or the
+# file /data/adb/antumbra-force exists (only
 # root can create it). That override exists for testing on other devices;
 # the firewall and the boot order have not been checked anywhere else.
 
@@ -21,6 +22,17 @@ antumbra_prop() { sed -n "s/^$1=//p" "$MODPATH/module.prop" | head -n 1; }
 
 antumbra_forced() {
 	[ "${ANTUMBRA_FORCE:-0}" = 1 ] || [ -f /data/adb/antumbra-force ]
+}
+
+# antumbra_api_gate API EMULATOR: prints ok (Android 16), emulator (Android
+# 17 on the emulator, for CI16) or no. Kept free of side effects: unit.sh
+# reads it from this file.
+antumbra_api_gate() {
+	case $1 in
+	36) echo ok ;;
+	37) if [ "$2" = 1 ]; then echo emulator; else echo no; fi ;;
+	*) echo no ;;
+	esac
 }
 
 # antumbra_require MESSAGE: stop the installation, unless forced.
@@ -42,10 +54,7 @@ x64) ANTUMBRA_ABI=x86_64 ;;
 *) abort "! This CPU ($ARCH) is not supported: only arm64 and x86_64." ;;
 esac
 
-# 2. Android 16.
-[ "$API" = 36 ] || antumbra_require "Android 16 (API 36) is required; this is API $API."
-
-# 3. The device: the OnePlus 7T Pro, or the Android emulator for CI.
+# 2. The device: the OnePlus 7T Pro, or the Android emulator for CI.
 ANTUMBRA_EMULATOR=0
 if [ "$(getprop ro.boot.qemu)" = 1 ] || [ "$(getprop ro.kernel.qemu)" = 1 ] ||
 	[ "$(getprop ro.hardware)" = ranchu ]; then
@@ -57,6 +66,14 @@ elif [ "$(getprop ro.product.device)" = hotdog ] || [ "$(getprop ro.lineage.devi
 else
 	antumbra_require "This module is for the OnePlus 7T Pro (hotdog), not '$(getprop ro.product.device)'."
 fi
+
+# 3. Android 16. Android 17 (API 37) only on the emulator, for CI16's job:
+# the phone waits until that job has passed (docs/install.md).
+case $(antumbra_api_gate "$API" "$ANTUMBRA_EMULATOR") in
+ok) ;;
+emulator) ui_print "- Android 17 (API $API) on the emulator: CI only, not yet for the phone" ;;
+*) antumbra_require "Android 16 (API 36) is required; this is API $API." ;;
+esac
 
 # 4. LineageOS (the emulator runs Google's plain Android image).
 if [ "$ANTUMBRA_EMULATOR" = 0 ]; then
