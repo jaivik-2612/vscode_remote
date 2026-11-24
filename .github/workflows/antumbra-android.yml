@@ -580,7 +580,9 @@ jobs:
           # emulator (the phone stays on Android 16 until then).
           - name: Android 17 leak test, not blocking
             suffix: '-a17'
-            api-level: '37'
+            # The runner installs platforms;android-<api-level>: Android 17's
+            # is android-37.0 (run 42: there is no platforms;android-37).
+            api-level: '37.0'
             image-api: '37.0'
             target: default
             optional: true
