@@ -563,6 +563,7 @@ jobs:
             image-api: '36'
             target: default
             optional: false
+            gpu: swiftshader_indirect
             limits: ''
           # LineageOS 23.2 is Android 16 QPR2 (36.1), which Google publishes
           # only with Google APIs. Not blocking.
@@ -572,6 +573,7 @@ jobs:
             image-api: '36.1'
             target: google_apis
             optional: true
+            gpu: swiftshader_indirect
             limits: ''
           # CI16: LineageOS 24.0, the January install's base, is Android 17.
           # Google's plain image (no Google services), next to the Android 16
@@ -586,6 +588,12 @@ jobs:
             image-api: '37.0'
             target: default
             optional: true
+            # Run 44: with swiftshader_indirect the Android 17 image's
+            # graphics driver aborts ('Assertion failed: !rcEnc->
+            # featureInfo()->hasReadColorBufferDma') in screencap and in
+            # system_server's task snapshots, before and without the module;
+            # netd then crash-loops. guest renders inside the image instead.
+            gpu: guest
             limits: >-
               Android 17 emulator: its modem is simulated, so there is no real
               SIM and no IMS. MOD15's call record (call log and emergency number
@@ -685,7 +693,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 900
           emulator-options: >-
-            -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -no-window -gpu ${{ matrix.gpu }} -no-snapshot -wipe-data -noaudio -no-boot-anim
             -camera-back none -camera-front none -feature -WiFiPacketStream
             -tcpdump ${{ runner.temp }}/capture/baseline.pcap
           script: bash antumbra/android/ci/emulator-baseline.sh
@@ -719,7 +727,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 900
           emulator-options: >-
-            -no-window -gpu swiftshader_indirect -no-snapshot -wipe-data -noaudio -no-boot-anim
+            -no-window -gpu ${{ matrix.gpu }} -no-snapshot -wipe-data -noaudio -no-boot-anim
             -camera-back none -camera-front none -feature -WiFiPacketStream
             -tcpdump ${{ runner.temp }}/capture/antumbra.pcap
           script: bash antumbra/android/ci/emulator-antumbra.sh
