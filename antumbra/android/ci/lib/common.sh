@@ -476,8 +476,27 @@ device_info() {
 
 collect_logcat() {
 	timeout 60 adb -s "$ANTUMBRA_SERIAL" logcat -d -v threadtime -b main,system,crash 2>/dev/null | tr -d '\r' |
-		grep -E -i 'antumbra|welcome|AndroidRuntime|FATAL|NetworkMonitor|ConnectivityService|DnsResolver|netd|WifiService|WifiClientModeImpl|DhcpClient|IpClient|NetworkStack|DevicePolicy|tor\b' |
+		grep -E -i 'antumbra|welcome|AndroidRuntime|FATAL|NetworkMonitor|ConnectivityService|DnsResolver|netd|WifiService|WifiClientModeImpl|DhcpClient|IpClient|NetworkStack|DevicePolicy|Watchdog|Runtime aborting|Abort message|tor\b' |
 		tail -c 1500000 >"$LOGS/$SCEN-logcat.txt"
+	collect_crashes
+}
+
+# collect_crashes: what Android kept about crashes, unfiltered, so that an
+# abort's own message is in the artifact (CI16, run 43: system_server's
+# abort message fell outside collect_logcat's tags). LOGS/SCEN-crashes.txt
+# holds the crash buffer and the first 80 lines of each tombstone (the
+# signal, the abort message and the crashing thread's backtrace), at most
+# 400 kB. Tombstones need root; without it the list says so.
+collect_crashes() {
+	{
+		echo "# logcat -b crash"
+		timeout 60 adb -s "$ANTUMBRA_SERIAL" logcat -d -v threadtime -b crash 2>&1 | tr -d '\r' | tail -c 200000
+		echo "# /data/tombstones"
+		ASH_TIMEOUT=30 ash 'ls -l /data/tombstones 2>&1'
+		# shellcheck disable=SC2016 # the device's shell expands $f
+		ASH_TIMEOUT=60 ash 'for f in /data/tombstones/tombstone_[0-9][0-9]; do [ -f "$f" ] || continue; echo "## $f"; head -n 80 "$f"; done 2>&1' |
+			tail -c 200000
+	} >"$LOGS/$SCEN-crashes.txt" 2>&1
 }
 
 proc_net_snapshot() {

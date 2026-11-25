@@ -64,7 +64,8 @@ stops it.
     256 bytes per frame (`*.slim.pcap`); the full captures are dropped
     first when the artifact would be too large (the list is in
     `omitted.txt`)
-  - `logs/`: filtered logcat, `tor.log`, the module's, firewall's and
+  - `logs/`: filtered logcat, `<scenario>-crashes.txt` (the unfiltered crash
+    buffer and the top of each tombstone: signal, abort message, backtrace), `tor.log`, the module's, firewall's and
     filter's logs, `build-module.sh`'s output, the firewall's state
     (`iptables-save`) and the armed phase, Wi-Fi, Welcome's policy checks,
     process capabilities, IPv6 addresses, the mount tables of
