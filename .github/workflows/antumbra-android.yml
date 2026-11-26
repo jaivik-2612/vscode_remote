@@ -597,10 +597,11 @@ jobs:
             # netd then crash-loops. Run 45: -gpu guest is not supported by
             # this image (the emulator falls back to lavapipe and swangle)
             # and the abort stays. The image is newer than the emulator the
-            # other jobs pin (37.2.12), so this job takes the stable
-            # channel's current build, 37.3.10 (16970787).
+            # other jobs pin (37.2.12), so it tried the stable channel's
+            # current build, 37.3.10 (16970787): run 46, the same abort.
+            # Now the dev channel's 37.4.2 (16982698).
             gpu: swiftshader_indirect
-            emulator-build: '16970787'
+            emulator-build: '16982698'
             limits: >-
               Android 17 emulator: its modem is simulated, so there is no real
               SIM and no IMS. MOD15's call record (call log and emergency number
@@ -674,7 +675,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       # The emulator is pinned per job (matrix.emulator-build; Android 16:
-      # 37.2.12, Android 17: 37.3.10, see the matrix), as before: 37.2.12 is the stable channel's
+      # 37.2.12, Android 17: 37.4.2, dev channel, see the matrix), as before: 37.2.12 is the stable channel's
       # build 16428233, from dl.google.com over HTTPS); the system image is
       # sdkmanager's current revision of the package, recorded in
       # logs/<scenario>-device.txt. -feature -WiFiPacketStream keeps the
