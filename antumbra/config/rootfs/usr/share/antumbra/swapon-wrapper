@@ -1,0 +1,24 @@
+#!/bin/sh
+# Tails' swapon replacement (05-replace_swapon): swap may only ever be
+# enabled on zram devices. Every device named on the command line must be a
+# zram device; enabling by fstab, label or UUID is refused; queries
+# (--show, --summary, no arguments) pass through.
+refuse() { echo "swapon: refusing swap outside zram on an amnesic system ($1)" >&2; exit 1; }
+skip=""
+for arg in "$@"; do
+    if [ -n "${skip}" ]; then skip=""; continue; fi
+    case "${arg}" in
+        # required argument (util-linux swapon.c): the next word is the value
+        -o|-p|--priority) skip=1 ;;
+        # value attached to the option word
+        -o?*|-p?*|-d?*|--options=*|--priority=*|--discard=*|--show=*) ;;
+        # optional or no argument: never consumes the next word
+        --options|--discard|--show|-d|-s|--summary|--noheadings|--raw|--bytes|--output-all|-v|--verbose|-f|--fixpgsz|-h|--help|-V|--version) ;;
+        /dev/zram[0-9]|/dev/zram[0-9][0-9]) ;;
+        # -a/-e/-L/-U/-T/--fstab, clustered options (-av), abbreviations
+        # (--al), "--" and every other device: refused
+        *) refuse "${arg}" ;;
+    esac
+done
+[ -z "${skip}" ] || refuse "missing option argument"
+exec /sbin/swapon.real "$@"

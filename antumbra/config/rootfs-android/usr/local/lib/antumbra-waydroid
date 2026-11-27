@@ -1,0 +1,424 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Prepare Android apps (Waydroid) for this session, as root
+(antumbra-waydroid.service, started by the Welcome screen's applier when the
+user turned Android apps on).
+
+Waydroid keeps its state in /var/lib/waydroid, which lives in the RAM
+overlay, so it is set up again at every boot from the images in the
+read-only root filesystem: "waydroid init" finds them preinstalled in
+/usr/share/waydroid-extra/images and never contacts Waydroid's update
+servers. Before that, waydroid.cfg gets Antumbra's settings:
+
+- overlays off: the root is itself an overlayfs, which cannot be the upper
+  layer of another one;
+- a generic device identity (the image's own, from product.prop), so that
+  Android does not copy the phone's model from the device tree;
+- multi-window mode, so Android apps open as ordinary windows;
+- the screen density for Phosh's scale (3 on the phone, 2 in the VM);
+- in a virtual machine, software rendering (the virtio GPU has no 3D).
+
+Then the container gets a generic kernel command line (the phone's boot
+loader puts its serial number on the host's) and the hardware identifiers
+in sysfs and procfs are masked, the generated LXC configuration is checked
+(Tor-only bridge, start-host hook, every device but cameras, no device
+tree, the command line, the masks, the post-stop hook), the container
+service is started and /run/antumbra/android-ready tells the user's
+session it can start Android.
+
+  antumbra-waydroid                 # the above (antumbra-waydroid.service)
+  antumbra-waydroid --masks         # the masks again, for what is there now
+                                    # (ExecStartPre= of waydroid-container.service)
+  antumbra-waydroid --print-masks   # print the mask entries for this machine
+  antumbra-waydroid --save-device-modes     # ExecStartPre= of waydroid-container.service
+  antumbra-waydroid --restore-device-modes  # ExecStopPost= of waydroid-container.service
+"""
+import configparser
+import glob
+import os
+import re
+import stat
+import subprocess
+import sys
+
+WORK = "/var/lib/waydroid"
+CFG = os.path.join(WORK, "waydroid.cfg")
+LXC_CONFIG = os.path.join(WORK, "lxc", "waydroid", "config")
+BASE_PROP = os.path.join(WORK, "waydroid_base.prop")
+IMAGES = "/usr/share/waydroid-extra/images"
+ANDROID_DIR = "/usr/share/antumbra/android"
+LXC_PROFILE = "/etc/apparmor.d/lxc/lxc-waydroid"
+READY = "/run/antumbra/android-ready"
+# The device nodes Waydroid opens to every user when the container starts
+# (set_permissions() in its container_manager.py, 0777, recursively for a
+# directory; the binder devices 0666). Their modes are recorded before the
+# first container start of the boot and put back when the container service
+# stops: udev cannot do it, as it sets no mode for framebuffers or DMA-BUF
+# heaps, and a change event left even the render node world-writable.
+OPENED_NODES = ("/dev/binder", "/dev/hwbinder", "/dev/vndbinder", "/dev/ashmem", "/dev/sw_sync",
+                "/sys/kernel/debug/sync/sw_sync", "/dev/Vcodec", "/dev/MTK_SMI", "/dev/mdp_sync",
+                "/dev/mtk_cmdq", "/dev/graphics", "/dev/pvr_sync", "/dev/ion")
+OPENED_GLOBS = ("/dev/dri/renderD*", "/dev/fb*", "/dev/dma_heap/*")
+DEVICE_MODES = "/run/antumbra/android-device-modes"
+# ro.hw_timeout_multiplier in a virtual machine (see properties()): QEMU's
+# software emulation runs Android about ten times slower than the phone.
+VM_TIMEOUT_MULTIPLIER = 10
+# The kernel command line Android sees (bound over its /proc/cmdline by the
+# config_3 template): a writable per-boot copy of the image's generic one.
+CMDLINE_SRC = os.path.join(ANDROID_DIR, "cmdline")
+CMDLINE = "/run/antumbra/android-cmdline"
+CMDLINE_ENTRY = f"lxc.mount.entry = {CMDLINE} proc/cmdline none bind,create=file 0 0"
+# Hardware identifiers the container's view of the host's sysfs and procfs
+# would show every app (docs/threat-model.md, "Fingerprinting by apps").
+# The container mounts a sysfs of its own network namespace: the host's
+# network interfaces and Wi-Fi radios, with their MAC addresses, are not in
+# it. The start-host hook looks for the same names (a unit test compares).
+#
+# Files, by name, anywhere under /sys/devices: the SoC's serial number
+# (soc0), the UFS device's string descriptor and a battery's
+# (serial_number); the serial of USB devices, MMC cards and virtio disks
+# (serial); the SCSI disks' unit serial and device identification pages and
+# the WWID derived from them (vpd_pg80, vpd_pg83, wwid); an SD or MMC card's
+# CID, which holds its serial number (cid); a device-mapper device's UUID,
+# which for unlocked Persistent Storage holds its LUKS UUID (uuid); the
+# legacy contents file of EEPROMs, such as a memory module's SPD with its
+# serial number (eeprom). Each is bound to /dev/null.
+MASKED_NAMES = ("serial_number", "serial", "vpd_pg80", "vpd_pg83", "wwid", "cid", "uuid", "eeprom")
+# The uevent file of a directory holding one of these repeats an identifier:
+# a partition's has its GPT unique GUID (PARTUUID), a power supply's its
+# serial number (POWER_SUPPLY_SERIAL_NUMBER). Bound to /dev/null too.
+UEVENT_MARKERS = ("partition", "serial_number")
+# Directories hidden whole (an empty read-only tmpfs over each), known by a
+# file in them: every nvmem provider ("nvmem", its raw contents, readable by
+# everyone unless the driver says otherwise: on the phone the SoC's QFPROM
+# fuses, with calibration values and very likely the chip's serial number;
+# its cells/ beside it), and every RTC ("since_epoch": the phone's PMIC RTC
+# cannot be set from Linux and counts from its first power-up, so its
+# reading less the real time is a constant of the phone).
+HIDDEN_DIR_MARKERS = ("nvmem", "since_epoch")
+# procfs files bound to /dev/null when they exist: the RTC's reading again.
+MASKED_PROC = ("driver/rtc",)
+# The options of the tmpfs that hides a directory, as for sys/firmware in config_3.
+HIDE_OPTIONS = "ro,nosuid,nodev,noexec,mode=0555,size=4k"
+MASKS_MARK = "# Antumbra (antumbra-waydroid): hardware identifiers masked"
+
+
+def log(msg):
+    print(msg, flush=True)
+
+
+def fail(msg):
+    print(f"antumbra-waydroid: {msg}", file=sys.stderr, flush=True)
+    subprocess.run(["logger", "-t", "antumbra-waydroid", "-p", "daemon.err", "--", msg], check=False)
+    sys.exit(1)
+
+
+def run(cmd):
+    log("+ " + " ".join(cmd))
+    return subprocess.run(cmd, check=False).returncode
+
+
+def in_vm():
+    return subprocess.run(["systemd-detect-virt", "--vm", "--quiet"], check=False).returncode == 0
+
+
+def properties():
+    props = {}
+    with open(os.path.join(ANDROID_DIR, "product.prop"), encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                key, value = line.split("=", 1)
+                props[key] = value
+    props["persist.waydroid.multi_windows"] = "true"
+    vm = in_vm()
+    props["ro.sf.lcd_density"] = "320" if vm else "480"
+    if vm:
+        # Waydroid's vendor image turns "swiftshader" into ANGLE on the
+        # SwiftShader Vulkan driver.
+        props["ro.hardware.gralloc"] = "default"
+        props["ro.hardware.egl"] = "swiftshader"
+        # Android's timeouts scaled for software emulation, as emulators
+        # set it. At the default, system_server's Watchdog asks for native
+        # stack dumps of vold and the HALs and gives each 2 seconds; under
+        # full emulation the dump outlasts that, the dumped process dies of
+        # SIGPIPE when the requester gives up, and vold's death reboots
+        # Android (reboot_on_failure), which stops the container.
+        props["ro.hw_timeout_multiplier"] = str(VM_TIMEOUT_MULTIPLIER)
+        # When Android's display sleeps, Waydroid freezes the container
+        # (suspend_action = freeze). Under emulation that happens before
+        # Android has finished unlocking its user: frozen, Android never
+        # tells the session it is ready (no app entries), draws no window
+        # and answers no lxc-attach. The phone keeps Waydroid's default.
+        props["persist.waydroid.suspend"] = "false"
+    return props
+
+
+def write_config(props):
+    cfg = configparser.ConfigParser()
+    cfg.read(CFG)
+    if "waydroid" not in cfg:
+        cfg["waydroid"] = {}
+    cfg["waydroid"]["mount_overlays"] = "False"
+    cfg["properties"] = props
+    os.makedirs(WORK, mode=0o755, exist_ok=True)
+    tmp = CFG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        cfg.write(f)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, CFG)
+
+
+def identifier_paths(sysfs="/sys", procfs="/proc"):
+    """What to hide from the container on this machine now: (FILES, DIRS),
+    absolute paths as the container sees them (/sys/..., /proc/...), each
+    sorted. Under SYSFS/devices, regular files only and symbolic links not
+    followed; a device that goes away during the scan is skipped."""
+    files, dirs = set(), set()
+    wanted = set(MASKED_NAMES) | set(UEVENT_MARKERS) | set(HIDDEN_DIR_MARKERS) | {"uevent"}
+    for dirpath, _dirs, names in os.walk(os.path.join(sysfs, "devices"), onerror=lambda e: None):
+        regular = set()
+        for name in wanted.intersection(names):
+            try:
+                if stat.S_ISREG(os.lstat(os.path.join(dirpath, name)).st_mode):
+                    regular.add(name)
+            except OSError:    # gone meanwhile: a device unplugged
+                pass
+        here = "/sys" + dirpath[len(sysfs):]
+        files.update(f"{here}/{name}" for name in regular.intersection(MASKED_NAMES))
+        if "uevent" in regular and regular.intersection(UEVENT_MARKERS):
+            files.add(f"{here}/uevent")
+        if regular.intersection(HIDDEN_DIR_MARKERS):
+            dirs.add(here)
+    for name in MASKED_PROC:
+        if os.path.isfile(os.path.join(procfs, name)):
+            files.add(f"/proc/{name}")
+    return sorted(files), sorted(dirs)
+
+
+def mask_entries(files, dirs=()):
+    """The LXC mount entries that hide FILES and DIRS (absolute, in /sys or
+    /proc) from the container: /dev/null bound read-only over each file, an
+    empty read-only tmpfs over each directory. Optional: one that has gone
+    by the time the container starts (a device unplugged) is skipped; the
+    start-host hook refuses an identifier that exists then and has no mask.
+    LXC parses the entries like fstab lines, so a path with white space or
+    a backslash fails."""
+    for path in list(files) + list(dirs):
+        if not re.match(r"/(sys|proc)/", path) or re.search(r"[\s\\]", path):
+            fail(f"cannot mask {path!r} in the container")
+    return ([f"lxc.mount.entry = /dev/null {p[1:]} none bind,ro,optional 0 0" for p in files]
+            + [f"lxc.mount.entry = tmpfs {p[1:]} tmpfs {HIDE_OPTIONS},optional 0 0" for p in dirs])
+
+
+def identifier_masks():
+    """The mask entries for this machine now."""
+    return mask_entries(*identifier_paths())
+
+
+def add_masks(entries):
+    """Put ENTRIES at the end of the generated container configuration, in
+    place of the masks written before."""
+    with open(LXC_CONFIG, encoding="utf-8") as f:
+        text = f.read()
+    if MASKS_MARK in text:
+        text = text[:text.index(MASKS_MARK)].rstrip("\n") + "\n"
+    text += "\n" + MASKS_MARK + "\n" + "".join(e + "\n" for e in entries)
+    tmp = LXC_CONFIG + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, LXC_CONFIG)
+
+
+def lxc_problems(lxc, masks):
+    """What is wrong with the generated container configuration LXC (text),
+    given the mask entries MASKS it must have; empty when nothing is."""
+    problems = []
+    wanted = [r"^lxc\.net\.0\.type = veth$", r"^lxc\.net\.0\.link = waydroid-tor$",
+              r"^lxc\.hook\.start-host = /usr/local/lib/antumbra-waydroid-start-host$",
+              r"^lxc\.mount\.entry = tmpfs sys/firmware tmpfs ", "^" + re.escape(CMDLINE_ENTRY) + "$"]
+    for pattern in wanted:
+        if not re.search(pattern, lxc, re.M):
+            problems.append(f"the container configuration lacks {pattern}")
+    # LXC's device list allows nothing until an "a" rule makes it a deny
+    # list: exactly "allow a", then the V4L2 deny.
+    devices = re.findall(r"^lxc\.cgroup2\.devices\.\S+ = .*$", lxc, re.M)
+    if devices != ["lxc.cgroup2.devices.allow = a", "lxc.cgroup2.devices.deny = c 81:* rwm"]:
+        problems.append(f"the container's device rules are not exactly allow a, then deny V4L2: {devices}")
+    # Antumbra's post-stop hook ahead of Waydroid's failing /dev/null one.
+    post_stop = re.findall(r"^lxc\.hook\.post-stop = (.*)$", lxc, re.M)
+    if post_stop[:1] != ["/usr/local/lib/antumbra-waydroid-post-stop"]:
+        problems.append(f"the container's post-stop hooks do not start with Antumbra's: {post_stop}")
+    for entry in masks:
+        if not re.search("^" + re.escape(entry) + "$", lxc, re.M):
+            problems.append(f"the container configuration does not mask {entry.split()[3]}")
+    cap_keep = re.search(r"^lxc\.cap\.keep = (.*)$", lxc, re.M)
+    if not cap_keep or "sys_time" in cap_keep.group(1).split():
+        problems.append("the container would keep sys_time")
+    return problems
+
+
+def check_config(props, masks):
+    cfg = configparser.ConfigParser()
+    cfg.read(CFG)
+    if cfg.get("waydroid", "images_path", fallback="") != IMAGES:
+        fail(f"waydroid init did not take the preinstalled images ({cfg.get('waydroid', 'images_path', fallback='none')})")
+    if cfg.get("waydroid", "mount_overlays", fallback="") != "False":
+        fail("waydroid.cfg lost mount_overlays = False")
+    for key, value in props.items():
+        if cfg.get("properties", key, fallback=None) != value:
+            fail(f"waydroid.cfg lost the property {key}")
+    try:
+        with open(LXC_CONFIG, encoding="utf-8") as f:
+            lxc = f.read()
+        with open(BASE_PROP, encoding="utf-8") as f:
+            base = f.read().split("\n")
+    except OSError as e:
+        fail(f"waydroid init left no container configuration: {e}")
+    for problem in lxc_problems(lxc, masks):
+        fail(problem)
+    with open(CMDLINE, encoding="utf-8") as f:
+        if "androidboot." in f.read():
+            fail(f"{CMDLINE} names androidboot values")
+    if "waydroid.updater.disabled=true" not in base:
+        fail("Waydroid's image updater is not disabled")
+    for key in ("ro.product.waydroid.model", "ro.product.waydroid.brand"):
+        if f"{key}={props[key]}" not in base:
+            fail(f"{key} is not the generic value")
+
+
+def main():
+    if os.geteuid() != 0:
+        fail("must run as root")
+    if not os.path.exists("/run/antumbra/android-enabled"):
+        fail("Android apps are not enabled for this session")
+    for img in ("system.img", "vendor.img"):
+        if not os.path.isfile(os.path.join(IMAGES, img)):
+            fail(f"{IMAGES}/{img} is missing")
+    # Waydroid's container profile (complain mode, as Debian ships it) sits
+    # in a subdirectory that apparmor.service does not load; load it so the
+    # container runs under it and its log shows what an enforcing profile
+    # would have to allow. Without it Waydroid runs the container unconfined.
+    if os.path.exists(LXC_PROFILE) and run(["aa-enabled", "--quiet"]) == 0:
+        if run(["apparmor_parser", "--replace", "--write-cache", LXC_PROFILE]) != 0:
+            log("warning: the lxc-waydroid AppArmor profile did not load; the container runs unconfined")
+    props = properties()
+    write_config(props)
+    if run(["waydroid", "init"]) != 0:
+        fail("waydroid init failed")
+    # "upgrade -o" (offline) regenerates the LXC configuration and the base
+    # properties from the templates and waydroid.cfg, as Debian's postinst does.
+    if run(["waydroid", "upgrade", "-o"]) != 0:
+        fail("waydroid upgrade -o failed")
+    # The container's kernel command line and the identifier masks: after
+    # "upgrade", which regenerates the configuration from the templates.
+    with open(CMDLINE_SRC, encoding="utf-8") as f:
+        cmdline = f.read()
+    with open(CMDLINE + ".tmp", "w", encoding="utf-8") as f:
+        f.write(cmdline)
+    os.chmod(CMDLINE + ".tmp", 0o644)
+    os.replace(CMDLINE + ".tmp", CMDLINE)
+    masks = write_masks()
+    check_config(props, masks)
+    # The container service writes the masks again each time it starts
+    # (ExecStartPre= in its drop-in), for the devices there by then.
+    if run(["systemctl", "start", "waydroid-container.service"]) != 0:
+        fail("the Waydroid container service did not start")
+    with open(READY, "w", encoding="utf-8") as f:
+        f.write("1\n")
+    os.chmod(READY, 0o644)
+    log("Android apps ready for the session")
+
+
+def write_masks():
+    """Mask what identifies the hardware now, in place of the masks written
+    before (devices come and go between container starts); the entries."""
+    masks = identifier_masks()
+    add_masks(masks)
+    log(f"{len(masks)} hardware identifiers masked in the container")
+    return masks
+
+
+def masks_main():
+    """ExecStartPre= of waydroid-container.service: the masks again, for the
+    devices there now, and the whole configuration checked again. Android
+    stopped stops the service (antumbra-waydroid-stopped), so this runs
+    before each container start that follows; a start without it meets the
+    start-host hook, which refuses an identifier without a mask."""
+    if os.geteuid() != 0:
+        fail("must run as root")
+    if not os.path.exists("/run/antumbra/android-enabled"):
+        fail("Android apps are not enabled for this session")
+    if not os.path.isfile(LXC_CONFIG):
+        fail(f"no container configuration at {LXC_CONFIG} (antumbra-waydroid has not prepared Waydroid)")
+    masks = write_masks()
+    with open(LXC_CONFIG, encoding="utf-8") as f:
+        problems = lxc_problems(f.read(), masks)
+    for problem in problems:
+        fail(problem)
+
+
+def opened_nodes(root="/"):
+    """The paths Waydroid opens to every user that exist under ROOT, a
+    directory's contents included (Waydroid runs chmod -R)."""
+    paths = [os.path.join(root, p.lstrip("/")) for p in OPENED_NODES]
+    for pattern in OPENED_GLOBS:
+        paths += sorted(glob.glob(os.path.join(root, pattern.lstrip("/"))))
+    found = []
+    for path in paths:
+        if os.path.islink(path) or not os.path.exists(path):
+            continue
+        found.append(path)
+        if os.path.isdir(path):
+            for top, dirs, files in os.walk(path):
+                found += [os.path.join(top, n) for n in sorted(dirs) + sorted(files)
+                          if not os.path.islink(os.path.join(top, n))]
+    return found
+
+
+def save_device_modes(root="/", state=DEVICE_MODES):
+    """Record the modes before the boot's first container start; later starts
+    keep that record, so a mode Waydroid left behind is never recorded."""
+    if os.path.exists(state):
+        return
+    os.makedirs(os.path.dirname(state), exist_ok=True)
+    tmp = state + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        for path in opened_nodes(root):
+            f.write(f"{stat.S_IMODE(os.lstat(path).st_mode):o} {path}\n")
+    os.replace(tmp, state)
+
+
+def restore_device_modes(root="/", state=DEVICE_MODES):
+    """Put the recorded modes back; a node without a record (none was made,
+    or it appeared later) loses the access Waydroid gave every other user."""
+    recorded = {}
+    try:
+        with open(state, encoding="utf-8") as f:
+            for line in f:
+                mode, path = line.rstrip("\n").split(" ", 1)
+                recorded[path] = int(mode, 8)
+    except FileNotFoundError:
+        log(f"no record of the device modes ({state}); taking other users' access away")
+    for path in opened_nodes(root):
+        mode = recorded.get(path)
+        if mode is None:
+            mode = stat.S_IMODE(os.lstat(path).st_mode) & ~0o007
+        os.chmod(path, mode)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--masks"]:
+        masks_main()
+    elif sys.argv[1:] == ["--save-device-modes"]:
+        save_device_modes()
+    elif sys.argv[1:] == ["--restore-device-modes"]:
+        restore_device_modes()
+    elif sys.argv[1:] == ["--print-masks"]:
+        print("".join(e + "\n" for e in identifier_masks()), end="")
+    elif sys.argv[1:]:
+        fail(f"unknown arguments: {' '.join(sys.argv[1:])}")
+    else:
+        main()

@@ -1,0 +1,17 @@
+[Unit]
+Description=Keep the cellular radio in low-power mode
+Documentation=file:///usr/share/doc/antumbra/architecture.md
+After=rmtfs.service tqftpserv.service
+Wants=rmtfs.service tqftpserv.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/antumbra-modem-radio-off
+TimeoutStartSec=180
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/run/antumbra
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+{
+ "index": {
+  "name": "/index-v2.json",
+  "numPackages": 4633,
+  "sha256": "c7062eae0a46ccdef4dca793498a9e4760b388dd2a0b54e940f844f93b925a81",
+  "size": 64466109
+ },
+ "maxAge": 14,
+ "timestamp": 1791818227459,
+ "version": 30000
+}

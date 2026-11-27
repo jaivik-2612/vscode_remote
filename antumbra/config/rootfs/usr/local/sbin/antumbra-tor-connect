@@ -1,0 +1,106 @@
+#!/usr/bin/python3 -I
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Minimal Tor connection control for Antumbra (the Tor Connection assistant's
+command-line counterpart). Talks to Tor's ControlPort 9052 as root with the
+cookie, like Tails' tca-portal does.
+
+  antumbra-tor-connect direct                 # connect to Tor directly
+  antumbra-tor-connect bridges FILE|-         # use the bridge lines from FILE (or stdin)
+  antumbra-tor-connect status                 # bootstrap status
+  antumbra-tor-connect disconnect             # DisableNetwork 1
+"""
+import subprocess
+import sys
+
+import stem
+import stem.connection
+import stem.control
+
+from antumbra import settings as S
+
+CONTROL = ("127.0.0.1", 9052)
+# The transports Tor gets a pluggable transport for (tor-pt-configuration-helper)
+TRANSPORTS = S.BRIDGE_TRANSPORTS
+PT_HELPER = "/usr/local/lib/tor-pt-configuration-helper"
+
+
+def controller():
+    c = stem.connection.connect(control_port=CONTROL)
+    if c is None:
+        sys.exit("cannot reach Tor's control port")
+    c.authenticate()
+    return c
+
+
+def set_sandbox(enabled: bool):
+    # Tails' helper restarts Tor with Sandbox 0/1 and writes the
+    # ClientTransportPlugin line when transports are needed.
+    subprocess.run([PT_HELPER, "1" if enabled else "0"], check=True)
+
+
+# Settings go to Tor with SETCONF only, never SAVECONF: Tor (debian-tor)
+# cannot write /etc/tor, so SAVECONF always failed after the settings had
+# taken effect, and an amnesic system keeps no Tor configuration anyway.
+# The NetworkManager dispatcher applies the Welcome screen's choice on
+# every connection. Bridges are kept only as part of that choice: the Welcome
+# screen writes them (ANTUMBRA_BRIDGES in tails.bridges), its applier copies
+# them to /var/lib/antumbra/settings/applied, where the dispatcher reads
+# them, and with Persistent Storage unlocked also saves them with the
+# volume's Welcome settings, which nothing reads back: they are entered at
+# every boot.
+
+
+def cmd_direct():
+    set_sandbox(True)
+    with controller() as c:
+        c.set_options({"UseBridges": "0", "Bridge": [], "DisableNetwork": "0"})
+    print("connecting directly")
+
+
+def cmd_bridges(path):
+    src = sys.stdin if path == "-" else open(path, encoding="utf-8")
+    try:
+        lines = S.bridge_lines(src)     # the same check as the Welcome screen's
+    except ValueError as e:
+        sys.exit(str(e))
+    if not lines:
+        sys.exit("no bridge lines given")
+    needs_pt = any(l.split()[0] in TRANSPORTS for l in lines)
+    set_sandbox(not needs_pt)
+    with controller() as c:
+        c.set_options({"UseBridges": "1", "Bridge": lines, "DisableNetwork": "0"})
+    print(f"connecting through {len(lines)} bridge(s)")
+
+
+def cmd_status():
+    with controller() as c:
+        phase = c.get_info("status/bootstrap-phase")
+        enough = c.get_info("status/enough-dir-info")
+        print(phase)
+        print("enough-dir-info", enough)
+        print("DisableNetwork", c.get_conf("DisableNetwork"))
+
+
+def cmd_disconnect():
+    with controller() as c:
+        c.set_options({"DisableNetwork": "1"})
+    print("network disabled for Tor")
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] not in ("direct", "bridges", "status", "disconnect"):
+        sys.exit(__doc__)
+    if argv[1] == "direct":
+        cmd_direct()
+    elif argv[1] == "bridges":
+        if len(argv) < 3:
+            sys.exit("bridges needs a file or -")
+        cmd_bridges(argv[2])
+    elif argv[1] == "status":
+        cmd_status()
+    else:
+        cmd_disconnect()
+
+
+if __name__ == "__main__":
+    main(sys.argv)

@@ -1,0 +1,10 @@
+# Antumbra: greetd runs the Welcome screen as the unprivileged greeter user
+# (/usr/libexec/antumbra-greeter-session). The Welcome screen itself asks
+# greetd to start the user's Phosh session once the root-side applier has
+# consumed the settings, so no auto-login entry is needed.
+[terminal]
+vt = 7
+
+[default_session]
+command = "/usr/libexec/antumbra-greeter-session"
+user = "antumbra-greeter"

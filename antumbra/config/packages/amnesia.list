@@ -1,0 +1,6 @@
+# Live boot, memory and shutdown behaviour.
+live-boot
+live-boot-initramfs-tools
+initramfs-tools
+systemd-zram-generator
+memlockd

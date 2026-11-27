@@ -1,0 +1,5 @@
+50-bubblewrap.conf is masked (a symlink to /dev/null overrides the file of
+the same name in /usr/lib/sysctl.d): it sets kernel.unprivileged_userns_clone,
+a knob that only Debian's patched kernels have. On Antumbra's mainline
+kernel unprivileged user namespaces are governed by user.max_user_namespaces,
+and the self-check fails on any sysctl that cannot be applied.

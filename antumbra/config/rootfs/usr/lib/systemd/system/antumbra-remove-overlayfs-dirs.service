@@ -1,0 +1,18 @@
+[Unit]
+# Tails' tails-remove-overlayfs-dirs.service for Debian's live-boot layout:
+# empty the tmpfs holding the overlay's upper and work directories late in
+# the shutdown sequence so the memory is actually released and zeroed.
+Description=Remove the overlayfs directories
+Documentation=https://tails.net/contribute/design/memory_erasure/
+Before=sysinit.target shutdown.target
+Conflicts=shutdown.target
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStop=/bin/rm -rf /run/live/overlay/rw /run/live/overlay/work
+TimeoutStopSec=90s
+
+[Install]
+WantedBy=multi-user.target

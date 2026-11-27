@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Welcome works as the device owner, whose powers do not depend on this
+     list; it declares no legacy device-admin policies. -->
+<device-admin>
+    <uses-policies />
+</device-admin>

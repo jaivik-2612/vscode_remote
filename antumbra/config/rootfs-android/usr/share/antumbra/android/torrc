@@ -1,0 +1,11 @@
+
+## Antumbra: Android apps (Waydroid). Appended to /etc/tor/torrc by
+## config/hooks/56-session-android.sh, in images built with
+## ANTUMBRA_ANDROID=1 only. The firewall redirects the Android container's
+## TCP to this TransPort and its DNS to this DNSPort; both are bound to the
+## host end of the waydroid-tor bridge (antumbra-create-netns), which must
+## exist before Tor is told to connect. Separate listeners, so Android's
+## streams never share circuits with the host's; all Android apps share one
+## client address, so isolation among them is per destination only.
+TransPort 10.200.2.1:9041 IsolateClientAddr IsolateDestAddr IsolateDestPort
+DNSPort 10.200.2.1:5354

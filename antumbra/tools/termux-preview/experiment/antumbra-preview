@@ -1,0 +1,38 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Antumbra's Phosh session nested in an X server, without gnome-session: the
+# launcher of the 9 Oct 2026 experiment's run 5 (README.md). The file itself
+# lived only in the experiment's overlay, which was deleted; this copy is
+# rebuilt from the run's record and has not been run in this form.
+#
+# Install it as /usr/local/bin/antumbra-preview in the root filesystem, and
+# Antumbra's phoc settings plus an [output:X11-1] section (phoc-x11.ini) as
+# /etc/phosh/phoc.ini. Start it as the user, with DISPLAY set:
+#     dbus-run-session -- /usr/local/bin/antumbra-preview
+set -eu
+# The session variables antumbra-session exports.
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Phosh:GNOME
+export XDG_SESSION_DESKTOP=phosh
+export GDMSESSION=phosh
+# phoc draws into an X window, in software (an X server without DRI3).
+export WLR_BACKENDS=x11
+export WLR_RENDERER=pixman
+# GTK 4's software renderer: antumbra-session-env sets it only in a VM.
+export GSK_RENDERER="${GSK_RENDERER:-cairo}"
+
+# The theme stubs antumbra-session writes: the shell's stylesheet for GTK 3
+# (phosh, squeekboard), the apps' for GTK 4; an existing gtk.css wins.
+theme_stub() {
+    dir="${XDG_CONFIG_HOME:-${HOME}/.config}/$1"
+    if [ -e "${dir}/gtk.css" ] || [ -L "${dir}/gtk.css" ]; then return 0; fi
+    mkdir -p "${dir}"
+    printf '@import url("file:///usr/share/antumbra/theme/%s");\n' "$2" > "${dir}/gtk.css"
+}
+theme_stub gtk-3.0 shell.css
+theme_stub gtk-4.0 apps.css
+
+# phoc in shell mode (-S) starts squeekboard and phosh; --unlocked skips the
+# lock screen, which a pointer could not swipe away in the experiment.
+exec phoc -v -S -C /etc/phosh/phoc.ini \
+    -E "sh -c '/usr/bin/squeekboard & exec /usr/libexec/phosh --unlocked'"

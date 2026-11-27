@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A power symbol: an open ring with a bar through its gap. Drawn for
+     Antumbra (no third-party artwork). Quick Settings tints it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M17.14,6.87A8,8 0,1 1,6.86 6.87L8.14,8.4A6,6 0,1 0,15.86 8.4Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M11,2h2v10h-2z" />
+</vector>

@@ -1,0 +1,14 @@
+[Unit]
+# In a session with Android apps on, start Android as soon as the system has
+# prepared it (antumbra-waydroid.service writes the flag), so that the apps'
+# icons appear and F-Droid gets installed without the user waiting for it.
+Description=Start Android once the system has prepared it
+ConditionPathExists=/run/antumbra/android-enabled
+PartOf=graphical-session.target
+
+[Path]
+PathExists=/run/antumbra/android-ready
+Unit=antumbra-android-session.service
+
+[Install]
+WantedBy=graphical-session.target
